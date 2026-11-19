@@ -1,9 +1,12 @@
 mod ask_why;
 mod finding_actions;
+mod finding_outcome;
+#[cfg(feature = "snapshots")]
+mod finding_staging;
 mod guided_tour;
 
 pub use ask_why::{DEFAULT_WHY_QUESTION, WhyAsked};
-pub use finding_actions::{FindingRefusal, FindingsBatch};
+pub use finding_outcome::{FindingRefusal, FindingsBatch};
 mod jobs;
 mod kept;
 mod pr_controls;

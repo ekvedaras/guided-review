@@ -4,7 +4,7 @@
 use std::fmt::Write as _;
 use std::time::Instant;
 
-use super::finding_actions::FindingRefusal;
+use super::finding_outcome::FindingRefusal;
 use super::{Review, ReviewCore};
 use crate::config::AskSettings;
 use crate::findings::{Anchor, AnchorSide, Finding, FindingId};
@@ -165,30 +165,6 @@ impl ReviewCore {
             }
             _ => Place::Tour,
         }
-    }
-
-    /// The Ask why threads a snapshot scene shows on the open findings.
-    #[cfg(feature = "snapshots")]
-    pub fn stage_finding_threads(&mut self) {
-        let findings = match &self.ai_review {
-            crate::viewer::ai_review::AiReview::Findings(file) => file.findings.clone(),
-            _ => Vec::new(),
-        };
-        self.show_staged_finding_threads(&findings);
-    }
-
-    #[cfg(feature = "snapshots")]
-    pub fn unstage_finding_threads(&mut self) {
-        self.show_staged_finding_threads(&[]);
-    }
-
-    #[cfg(feature = "snapshots")]
-    fn show_staged_finding_threads(&mut self, findings: &[Finding]) {
-        self.record_reporting("the staged finding threads", |state| {
-            *state.finding_threads_mut() =
-                crate::viewer::finding_threads::FindingThreads::staged(findings);
-        });
-        self.place_threads();
     }
 
     pub fn finding_thread(&self, id: &FindingId) -> Option<&FindingThread> {

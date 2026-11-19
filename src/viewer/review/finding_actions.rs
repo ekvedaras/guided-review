@@ -1,6 +1,5 @@
-use std::fmt;
-
 use super::ReviewCore;
+use super::finding_outcome::{FindingRefusal, FindingsBatch};
 use crate::file_path::FilePath;
 use crate::findings::{Anchor, AnchorSide, Finding, FindingId};
 use crate::line_number::LineNumber;
@@ -10,52 +9,10 @@ use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, Send
 use crate::viewer::finding_decisions::Fate;
 use crate::viewer::finding_threads::WhyAuthor;
 use crate::viewer::findings_list::{FindingLine, FindingsList};
-#[cfg(feature = "snapshots")]
-use crate::viewer::fix_requests::FixRequests;
 use crate::viewer::fix_requests::{FixReply, FixState};
 use crate::viewer::hand_offs::Audience;
 use crate::viewer::step_page::{LineLocation, Side};
 use crate::viewer::work_agenda::WorkKind;
-
-/// Why an action on a finding did not happen.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FindingRefusal {
-    /// The finding is not among the open ones: it was decided already, or a new run replaced it.
-    NotThere,
-    /// The decision could not be kept.
-    NotKept(String),
-    /// A comment box with text is open on those lines: sending the finding would send that text unread.
-    DraftInTheWay,
-    /// A fix is asked for already, or under way: asking again would send it twice.
-    BeingFixed,
-    /// A question on it waits for its answer: another would cross it.
-    BeingAsked,
-    Comment(CommentRefusal),
-}
-
-impl fmt::Display for FindingRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotThere => f.write_str("This finding is not open any more"),
-            Self::NotKept(reason) => write!(f, "The decision could not be kept: {reason}"),
-            Self::DraftInTheWay => {
-                f.write_str("A comment box is open on these lines: use the finding there, or send that comment first")
-            }
-            Self::BeingFixed => f.write_str("A fix of this finding is asked for already"),
-            Self::BeingAsked => {
-                f.write_str("A question on this finding waits for the review agent's answer")
-            }
-            Self::Comment(refusal) => refusal.fmt(f),
-        }
-    }
-}
-
-/// What a batch did: what went through, and each finding that did not, with the reason.
-#[derive(Debug)]
-pub struct FindingsBatch<T> {
-    pub done: Vec<T>,
-    pub refused: Vec<(FindingId, FindingRefusal)>,
-}
 
 /// Starts a comment made from a finding the reviewer did not edit.
 const AI_MARK: &str = "🤖";
@@ -93,11 +50,16 @@ impl ReviewCore {
         self.state
             .record(|state| state.decide_finding(finding, fate))
             .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
+        self.close_finding(&id);
+        Ok(())
+    }
+
+    /// The finding goes from the open ones and from the screens.
+    fn close_finding(&mut self, id: &FindingId) {
         if let AiReview::Findings(file) = &mut self.ai_review {
-            file.findings.retain(|open| open.id != id);
+            file.findings.retain(|open| open.id != *id);
         }
         self.place_threads();
-        Ok(())
     }
 
     /// The finding goes, and a later run is told it was dismissed.
@@ -234,12 +196,11 @@ impl ReviewCore {
     /// The tour agent's word on one finding. A finding it fixed is closed.
     pub fn fix_replied(&mut self, id: &FindingId, reply: &FixReply) -> anyhow::Result<()> {
         self.state.record(|state| state.fix_replied(id, reply))??;
-        if matches!(reply, FixReply::Fixed { .. })
-            && let AiReview::Findings(file) = &mut self.ai_review
-        {
-            file.findings.retain(|open| open.id != *id);
+        if matches!(reply, FixReply::Fixed { .. }) {
+            self.close_finding(id);
+        } else {
+            self.place_threads();
         }
-        self.place_threads();
         Ok(())
     }
 
@@ -259,29 +220,6 @@ impl ReviewCore {
             screen: screen_at,
             first_line,
         }
-    }
-
-    /// The fixes a snapshot scene shows on the open findings.
-    #[cfg(feature = "snapshots")]
-    pub fn stage_fix_requests(&mut self) {
-        let findings = match &self.ai_review {
-            AiReview::Findings(file) => file.findings.clone(),
-            _ => Vec::new(),
-        };
-        self.show_staged_fix_requests(&findings);
-    }
-
-    #[cfg(feature = "snapshots")]
-    pub fn unstage_fix_requests(&mut self) {
-        self.show_staged_fix_requests(&[]);
-    }
-
-    #[cfg(feature = "snapshots")]
-    fn show_staged_fix_requests(&mut self, findings: &[Finding]) {
-        self.record_reporting("the staged fix requests", |state| {
-            *state.fix_requests_mut() = FixRequests::staged(findings);
-        });
-        self.place_threads();
     }
 
     /// Where the fix of a finding is, when it was asked for.
