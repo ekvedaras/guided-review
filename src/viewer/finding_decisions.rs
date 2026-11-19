@@ -9,6 +9,8 @@ use crate::findings::{Finding, FindingId};
 pub enum Fate {
     Used,
     Dismissed,
+    /// Dismissed, then restored: open again, kept from this copy when the findings file no longer holds it.
+    Reopened,
     /// The tour agent fixed it in a commit.
     Fixed,
 }
@@ -30,10 +32,19 @@ impl FindingDecisions {
     }
 
     /// A finding counts as decided only when its id and its text are the same: a new run may reuse an id.
+    /// A reopened one is open, so it is not decided.
     pub fn has_decided(&self, finding: &Finding) -> bool {
         self.0
             .iter()
-            .any(|decision| decision.finding.is_same_as(finding))
+            .any(|decision| decision.fate != Fate::Reopened && decision.finding.is_same_as(finding))
+    }
+
+    /// The restored findings, in the order they were restored.
+    pub fn reopened(&self) -> impl Iterator<Item = &Finding> {
+        self.0
+            .iter()
+            .filter(|decision| decision.fate == Fate::Reopened)
+            .map(|decision| &decision.finding)
     }
 
     /// A re-pin moved the findings: the decided ones keep their new place, for the brief of a later run.
@@ -48,13 +59,15 @@ impl FindingDecisions {
         self.0.push(FindingDecision { finding, fate });
     }
 
-    /// The dismissed finding is taken back: it is no longer decided, so it is not told to a later run.
+    /// The dismissed finding is taken back: it is no longer decided, so it is not told to a later run,
+    /// and its copy stays to open it again where the findings file no longer holds it.
     pub fn restore(&mut self, id: &FindingId) -> Option<Finding> {
-        let at = self
+        let decision = self
             .0
-            .iter()
-            .position(|decision| decision.fate == Fate::Dismissed && decision.finding.id == *id)?;
-        Some(self.0.remove(at).finding)
+            .iter_mut()
+            .find(|decision| decision.fate == Fate::Dismissed && decision.finding.id == *id)?;
+        decision.fate = Fate::Reopened;
+        Some(decision.finding.clone())
     }
 
     pub fn dismissed(&self) -> impl Iterator<Item = &Finding> {

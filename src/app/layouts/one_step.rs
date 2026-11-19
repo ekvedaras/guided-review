@@ -1727,13 +1727,23 @@ impl OneStepLayout {
                     .child(div().font_weight(FontWeight::SEMIBOLD).child("AI review"))
                     .child(
                         div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_x_1()
                             .min_w_0()
                             .text_color(if ai_review.is_failure {
                                 colors.danger
                             } else {
                                 colors.muted_text
                             })
-                            .child(ai_review.line.clone()),
+                            .children(ai_review.line.split(" · ").enumerate().map(|(at, part)| {
+                                let text = if at == 0 {
+                                    part.to_owned()
+                                } else {
+                                    format!("· {part}")
+                                };
+                                div().whitespace_nowrap().child(text)
+                            })),
                     ),
             )
             .child(

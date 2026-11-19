@@ -502,6 +502,51 @@ fn a_finding_dismissed_from_a_run_the_file_dropped_is_restored_from_the_saved_co
 }
 
 #[test]
+fn a_restored_finding_the_file_no_longer_holds_stays_open_from_its_saved_copy_when_the_review_opens_again()
+ {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+    review.dismiss_finding(&id("a")).unwrap();
+    review.restore_finding(&id("a")).unwrap();
+    shop.the_agent_writes(&[on_line_2("b", "Two.")]);
+
+    let reopened = shop.open();
+
+    assert_eq!(shown_ids(&reopened), ["b", "a"]);
+    assert_eq!(dismissed_ids(&reopened), Vec::<String>::new());
+    assert_eq!(shown_on_screens(&reopened), ["a", "b"]);
+    let mut read_again = shop.open();
+    read_again.read_findings(&shop.repo.folders());
+    assert_eq!(shown_ids(&read_again), ["b", "a"]);
+}
+
+#[test]
+fn a_restored_finding_the_file_still_holds_is_shown_once() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+    review.dismiss_finding(&id("a")).unwrap();
+    review.restore_finding(&id("a")).unwrap();
+
+    review.read_findings(&shop.repo.folders());
+
+    assert_eq!(shown_ids(&review), ["a", "b"]);
+}
+
+#[test]
+fn a_restored_finding_can_be_dismissed_again() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+    review.dismiss_finding(&id("a")).unwrap();
+    review.restore_finding(&id("a")).unwrap();
+    review.dismiss_finding(&id("a")).unwrap();
+
+    let reopened = shop.open();
+
+    assert_eq!(dismissed_ids(&reopened), ["a"]);
+    assert_eq!(shown_ids(&reopened), ["b"]);
+}
+
+#[test]
 fn a_batch_restore_restores_each_dismissed_finding_and_reports_one_that_is_not() {
     let shop = Shop::with_findings(&[
         on_line_2("a", "One."),

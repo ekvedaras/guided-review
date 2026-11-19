@@ -830,6 +830,13 @@ impl ReviewCore {
             let decided = self.state.finding_decisions();
             file.findings
                 .retain(|finding| !decided.has_decided(finding));
+            let held: Vec<FindingId> = file.findings.iter().map(|f| f.id.clone()).collect();
+            file.findings.extend(
+                decided
+                    .reopened()
+                    .filter(|reopened| !held.contains(&reopened.id))
+                    .cloned(),
+            );
         }
         self.run_ends_with(&read);
         self.ai_review = read;
