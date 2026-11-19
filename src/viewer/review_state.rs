@@ -516,6 +516,10 @@ impl ReviewState {
         self.viewer.finding_decisions.record(finding, fate);
     }
 
+    pub(super) fn restore_finding(&mut self, id: &FindingId) -> Option<Finding> {
+        self.viewer.finding_decisions.restore(id)
+    }
+
     pub const fn fix_requests(&self) -> &FixRequests {
         &self.viewer.fix_requests
     }

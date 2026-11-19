@@ -50,6 +50,8 @@ pub struct AiReviewStage {
     pub can_show_agent: bool,
     /// There are findings to walk through and to list, whatever the run is doing.
     pub has_findings: bool,
+    /// The findings list is there to restore them from, even with none open.
+    pub has_dismissed_findings: bool,
 }
 
 /// Whether the subject's review agent is alive, as its follow last said; it outlives the run, idle, to be

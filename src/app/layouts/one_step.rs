@@ -1265,6 +1265,9 @@ impl OneStepLayout {
             FindingsEvent::Dismiss(ids) => self
                 .session
                 .update(cx, |session, cx| session.dismiss_findings(ids, cx)),
+            FindingsEvent::Restore(ids) => self
+                .session
+                .update(cx, |session, cx| session.restore_findings(ids, cx)),
             FindingsEvent::Comment(ids) => self
                 .session
                 .update(cx, |session, cx| session.comment_findings(ids, cx)),
@@ -1672,7 +1675,7 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::show_review_agent);
             }))
         });
-        let list = ai_review.has_findings.then(|| {
+        let list = (ai_review.has_findings || ai_review.has_dismissed_findings).then(|| {
             icon_label_button(
                 colors,
                 "findings-list",

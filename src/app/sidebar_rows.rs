@@ -111,6 +111,7 @@ pub struct SidebarAiReview {
     pub is_failure: bool,
     pub can_show_agent: bool,
     pub has_findings: bool,
+    pub has_dismissed_findings: bool,
     pub action: Option<AiReviewAction>,
 }
 
@@ -225,6 +226,7 @@ impl SidebarRows {
                     is_failure: stage.is_failure,
                     can_show_agent: stage.can_show_agent,
                     has_findings: stage.has_findings,
+                    has_dismissed_findings: stage.has_dismissed_findings,
                     action: stage.action,
                 }
             },

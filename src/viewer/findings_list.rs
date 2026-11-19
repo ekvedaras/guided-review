@@ -41,6 +41,10 @@ pub struct FindingsList {
     open: Option<FindingId>,
     /// What each finding's fix says, for the findings that have one.
     fixes: BTreeMap<FindingId, String>,
+    /// What the reviewer dismissed, which can be restored.
+    dismissed: Vec<Finding>,
+    dismissed_selected: BTreeSet<FindingId>,
+    dismissed_are_shown: bool,
     /// The code lines each finding is about.
     lines: BTreeMap<FindingId, Vec<FindingLine>>,
 }
@@ -71,6 +75,78 @@ impl FindingsList {
         self
     }
 
+    /// The list with the findings the reviewer dismissed, to look at and restore. They show folded, unless
+    /// nothing is open.
+    #[must_use]
+    pub fn with_dismissed(mut self, dismissed: Vec<Finding>) -> Self {
+        self.dismissed_are_shown = self.findings.is_empty() && !dismissed.is_empty();
+        self.dismissed = dismissed;
+        self
+    }
+
+    pub fn dismissed_rows(&self) -> Vec<FindingsListRow> {
+        self.dismissed
+            .iter()
+            .enumerate()
+            .map(|(position, finding)| FindingsListRow {
+                is_selected: self.dismissed_selected.contains(&finding.id),
+                is_under_cursor: self.dismissed_are_shown
+                    && position + self.findings.len() == self.cursor,
+                ..Self::row_of(finding)
+            })
+            .collect()
+    }
+
+    pub const fn dismissed_are_shown(&self) -> bool {
+        self.dismissed_are_shown
+    }
+
+    pub fn toggle_dismissed_shown(&mut self) {
+        self.dismissed_are_shown = !self.dismissed_are_shown;
+        self.cursor = self.cursor.min(self.last_row());
+    }
+
+    /// The dismissed row's own tick: an id may be open and dismissed at once, so it is not told by id alone.
+    pub fn toggle_dismissed_selected(&mut self, id: &FindingId) {
+        if !self.dismissed_selected.remove(id) {
+            self.dismissed_selected.insert(id.clone());
+        }
+    }
+
+    /// In the dismissed section's order.
+    pub fn selected_dismissed(&self) -> Vec<FindingId> {
+        self.dismissed
+            .iter()
+            .filter(|finding| self.dismissed_selected.contains(&finding.id))
+            .map(|finding| finding.id.clone())
+            .collect()
+    }
+
+    /// A click on a dismissed row puts the cursor there, as long as the section is shown.
+    pub fn move_cursor_to_dismissed(&mut self, id: &FindingId) {
+        if !self.dismissed_are_shown {
+            return;
+        }
+        if let Some(position) = self.dismissed.iter().position(|finding| finding.id == *id) {
+            self.cursor = self.findings.len() + position;
+        }
+    }
+
+    /// The cursor's row, when it is one of the open findings.
+    const fn cursor_is_on_open(&self) -> bool {
+        self.cursor < self.findings.len()
+    }
+
+    /// The last row the cursor can be on: the open findings, and the dismissed ones while shown.
+    fn last_row(&self) -> usize {
+        let shown_dismissed = if self.dismissed_are_shown {
+            self.dismissed.len()
+        } else {
+            0
+        };
+        (self.findings.len() + shown_dismissed).saturating_sub(1)
+    }
+
     /// The list with the code lines each finding is about, as `lines_of` finds them.
     #[must_use]
     pub fn with_lines(mut self, lines_of: impl Fn(&Finding) -> Vec<FindingLine>) -> Self {
@@ -87,23 +163,36 @@ impl FindingsList {
             .iter()
             .enumerate()
             .map(|(position, finding)| FindingsListRow {
-                id: finding.id.clone(),
-                severity: finding.severity,
-                place: place_of(&finding.anchor),
-                first_line: finding.body.lines().next().unwrap_or_default().to_owned(),
-                body: finding.body.clone(),
                 is_selected: self.selected.contains(&finding.id),
                 is_open: self.open.as_ref() == Some(&finding.id),
                 is_under_cursor: position == self.cursor,
                 lines: self.lines.get(&finding.id).cloned().unwrap_or_default(),
                 fix: self.fixes.get(&finding.id).cloned(),
-                is_outdated: finding.outdated.is_some(),
+                ..Self::row_of(finding)
             })
             .collect()
     }
 
+    /// A row with nothing of the list's state on it.
+    fn row_of(finding: &Finding) -> FindingsListRow {
+        FindingsListRow {
+            id: finding.id.clone(),
+            severity: finding.severity,
+            place: place_of(&finding.anchor),
+            first_line: finding.body.lines().next().unwrap_or_default().to_owned(),
+            body: finding.body.clone(),
+            is_selected: false,
+            is_open: false,
+            is_under_cursor: false,
+            lines: Vec::new(),
+            fix: None,
+            is_outdated: finding.outdated.is_some(),
+        }
+    }
+
+    /// Nothing to show: no open finding and no dismissed one.
     pub const fn is_empty(&self) -> bool {
-        self.findings.is_empty()
+        self.findings.is_empty() && self.dismissed.is_empty()
     }
 
     pub fn toggle_selected(&mut self, id: &FindingId) {
@@ -115,6 +204,8 @@ impl FindingsList {
     pub fn toggle_under_cursor(&mut self) {
         if let Some(id) = self.id_under_cursor().cloned() {
             self.toggle_selected(&id);
+        } else if let Some(id) = self.dismissed_under_cursor().cloned() {
+            self.toggle_dismissed_selected(&id);
         }
     }
 
@@ -145,7 +236,7 @@ impl FindingsList {
     }
 
     pub fn cursor_down(&mut self) {
-        self.cursor = (self.cursor + 1).min(self.findings.len().saturating_sub(1));
+        self.cursor = (self.cursor + 1).min(self.last_row());
     }
 
     pub const fn cursor_up(&mut self) {
@@ -159,13 +250,25 @@ impl FindingsList {
         }
     }
 
+    /// The open finding the cursor is on; none when it is on a dismissed one.
     pub fn id_under_cursor(&self) -> Option<&FindingId> {
         self.findings.get(self.cursor).map(|finding| &finding.id)
     }
 
+    pub fn dismissed_under_cursor(&self) -> Option<&FindingId> {
+        if !self.dismissed_are_shown || self.cursor_is_on_open() {
+            return None;
+        }
+        self.dismissed
+            .get(self.cursor - self.findings.len())
+            .map(|finding| &finding.id)
+    }
+
     /// The row under the cursor shows its whole finding, or folds again; only one row is open.
     pub fn toggle_open_under_cursor(&mut self) {
-        let under_cursor = self.id_under_cursor().cloned();
+        let Some(under_cursor) = self.id_under_cursor().cloned().map(Some) else {
+            return;
+        };
         self.open = if self.open == under_cursor {
             None
         } else {
@@ -178,6 +281,16 @@ impl FindingsList {
         let mut list = self.refreshed(&newer.findings);
         list.fixes.clone_from(&newer.fixes);
         list.lines.clone_from(&newer.lines);
+        list.dismissed.clone_from(&newer.dismissed);
+        list.dismissed_selected = self
+            .dismissed_selected
+            .iter()
+            .filter(|id| list.dismissed.iter().any(|finding| finding.id == **id))
+            .cloned()
+            .collect();
+        list.dismissed_are_shown =
+            self.dismissed_are_shown || (list.findings.is_empty() && !list.dismissed.is_empty());
+        list.cursor = self.cursor.min(list.last_row());
         list
     }
 

@@ -490,6 +490,16 @@ impl ReviewSession {
             .refused
     }
 
+    /// Restore in the findings list: each dismissed finding is open again, and a refused one is told back.
+    pub fn restore_findings(
+        &mut self,
+        ids: &[FindingId],
+        cx: &mut Context<Self>,
+    ) -> Vec<(FindingId, FindingRefusal)> {
+        self.change(cx, |review| review.restore_findings(ids))
+            .refused
+    }
+
     /// Fix, on one finding or in the findings list: the findings go to the tour agent as one message.
     pub fn fix_findings(
         &mut self,

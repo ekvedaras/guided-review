@@ -55,7 +55,7 @@ impl ReviewCore {
     }
 
     /// The finding goes from the open ones and from the screens.
-    fn close_finding(&mut self, id: &FindingId) {
+    pub(super) fn close_finding(&mut self, id: &FindingId) {
         if let AiReview::Findings(file) = &mut self.ai_review {
             file.findings.retain(|open| open.id != *id);
         }
@@ -227,14 +227,24 @@ impl ReviewCore {
         self.state.fix_requests().state_of(id)
     }
 
-    /// The open findings as the findings list shows them.
+    /// The open findings as the findings list shows them, and the dismissed ones below.
     pub fn findings_list(&self) -> FindingsList {
-        match &self.ai_review {
+        let open = match &self.ai_review {
             AiReview::Findings(file) => FindingsList::of(&file.findings)
                 .with_fixes(self.state.fix_requests())
                 .with_lines(|finding| self.code_lines_of(finding)),
             AiReview::NotRun | AiReview::Unreadable(_) => FindingsList::default(),
-        }
+        };
+        open.with_dismissed(self.dismissed_findings())
+    }
+
+    /// What the reviewer dismissed, in the order they did.
+    pub(super) fn dismissed_findings(&self) -> Vec<Finding> {
+        self.state
+            .finding_decisions()
+            .dismissed()
+            .cloned()
+            .collect()
     }
 
     /// The code lines of a finding's anchor on the screen that shows them; none when no screen does.
@@ -249,6 +259,38 @@ impl ReviewCore {
                     text: line.text.clone(),
                 })
                 .collect()
+        })
+    }
+
+    /// A dismissed finding is open again, on its lines and in the list, and a later run is no longer
+    /// told it was dismissed. It comes from the copy kept with the decision, so it returns even when a
+    /// later run's findings file does not hold it any more.
+    pub fn restore_finding(&mut self, id: &FindingId) -> Result<(), FindingRefusal> {
+        let finding = self
+            .state
+            .finding_decisions()
+            .dismissed()
+            .find(|dismissed| dismissed.id == *id)
+            .cloned()
+            .ok_or(FindingRefusal::NotDismissed)?;
+        if self.open_finding(id).is_ok() {
+            return Err(FindingRefusal::IdTaken);
+        }
+        let AiReview::Findings(file) = &mut self.ai_review else {
+            return Err(FindingRefusal::NoFindingsFile);
+        };
+        file.findings.push(finding);
+        self.state
+            .record(|state| state.restore_finding(id))
+            .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
+        self.place_threads();
+        Ok(())
+    }
+
+    /// Restores each; one that is not dismissed is reported and the rest still come back.
+    pub fn restore_findings(&mut self, ids: &[FindingId]) -> FindingsBatch<FindingId> {
+        self.batch(ids, |review, id| {
+            review.restore_finding(id).map(|()| id.clone())
         })
     }
 

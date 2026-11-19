@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::findings::Finding;
+use crate::findings::{Finding, FindingId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fate {
@@ -46,6 +46,15 @@ impl FindingDecisions {
     pub fn record(&mut self, finding: Finding, fate: Fate) {
         self.0.retain(|decision| decision.finding.id != finding.id);
         self.0.push(FindingDecision { finding, fate });
+    }
+
+    /// The dismissed finding is taken back: it is no longer decided, so it is not told to a later run.
+    pub fn restore(&mut self, id: &FindingId) -> Option<Finding> {
+        let at = self
+            .0
+            .iter()
+            .position(|decision| decision.fate == Fate::Dismissed && decision.finding.id == *id)?;
+        Some(self.0.remove(at).finding)
     }
 
     pub fn dismissed(&self) -> impl Iterator<Item = &Finding> {

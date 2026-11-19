@@ -25,6 +25,7 @@ impl ReviewCore {
     pub fn ai_review_stage(&self) -> AiReviewStage {
         let refusal = self.run_ai_review_refusal();
         let has_findings = self.has_findings();
+        let has_dismissed_findings = self.can_list_findings() && !has_findings;
         let action_if_free = |action| refusal.is_none().then_some(action);
         match &self.ai_review_run {
             AiReviewRun::Starting => AiReviewStage {
@@ -33,6 +34,7 @@ impl ReviewCore {
                 action: None,
                 can_show_agent: false,
                 has_findings,
+                has_dismissed_findings,
             },
             AiReviewRun::Running(running) => AiReviewStage {
                 line: match running.status {
@@ -43,6 +45,7 @@ impl ReviewCore {
                 action: None,
                 can_show_agent: true,
                 has_findings,
+                has_dismissed_findings,
             },
             AiReviewRun::Failed { reason, agent } => AiReviewStage {
                 line: reason.clone(),
@@ -50,6 +53,7 @@ impl ReviewCore {
                 action: action_if_free(AiReviewAction::TryAgain),
                 can_show_agent: agent.is_some(),
                 has_findings,
+                has_dismissed_findings,
             },
             AiReviewRun::NotRun => AiReviewStage {
                 line: self.line_with_fixes(),
@@ -60,6 +64,7 @@ impl ReviewCore {
                 }),
                 can_show_agent: self.review_agent.is_alive(),
                 has_findings,
+                has_dismissed_findings,
             },
         }
     }
@@ -67,7 +72,11 @@ impl ReviewCore {
     /// The findings' count, and the commits of the fixes the tour agent made.
     fn line_with_fixes(&self) -> String {
         let commits: Vec<&str> = self.state.fix_requests().fixed_commits().collect();
-        let line = self.ai_review.line();
+        let dismissed = self.state.finding_decisions().dismissed().count();
+        let line = match dismissed {
+            0 => self.ai_review.line(),
+            _ => format!("{} · {dismissed} dismissed", self.ai_review.line()),
+        };
         match commits.len() {
             0 => line,
             1 => format!("{line} · 1 fix: {}", commits.join(", ")),
@@ -77,6 +86,11 @@ impl ReviewCore {
 
     pub fn has_findings(&self) -> bool {
         self.ai_review.counts().total() > 0
+    }
+
+    /// The findings list has something to show: open findings, or dismissed ones to restore.
+    pub fn can_list_findings(&self) -> bool {
+        self.has_findings() || self.state.finding_decisions().dismissed().next().is_some()
     }
 
     /// Run AI review and Try again: the run starts, and the app makes the worktree and starts the agent.

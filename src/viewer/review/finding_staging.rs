@@ -3,6 +3,7 @@
 use super::ReviewCore;
 use crate::findings::Finding;
 use crate::viewer::ai_review::AiReview;
+use crate::viewer::finding_decisions::Fate;
 use crate::viewer::finding_threads::FindingThreads;
 use crate::viewer::fix_requests::FixRequests;
 
@@ -25,6 +26,21 @@ impl ReviewCore {
             *state.fix_requests_mut() = FixRequests::staged(findings);
         });
         self.place_threads();
+    }
+
+    /// The last open finding, dismissed, as a snapshot scene shows the dismissed section.
+    pub fn stage_dismissed_finding(&mut self) {
+        let Some(finding) = (match &self.ai_review {
+            AiReview::Findings(file) => file.findings.last().cloned(),
+            _ => None,
+        }) else {
+            return;
+        };
+        let id = finding.id.clone();
+        self.record_reporting("the staged dismissed finding", |state| {
+            state.decide_finding(finding, Fate::Dismissed);
+        });
+        self.close_finding(&id);
     }
 
     /// The Ask why threads a snapshot scene shows on the open findings.

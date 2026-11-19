@@ -33,6 +33,8 @@ pub enum FindingsEvent {
     Comment(Vec<FindingId>),
     /// To the tour agent, as one message in reading order.
     Fix(Vec<FindingId>),
+    /// Dismissed findings are open again.
+    Restore(Vec<FindingId>),
     /// Closes the list and shows the finding on its lines.
     GoTo(FindingId),
 }
@@ -101,6 +103,15 @@ impl FindingsSheet {
         cx.notify();
     }
 
+    /// The dismissed section unfolded, as a snapshot scene shows it.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_dismissed_shown(&mut self, cx: &mut Context<Self>) {
+        if !self.list.dismissed_are_shown() {
+            self.list.toggle_dismissed_shown();
+        }
+        cx.notify();
+    }
+
     /// The findings that are still open after a batch: what is ticked stays ticked, and an empty list closes.
     pub fn refresh(&mut self, list: &FindingsList, window: &mut Window, cx: &mut Context<Self>) {
         let remaining = self.list.refreshed_to(list);
@@ -136,6 +147,13 @@ impl FindingsSheet {
             "d" => self.ask(FindingsEvent::Dismiss, cx),
             "c" => self.ask(FindingsEvent::Comment, cx),
             "x" => self.ask(FindingsEvent::Fix, cx),
+            "r" => {
+                let selected = self.list.selected_dismissed();
+                if !selected.is_empty() {
+                    cx.emit(FindingsEvent::Restore(selected));
+                }
+            }
+            "h" => self.list.toggle_dismissed_shown(),
             "g" => {
                 if let Some(id) = self.list.id_under_cursor().cloned() {
                     self.close(window, cx);
@@ -283,6 +301,142 @@ impl FindingsSheet {
             })
     }
 
+    /// A dismissed finding on one line, with the way back.
+    fn dismissed_row(
+        colors: &Colors,
+        row: &FindingsListRow,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let (tick_id, cursor_id, restore_id) = (row.id.clone(), row.id.clone(), row.id.clone());
+        picker_row(
+            colors,
+            SharedString::from(format!("findings-dismissed-row-{}", row.id)),
+            row.is_under_cursor,
+        )
+        .py_1p5()
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.list.move_cursor_to_dismissed(&cursor_id);
+            cx.notify();
+        }))
+        .child(
+            div()
+                .id(SharedString::from(format!(
+                    "findings-dismissed-tick-{}",
+                    row.id
+                )))
+                .py_1()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.list.move_cursor_to_dismissed(&tick_id);
+                    this.list.toggle_dismissed_selected(&tick_id);
+                    cx.notify();
+                }))
+                .child(Self::checkbox(colors, Selection::of(row.is_selected))),
+        )
+        .child(chip(colors, tone_of(row.severity)).child(row.severity.to_string()))
+        .child(
+            div()
+                .flex_none()
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(row.place.clone()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_color(colors.muted_text)
+                .child(row.first_line.clone()),
+        )
+        .child(
+            button(
+                colors,
+                SharedString::from(format!("findings-restore-{}", row.id)),
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+            )
+            .child("Restore")
+            .on_click(cx.listener(move |_, _, _, cx| {
+                cx.stop_propagation();
+                cx.emit(FindingsEvent::Restore(vec![restore_id.clone()]));
+            })),
+        )
+    }
+
+    /// The fold with the dismissed findings under it, and the batch Restore while they show.
+    fn dismissed_section(
+        colors: &Colors,
+        list: &FindingsList,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::Div> {
+        let rows = list.dismissed_rows();
+        if rows.is_empty() {
+            return None;
+        }
+        let is_shown = list.dismissed_are_shown();
+        let ticked = list.selected_dismissed().len();
+        let header = div()
+            .id("findings-dismissed-header")
+            .px_5()
+            .py_2()
+            .flex()
+            .items_center()
+            .gap_2()
+            .cursor_pointer()
+            .border_t_1()
+            .border_color(colors.subtle_border)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.list.toggle_dismissed_shown();
+                cx.notify();
+            }))
+            .child(sized_icon(
+                if is_shown {
+                    Icon::ChevronDown
+                } else {
+                    Icon::ChevronRight
+                },
+                colors.muted_text,
+                px(14.),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .text_color(colors.muted_text)
+                    .child(format!("Dismissed ({})", rows.len())),
+            )
+            .when(is_shown, |header| {
+                header.child(
+                    Self::batch_button(
+                        colors,
+                        "findings-restore-selected",
+                        format!("Restore ({ticked})"),
+                        ButtonKind::Secondary,
+                        Selection::of(ticked > 0),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        let selected = this.list.selected_dismissed();
+                        if !selected.is_empty() {
+                            cx.emit(FindingsEvent::Restore(selected));
+                        }
+                    })),
+                )
+            });
+        Some(
+            div().flex().flex_col().child(header).children(
+                is_shown
+                    .then(|| {
+                        rows.iter()
+                            .map(|row| Self::dismissed_row(colors, row, cx))
+                            .collect::<Vec<_>>()
+                    })
+                    .into_iter()
+                    .flatten(),
+            ),
+        )
+    }
+
     fn batch_button(
         colors: &Colors,
         id: &'static str,
@@ -427,7 +581,8 @@ impl Render for FindingsSheet {
                 rows.iter()
                     .map(|row| Self::row(&colors, row, cx))
                     .collect::<Vec<_>>(),
-            );
+            )
+            .children(Self::dismissed_section(&colors, &self.list, cx));
         modal_layer_for(&colors, "findings-scrim", &self.presence)
             .on_mouse_down(
                 MouseButton::Left,
@@ -453,6 +608,8 @@ impl Render for FindingsSheet {
                             .child(key_hint(&colors, &[KeyLabel::Text("d")], "dismiss"))
                             .child(key_hint(&colors, &[KeyLabel::Text("c")], "comment"))
                             .child(key_hint(&colors, &[KeyLabel::Text("x")], "fix"))
+                            .child(key_hint(&colors, &[KeyLabel::Text("h")], "dismissed"))
+                            .child(key_hint(&colors, &[KeyLabel::Text("r")], "restore"))
                             .child(key_hint(&colors, &[KeyLabel::Text("g")], "show")),
                     ),
                 "findings-sheet-rise",

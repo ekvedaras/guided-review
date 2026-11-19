@@ -2454,7 +2454,10 @@ impl ReviewCore {
             .chain(ask)
             .chain(self.guided_tour_palette_actions())
             .chain(self.has_findings().then_some(PaletteAction::NextFinding))
-            .chain(self.has_findings().then_some(PaletteAction::FindingsList))
+            .chain(
+                self.can_list_findings()
+                    .then_some(PaletteAction::FindingsList),
+            )
             .chain(
                 self.run_ai_review_refusal()
                     .is_none()

@@ -325,7 +325,9 @@ impl ReviewCore {
             Intent::PreviousScreen => Effect::Change(ReviewChange::GoBack),
             Intent::NextUnreadStep => Effect::Change(ReviewChange::GoToNextUnread),
             Intent::NextFinding if self.has_findings() => Effect::NextFinding,
-            Intent::ToggleFindingsList if self.has_findings() => Effect::Toggle(Overlay::Findings),
+            Intent::ToggleFindingsList if self.can_list_findings() => {
+                Effect::Toggle(Overlay::Findings)
+            }
             Intent::ToggleRead => match self.screen() {
                 Screen::Step(id) => {
                     Effect::Change(ReviewChange::ToggleTick(ReadSubject::Step(id.clone())))

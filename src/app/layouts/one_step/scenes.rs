@@ -807,11 +807,15 @@ impl OneStepLayout {
                 review.ai_review_run_is(AiReviewRun::staged_failed());
             }),
             Scene::AiReviewFindingsList => {
-                self.change_review(cx, |review| review.ai_review_is(AiReview::staged()));
+                self.change_review(cx, |review| {
+                    review.ai_review_is(AiReview::staged());
+                    review.stage_dismissed_finding();
+                });
                 let list = self.session.read(cx).review().findings_list();
                 self.findings.update(cx, |sheet, cx| {
                     sheet.toggle(list, window, cx);
                     sheet.stage_sample(cx);
+                    sheet.stage_dismissed_shown(cx);
                 });
             }
             Scene::AiReviewOnLines => self.change_review(cx, |review| {

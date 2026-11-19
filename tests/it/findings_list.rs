@@ -4,6 +4,7 @@ use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 use guided_review::findings::{Finding, FindingId};
 use guided_review::open_review::open_review;
+use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::update::Build;
@@ -138,6 +139,7 @@ fn pr() -> ReviewSubject {
 /// `README.md` changes on line 2 and is the only step.
 struct Shop {
     repo: FixtureRepo,
+    base: String,
     head: String,
 }
 
@@ -160,7 +162,17 @@ impl Shop {
             json!({"pr": PR, "base": base, "head": head, "findings": findings}).to_string(),
         )
         .unwrap();
-        Self { repo, head }
+        Self { repo, base, head }
+    }
+
+    /// A later run of the review agent writes its findings file again.
+    fn the_agent_writes(&self, findings: &[Finding]) {
+        std::fs::write(
+            Tour::findings_path_for(&self.repo.folders(), &pr()),
+            json!({"pr": PR, "base": self.base, "head": self.head, "findings": findings})
+                .to_string(),
+        )
+        .unwrap();
     }
 
     /// The review as the app opens it, on its only step.
@@ -385,4 +397,243 @@ fn going_to_a_finding_opens_the_screen_that_shows_it() {
     assert_eq!(review.screen(), &Screen::Summary);
     assert!(review.page().row_of_finding(&id("c")).is_some());
     assert!(!review.go_to_finding(&id("gone")));
+}
+
+fn dismissed_ids(review: &Review) -> Vec<String> {
+    review
+        .findings_list()
+        .dismissed_rows()
+        .iter()
+        .map(|row| row.id.to_string())
+        .collect()
+}
+
+fn shown_on_screens(review: &Review) -> Vec<String> {
+    ["a", "b", "c"]
+        .into_iter()
+        .filter(|name| review.page().row_of_finding(&id(name)).is_some())
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn a_dismissed_finding_is_listed_apart_from_the_open_ones_with_its_place_and_first_line() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One.\n\nMore."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+
+    review.dismiss_finding(&id("a")).unwrap();
+
+    assert_eq!(shown_ids(&review), ["b"]);
+    assert_eq!(dismissed_ids(&review), ["a"]);
+    let row = &review.findings_list().dismissed_rows()[0];
+    assert_eq!(row.place, "README.md:2");
+    assert_eq!(row.first_line, "One.");
+}
+
+#[test]
+fn dismissed_findings_are_still_listed_when_the_review_opens_again() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    shop.open().dismiss_finding(&id("a")).unwrap();
+
+    let reopened = shop.open();
+
+    assert_eq!(dismissed_ids(&reopened), ["a"]);
+    assert_eq!(shown_ids(&reopened), ["b"]);
+}
+
+#[test]
+fn a_dismissed_finding_is_listed_from_the_saved_copy_when_a_later_run_no_longer_holds_it() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    shop.open().dismiss_finding(&id("a")).unwrap();
+    shop.the_agent_writes(&[on_line_2("b", "Two.")]);
+
+    let review = shop.open();
+
+    assert_eq!(dismissed_ids(&review), ["a"]);
+    assert_eq!(
+        review.findings_list().dismissed_rows()[0].first_line,
+        "One."
+    );
+}
+
+#[test]
+fn a_restored_finding_is_open_again_on_its_lines_and_in_the_list_and_not_dismissed() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+    review.dismiss_finding(&id("a")).unwrap();
+    assert_eq!(shown_on_screens(&review), ["b"]);
+
+    review.restore_finding(&id("a")).unwrap();
+
+    assert_eq!(dismissed_ids(&review), Vec::<String>::new());
+    assert_eq!(shown_ids(&review), ["b", "a"]);
+    assert_eq!(shown_on_screens(&review), ["a", "b"]);
+    assert_eq!(review.ai_review().counts().total(), 2);
+}
+
+#[test]
+fn a_restored_finding_stays_open_when_the_review_opens_again_and_leaves_the_dismissed_list_of_the_brief()
+ {
+    let shop = Shop::with_findings(&[on_line_2("a", "Rename it."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+    review.dismiss_finding(&id("a")).unwrap();
+    review.restore_finding(&id("a")).unwrap();
+
+    let reopened = shop.open();
+
+    assert_eq!(shown_ids(&reopened), ["a", "b"]);
+    assert_eq!(dismissed_ids(&reopened), Vec::<String>::new());
+    let brief = ReviewBrief::of(&shop.repo.folders(), &pr()).to_string();
+    assert!(brief.contains("dismissed findings: none"), "{brief}");
+    assert!(!brief.contains("Rename it."), "{brief}");
+}
+
+#[test]
+fn a_finding_dismissed_from_a_run_the_file_dropped_is_restored_from_the_saved_copy() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    shop.open().dismiss_finding(&id("a")).unwrap();
+    shop.the_agent_writes(&[on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+
+    review.restore_finding(&id("a")).unwrap();
+
+    assert_eq!(shown_ids(&review), ["b", "a"]);
+    assert_eq!(shown_on_screens(&review), ["a", "b"]);
+}
+
+#[test]
+fn a_batch_restore_restores_each_dismissed_finding_and_reports_one_that_is_not() {
+    let shop = Shop::with_findings(&[
+        on_line_2("a", "One."),
+        on_line_2("b", "Two."),
+        on_line_2("c", "Three."),
+    ]);
+    let mut review = shop.open();
+    review.dismiss_findings(&[id("a"), id("c")]);
+
+    let batch = review.restore_findings(&[id("a"), id("b"), id("gone")]);
+
+    assert_eq!(batch.done, [id("a")]);
+    assert_eq!(
+        batch.refused,
+        [
+            (id("b"), FindingRefusal::NotDismissed),
+            (id("gone"), FindingRefusal::NotDismissed)
+        ]
+    );
+    assert_eq!(dismissed_ids(&review), ["c"]);
+    assert_eq!(shown_ids(&review), ["b", "a"]);
+}
+
+#[test]
+fn a_dismissed_finding_is_not_a_finding_to_go_to_next() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+    review.dismiss_finding(&id("a")).unwrap();
+
+    assert_eq!(review.go_to_next_finding(), Some(id("b")));
+    assert_eq!(review.go_to_next_finding(), Some(id("b")));
+}
+
+#[test]
+fn the_findings_list_is_offered_while_only_dismissed_findings_are_left_but_next_finding_is_not() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One.")]);
+    let mut review = shop.open();
+    review.dismiss_finding(&id("a")).unwrap();
+
+    assert!(review.ai_review_stage().has_dismissed_findings);
+    assert!(!review.ai_review_stage().has_findings);
+    assert_eq!(
+        review.decide(Intent::ToggleFindingsList, WindowMoment::default()),
+        Effect::Toggle(Overlay::Findings)
+    );
+    assert!(
+        review
+            .palette_actions(Build::Local)
+            .contains(&PaletteAction::FindingsList)
+    );
+    assert_eq!(
+        review.decide(Intent::NextFinding, WindowMoment::default()),
+        Effect::Nothing
+    );
+}
+
+#[test]
+fn the_sidebar_line_counts_the_dismissed_findings() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+    review.dismiss_finding(&id("a")).unwrap();
+
+    assert_eq!(
+        review.ai_review_stage().line,
+        "1 finding: 1 should fix · 1 dismissed"
+    );
+}
+
+fn with_dismissed(open: &[Finding], dismissed: &[Finding]) -> FindingsList {
+    FindingsList::of(open).with_dismissed(dismissed.to_vec())
+}
+
+#[test]
+fn the_dismissed_section_is_folded_until_toggled_and_opens_by_itself_when_nothing_is_open() {
+    let mut list = with_dismissed(&three(), &[on_line_2("d", "Gone.")]);
+    assert!(!list.dismissed_are_shown());
+    assert_eq!(list.dismissed_rows().len(), 1);
+
+    list.toggle_dismissed_shown();
+    assert!(list.dismissed_are_shown());
+    list.toggle_dismissed_shown();
+    assert!(!list.dismissed_are_shown());
+
+    let nothing_open = with_dismissed(&[], &[on_line_2("d", "Gone.")]);
+    assert!(nothing_open.dismissed_are_shown());
+    assert!(!nothing_open.is_empty());
+}
+
+#[test]
+fn the_cursor_runs_on_into_the_dismissed_rows_once_they_are_shown() {
+    let mut list = with_dismissed(&three(), &[on_line_2("d", "Gone.")]);
+    for _ in 0..5 {
+        list.cursor_down();
+    }
+    assert_eq!(list.id_under_cursor(), Some(&id("a")));
+
+    list.toggle_dismissed_shown();
+    for _ in 0..5 {
+        list.cursor_down();
+    }
+    assert_eq!(list.id_under_cursor(), None);
+    assert!(list.dismissed_rows()[0].is_under_cursor);
+    assert!(!list.rows()[2].is_under_cursor);
+}
+
+#[test]
+fn ticking_a_dismissed_row_selects_it_apart_from_the_open_ones() {
+    let mut list = with_dismissed(&three(), &[on_line_2("d", "Gone."), on_line_2("e", "Too.")]);
+    list.toggle_dismissed_shown();
+    list.toggle_selected(&id("a"));
+
+    list.toggle_dismissed_selected(&id("e"));
+
+    assert_eq!(list.selected(), [id("a")]);
+    assert_eq!(list.selected_dismissed(), [id("e")]);
+    assert!(list.dismissed_rows()[1].is_selected);
+    for _ in 0..3 {
+        list.cursor_down();
+    }
+    list.toggle_under_cursor();
+    assert_eq!(list.selected_dismissed(), [id("d"), id("e")]);
+}
+
+#[test]
+fn refreshing_keeps_the_dismissed_section_shown_and_its_ticks_over_the_dismissed_now() {
+    let mut list = with_dismissed(&three(), &[on_line_2("d", "Gone."), on_line_2("e", "Too.")]);
+    list.toggle_dismissed_shown();
+    list.toggle_dismissed_selected(&id("d"));
+    list.toggle_dismissed_selected(&id("e"));
+
+    let refreshed = list.refreshed_to(&with_dismissed(&three(), &[on_line_2("e", "Too.")]));
+
+    assert!(refreshed.dismissed_are_shown());
+    assert_eq!(refreshed.selected_dismissed(), [id("e")]);
 }
