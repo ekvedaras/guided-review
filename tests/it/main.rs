@@ -56,6 +56,7 @@ mod file_reads;
 mod finding_actions;
 mod finding_placement;
 mod findings_done;
+mod findings_list;
 mod finish_review;
 mod focused_change;
 mod fold_key;

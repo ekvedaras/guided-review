@@ -24,6 +24,8 @@ pub enum Intent {
     NextUnreadStep,
     /// From the sidebar's AI review row and the palette: to the next finding, most severe first.
     NextFinding,
+    /// From the sidebar's AI review row, its key and the palette: the list of findings, or closes it.
+    ToggleFindingsList,
     /// Ticks or unticks the step on screen.
     ToggleRead,
     ToggleWrapLines,
@@ -80,6 +82,7 @@ impl From<PaletteAction> for Intent {
         match action {
             PaletteAction::NextUnreadStep => Self::NextUnreadStep,
             PaletteAction::NextFinding => Self::NextFinding,
+            PaletteAction::FindingsList => Self::ToggleFindingsList,
             PaletteAction::MarkStepRead
             | PaletteAction::MarkStepUnread
             | PaletteAction::MarkFileRead
@@ -190,6 +193,8 @@ pub enum Overlay {
     PrSwitcher,
     Settings,
     Shortcuts,
+    /// The AI review's findings, as a list to go through and act on in a batch.
+    Findings,
 }
 
 /// Why an intent does nothing now.
@@ -263,6 +268,7 @@ impl Intent {
             | Self::ToggleDraft
             | Self::ToggleAutoMerge
             | Self::ToggleJump
+            | Self::ToggleFindingsList
             | Self::ToggleSettings
             | Self::ShowSettings
             | Self::ToggleShortcuts => true,
@@ -287,7 +293,10 @@ impl Intent {
         };
         let waits_for_settings = matches!(
             self,
-            Self::ToggleJump | Self::TogglePrSwitcher | Self::ShowPrSwitcher
+            Self::ToggleJump
+                | Self::ToggleFindingsList
+                | Self::TogglePrSwitcher
+                | Self::ShowPrSwitcher
         );
         if refused_while_reopening && moment.reopening == Reopening::Underway {
             Some(Refusal::Reopening)
@@ -316,6 +325,7 @@ impl ReviewCore {
             Intent::PreviousScreen => Effect::Change(ReviewChange::GoBack),
             Intent::NextUnreadStep => Effect::Change(ReviewChange::GoToNextUnread),
             Intent::NextFinding if self.has_findings() => Effect::NextFinding,
+            Intent::ToggleFindingsList if self.has_findings() => Effect::Toggle(Overlay::Findings),
             Intent::ToggleRead => match self.screen() {
                 Screen::Step(id) => {
                     Effect::Change(ReviewChange::ToggleTick(ReadSubject::Step(id.clone())))
@@ -359,7 +369,10 @@ impl ReviewCore {
                 None => Effect::OpenFinishForm,
             },
             Intent::OpenPr if self.can_open_pr() => Effect::OpenPr,
-            Intent::NextFinding | Intent::OpenPr | Intent::MarkDone => Effect::Nothing,
+            Intent::NextFinding
+            | Intent::ToggleFindingsList
+            | Intent::OpenPr
+            | Intent::MarkDone => Effect::Nothing,
             Intent::OpenOnGitHub => self
                 .subject()
                 .pull_request()

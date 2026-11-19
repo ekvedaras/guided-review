@@ -166,6 +166,8 @@
 
 **Finding**: One thing an AI review reports, before the reviewer acts on it: an id, a severity, a Markdown body and an anchor (lines of either side of one changed file, a whole changed file, or the whole change). Avoid: AI comment, suggestion (a GitHub suggestion is a code change in a comment), issue.
 
+**Findings list**: The sheet that lists every open finding as one compact row (severity, `file:line`, first line), to tick, open and decide in a batch: Dismiss, or Comment (each as is, marked 🤖, into the pending review or the tasks of a local review). Avoid: findings panel.
+
 **Severity**: How much a finding matters: `must fix`, `should fix` or `nit`, most severe first. Avoid: priority, level.
 
 **Use / Use as is / Dismiss**: What the reviewer does with one finding. Use puts its text in a comment box on its lines (a task in a local review) to edit and send; Use as is sends it at once to Add to review (Add to tasks), starting with 🤖; Dismiss drops it, and the next AI review is told not to report it again. A decided finding is kept in the review's state file and never shown again.

@@ -2,7 +2,7 @@ mod ai_review_run;
 mod finding_actions;
 mod guided_tour;
 
-pub use finding_actions::FindingRefusal;
+pub use finding_actions::{FindingRefusal, FindingsBatch};
 mod jobs;
 mod kept;
 mod pr_controls;
@@ -841,7 +841,15 @@ impl ReviewCore {
             .or_else(|| by_severity.first())?
             .id
             .clone();
-        let screen = match self.findings.home_of(&next)? {
+        self.go_to_finding(&next).then_some(next)
+    }
+
+    /// Goes to the screen of one finding, as Next finding does; false when it is not open.
+    pub fn go_to_finding(&mut self, id: &FindingId) -> bool {
+        let Some(home) = self.findings.home_of(id) else {
+            return false;
+        };
+        let screen = match home {
             FindingHome::Step(id) => Screen::Step(id.clone()),
             FindingHome::File(path) => Screen::File(path.clone()),
             FindingHome::SafetyNet => Screen::SafetyNet,
@@ -854,8 +862,8 @@ impl ReviewCore {
         {
             self.toggle_fold(&id.clone());
         }
-        self.finding_cursor = Some(next.clone());
-        Some(next)
+        self.finding_cursor = Some(id.clone());
+        true
     }
 
     /// The findings of the open screen: on their lines, or after the code.
@@ -2400,6 +2408,7 @@ impl ReviewCore {
             .chain(ask)
             .chain(self.guided_tour_palette_actions())
             .chain(self.has_findings().then_some(PaletteAction::NextFinding))
+            .chain(self.has_findings().then_some(PaletteAction::FindingsList))
             .chain(
                 self.run_ai_review_refusal()
                     .is_none()

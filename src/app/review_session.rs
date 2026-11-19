@@ -474,6 +474,32 @@ impl ReviewSession {
         self.change(cx, |review| review.dismiss_finding(id))
     }
 
+    /// Dismiss in the findings list: each selected finding goes, and a refused one is told back.
+    pub fn dismiss_findings(
+        &mut self,
+        ids: &[FindingId],
+        cx: &mut Context<Self>,
+    ) -> Vec<(FindingId, FindingRefusal)> {
+        self.change(cx, |review| review.dismiss_findings(ids))
+            .refused
+    }
+
+    /// Comment in the findings list: each selected finding goes in as is, as Use as is does.
+    pub fn comment_findings(
+        &mut self,
+        ids: &[FindingId],
+        cx: &mut Context<Self>,
+    ) -> Vec<(FindingId, FindingRefusal)> {
+        let mode = self.review.add_mode();
+        let batch = self.change(cx, |review| review.comment_findings(ids, mode));
+        for request in batch.done {
+            let place = request.place().clone();
+            let audience = request.audience();
+            self.run_comment_request(&place, request, (mode, audience), cx);
+        }
+        batch.refused
+    }
+
     pub fn send_comment(
         &mut self,
         place: &CommentPlace,

@@ -50,6 +50,7 @@ pub struct AiReviewStage {
     pub can_show_agent: bool,
     /// There are findings to walk through, whatever the run is doing.
     pub can_go_to_next_finding: bool,
+    pub can_open_findings_list: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

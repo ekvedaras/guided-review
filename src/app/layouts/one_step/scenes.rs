@@ -98,10 +98,11 @@ enum Scene {
     AiReviewRunning,
     AiReviewFailed,
     AiReviewOnLines,
+    AiReviewFindingsList,
 }
 
 impl Scene {
-    const ALL: [Self; 61] = [
+    const ALL: [Self; 62] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -163,6 +164,7 @@ impl Scene {
         Self::AiReviewRunning,
         Self::AiReviewFailed,
         Self::AiReviewOnLines,
+        Self::AiReviewFindingsList,
     ];
 
     fn file_name(self) -> &'static str {
@@ -228,6 +230,7 @@ impl Scene {
             Self::AiReviewRunning => "81-ai-review-running",
             Self::AiReviewFailed => "82-ai-review-failed",
             Self::AiReviewOnLines => "83-ai-review-on-lines",
+            Self::AiReviewFindingsList => "84-ai-review-findings-list",
         }
     }
 
@@ -793,6 +796,14 @@ impl OneStepLayout {
             Scene::AiReviewFailed => self.change_review(cx, |review| {
                 review.ai_review_run_is(AiReviewRun::staged_failed());
             }),
+            Scene::AiReviewFindingsList => {
+                self.change_review(cx, |review| review.ai_review_is(AiReview::staged()));
+                let list = self.session.read(cx).review().findings_list();
+                self.findings.update(cx, |sheet, cx| {
+                    sheet.toggle(list, window, cx);
+                    sheet.stage_sample(cx);
+                });
+            }
             Scene::AiReviewOnLines => self.change_review(cx, |review| {
                 review.go_forward();
                 let first_line = review
@@ -1013,6 +1024,11 @@ impl OneStepLayout {
             Scene::AiReviewFound => self.change_review(cx, |review| {
                 review.ai_review_is(AiReview::NotRun);
             }),
+            Scene::AiReviewFindingsList => {
+                self.findings
+                    .update(cx, |sheet, cx| sheet.close(window, cx));
+                self.change_review(cx, |review| review.ai_review_is(AiReview::NotRun));
+            }
             Scene::AiReviewOnLines => self.change_review(cx, |review| {
                 review.ai_review_is(AiReview::NotRun);
                 review.go_to_summary();

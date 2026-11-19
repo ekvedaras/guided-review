@@ -27,6 +27,7 @@ mod file_block;
 mod file_tree;
 mod finding_decisions;
 mod finding_placement;
+mod findings_list;
 mod finish_review;
 mod focused_change;
 mod github_outage;
@@ -134,6 +135,7 @@ pub use display_options::DisplayOptions;
 pub use file_block::FileBlock;
 pub use file_tree::{FileTree, FolderPath, TreeRow, TreeRowKind};
 pub use finding_decisions::{Fate, FindingDecision, FindingDecisions};
+pub use findings_list::{FindingsList, FindingsListRow};
 pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishAction, FinishOutcome, FinishRefusal, FinishRequest,
     FinishResult, ReviewOutcome, ReviewVerdict, SubmittedReview,
@@ -217,9 +219,9 @@ pub use replacing_jobs::{
     AfterJob, JobOutcome, JobProgress, ReplacingJob, ReplacingJobs, StartedJob,
 };
 pub use review::{
-    FindingRefusal, NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit, ReadingPlace, Review,
-    RouteStop, SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats, TourLead, UnreadFile,
-    UnreadStep,
+    FindingRefusal, FindingsBatch, NextScreen, OldHead, ReadProgress, ReadSubject, ReadUnit,
+    ReadingPlace, Review, RouteStop, SafetyNetSize, Screen, SidebarEntry, StepId, SummaryStats,
+    TourLead, UnreadFile, UnreadStep,
 };
 pub use review_agents::ReviewAgents;
 pub use review_builder::ReviewBuilder;

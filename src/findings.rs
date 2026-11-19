@@ -35,7 +35,7 @@ impl fmt::Display for Severity {
 }
 
 /// Names a finding inside its file, so a later run can be told which ones the reviewer dismissed.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct FindingId(String);
 

@@ -8,6 +8,7 @@ use crate::viewer::ai_review::AiReview;
 use crate::viewer::comment_desk::TourFreshness;
 use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, SendMode};
 use crate::viewer::finding_decisions::Fate;
+use crate::viewer::findings_list::FindingsList;
 use crate::viewer::hand_offs::Audience;
 use crate::viewer::step_page::{LineLocation, Side};
 
@@ -34,6 +35,13 @@ impl fmt::Display for FindingRefusal {
             Self::Comment(refusal) => refusal.fmt(f),
         }
     }
+}
+
+/// What a batch did: what went through, and each finding that did not, with the reason.
+#[derive(Debug)]
+pub struct FindingsBatch<T> {
+    pub done: Vec<T>,
+    pub refused: Vec<(FindingId, FindingRefusal)>,
 }
 
 /// Starts a comment made from a finding the reviewer did not edit.
@@ -105,6 +113,49 @@ impl ReviewCore {
             .ok_or(FindingRefusal::NotThere)?;
         self.record_decision(finding, Fate::Used)?;
         Ok(request)
+    }
+
+    /// The open findings as the findings list shows them.
+    pub fn findings_list(&self) -> FindingsList {
+        match &self.ai_review {
+            AiReview::Findings(file) => FindingsList::of(&file.findings),
+            AiReview::NotRun | AiReview::Unreadable(_) => FindingsList::default(),
+        }
+    }
+
+    /// Dismisses each; one that is not open any more is reported and the rest still go.
+    pub fn dismiss_findings(&mut self, ids: &[FindingId]) -> FindingsBatch<FindingId> {
+        self.batch(ids, |review, id| {
+            review.dismiss_finding(id).map(|()| id.clone())
+        })
+    }
+
+    /// Each finding as is, one request per finding, in the order given. A finding with no lines to
+    /// comment on, or whose lines have a box open, stays open and is reported.
+    pub fn comment_findings(
+        &mut self,
+        ids: &[FindingId],
+        mode: SendMode,
+    ) -> FindingsBatch<CommentRequest> {
+        self.batch(ids, |review, id| review.use_finding_as_is(id, mode))
+    }
+
+    fn batch<T>(
+        &mut self,
+        ids: &[FindingId],
+        mut act: impl FnMut(&mut Self, &FindingId) -> Result<T, FindingRefusal>,
+    ) -> FindingsBatch<T> {
+        let mut batch = FindingsBatch {
+            done: Vec::new(),
+            refused: Vec::new(),
+        };
+        for id in ids {
+            match act(self, id) {
+                Ok(done) => batch.done.push(done),
+                Err(refusal) => batch.refused.push((id.clone(), refusal)),
+            }
+        }
+        batch
     }
 
     /// What "Use as is" sends with: into the pending review, or into the tasks of a local review.

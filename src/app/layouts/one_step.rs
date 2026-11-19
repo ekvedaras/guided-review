@@ -39,6 +39,7 @@ use crate::app::components::diff_view::{
     rendered_block_row, rendered_file_waiting_row,
 };
 use crate::app::components::finding_view::finding_card;
+use crate::app::components::findings_sheet::{FindingsEvent, FindingsSheet};
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish, OnMarkDone};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::guided_tour_banner::{GuidedTourReadyBanner, switch_button};
@@ -149,6 +150,7 @@ actions!(
         ToggleAutoMerge,
         ToggleRead,
         ToggleShortcuts,
+        ToggleFindingsList,
         OpenPrOnGitHub,
         OpenIssue,
         AskToOpenPr,
@@ -214,6 +216,7 @@ pub struct OneStepLayout {
     jump: Entity<JumpPalette>,
     pr_switcher: Entity<PrSwitcherView>,
     shortcuts: Entity<ShortcutsSheet>,
+    findings: Entity<FindingsSheet>,
     picture_zoom: Entity<PictureZoom>,
     settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
@@ -314,6 +317,11 @@ impl OneStepLayout {
         })
         .detach();
         let shortcuts = cx.new(|cx| ShortcutsSheet::new(focus.clone(), cx));
+        let findings = cx.new(|cx| FindingsSheet::new(focus.clone(), cx));
+        cx.subscribe_in(&findings, window, |this, sheet, event, window, cx| {
+            this.findings_asked(sheet, event, window, cx);
+        })
+        .detach();
         let picture_zoom = cx.new(|cx| PictureZoom::new(focus.clone(), cx));
         cx.subscribe_in(
             &jump,
@@ -434,6 +442,7 @@ impl OneStepLayout {
             jump,
             pr_switcher,
             shortcuts,
+            findings,
             picture_zoom,
             settings,
             loading,
@@ -1178,6 +1187,43 @@ impl OneStepLayout {
             )
     }
 
+    /// What the findings list asked: a batch is done by the session, and the list shows what is left.
+    fn findings_asked(
+        &mut self,
+        sheet: &Entity<FindingsSheet>,
+        event: &FindingsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let refused = match event {
+            FindingsEvent::Dismiss(ids) => self
+                .session
+                .update(cx, |session, cx| session.dismiss_findings(ids, cx)),
+            FindingsEvent::Comment(ids) => self
+                .session
+                .update(cx, |session, cx| session.comment_findings(ids, cx)),
+            FindingsEvent::GoTo(id) => {
+                self.session.update(cx, |session, cx| {
+                    session.change(cx, |review| review.go_to_finding(id));
+                });
+                self.scroll_to_finding(id, cx);
+                return;
+            }
+        };
+        if let Some((_, refusal)) = refused.first() {
+            let others = refused.len().saturating_sub(1);
+            let note = if others == 0 {
+                refusal.to_string()
+            } else {
+                format!("{refusal}, and {others} more were left open")
+            };
+            post_toast(cx, ToastTone::Neutral, note);
+        }
+        let list = self.session.read(cx).review().findings_list();
+        sheet.update(cx, |sheet, cx| sheet.refresh(&list, window, cx));
+        cx.notify();
+    }
+
     fn use_finding(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
         let used = self.session.update(cx, |session, cx| {
             session.change(cx, |review| review.use_finding(id))
@@ -1347,6 +1393,15 @@ impl OneStepLayout {
         });
     }
 
+    /// After the review went to a finding's screen: its row is on the page the session just built.
+    fn scroll_to_finding(&mut self, id: &FindingId, cx: &mut Context<Self>) {
+        let row = self.session.read(cx).rows().row_of_finding(id);
+        self.screen_list.scroll_to(ListOffset {
+            item_ix: row.unwrap_or(0),
+            offset_in_item: px(0.),
+        });
+    }
+
     fn act(&mut self, intent: Intent, window: &mut Window, cx: &mut Context<Self>) {
         let effect = self
             .session
@@ -1393,6 +1448,11 @@ impl OneStepLayout {
             Effect::Toggle(Overlay::Shortcuts) => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.toggle(window, cx)),
+            Effect::Toggle(Overlay::Findings) => {
+                let list = self.session.read(cx).review().findings_list();
+                self.findings
+                    .update(cx, |sheet, cx| sheet.toggle(list, window, cx));
+            }
             Effect::OpenSettings => self
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
@@ -1499,6 +1559,19 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::show_review_agent);
             }))
         });
+        let list = ai_review.can_open_findings_list.then(|| {
+            icon_label_button(
+                colors,
+                "findings-list",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::ListChecks,
+                "Findings list",
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::ToggleFindingsList, window, cx);
+            }))
+        });
         let next = ai_review.can_go_to_next_finding.then(|| {
             icon_label_button(
                 colors,
@@ -1558,6 +1631,7 @@ impl OneStepLayout {
                     .flex()
                     .gap_2()
                     .children(show)
+                    .children(list)
                     .children(next)
                     .children(action),
             )
@@ -5453,6 +5527,9 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &ToggleRead, window, cx| {
                 this.act(Intent::ToggleRead, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleFindingsList, window, cx| {
+                this.act(Intent::ToggleFindingsList, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ToggleShortcuts, window, cx| {
                 this.act(Intent::ToggleShortcuts, window, cx);
             }))
@@ -5557,6 +5634,7 @@ impl Render for OneStepLayout {
             .child(self.jump.clone())
             .child(self.pr_switcher.clone())
             .child(self.shortcuts.clone())
+            .child(self.findings.clone())
             .child(self.picture_zoom.clone())
             .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))
             .children(frame_painted_marker)
