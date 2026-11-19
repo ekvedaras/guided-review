@@ -168,7 +168,7 @@ impl ReviewCore {
                 Err(refusal) => batch.refused.push((id.clone(), refusal)),
             }
         }
-        to_fix.sort_by_key(|finding| self.reading_order_of(&finding.anchor));
+        to_fix.sort_by_key(|finding| self.reading_order_of(finding));
         batch.done = to_fix.iter().map(|finding| finding.id.clone()).collect();
         if to_fix.is_empty() {
             return batch;
@@ -205,19 +205,19 @@ impl ReviewCore {
         Ok(())
     }
 
-    /// The whole change first, then each changed file in the review's order, each by its lines.
-    fn reading_order_of(&self, anchor: &Anchor) -> (usize, u32) {
-        let file_at = |file: &FilePath| {
-            self.files
-                .iter()
-                .position(|changed| changed.path == *file)
-                .map_or(usize::MAX, |position| position + 1)
+    /// The tour's own order: the screen that shows the finding, then its first line.
+    fn reading_order_of(&self, finding: &Finding) -> (usize, u32) {
+        let screen_at = self
+            .findings
+            .home_of(&finding.id)
+            .map(|home| self.screen_of_home(home))
+            .and_then(|screen| self.reading_position(&screen))
+            .unwrap_or(usize::MAX);
+        let first_line = match &finding.anchor {
+            Anchor::Change | Anchor::File { .. } => 0,
+            Anchor::Lines { lines, .. } => lines[0].get(),
         };
-        match anchor {
-            Anchor::Change => (0, 0),
-            Anchor::File { file } => (file_at(file), 0),
-            Anchor::Lines { file, lines, .. } => (file_at(file), lines[0].get()),
-        }
+        (screen_at, first_line)
     }
 
     /// The fixes a snapshot scene shows on the open findings, and their removal.

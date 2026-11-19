@@ -125,6 +125,59 @@ fn a_batch_of_fix_requests_goes_to_the_tour_agent_as_one_message_in_reading_orde
     );
 }
 
+/// Two changed files, `a.txt` and `b.txt`, the tour reads `b.txt` first.
+fn shop_reading_b_before_a(findings: &[Value]) -> Shop {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("a.txt", "a\n");
+    repo.write("b.txt", "b\n");
+    let base = repo.commit("base");
+    repo.write("a.txt", "A\n");
+    repo.write("b.txt", "B\n");
+    let head = repo.commit("head");
+    let tour = json!({
+        "pr": PR, "base": base, "head": head, "title": "Two", "summary": [],
+        "steps": [
+            {"id": "b", "title": "B", "why": "w", "pieces": [{"file": "b.txt"}]},
+            {"id": "a", "title": "A", "why": "w", "pieces": [{"file": "a.txt"}]},
+        ],
+    });
+    let path = Tour::path_for(&repo.folders(), &pr());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, tour.to_string()).unwrap();
+    std::fs::write(
+        Tour::findings_path_for(&repo.folders(), &pr()),
+        json!({"pr": PR, "base": base, "head": head, "findings": findings}).to_string(),
+    )
+    .unwrap();
+    Shop { repo, head }
+}
+
+fn on_file_line(id: &str, file: &str, body: &str) -> Value {
+    json!({"id": id, "severity": "should fix", "body": body, "anchor": {
+        "kind": "lines", "file": file, "side": "head", "lines": [1, 1],
+    }})
+}
+
+#[test]
+fn a_batch_reads_in_the_order_of_the_tours_steps_not_the_order_of_the_changed_files() {
+    let shop = shop_reading_b_before_a(&[
+        on_file_line("in-a", "a.txt", "About a."),
+        on_file_line("in-b", "b.txt", "About b."),
+    ]);
+    let mut review = shop.open();
+    let fake = idle_agent();
+
+    review.fix_findings(&[id("in-a"), id("in-b")]);
+    shop.deliver(&mut review, &agents_of(&fake));
+
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    let (about_a, about_b) = (text.find("About a.").unwrap(), text.find("About b.").unwrap());
+    assert!(about_b < about_a, "{text}");
+}
+
 #[test]
 fn a_busy_tour_agent_gets_the_batch_when_it_is_idle() {
     let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);

@@ -853,18 +853,22 @@ impl ReviewCore {
         self.go_to_finding(&next).then_some(next)
     }
 
-    /// Goes to the screen of one finding, as Next finding does; false when it is not open.
-    pub fn go_to_finding(&mut self, id: &FindingId) -> bool {
-        let Some(home) = self.findings.home_of(id) else {
-            return false;
-        };
-        let screen = match home {
+    pub(super) fn screen_of_home(&self, home: &FindingHome) -> Screen {
+        match home {
             FindingHome::Step(id) => Screen::Step(id.clone()),
             FindingHome::File(path) => Screen::File(path.clone()),
             FindingHome::SafetyNet => Screen::SafetyNet,
             FindingHome::Change if self.tour.guided().is_some() => Screen::Summary,
             FindingHome::Change => Screen::Overview,
+        }
+    }
+
+    /// Goes to the screen of one finding, as Next finding does; false when it is not open.
+    pub fn go_to_finding(&mut self, id: &FindingId) -> bool {
+        let Some(home) = self.findings.home_of(id) else {
+            return false;
         };
+        let screen = self.screen_of_home(home);
         self.go_to_screen(screen);
         if let Screen::Step(id) = &self.screen
             && self.is_folded(id)
