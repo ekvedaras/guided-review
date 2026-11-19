@@ -133,20 +133,35 @@ impl ReviewCore {
     ) -> Result<CommentRequest, FindingRefusal> {
         let finding = self.open_finding(id)?;
         let place = self.comment_place_of(&finding.anchor)?;
+        self.send_findings_as_is(&place, vec![finding], mode)
+    }
+
+    /// One comment on `place` with every finding's text, each marked as AI; each goes when it lands.
+    fn send_findings_as_is(
+        &mut self,
+        place: &CommentPlace,
+        findings: Vec<Finding>,
+        mode: SendMode,
+    ) -> Result<CommentRequest, FindingRefusal> {
         if let Some(refusal) = self.send_refusal(mode) {
             return Err(FindingRefusal::Comment(refusal));
         }
-        if self.state.draft_at(&place).is_some() {
+        if self.state.draft_at(place).is_some() {
             return Err(FindingRefusal::DraftInTheWay);
         }
-        let text = format!("{AI_MARK} {}", finding.body);
+        let text = findings
+            .iter()
+            .map(|finding| format!("{AI_MARK} {}", finding.body))
+            .collect::<Vec<_>>()
+            .join("\n\n");
         self.comment_desk
-            .add_text_at(&mut self.state, &place, &self.head, &text)
+            .add_text_at(&mut self.state, place, &self.head, &text)
             .map_err(FindingRefusal::Comment)?;
         let request = self
-            .start_sending(&place, mode, Audience::Author)
+            .start_sending(place, mode, Audience::Author)
             .ok_or(FindingRefusal::NotThere)?;
-        self.findings_in_boxes.push((place, finding));
+        self.findings_in_boxes
+            .extend(findings.into_iter().map(|finding| (place.clone(), finding)));
         Ok(request)
     }
 
@@ -255,14 +270,42 @@ impl ReviewCore {
         })
     }
 
-    /// Each finding as is, one request per finding, in the order given. A finding with no lines to
-    /// comment on, or whose lines have a box open, stays open and is reported.
+    /// Each finding as is, one request per place, in the order given: findings on the same lines go
+    /// in one comment. A finding with no lines to comment on, or whose lines have a box open, stays
+    /// open and is reported.
     pub fn comment_findings(
         &mut self,
         ids: &[FindingId],
         mode: SendMode,
     ) -> FindingsBatch<CommentRequest> {
-        self.batch(ids, |review, id| review.use_finding_as_is(id, mode))
+        let mut batch = FindingsBatch {
+            done: Vec::new(),
+            refused: Vec::new(),
+        };
+        let mut by_place: Vec<(CommentPlace, Vec<Finding>)> = Vec::new();
+        for id in ids {
+            let placed = self.open_finding(id).and_then(|finding| {
+                let place = self.comment_place_of(&finding.anchor)?;
+                Ok((place, finding))
+            });
+            match placed {
+                Ok((place, finding)) => match by_place.iter_mut().find(|(at, _)| *at == place) {
+                    Some((_, findings)) => findings.push(finding),
+                    None => by_place.push((place, vec![finding])),
+                },
+                Err(refusal) => batch.refused.push((id.clone(), refusal)),
+            }
+        }
+        for (place, findings) in by_place {
+            let ids: Vec<FindingId> = findings.iter().map(|finding| finding.id.clone()).collect();
+            match self.send_findings_as_is(&place, findings, mode) {
+                Ok(request) => batch.done.push(request),
+                Err(refusal) => batch
+                    .refused
+                    .extend(ids.into_iter().map(|id| (id, refusal.clone()))),
+            }
+        }
+        batch
     }
 
     fn batch<T>(

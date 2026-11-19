@@ -263,15 +263,55 @@ fn a_batch_comment_adds_each_finding_as_is_marked_as_ai_and_leaves_open_those_wi
 }
 
 #[test]
-fn a_batch_comment_keeps_open_a_finding_whose_lines_already_have_a_comment_on_the_way() {
+fn a_batch_comment_of_findings_on_the_same_lines_sends_them_all_as_one_comment() {
     let shop = Shop::with_findings(&[on_line_2("a", "First."), on_line_2("b", "Second.")]);
     let mut review = shop.open();
+    let sent = SentLog::default();
 
     let batch = review.comment_findings(&[id("a"), id("b")], SendMode::AddToReview);
 
+    assert_eq!(batch.refused, []);
     assert_eq!(batch.done.len(), 1);
-    assert_eq!(batch.refused, [(id("b"), FindingRefusal::DraftInTheWay)]);
     assert_eq!(shown_ids(&review), ["a", "b"]);
+    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    for request in batch.done {
+        assert_eq!(
+            review.apply_comment(request.run(&github)).unwrap(),
+            CommentResult::Sent
+        );
+    }
+    let added: Vec<String> = sent
+        .github_calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            GitHubCall::AddThread { body, .. } => Some(body),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(added, ["🤖 First.\n\n🤖 Second."]);
+    assert_eq!(shown_ids(&review), Vec::<String>::new());
+}
+
+#[test]
+fn a_batch_comment_keeps_open_every_finding_whose_lines_have_a_box_with_text_in_it() {
+    let shop = Shop::with_findings(&[
+        on_line_2("a", "First."),
+        on_line_2("b", "Second."),
+        on_line_2("c", "Third."),
+    ]);
+    let mut review = shop.open();
+    review.use_finding(&id("c")).unwrap();
+
+    let batch = review.comment_findings(&[id("a"), id("b")], SendMode::AddToReview);
+
+    assert!(batch.done.is_empty());
+    assert_eq!(
+        batch.refused,
+        [
+            (id("a"), FindingRefusal::DraftInTheWay),
+            (id("b"), FindingRefusal::DraftInTheWay)
+        ]
+    );
 }
 
 #[test]
