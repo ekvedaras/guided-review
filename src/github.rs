@@ -23,10 +23,11 @@ use crate::viewer::{
     AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, GitHubError,
     HeadBranch, IssueDetails, IssueDetailsPort, IssueState, MergeRoute, NoAccess, OutageCause,
     PictureUploadPort, PrAuthor, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues,
-    PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort, PullRequestStatusPort,
-    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RelatedIssue, RepoCloner,
-    Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort,
-    SendMode, Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
+    PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews,
+    PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount,
+    RelatedIssue, RepoCloner, Resolution, ReviewOutcome, ReviewRecord, ReviewThread,
+    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, Reviewer, ReviewersOnGitHub, SendMode,
+    Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
     ViewedState, percent_encode_path,
 };
 
@@ -1160,6 +1161,55 @@ impl ReviewThreadsPort for GitHub {
     }
 }
 
+/// `None` for no review, or for one still pending: it is not sent.
+fn viewer_latest_review(
+    pr: &PullRequestUrl,
+    review: &serde_json::Value,
+) -> Result<Option<SubmittedReview>, GitHubError> {
+    if review.is_null() {
+        return Ok(None);
+    }
+    let text = |pointer: &str| at(review, pointer).as_str().map(str::to_owned);
+    let state = text("/state")
+        .with_context(|| format!("GitHub did not say how your last review of {pr} ended"))?;
+    let Some(outcome) = ReviewOutcome::from_github_state(&state) else {
+        return Ok(None);
+    };
+    let missing =
+        |what: &str| format!("GitHub did not give the {what} of your last review of {pr}");
+    Ok(Some(SubmittedReview {
+        outcome,
+        body: text("/body").unwrap_or_default(),
+        submitted_at: text("/submittedAt").with_context(|| missing("time"))?,
+        commit: Sha::new(&text("/commit/oid").with_context(|| missing("commit"))?),
+    }))
+}
+
+/// A review GitHub lists among a PR's latest. A pending one, or one whose author's account is gone,
+/// says nothing about where anyone stands.
+fn review_record(review: &serde_json::Value) -> Option<ReviewRecord> {
+    let outcome = ReviewOutcome::from_github_state(at(review, "/state").as_str()?)?;
+    Some(ReviewRecord {
+        reviewer: Reviewer::person(
+            at(review, "/author/login").as_str()?,
+            at(review, "/author/avatarUrl").as_str(),
+        ),
+        outcome,
+        commit: Sha::new(at(review, "/commit/oid").as_str()?),
+    })
+}
+
+fn requested_reviewer(requested: &serde_json::Value) -> Option<Reviewer> {
+    let avatar_url = at(requested, "/avatarUrl").as_str();
+    match at(requested, "/__typename").as_str()? {
+        "Team" => Some(Reviewer::team(at(requested, "/name").as_str()?, avatar_url)),
+        _ => Some(Reviewer::person(
+            at(requested, "/login").as_str()?,
+            avatar_url,
+        )),
+    }
+}
+
 impl ReviewWritesPort for GitHub {
     fn has_pending_review(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
         let data = self
@@ -1182,38 +1232,61 @@ impl ReviewWritesPort for GitHub {
             .any(|review| at(review, "/viewerDidAuthor").as_bool() == Some(true)))
     }
 
-    fn viewer_latest_review(
-        &self,
-        pr: &PullRequestUrl,
-    ) -> Result<Option<SubmittedReview>, GitHubError> {
+    fn reviews(&self, pr: &PullRequestUrl) -> Result<PullRequestReviews, GitHubError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
+                    viewer { login }
                     repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+                        author { login }
                         viewerLatestReview { state body submittedAt commit { oid } }
+                        latestOpinionatedReviews(first: 50) { nodes { ...listed } }
+                        latestReviews(first: 50) { nodes { ...listed } }
+                        reviewRequests(first: 50) { nodes { requestedReviewer {
+                            __typename
+                            ... on User { login avatarUrl }
+                            ... on Bot { login avatarUrl }
+                            ... on Mannequin { login avatarUrl }
+                            ... on Team { name avatarUrl }
+                        } } }
                     } }
+                }
+                fragment listed on PullRequestReview {
+                    state commit { oid } author { login avatarUrl }
                 }",
                 &pull_request_variables(pr, &serde_json::Value::Null),
             )
-            .map_err(|error| error.context(format!("could not read your last review of {pr}")))?;
-        let review = at(&data, "/repository/pullRequest/viewerLatestReview");
-        if review.is_null() {
-            return Ok(None);
-        }
-        let text = |pointer: &str| at(review, pointer).as_str().map(str::to_owned);
-        let state = text("/state")
-            .with_context(|| format!("GitHub did not say how your last review of {pr} ended"))?;
-        let Some(outcome) = ReviewOutcome::from_github_state(&state) else {
-            return Ok(None);
+            .map_err(|error| error.context(format!("could not read the reviews of {pr}")))?;
+        let pull = at(&data, "/repository/pullRequest");
+        let records = |list: &str| -> Vec<ReviewRecord> {
+            at(pull, list)
+                .as_array()
+                .map_or_default(Vec::as_slice)
+                .iter()
+                .filter_map(review_record)
+                .collect()
         };
-        let missing =
-            |what: &str| format!("GitHub did not give the {what} of your last review of {pr}");
-        Ok(Some(SubmittedReview {
-            outcome,
-            body: text("/body").unwrap_or_default(),
-            submitted_at: text("/submittedAt").with_context(|| missing("time"))?,
-            commit: Sha::new(&text("/commit/oid").with_context(|| missing("commit"))?),
-        }))
+        let requested = at(pull, "/reviewRequests/nodes")
+            .as_array()
+            .map_or_default(Vec::as_slice)
+            .iter()
+            .filter_map(|request| requested_reviewer(at(request, "/requestedReviewer")))
+            .collect();
+        let standings = ReviewersOnGitHub {
+            viewer_login: at(&data, "/viewer/login")
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            author_login: at(pull, "/author/login").as_str().map(str::to_owned),
+            latest: records("/latestReviews/nodes"),
+            verdicts: records("/latestOpinionatedReviews/nodes"),
+            requested,
+        }
+        .standings();
+        Ok(PullRequestReviews {
+            viewer_last: viewer_latest_review(pr, at(pull, "/viewerLatestReview"))?,
+            standings,
+        })
     }
 
     fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {

@@ -684,15 +684,15 @@ fn reviewer_summary_row(review: &ReviewCore, summary: Markdown) -> ReviewerSumma
 fn screen_footer(review: &ReviewCore, ticks: Option<ReadSubject>) -> PageRow {
     let place = review.reading_place();
     let lead = review.tour_lead();
-    let leads_on = matches!(lead, TourLead::Finish { .. } | TourLead::FinishFiles { .. })
-        && place.next.is_none()
-        && ticks.is_none();
+    let progress = review.progress();
+    let leads_on = lead != TourLead::Nowhere && place.next.is_none() && ticks.is_none();
     PageRow::ScreenFooter(Arc::new(ScreenFooter {
         ticks,
         has_previous: place.has_previous,
         next: place.next,
         file_place: place.file_number.map(|number| (number, place.file_count)),
         lead: leads_on.then_some(lead),
+        unread_left: progress.total - progress.read,
     }))
 }
 

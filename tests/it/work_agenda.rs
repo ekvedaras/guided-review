@@ -95,7 +95,7 @@ fn a_window_coming_to_the_front_reads_github_and_the_clone_and_sends_what_waits_
             WorkKind::SyncViewed,
             WorkKind::PullThreads,
             WorkKind::PullPendingReview,
-            WorkKind::PullLastReview,
+            WorkKind::PullReviews,
             WorkKind::PullPrStatus,
         ],
         "an empty queue sends nothing"
@@ -163,7 +163,7 @@ fn a_finished_review_reads_the_last_review_again() {
 
     let ran = drive_without_agents(&mut review, &github, &pull.source(), Instant::now());
 
-    assert_eq!(ran, [WorkKind::PullLastReview]);
+    assert_eq!(ran, [WorkKind::PullReviews]);
 }
 
 #[test]

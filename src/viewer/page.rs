@@ -405,6 +405,24 @@ impl Page {
             .unwrap_or(0)
     }
 
+    /// The footer of the last screen as it is when steps were passed unread: how many, and the way
+    /// back to the first of them.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_unread_end(&mut self, lead: &crate::viewer::TourLead, unread_left: usize) {
+        for row in &mut self.rows {
+            if let PageRow::ScreenFooter(footer) = row {
+                *row = PageRow::ScreenFooter(Arc::new(ScreenFooter {
+                    ticks: None,
+                    has_previous: footer.has_previous,
+                    next: None,
+                    file_place: footer.file_place,
+                    lead: Some(lead.clone()),
+                    unread_left,
+                }));
+            }
+        }
+    }
+
     /// The footer of the page as it is once every step is read, and its heading ticked.
     #[cfg(feature = "snapshots")]
     pub fn stage_all_read(&mut self, steps: usize) {
@@ -420,6 +438,7 @@ impl Page {
                             steps,
                             finish: Some(crate::viewer::FinishAction::FinishReview),
                         }),
+                        unread_left: 0,
                     }));
                 }
                 PageRow::StepHeading(heading) => {

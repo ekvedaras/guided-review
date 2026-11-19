@@ -7,8 +7,8 @@ use guided_review::github::GitHub;
 use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::viewer::{
     CommentId, CommentPlace, GitHubError, LineLocation, Reaction, ReactionChange, ReactionCount,
-    Resolution, ReviewOutcome, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode, Side,
-    ThreadId,
+    Resolution, ReviewOutcome, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, ReviewerKind,
+    SendMode, Side, Stance, ThreadId,
 };
 
 fn page(has_next: bool, cursor: &str, nodes: &str) -> String {
@@ -143,8 +143,9 @@ fn the_viewers_latest_review_is_read_with_its_outcome_time_and_commit() {
     let (url, asked) = serve_graphql(vec![LATEST_REVIEW_COMMENTED.into()]);
 
     let review = GitHub::at(&url)
-        .viewer_latest_review(&pr())
+        .reviews(&pr())
         .unwrap()
+        .viewer_last
         .unwrap();
 
     assert_eq!(review.outcome, ReviewOutcome::Commented);
@@ -162,6 +163,56 @@ fn the_viewers_latest_review_is_read_with_its_outcome_time_and_commit() {
     );
 }
 
+/// Shaped like GitHub's answer to the reviews query, checked against GitHub on 2026-11-19.
+const PR_REVIEWS: &str = include_str!("../fixtures/github/pr_reviews.json");
+
+#[test]
+fn the_reviews_say_where_each_reviewer_stands_with_approvals_outweighing_later_comments() {
+    let (url, _) = serve_graphql(vec![PR_REVIEWS.into()]);
+
+    let reviews = GitHub::at(&url).reviews(&pr()).unwrap();
+
+    assert_eq!(
+        reviews.viewer_last.map(|last| last.outcome),
+        Some(ReviewOutcome::Commented)
+    );
+    let standings: Vec<(&str, Stance, bool)> = reviews
+        .standings
+        .iter()
+        .map(|standing| {
+            (
+                standing.reviewer.name(),
+                standing.stance.clone(),
+                standing.is_viewer(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        standings,
+        vec![
+            (
+                "me",
+                Stance::Reviewed {
+                    outcome: ReviewOutcome::Approved,
+                    commit: Sha::new("old1")
+                },
+                true
+            ),
+            (
+                "alice",
+                Stance::Reviewed {
+                    outcome: ReviewOutcome::ChangesRequested,
+                    commit: Sha::new("head1")
+                },
+                false
+            ),
+            ("backend", Stance::Requested, false),
+            ("bob", Stance::Requested, false),
+        ]
+    );
+    assert_eq!(reviews.standings[2].reviewer.kind(), ReviewerKind::Team);
+}
+
 #[test]
 fn every_way_a_review_can_end_is_named() {
     let (url, _) = serve_graphql(
@@ -172,7 +223,7 @@ fn every_way_a_review_can_end_is_named() {
     let github = GitHub::at(&url);
 
     let outcomes: Vec<_> = (0..3)
-        .map(|_| github.viewer_latest_review(&pr()).unwrap().unwrap().outcome)
+        .map(|_| github.reviews(&pr()).unwrap().viewer_last.unwrap().outcome)
         .collect();
 
     assert_eq!(
@@ -193,8 +244,8 @@ fn no_review_sent_and_a_pending_one_are_both_no_last_review() {
     ]);
     let github = GitHub::at(&url);
 
-    assert_eq!(github.viewer_latest_review(&pr()).unwrap(), None);
-    assert_eq!(github.viewer_latest_review(&pr()).unwrap(), None);
+    assert_eq!(github.reviews(&pr()).unwrap().viewer_last, None);
+    assert_eq!(github.reviews(&pr()).unwrap().viewer_last, None);
 }
 
 #[test]

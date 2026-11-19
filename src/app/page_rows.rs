@@ -229,6 +229,23 @@ impl PageRows {
             .is_some_and(|page| page.change_to_focus_for_view(visible).is_some())
     }
 
+    /// The footer of the last screen as it is when steps were passed unread.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_unread_end(
+        &mut self,
+        lead: &crate::viewer::TourLead,
+        unread_left: usize,
+        open_details: &OpenDetails,
+    ) {
+        let Some(page) = &self.page else {
+            return;
+        };
+        let mut staged = Page::clone(page);
+        staged.stage_unread_end(lead, unread_left);
+        self.keys = keys_of(&staged, open_details);
+        self.page = Some(Arc::new(staged));
+    }
+
     /// The footer of the screen as it is once every step is read, and its heading ticked.
     #[cfg(feature = "snapshots")]
     pub fn stage_all_read(&mut self, steps: usize, open_details: &OpenDetails) {

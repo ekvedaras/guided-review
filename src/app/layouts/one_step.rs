@@ -38,7 +38,7 @@ use crate::app::components::diff_view::{
     hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
     rendered_block_row, rendered_file_waiting_row,
 };
-use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish};
+use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish, OnMarkDone};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::guided_tour_banner::{GuidedTourReadyBanner, switch_button};
 use crate::app::components::icon::{Icon, icon, sized_icon};
@@ -64,6 +64,7 @@ use crate::app::components::pr_switcher::{
     DropShownReview, PrSwitcherView, PrSwitching, SwitcherPlace,
 };
 use crate::app::components::refresh_banner::RefreshBanner;
+use crate::app::components::reviews_block::ReviewsBlock;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::scrollbar::{ScrollbarDrag, drag_listener, scrollbar};
 use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
@@ -952,7 +953,7 @@ impl OneStepLayout {
             is_everything_read,
             sidebar.finishing,
             sidebar.approve_warning,
-            sidebar.last_review.clone(),
+            sidebar.finish,
             self.session
                 .read(cx)
                 .review()
@@ -962,6 +963,7 @@ impl OneStepLayout {
             self.on_finish_body_edit(),
             self.on_finish_review(),
         )
+        .on_mark_done(Self::on_mark_done(cx))
         .opened_by(self.finish_form_request)
         .into_any_element()
     }
@@ -984,6 +986,16 @@ impl OneStepLayout {
             .on_click(cx.listener(|this, _, window, cx| {
                 this.act(Intent::SendTasks, window, cx);
             }))
+    }
+
+    fn on_mark_done(cx: &Context<Self>) -> OnMarkDone {
+        let layout = cx.entity().downgrade();
+        Rc::new(move |window, cx| {
+            // A layout already gone has no review left to mark.
+            layout
+                .update(cx, |layout, cx| layout.act(Intent::MarkDone, window, cx))
+                .ok();
+        })
     }
 
     fn on_finish_review(&self) -> OnFinish {
@@ -2058,6 +2070,8 @@ impl OneStepLayout {
             ))
             .children(count_badge(&colors, safety_net.thread_count))
         });
+        let reviews_block =
+            (!sidebar.reviews.is_empty()).then(|| ReviewsBlock::new(Arc::clone(&sidebar.reviews)));
         let header = div()
             .flex_none()
             .px_4()
@@ -2081,6 +2095,7 @@ impl OneStepLayout {
                     .into_any_element(),
                 None => progress_meter(&colors, progress, sidebar.progress_unit).into_any_element(),
             })
+            .children(reviews_block)
             .children(finish_dialog)
             .children(guided_tour)
             .children(tour_agent)
@@ -4183,6 +4198,25 @@ fn update_button(colors: &Colors, cx: &App) -> Option<impl IntoElement + use<>> 
     )
 }
 
+/// What the last screen's footer says: the end, or what was passed without being read.
+fn the_end_note(footer: &ScreenFooter) -> SharedString {
+    let unit = if footer.file_place.is_some() {
+        ReadUnit::Files
+    } else {
+        ReadUnit::Steps
+    };
+    match (footer.ticks.is_some(), footer.unread_left, unit) {
+        (true, _, _) => "This is the last step.".into(),
+        (false, 0, ReadUnit::Files) => "That was the last file.".into(),
+        (false, 0, ReadUnit::Steps) => {
+            "That was the last step. Finish the review in the sidebar.".into()
+        }
+        (false, 1, ReadUnit::Files) => "1 file is not read yet.".into(),
+        (false, 1, ReadUnit::Steps) => "1 step is not read yet.".into(),
+        (false, left, unit) => format!("{left} {} are not read yet.", unit.plural()).into(),
+    }
+}
+
 fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyElement {
     let colors = Colors::active(cx);
     let previous = footer.has_previous.then(|| {
@@ -4236,10 +4270,15 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
         (None, true) => Some(("Next", Onward::Goes)),
         (None, false) => None,
     };
+    let lead_label = if footer.next.is_none() {
+        LeadLabel::Named
+    } else {
+        LeadLabel::Short
+    };
     let lead = footer
         .lead
         .as_ref()
-        .and_then(|lead| lead_button(lead, LeadLabel::Short, "footer-lead", cx));
+        .and_then(|lead| lead_button(lead, lead_label, "footer-lead", cx));
     let primary = action.map(|(label, onward)| {
         button(
             &colors,
@@ -4294,13 +4333,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             .min_w_0()
             .text_sm()
             .text_color(colors.muted_text)
-            .child(if footer.ticks.is_some() {
-                "This is the last step."
-            } else if footer.file_place.is_some() {
-                "That was the last file."
-            } else {
-                "That was the last step. Finish the review in the sidebar."
-            })
+            .child(the_end_note(footer))
     });
     div()
         .pt_8()
@@ -4766,9 +4799,10 @@ fn finish_card(
         (count, unit) => format!("All {count} {} read", unit.plural()),
     };
     let finish_button = finish.map(|finish| {
-        let (icon, label) = match finish {
-            FinishAction::FinishReview => (Icon::ListChecks, "Finish review"),
-            FinishAction::SendTasks => (Icon::Send, "Send tasks"),
+        let (icon, label, intent) = match finish {
+            FinishAction::FinishReview => (Icon::ListChecks, "Finish review", Intent::FinishReview),
+            FinishAction::SendTasks => (Icon::Send, "Send tasks", Intent::SendTasks),
+            FinishAction::MarkDone => (Icon::CircleCheck, "Mark done", Intent::MarkDone),
         };
         icon_label_button(
             &colors,
@@ -4778,8 +4812,8 @@ fn finish_card(
             icon,
             label,
         )
-        .on_click(cx.listener(|this, _, window, cx| {
-            this.act(Intent::FinishReview, window, cx);
+        .on_click(cx.listener(move |this, _, window, cx| {
+            this.act(intent, window, cx);
         }))
     });
     let again = (review_again == ReviewAgain::Offered).then(|| {
@@ -4841,12 +4875,18 @@ fn finish_card(
                         (ReadUnit::Steps, Some(FinishAction::SendTasks)) => {
                             "Every step of the tour is read. Send your tasks when you are ready."
                         }
+                        (ReadUnit::Steps, Some(FinishAction::MarkDone)) => {
+                            "Every step of the tour is read. Nothing new to send? Mark it done."
+                        }
                         (ReadUnit::Steps, None) => "Every step of the tour is read.",
                         (ReadUnit::Files, Some(FinishAction::FinishReview)) => {
                             "Every changed file is read. Send your review when you are ready."
                         }
                         (ReadUnit::Files, Some(FinishAction::SendTasks)) => {
                             "Every changed file is read. Send your tasks when you are ready."
+                        }
+                        (ReadUnit::Files, Some(FinishAction::MarkDone)) => {
+                            "Every changed file is read. Nothing new to send? Mark it done."
                         }
                         (ReadUnit::Files, None) => "Every changed file is read.",
                     },

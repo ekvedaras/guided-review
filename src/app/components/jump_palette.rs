@@ -121,6 +121,7 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::AskAboutStep | PaletteAction::WriteGuidedTour => Icon::Sparkles,
         PaletteAction::SwitchToGuidedTour => Icon::ArrowRight,
         PaletteAction::FinishReview => Icon::ListChecks,
+        PaletteAction::MarkDone => Icon::CircleCheck,
         PaletteAction::SendTasks => Icon::Send,
         PaletteAction::OpenOnGitHub | PaletteAction::OpenChecksOnGitHub => Icon::ExternalLink,
         PaletteAction::NextUnreadStep | PaletteAction::OpenIssue => Icon::CircleDot,

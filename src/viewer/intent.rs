@@ -44,6 +44,8 @@ pub enum Intent {
     WriteGuidedTour,
     SwitchToGuidedTour,
     FinishReview,
+    /// A re-review with nothing new to send is done, from the sidebar, the finish card or the palette.
+    MarkDone,
     /// A local review's finish, from the sidebar, the finish card or the palette.
     SendTasks,
     /// A local review's ask to its agent to open the PR of its branch.
@@ -87,6 +89,7 @@ impl From<PaletteAction> for Intent {
             PaletteAction::WriteGuidedTour => Self::WriteGuidedTour,
             PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
             PaletteAction::FinishReview => Self::FinishReview,
+            PaletteAction::MarkDone => Self::MarkDone,
             PaletteAction::SendTasks => Self::SendTasks,
             PaletteAction::OpenPr => Self::OpenPr,
             PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
@@ -160,6 +163,7 @@ pub enum ReviewChange {
     ToggleFolder(FolderPath),
     ToggleWrapLines,
     ToggleWhitespace,
+    MarkDone,
 }
 
 /// What `R` and `L` switch on the focused change's file, which only the page can say.
@@ -237,6 +241,7 @@ impl Intent {
             | Self::PreviousScreen
             | Self::NextUnreadStep
             | Self::ToggleRead
+            | Self::MarkDone
             | Self::ToggleWrapLines
             | Self::ToggleRenderedView
             | Self::TogglePieceLabels
@@ -327,13 +332,14 @@ impl ReviewCore {
                 Ok(()) => Effect::SwitchToGuidedTour,
                 Err(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
             },
+            Intent::MarkDone if self.can_mark_done() => Effect::Change(ReviewChange::MarkDone),
             Intent::FinishReview | Intent::SendTasks => match self.finishes_with_send_tasks() {
                 Some(0) => Effect::Nothing,
                 Some(_) => Effect::SendTasks,
                 None => Effect::OpenFinishForm,
             },
             Intent::OpenPr if self.can_open_pr() => Effect::OpenPr,
-            Intent::OpenPr => Effect::Nothing,
+            Intent::OpenPr | Intent::MarkDone => Effect::Nothing,
             Intent::OpenOnGitHub => self
                 .subject()
                 .pull_request()
@@ -407,6 +413,7 @@ impl ReviewCore {
                 self.display_options_mut().toggle_ignore_whitespace();
                 Ok(())
             }
+            ReviewChange::MarkDone => self.mark_done(),
         }
     }
 

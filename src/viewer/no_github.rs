@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::comments::{CommentPlace, SendMode};
-use super::finish_review::{ReviewVerdict, SubmittedReview};
+use super::finish_review::ReviewVerdict;
 use super::merging::MergeChange;
 use super::ports::{
     ChangeTipsPort, GitHubError, IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch,
@@ -10,6 +10,7 @@ use super::ports::{
     Viewed, ViewedFile, ViewedFilesPort,
 };
 use super::pr_origin::PullRequestOrigin;
+use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::{IssueDetails, PullRequestIssues};
@@ -203,10 +204,7 @@ impl ReviewWritesPort for NoGitHub {
         refused()
     }
 
-    fn viewer_latest_review(
-        &self,
-        _pr: &PullRequestUrl,
-    ) -> Result<Option<SubmittedReview>, GitHubError> {
+    fn reviews(&self, _pr: &PullRequestUrl) -> Result<PullRequestReviews, GitHubError> {
         refused()
     }
 

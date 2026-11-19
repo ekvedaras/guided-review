@@ -38,23 +38,6 @@ impl SubmittedReview {
         self.body.lines().count() > CLAMPED_BODY_LINES
             || self.body.chars().count() > LONG_BODY_CHARS
     }
-
-    /// How it ended and when, for a line the reviewer reads; `PR has new commits` when `is_old`.
-    pub fn headline(&self, is_old: bool) -> String {
-        let outcome = match self.outcome {
-            ReviewOutcome::Approved => "Approved",
-            ReviewOutcome::ChangesRequested => "Changes requested",
-            ReviewOutcome::Commented => "Commented",
-            ReviewOutcome::Dismissed => "Dismissed",
-        };
-        let day = self.submitted_at.split('T').next().unwrap_or_default();
-        let since = if is_old {
-            ", PR has new commits since"
-        } else {
-            ""
-        };
-        format!("Your last review: {outcome} on {day}{since}")
-    }
 }
 
 impl ReviewOutcome {
@@ -91,6 +74,8 @@ pub struct SubmittedReview {
 pub enum FinishAction {
     FinishReview,
     SendTasks,
+    /// A re-review with nothing new to send ends on the reviewer's say-so, not on GitHub.
+    MarkDone,
 }
 
 /// What approving now would skip over.

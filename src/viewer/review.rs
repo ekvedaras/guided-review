@@ -60,13 +60,14 @@ use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
 use super::pr_controls::PrControls;
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
 use super::pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
+use super::pr_reviewers::{PullRequestReviews, ReviewerLine, StanceAge, Standing, YourReview};
 use super::problems::{Problem, ProblemKind, Problems, Read};
 use super::reactions::ReactionChange;
 use super::refresh::RefreshBrief;
 use super::related_issues::{IssueDetails, RelatedIssue, RelatedIssues};
 use super::replacing_jobs::{ReplacingJob, ReplacingJobs};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
-use super::reviewing_mark::ReviewingMark;
+use super::reviewing_mark::{ReviewingMark, ReviewingMarkRemoval};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::saved_state::SavedState;
 use super::step_page::{
@@ -306,6 +307,8 @@ pub struct ReviewCore {
     on_disk: Option<OnDisk>,
     /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
+    /// Where each reviewer stands, as last read.
+    standings: Vec<Standing>,
     /// `None` for a local review, which has no PR to change.
     pr_controls: Option<PrControls>,
     files: Vec<ChangedFile>,
@@ -572,7 +575,10 @@ impl ReviewCore {
             ViewedSync::without_github_marks()
         };
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
-        let reviewing_mark = ReviewingMark::new(head.clone());
+        let mut reviewing_mark = ReviewingMark::new(head.clone());
+        if state.is_done_at(&head) {
+            reviewing_mark.done();
+        }
         let files = pieces::cut(source, &base, &head)?;
         let (file_tree, steps_in_reading_order, screen) = match &tour {
             Tour::Guided(guided) => {
@@ -640,6 +646,7 @@ impl ReviewCore {
             pr_head: None,
             on_disk: None,
             last_review: None,
+            standings: Vec::new(),
             pr_controls,
             files,
             steps_in_reading_order,
@@ -1668,12 +1675,38 @@ impl ReviewCore {
         self.comment_desk.pending_review_is(exists);
     }
 
-    pub fn last_review_is(&mut self, last: Option<SubmittedReview>) {
+    pub fn reviews_are(&mut self, reviews: PullRequestReviews) {
         self.clear_problem(ProblemKind::NotRead(Read::LastReview));
         self.github_answered(Affected::LastReview);
-        self.reviewing_mark.last_review_is(last.as_ref());
-        self.last_review = last;
+        self.reviewing_mark
+            .last_review_is(reviews.viewer_last.as_ref());
+        self.last_review = reviews.viewer_last;
+        self.standings = reviews.standings;
         self.want_reviewing_mark_sent();
+    }
+
+    /// Where the viewer stands: by GitHub's standing, else by the last review sent. `None` when the
+    /// viewer neither reviewed nor is asked to.
+    pub fn your_review(&self) -> Option<YourReview> {
+        let age = if self.last_review_is_old() {
+            StanceAge::BeforeNewCommits
+        } else {
+            StanceAge::Current
+        };
+        YourReview::of(
+            self.standings.iter().find(|standing| standing.is_viewer()),
+            self.last_review.as_ref(),
+            age,
+            self.is_marked_done(),
+        )
+    }
+
+    /// The sidebar's reviews: the viewer first, then what blocks the PR, then what lets it through.
+    pub fn reviewer_lines(&self) -> Vec<ReviewerLine> {
+        self.standings
+            .iter()
+            .map(|standing| ReviewerLine::of(standing, self.pr_head.as_ref()))
+            .collect()
     }
 
     fn want_reviewing_mark_sent(&mut self) {
@@ -1692,6 +1725,39 @@ impl ReviewCore {
                 self.raise_problem(Problem::ReviewingMarkNotChanged(error.short_reason()));
             }
         }
+    }
+
+    /// The review is closing: the reviewing mark comes off, if it is on, by the job returned. It is
+    /// run at once, since nothing is left to run it later.
+    pub fn close(&mut self) -> Option<ReviewingMarkRemoval> {
+        let may_be_on = self.reviewing_mark.close();
+        let pr = self.subject.pull_request()?;
+        may_be_on.then(|| ReviewingMarkRemoval::of(pr.clone()))
+    }
+
+    /// A re-review can end with nothing to send: the reviewer's last review saw an older commit, and
+    /// no pending review waits to go.
+    pub fn can_mark_done(&self) -> bool {
+        self.subject.pull_request().is_some()
+            && self
+                .last_review
+                .as_ref()
+                .is_some_and(|last| last.commit != self.head)
+            && self.comment_desk.can_comment_now()
+            && !self.is_marked_done()
+    }
+
+    /// Done with this head without a new review on GitHub: saved, and the 👀 comes off.
+    pub fn mark_done(&mut self) -> anyhow::Result<()> {
+        let head = self.head.clone();
+        let saved = self.state.change(|state| state.mark_done(&head));
+        self.reviewing_mark.done();
+        self.want_reviewing_mark_sent();
+        saved
+    }
+
+    pub fn is_marked_done(&self) -> bool {
+        self.state.is_done_at(&self.head)
     }
 
     /// The viewer's latest sent review, from this app or the GitHub web page.
@@ -1858,6 +1924,12 @@ impl ReviewCore {
 
     /// What finishing the review does now; `None` when there is nothing to finish.
     pub fn finish_action(&self) -> Option<FinishAction> {
+        if self.can_mark_done() {
+            return Some(FinishAction::MarkDone);
+        }
+        if self.is_marked_done() {
+            return None;
+        }
         self.can_finish_review().then(|| {
             if self.finishes_with_send_tasks().is_some() {
                 FinishAction::SendTasks
@@ -1920,7 +1992,7 @@ impl ReviewCore {
     pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
         let result = self.comment_desk.apply_finish(&mut self.state, outcome);
         if result == FinishResult::Sent {
-            self.work.want(WorkKind::PullLastReview);
+            self.work.want(WorkKind::PullReviews);
         }
         result
     }
@@ -2210,10 +2282,14 @@ impl ReviewCore {
             || self.first_unread_file().is_some())
         .then_some(PaletteAction::NextUnreadStep);
         let ask = step.map(|_| PaletteAction::AskAboutStep);
-        let finish = self.finish_action().map(|finish| match finish {
-            FinishAction::FinishReview => PaletteAction::FinishReview,
-            FinishAction::SendTasks => PaletteAction::SendTasks,
-        });
+        let finish: Vec<PaletteAction> = match self.finish_action() {
+            Some(FinishAction::FinishReview) => vec![PaletteAction::FinishReview],
+            Some(FinishAction::SendTasks) => vec![PaletteAction::SendTasks],
+            Some(FinishAction::MarkDone) => {
+                vec![PaletteAction::MarkDone, PaletteAction::FinishReview]
+            }
+            None => Vec::new(),
+        };
         let check_for_updates = build
             .takes_updates()
             .then_some(PaletteAction::CheckForUpdates);
