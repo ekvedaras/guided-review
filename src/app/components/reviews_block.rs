@@ -17,6 +17,8 @@ use super::thread_view::avatar_circle;
 use super::tooltip::tooltip;
 
 const YOUR_AVATAR_SIZE: f32 = 20.;
+/// One line of the "Last review" text, so its icon centres on the first line however it wraps.
+const SINCE_LINE_HEIGHT: gpui::Pixels = px(16.);
 const REVIEWER_AVATAR_SIZE: f32 = 18.;
 
 /// The sidebar's reviews: where the viewer stands, in the colour of that state, then who else
@@ -116,11 +118,14 @@ fn your_review(
             .items_start()
             .gap_1()
             .text_xs()
+            .line_height(SINCE_LINE_HEIGHT)
             .text_color(color)
             .children(icon.map(|icon| {
                 div()
                     .flex_none()
-                    .pt(px(1.))
+                    .h(SINCE_LINE_HEIGHT)
+                    .flex()
+                    .items_center()
                     .child(sized_icon(icon, color, px(12.)))
             }))
             .child(div().min_w_0().child(yours.since.clone()))
