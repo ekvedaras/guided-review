@@ -119,6 +119,10 @@ pub enum Request {
         #[serde(default)]
         replied: AgentReplied,
     },
+    /// The review agent's findings are checked and on disk: the app shows them.
+    FindingsDone {
+        pr: String,
+    },
     /// Show Settings: over the PR on screen, or in a window of its own when no PR is open.
     ShowSettings,
     /// Show the PR switcher, as a launch from the Desktop entry does: over the PR on screen, or in a
@@ -193,6 +197,7 @@ impl RequestLine {
             Request::Quit => self.replacing.as_deref() == Some(build),
             Request::Open(_)
             | Request::AgentReplied { .. }
+            | Request::FindingsDone { .. }
             | Request::ShowSettings
             | Request::ShowSwitcher => self.across_builds == AcrossBuilds::AnyBuild,
         }
@@ -250,6 +255,11 @@ pub enum Answer {
     HandOffAnswered {
         pr: String,
     },
+    /// The window read the findings file of this review again and shows `count` findings.
+    FindingsRead {
+        pr: String,
+        count: usize,
+    },
     /// The window shows another PR, so the hand-off is not the app's to mark.
     NotShown {
         pr: String,
@@ -290,6 +300,11 @@ impl std::fmt::Display for Answer {
             Self::HandOffAnswered { pr } => {
                 write!(f, "guided-review app marked the hand-off answered on {pr}")
             }
+            Self::FindingsRead { pr, count } => write!(
+                f,
+                "guided-review app read {count} finding{} of {pr}",
+                if *count == 1 { "" } else { "s" }
+            ),
             Self::NotShown { pr } => write!(f, "guided-review app does not show {pr}"),
             Self::ShowingSettings => write!(f, "guided-review app is showing Settings"),
             Self::ShowingSwitcher => write!(f, "guided-review app is showing the PR switcher"),

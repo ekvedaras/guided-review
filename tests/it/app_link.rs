@@ -140,6 +140,7 @@ fn the_listener_answers_each_request_line_through_the_handler() {
         .serve(|request| match request {
             Request::Open(open) => Answer::Opening { pr: open.subject },
             Request::AgentReplied { pr, .. } => Answer::HandOffAnswered { pr },
+            Request::FindingsDone { pr } => Answer::FindingsRead { pr, count: 0 },
             Request::ShowSettings => Answer::ShowingSettings,
             Request::ShowSwitcher => Answer::ShowingSwitcher,
             Request::Quit => Answer::Quitting,

@@ -24,9 +24,9 @@ use crate::pull_request::RepoName;
 use crate::review_subject::{BranchName, ReviewSubject};
 use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
-    AgentStatus, AutoMerge, CheckRun, CheckState, Checks, FileView, LineKind, LineLocation,
-    MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus, PageRow, PieceLabels, PrStatus,
-    Problem, ProblemKind, Readiness, TerminalId, TextBox,
+    AgentStatus, AiReview, AutoMerge, CheckRun, CheckState, Checks, FileView, LineKind,
+    LineLocation, MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus, PageRow,
+    PieceLabels, PrStatus, Problem, ProblemKind, Readiness, TerminalId, TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue};
@@ -94,10 +94,11 @@ enum Scene {
     ReReview,
     ReReviewDone,
     TourEndUnread,
+    AiReviewFound,
 }
 
 impl Scene {
-    const ALL: [Self; 57] = [
+    const ALL: [Self; 58] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -155,6 +156,7 @@ impl Scene {
         Self::ReReview,
         Self::ReReviewDone,
         Self::TourEndUnread,
+        Self::AiReviewFound,
     ];
 
     fn file_name(self) -> &'static str {
@@ -216,6 +218,7 @@ impl Scene {
             Self::ReReview => "77-re-review",
             Self::ReReviewDone => "78-re-review-done",
             Self::TourEndUnread => "79-tour-end-unread",
+            Self::AiReviewFound => "80-ai-review-found",
         }
     }
 
@@ -772,6 +775,9 @@ impl OneStepLayout {
             Scene::ReReviewDone => self.session.update(cx, |session, cx| {
                 session.stage_re_review(StagedReReview::MarkedDone, cx);
             }),
+            Scene::AiReviewFound => self.change_review(cx, |review| {
+                review.ai_review_is(AiReview::staged());
+            }),
             Scene::TourEndUnread => {
                 self.change_review(cx, |review| while review.go_forward() {});
                 self.session.update(cx, ReviewSession::stage_unread_end);
@@ -978,6 +984,9 @@ impl OneStepLayout {
             Scene::ReReview | Scene::ReReviewDone => {
                 self.session.update(cx, ReviewSession::unstage);
             }
+            Scene::AiReviewFound => self.change_review(cx, |review| {
+                review.ai_review_is(AiReview::NotRun);
+            }),
             Scene::DescriptionFolds => {
                 self.toggle_description_folds(cx);
                 self.go_to_first_open_code(cx);

@@ -6,9 +6,10 @@ use gpui::SharedString;
 use std::sync::Arc;
 
 use crate::viewer::{
-    ApproveWarning, BranchOffer, DiskNews, DiskOffer, GuidedTourBanner, GuidedTourProgress,
-    GuidedTourRefusal, GuidedTourStage, Problem, ReadProgress, ReadUnit, Review, ReviewerLine,
-    ReviewerStatus, Screen, StanceAge, StepId, TerminalId, TourAgentState, TreeRow,
+    AiReview, ApproveWarning, BranchOffer, DiskNews, DiskOffer, GuidedTourBanner,
+    GuidedTourProgress, GuidedTourRefusal, GuidedTourStage, Problem, ReadProgress, ReadUnit,
+    Review, ReviewerLine, ReviewerStatus, Screen, StanceAge, StepId, TerminalId, TourAgentState,
+    TreeRow,
 };
 
 pub struct SidebarStep {
@@ -104,6 +105,12 @@ pub struct SidebarTourAgent {
     pub choices: Vec<TerminalId>,
 }
 
+/// The review agent's findings as the sidebar says it: shown once there is news of them.
+pub struct SidebarAiReview {
+    pub line: SharedString,
+    pub is_unreadable: bool,
+}
+
 /// The guided tour of a basic review's PR as the sidebar says it: the stage of its writing, Write
 /// guided tour while nothing is asked, and the banner once it is ready.
 pub struct SidebarGuidedTour {
@@ -142,6 +149,8 @@ impl SidebarProblem {
 
 pub struct SidebarRows {
     pub tour_agent: SidebarTourAgent,
+    /// None until the review agent has left findings or a file that cannot be read.
+    pub ai_review: Option<SidebarAiReview>,
     /// Only a basic review has one.
     pub guided_tour: Option<SidebarGuidedTour>,
     pub progress: ReadProgress,
@@ -207,6 +216,13 @@ impl SidebarRows {
             is_current: review.screen() == &Screen::SafetyNet,
         });
         Self {
+            ai_review: match review.ai_review() {
+                AiReview::NotRun => None,
+                ai_review => Some(SidebarAiReview {
+                    line: ai_review.line().into(),
+                    is_unreadable: matches!(ai_review, AiReview::Unreadable(_)),
+                }),
+            },
             tour_agent: SidebarTourAgent {
                 is_shown: tour_agent.is_worth_a_line() || review.show_agent_failed(),
                 line: tour_agent.line_for(review.subject()).into(),

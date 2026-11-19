@@ -4,6 +4,7 @@
 mod active_pr;
 mod agent_event;
 mod agent_pool;
+mod ai_review;
 mod app_state;
 mod app_window;
 mod ask;
@@ -92,6 +93,7 @@ pub use active_pr::{
 };
 pub use agent_event::AgentEvent;
 pub use agent_pool::{AgentPool, Opening};
+pub use ai_review::AiReview;
 pub use app_state::AppStateFile;
 pub use app_window::{
     AfterClose, AppWindow, FailedBuild, Relaunched, ShowBuilding, ShowReview, ShowSettings,

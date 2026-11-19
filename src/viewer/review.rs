@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::AskSettings;
 
+use super::ai_review::AiReview;
 use super::ask::{Ask, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
@@ -81,6 +82,7 @@ use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement, T
 use super::typing_save::TypingSave;
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
+use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
@@ -351,6 +353,8 @@ pub struct ReviewCore {
     replies_after_repin: Vec<(HandOffId, AgentReplied)>,
     /// The last news of the tour agent said tour agents cannot be reached. Not saved.
     agent_link_is_off: bool,
+    /// The review agent's findings, read from their file. Not saved: the file is the state.
+    ai_review: AiReview,
     /// What is known of the guided tour of a basic review's PR. Not saved: the app tells it at a build.
     guided_tour: GuidedTourProgress,
     /// After a switch from a basic tour: how many steps started read. Not saved.
@@ -682,6 +686,7 @@ impl ReviewCore {
             reviewing_mark,
             replies_after_repin: Vec::new(),
             agent_link_is_off: false,
+            ai_review: AiReview::NotRun,
             guided_tour: GuidedTourProgress::NotAsked,
             steps_started_read: None,
             read_carrier: None,
@@ -773,6 +778,21 @@ impl ReviewCore {
 
     pub(super) fn has_seen_end_of_screen(&self) -> bool {
         self.seen_end_of.as_ref() == Some(&self.screen)
+    }
+
+    pub const fn ai_review(&self) -> &AiReview {
+        &self.ai_review
+    }
+
+    /// The sample findings of a snapshot scene, and their removal.
+    #[cfg(feature = "snapshots")]
+    pub fn ai_review_is(&mut self, ai_review: AiReview) {
+        self.ai_review = ai_review;
+    }
+
+    /// Reads the review agent's findings file again, as the app does when the agent says it is done.
+    pub fn read_findings(&mut self, folders: &AppFolders) {
+        self.ai_review = AiReview::read(folders, &self.subject);
     }
 
     /// For a failure the reviewer must know about; it stays until its kind is cleared.

@@ -48,6 +48,7 @@ impl ReviewBuilder {
             review.local_facts_are(facts);
         }
         review.working_copy_is(working_copy);
+        review.read_findings(&self.folders);
         review
             .display_options_mut()
             .use_more_lines(config.more_lines());

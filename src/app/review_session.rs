@@ -1563,6 +1563,15 @@ impl ReviewSession {
         self.change(cx, |review| review.hand_off_replied(id, replied))
     }
 
+    /// The review agent says its findings are on disk: how many the review shows now.
+    pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
+        let folders = self.tour_work.repinner.folders.clone();
+        self.change(cx, |review| {
+            review.read_findings(&folders);
+            review.ai_review().counts().total()
+        })
+    }
+
     /// Loads the pictures of the screen once each, off the main thread. A load that ends after `reopen`
     /// is dropped: `loading_images` was cleared, and its picture may not match the new review.
     fn load_images(&mut self, cx: &mut Context<Self>) {

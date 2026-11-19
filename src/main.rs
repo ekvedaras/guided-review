@@ -10,6 +10,9 @@ use guided_review::app_link::{
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
+use guided_review::findings::FindingsFile;
+use guided_review::findings_check;
+use guided_review::findings_done::findings_done;
 use guided_review::github::GitHub;
 use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject};
 use guided_review::outline::Outline;
@@ -41,6 +44,12 @@ enum Command {
     Outline { subject: ReviewSubject },
     /// Print where the tour file of a PR lives
     TourPath { subject: ReviewSubject },
+    /// Print where the findings file of a review lives
+    FindingsPath { subject: ReviewSubject },
+    /// Pin the findings file of a review to its commits, then list what is wrong with its anchors
+    CheckFindings { subject: ReviewSubject },
+    /// Tell the app the review agent's findings file is written and checked
+    FindingsDone { subject: ReviewSubject },
     /// Print the diff of the given pieces
     Show {
         subject: ReviewSubject,
@@ -133,6 +142,12 @@ fn main() -> anyhow::Result<()> {
             around,
         } => show(&subject, &ids, around),
         Command::TourPath { subject } => tour_path(&subject),
+        Command::FindingsPath { subject } => findings_path(&subject),
+        Command::CheckFindings { subject } => check_findings(&subject),
+        Command::FindingsDone { subject } => {
+            println!("{}", findings_done(&AppFolders::running()?, &subject)?);
+            Ok(())
+        }
         Command::Check { subject } => check(&subject),
         Command::Repin { subject } => repin_command(&subject),
         Command::Refresh { subject, done } => refresh(&subject, done),
@@ -267,6 +282,39 @@ fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result
         }
         .render()?
     );
+    Ok(())
+}
+
+fn findings_path(subject: &ReviewSubject) -> anyhow::Result<()> {
+    println!(
+        "{}",
+        Tour::findings_path_for(&AppFolders::running()?, subject).display()
+    );
+    Ok(())
+}
+
+fn check_findings(subject: &ReviewSubject) -> anyhow::Result<()> {
+    let opened = opened(subject)?;
+    let subject = &opened.subject();
+    let path = Tour::findings_path_for(&AppFolders::running()?, subject);
+    let mut findings = FindingsFile::load_of(&path, subject)?;
+
+    let code = opened.code_to_read()?;
+    if findings.pin.head.is_empty() {
+        findings
+            .pin
+            .pin_to(subject, &code.merge_base()?, &code.tips.head);
+    } else if findings.pin.head != code.tips.head {
+        println!("warning: {}", subject.moved_on());
+    }
+    findings.save(&path)?;
+    let files = pieces::cut(code.source.as_ref(), &findings.pin.base, &findings.pin.head)?;
+
+    let report = findings_check::check(&findings, &files);
+    print!("{report}");
+    if !report.errors.is_empty() {
+        std::process::exit(1);
+    }
     Ok(())
 }
 

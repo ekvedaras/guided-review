@@ -161,3 +161,15 @@
 **Merge method**: How a merge lands on the base branch: a merge commit, a squash or a rebase. The reviewer's choice is a setting, `merge_method` (a merge commit when not set), which `[merge_methods]` can change per repo; when the repo does not allow it, its first allowed method is used, and the toast that asks for the second press names the one used. Avoid: merge strategy, merge type.
 
 **Merge now**: What the auto-merge key and button offer instead when nothing blocks the PR, so GitHub would refuse auto-merge: a merge at once with the merge method, confirmed the same way. Avoid: force merge, admin merge.
+
+**AI review**: A code review of a whole review subject that the app asks a review agent to do, when the reviewer wants it. Its result is the findings file, shown in the sidebar and, in later steps, on the lines. Avoid: auto review, bot review.
+
+**Finding**: One thing an AI review reports, before the reviewer acts on it: an id, a severity, a Markdown body and an anchor (lines of either side of one changed file, a whole changed file, or the whole change). Avoid: AI comment, suggestion (a GitHub suggestion is a code change in a comment), issue.
+
+**Severity**: How much a finding matters: `must fix`, `should fix` or `nit`, most severe first. Avoid: priority, level.
+
+**Findings file**: What the review agent writes beside the tour (`<number>.findings.json`, the path `guided-review findings-path <key>` prints): the tour's pin (`pr` or `local`, `base`, `head`) and `findings`. `check-findings` checks it and pins it, `findings-done` tells the app, which reads the file whole, never half of it. The file is the state: an app that is not running reads it when it opens the review. Avoid: report, review file.
+
+**Review agent**: The AI session, in its own herdr terminal and apart from the tour agent, that does one review subject's AI review. Avoid: reviewer (that is the person), review subagent.
+
+**Fix request**: A finding the reviewer sent to the tour agent to fix in code, alone or in a batch with others. Avoid: task (that is a local review's comment), auto-fix.

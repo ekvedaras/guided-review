@@ -338,6 +338,10 @@ async fn answer_requests(
                 let answer = mark_replied(&screen, pr, hand_off, &replied, cx);
                 reply.send(answer).ok();
             }
+            Request::FindingsDone { pr } => {
+                let answer = read_findings(&screen, pr, cx);
+                reply.send(answer).ok();
+            }
             Request::Open(open) => {
                 let pr = match open.subject.parse::<ReviewSubject>() {
                     Ok(subject) => subject,
@@ -610,6 +614,23 @@ fn mark_replied(
             }
             Answer::HandOffAnswered { pr }
         }
+        Err(error) => refused(&format!("{error:#}")),
+    }
+}
+
+/// Only the review in the window holds findings to read again; any other reads its file when it opens.
+fn read_findings(screen: &SharedScreen, pr: String, cx: &mut AsyncApp) -> Answer {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window.review())
+    };
+    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
+    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+        return Answer::NotShown { pr };
+    };
+    let count = cx.update(|cx| window.update(cx, |layout, _, cx| layout.findings_done(cx)));
+    match count {
+        Ok(count) => Answer::FindingsRead { pr, count },
         Err(error) => refused(&format!("{error:#}")),
     }
 }

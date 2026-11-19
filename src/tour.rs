@@ -272,6 +272,13 @@ impl Tour {
             .join(subject.file_stem())
     }
 
+    /// Where the review agent's findings live, beside the tour; the path `findings-path` prints.
+    pub fn findings_path_for(folders: &AppFolders, subject: &ReviewSubject) -> PathBuf {
+        Self::tours_dir(folders)
+            .join(subject.files_folder())
+            .join(format!("{}.findings.json", subject.file_stem()))
+    }
+
     pub fn path_in(tours_dir: &Path, subject: &ReviewSubject) -> PathBuf {
         tours_dir
             .join(subject.files_folder())
@@ -343,7 +350,7 @@ fn read_json(path: &Path) -> anyhow::Result<serde_json::Value> {
         .with_context(|| format!("{} is not a valid tour file", path.display()))
 }
 
-fn write_json(value: &impl Serialize, path: &Path) -> anyhow::Result<()> {
+pub(crate) fn write_json(value: &impl Serialize, path: &Path) -> anyhow::Result<()> {
     let text = serde_json::to_string_pretty(value)?;
     let mut temp_name = path.as_os_str().to_owned();
     temp_name.push(".tmp");
@@ -400,7 +407,7 @@ impl TourPin {
         }
     }
 
-    fn ensure_is_of(&self, subject: &ReviewSubject, path: &Path) -> anyhow::Result<()> {
+    pub(crate) fn ensure_is_of(&self, subject: &ReviewSubject, path: &Path) -> anyhow::Result<()> {
         match &self.local {
             Some(held) if subject.local_key().is_some_and(|key| *held != key) => {
                 anyhow::bail!("{} is the tour of {held}, not of {subject}", path.display())

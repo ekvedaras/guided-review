@@ -89,7 +89,8 @@ use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
 use crate::app::sidebar_rows::{
-    SidebarDiskNews, SidebarGuidedTour, SidebarMoveOffer, SidebarRows, SidebarTourAgent, WriteOffer,
+    SidebarAiReview, SidebarDiskNews, SidebarGuidedTour, SidebarMoveOffer, SidebarRows,
+    SidebarTourAgent, WriteOffer,
 };
 use crate::app::updater::{UpdateInstalled, Updater, Updates};
 use crate::code_source::CodeSource;
@@ -492,6 +493,10 @@ impl OneStepLayout {
     ) -> anyhow::Result<()> {
         self.session
             .update(cx, |session, cx| session.hand_off_replied(id, replied, cx))
+    }
+
+    pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
+        self.session.update(cx, ReviewSession::findings_done)
     }
 
     pub fn reload_tour(&mut self, cx: &mut Context<Self>) {
@@ -1378,6 +1383,32 @@ impl OneStepLayout {
         }
     }
 
+    /// What the review agent left: its findings by severity, or why its file was not read.
+    fn ai_review_block(colors: &Colors, ai_review: &SidebarAiReview) -> impl IntoElement {
+        div()
+            .id("ai-review")
+            .flex()
+            .items_baseline()
+            .gap_2()
+            .text_xs()
+            .child(
+                div()
+                    .flex_none()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("AI review"),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .text_color(if ai_review.is_unreadable {
+                        colors.danger
+                    } else {
+                        colors.muted_text
+                    })
+                    .child(ai_review.line.clone()),
+            )
+    }
+
     /// Names the PR's tour agent and its status, or why tour agents are off, with Show agent.
     fn tour_agent_block(
         colors: &Colors,
@@ -1984,6 +2015,10 @@ impl OneStepLayout {
             .tour_agent
             .is_shown
             .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
+        let ai_review = sidebar
+            .ai_review
+            .as_ref()
+            .map(|ai_review| Self::ai_review_block(&colors, ai_review));
         let repin_progress = session.repin_progress();
         let disk_news = sidebar
             .disk_news
@@ -2099,6 +2134,7 @@ impl OneStepLayout {
             .children(finish_dialog)
             .children(guided_tour)
             .children(tour_agent)
+            .children(ai_review)
             .children(clone_offer)
             .children(changes_not_shown)
             .children(problems)
