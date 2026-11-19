@@ -142,7 +142,7 @@ pub use finding_threads::{
     FindingThread, FindingThreads, NoQuestion, WhyAuthor, WhyDeliveryOutcome, WhyDeliveryRequest,
     WhyMessage, WhyReply, WhyState,
 };
-pub use findings_list::{FindingsList, FindingsListRow};
+pub use findings_list::{FindingLine, FindingsList, FindingsListRow};
 pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishAction, FinishOutcome, FinishRefusal, FinishRequest,
     FinishResult, ReviewOutcome, ReviewVerdict, SubmittedReview,

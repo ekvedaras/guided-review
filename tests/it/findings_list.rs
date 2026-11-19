@@ -227,6 +227,27 @@ fn file_finding(id: &str, body: &str) -> Finding {
 }
 
 #[test]
+fn an_open_row_holds_the_code_lines_of_its_finding_and_none_for_a_finding_on_no_lines() {
+    let shop = Shop::with_findings(&[
+        on_line_2("a", "On the line."),
+        file_finding("f", "On the file."),
+    ]);
+    let review = shop.open();
+
+    let rows = review.findings_list().rows();
+
+    let lines_of = |name: &str| {
+        let row = rows.iter().find(|row| row.id == id(name)).unwrap();
+        row.lines
+            .iter()
+            .map(|line| (line.number, line.text.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(lines_of("a"), [(2, "world".to_owned())]);
+    assert_eq!(lines_of("f"), []);
+}
+
+#[test]
 fn a_batch_comment_adds_each_finding_as_is_marked_as_ai_and_leaves_open_those_with_no_lines() {
     let shop = Shop::with_findings(&[
         on_line_2("a", "On the line."),

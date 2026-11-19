@@ -12,7 +12,7 @@ use gpui::{
 
 use crate::app::keymap::{chord_of, keymap};
 use crate::findings::FindingId;
-use crate::viewer::{Command, FindingsList, FindingsListRow, Presence};
+use crate::viewer::{Command, FindingLine, FindingsList, FindingsListRow, Presence};
 
 use super::button::{ButtonKind, ButtonSize, button, icon_button};
 use super::chip::chip;
@@ -24,7 +24,7 @@ use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
 };
-use super::palette::{Colors, Tone};
+use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, Tone};
 
 /// What the reviewer asked of the selected findings, or of one of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -243,6 +243,7 @@ impl FindingsSheet {
                             )
                             .into_element(),
                         )
+                        .children(code_block(colors, &row.lines))
                         .child(
                             div().flex().child(
                                 button(
@@ -278,6 +279,36 @@ impl FindingsSheet {
             base.opacity(0.45).cursor_default()
         }
     }
+}
+
+/// The code lines a finding is about, with their line numbers; nothing for a finding on no lines.
+fn code_block(colors: &Colors, lines: &[FindingLine]) -> Option<gpui::Div> {
+    if lines.is_empty() {
+        return None;
+    }
+    Some(
+        div()
+            .py_1()
+            .px_2()
+            .rounded(px(CONTROL_RADIUS))
+            .bg(colors.subtle_border)
+            .font_family(*CODE_FONT)
+            .text_sm()
+            .overflow_hidden()
+            .children(lines.iter().map(|line| {
+                div()
+                    .flex()
+                    .gap_3()
+                    .whitespace_nowrap()
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(colors.muted_text)
+                            .child(line.number.to_string()),
+                    )
+                    .child(SharedString::from(line.text.clone()))
+            })),
+    )
 }
 
 impl Render for FindingsSheet {

@@ -8,7 +8,7 @@ use crate::viewer::ai_review::AiReview;
 use crate::viewer::comment_desk::TourFreshness;
 use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, SendMode};
 use crate::viewer::finding_decisions::Fate;
-use crate::viewer::findings_list::FindingsList;
+use crate::viewer::findings_list::{FindingLine, FindingsList};
 #[cfg(feature = "snapshots")]
 use crate::viewer::fix_requests::FixRequests;
 use crate::viewer::fix_requests::{FixReply, FixState};
@@ -133,14 +133,14 @@ impl ReviewCore {
     ) -> Result<CommentRequest, FindingRefusal> {
         let finding = self.open_finding(id)?;
         let place = self.comment_place_of(&finding.anchor)?;
-        self.send_findings_as_is(&place, vec![finding], mode)
+        self.send_findings_as_is(&place, &[finding], mode)
     }
 
     /// One comment on `place` with every finding's text, each marked as AI; each goes when it lands.
     fn send_findings_as_is(
         &mut self,
         place: &CommentPlace,
-        findings: Vec<Finding>,
+        findings: &[Finding],
         mode: SendMode,
     ) -> Result<CommentRequest, FindingRefusal> {
         if let Some(refusal) = self.send_refusal(mode) {
@@ -160,8 +160,11 @@ impl ReviewCore {
         let request = self
             .start_sending(place, mode, Audience::Author)
             .ok_or(FindingRefusal::NotThere)?;
-        self.findings_in_boxes
-            .extend(findings.into_iter().map(|finding| (place.clone(), finding)));
+        self.findings_in_boxes.extend(
+            findings
+                .iter()
+                .map(|finding| (place.clone(), finding.clone())),
+        );
         Ok(request)
     }
 
@@ -256,11 +259,26 @@ impl ReviewCore {
     /// The open findings as the findings list shows them.
     pub fn findings_list(&self) -> FindingsList {
         match &self.ai_review {
-            AiReview::Findings(file) => {
-                FindingsList::of(&file.findings).with_fixes(self.state.fix_requests())
-            }
+            AiReview::Findings(file) => FindingsList::of(&file.findings)
+                .with_fixes(self.state.fix_requests())
+                .with_lines(|finding| self.code_lines_of(finding)),
             AiReview::NotRun | AiReview::Unreadable(_) => FindingsList::default(),
         }
+    }
+
+    /// The code lines of a finding's anchor on the screen that shows them; none when no screen does.
+    fn code_lines_of(&self, finding: &Finding) -> Vec<FindingLine> {
+        let place = self.ask_place_of_finding(finding);
+        self.lines_of(&place).map_or_default(|selected| {
+            selected
+                .lines()
+                .iter()
+                .map(|line| FindingLine {
+                    number: line.location.line.get(),
+                    text: line.text.clone(),
+                })
+                .collect()
+        })
     }
 
     /// Dismisses each; one that is not open any more is reported and the rest still go.
@@ -297,12 +315,13 @@ impl ReviewCore {
             }
         }
         for (place, findings) in by_place {
-            let ids: Vec<FindingId> = findings.iter().map(|finding| finding.id.clone()).collect();
-            match self.send_findings_as_is(&place, findings, mode) {
+            match self.send_findings_as_is(&place, &findings, mode) {
                 Ok(request) => batch.done.push(request),
-                Err(refusal) => batch
-                    .refused
-                    .extend(ids.into_iter().map(|id| (id, refusal.clone()))),
+                Err(refusal) => batch.refused.extend(
+                    findings
+                        .iter()
+                        .map(|finding| (finding.id.clone(), refusal.clone())),
+                ),
             }
         }
         batch

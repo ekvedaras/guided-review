@@ -6,6 +6,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::fix_requests::FixRequests;
 use crate::findings::{Anchor, Finding, FindingId, Severity};
 
+/// One line of the code a finding is about, as the step shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindingLine {
+    pub number: u32,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FindingsListRow {
     pub id: FindingId,
@@ -18,6 +25,8 @@ pub struct FindingsListRow {
     pub is_selected: bool,
     pub is_open: bool,
     pub is_under_cursor: bool,
+    /// The code lines of its anchor, which an open row shows; none for a finding on a file or the change.
+    pub lines: Vec<FindingLine>,
     /// Where the fix the reviewer asked for is, when one was asked for.
     pub fix: Option<String>,
     /// New commits changed its lines since the review agent wrote it.
@@ -32,6 +41,8 @@ pub struct FindingsList {
     open: Option<FindingId>,
     /// What each finding's fix says, for the findings that have one.
     fixes: BTreeMap<FindingId, String>,
+    /// The code lines each finding is about.
+    lines: BTreeMap<FindingId, Vec<FindingLine>>,
 }
 
 impl FindingsList {
@@ -60,6 +71,17 @@ impl FindingsList {
         self
     }
 
+    /// The list with the code lines each finding is about, as `lines_of` finds them.
+    #[must_use]
+    pub fn with_lines(mut self, lines_of: impl Fn(&Finding) -> Vec<FindingLine>) -> Self {
+        self.lines = self
+            .findings
+            .iter()
+            .map(|finding| (finding.id.clone(), lines_of(finding)))
+            .collect();
+        self
+    }
+
     pub fn rows(&self) -> Vec<FindingsListRow> {
         self.findings
             .iter()
@@ -73,6 +95,7 @@ impl FindingsList {
                 is_selected: self.selected.contains(&finding.id),
                 is_open: self.open.as_ref() == Some(&finding.id),
                 is_under_cursor: position == self.cursor,
+                lines: self.lines.get(&finding.id).cloned().unwrap_or_default(),
                 fix: self.fixes.get(&finding.id).cloned(),
                 is_outdated: finding.outdated.is_some(),
             })
@@ -154,6 +177,7 @@ impl FindingsList {
     pub fn refreshed_to(&self, newer: &Self) -> Self {
         let mut list = self.refreshed(&newer.findings);
         list.fixes.clone_from(&newer.fixes);
+        list.lines.clone_from(&newer.lines);
         list
     }
 
