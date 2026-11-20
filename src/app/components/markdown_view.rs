@@ -955,8 +955,9 @@ fn inline_text(
         .into_any_element()
 }
 
-/// Inline code gets a third of an em of space on each side inside its background, as padding.
-const CODE_PADDING: &str = "\u{2004}";
+/// Inline code gets a space on each side inside its background, as padding. A no-break space, since gpui
+/// wraps after any other space, which left code that starts a wrapped line without its left gap.
+const CODE_PADDING: &str = "\u{00A0}";
 
 /// Runs joined into one line of text, with no colours in it, so one parse serves every theme.
 #[derive(Debug, PartialEq)]
@@ -1323,14 +1324,20 @@ mod tests {
     }
 
     #[test]
+    fn code_padding_is_a_character_gpui_never_wraps_at() {
+        // gpui's line wrapper glues only U+00A0, U+202F and U+2011 to their word; any other space is a break point.
+        assert_eq!(CODE_PADDING, "\u{00A0}");
+    }
+
+    #[test]
     fn a_changed_title_is_not_drawn_from_the_old_parse() {
         assert_eq!(
             parsed_inline("old `title`").text.as_ref(),
-            "old \u{2004}title\u{2004}"
+            "old \u{00A0}title\u{00A0}"
         );
         assert_eq!(
             parsed_inline("new `title`").text.as_ref(),
-            "new \u{2004}title\u{2004}"
+            "new \u{00A0}title\u{00A0}"
         );
     }
 

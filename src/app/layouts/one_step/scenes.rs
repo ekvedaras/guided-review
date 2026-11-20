@@ -1348,7 +1348,7 @@ fn sample_agent_screen() -> Vec<String> {
 }
 
 /// Long enough to scroll in the issue card, and to show Markdown the card renders.
-const ISSUE_BODY: &str = "The title bar should say which issue the PR is about, so a reviewer can open it without leaving the review.
+const ISSUE_BODY: &str = "The title bar should say which issue the PR is about, so a reviewer can open it without leaving the review, and see what the PR `Closes` or is `Part of` before opening a single file, or reading the diff.
 
 ## What to show
 
