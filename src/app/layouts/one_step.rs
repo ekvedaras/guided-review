@@ -1753,6 +1753,12 @@ impl OneStepLayout {
                 Icon::ListChecks,
                 "Findings list",
             )
+            .child(button_keys(
+                colors,
+                ButtonKind::Ghost,
+                Command::FindingsList,
+                cx,
+            ))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.act(Intent::ToggleFindingsList, window, cx);
             }))

@@ -33,6 +33,14 @@ pub struct FindingsListRow {
     pub is_outdated: bool,
 }
 
+/// Which rows the batch buttons act on, for their labels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Batch {
+    Ticked(usize),
+    Highlighted,
+    Nothing,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct FindingsList {
     findings: Vec<Finding>,
@@ -250,6 +258,22 @@ impl FindingsList {
         }
     }
 
+    /// What the batch buttons act on: the ticked rows, else the highlighted one.
+    pub fn targets(&self) -> Vec<FindingId> {
+        match self.selected() {
+            ticked if !ticked.is_empty() => ticked,
+            _ => self.id_under_cursor().cloned().into_iter().collect(),
+        }
+    }
+
+    pub fn batch(&self) -> Batch {
+        match (self.selected().len(), self.id_under_cursor()) {
+            (0, Some(_)) => Batch::Highlighted,
+            (0, None) => Batch::Nothing,
+            (ticked, _) => Batch::Ticked(ticked),
+        }
+    }
+
     /// The open finding the cursor is on; none when it is on a dismissed one.
     pub fn id_under_cursor(&self) -> Option<&FindingId> {
         self.findings.get(self.cursor).map(|finding| &finding.id)
@@ -312,10 +336,24 @@ impl FindingsList {
     }
 }
 
+/// A row's place is cut to this many characters so the finding's first line keeps its room.
+const PLACE_WIDTH: usize = 44;
+
 fn place_of(anchor: &Anchor) -> String {
     match anchor {
         Anchor::Change => "the whole change".to_owned(),
-        Anchor::File { file } => file.to_string(),
-        Anchor::Lines { file, lines, .. } => format!("{file}:{}", lines.start),
+        Anchor::File { file } => shortened(&file.to_string()),
+        Anchor::Lines { file, lines, .. } => shortened(&format!("{file}:{}", lines.start)),
     }
+}
+
+/// Cut from the start, at a folder boundary when one fits, so the file name and the line stay.
+fn shortened(place: &str) -> String {
+    let count = place.chars().count();
+    if count <= PLACE_WIDTH {
+        return place.to_owned();
+    }
+    let tail: String = place.chars().skip(count - (PLACE_WIDTH - 1)).collect();
+    let from_folder = tail.find('/').and_then(|slash| tail.get(slash..));
+    format!("…{}", from_folder.unwrap_or(&tail))
 }

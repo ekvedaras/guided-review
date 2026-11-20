@@ -9,8 +9,8 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::update::Build;
 use guided_review::viewer::{
-    Command, CommentRefusal, CommentResult, Effect, FindingRefusal, FindingsList, Intent, Overlay,
-    PaletteAction, Review, Screen, SendMode, WindowMoment,
+    Batch, Command, CommentRefusal, CommentResult, Effect, FindingRefusal, FindingsList, Intent,
+    Overlay, PaletteAction, Review, Screen, SendMode, WindowMoment,
 };
 use serde_json::{Value, json};
 
@@ -681,4 +681,50 @@ fn refreshing_keeps_the_dismissed_section_shown_and_its_ticks_over_the_dismissed
 
     assert!(refreshed.dismissed_are_shown());
     assert_eq!(refreshed.selected_dismissed(), [id("e")]);
+}
+
+#[test]
+fn a_batch_acts_on_the_ticked_rows_and_on_the_highlighted_one_when_none_is_ticked() {
+    let mut list = FindingsList::of(&three());
+
+    assert_eq!(list.batch(), Batch::Highlighted);
+    assert_eq!(list.targets(), [id("b")]);
+    list.cursor_down();
+    assert_eq!(list.targets(), [id("c")]);
+
+    list.toggle_selected(&id("a"));
+    list.toggle_selected(&id("b"));
+    assert_eq!(list.batch(), Batch::Ticked(2));
+    assert_eq!(list.targets(), [id("b"), id("a")]);
+}
+
+#[test]
+fn a_batch_has_nothing_to_act_on_while_the_cursor_is_on_a_dismissed_row_and_nothing_is_ticked() {
+    let mut list = with_dismissed(&[three().remove(0)], &three()[1..2]);
+    list.toggle_dismissed_shown();
+    list.cursor_down();
+
+    assert_eq!(list.batch(), Batch::Nothing);
+    assert_eq!(list.targets().len(), 0);
+}
+
+#[test]
+fn a_long_path_is_cut_from_its_start_keeping_the_file_name_and_line() {
+    let long = "domains/Demand/database/migrations/2026_11_19_150000_rename_kitchen_changed_at.php";
+    let findings = [
+        finding("l", "nit", "Long.", on_line(long, 31)),
+        finding("s", "nit", "Short.", on_line("src/a.rs", 3)),
+    ];
+    let list = FindingsList::of(&findings);
+
+    let places: Vec<String> = list.rows().iter().map(|row| row.place.clone()).collect();
+    assert_eq!(places[1], "src/a.rs:3");
+    assert!(places[0].starts_with('…'), "{}", places[0]);
+    assert!(
+        places[0].ends_with("2026_11_19_150000_rename_kitchen_changed_at.php:31")
+            || places[0].ends_with("_rename_kitchen_changed_at.php:31"),
+        "{}",
+        places[0]
+    );
+    assert!(places[0].chars().count() <= 48, "{}", places[0]);
 }

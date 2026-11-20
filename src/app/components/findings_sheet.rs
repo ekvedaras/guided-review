@@ -12,7 +12,7 @@ use gpui::{
 
 use crate::app::keymap::{chord_of, keymap};
 use crate::findings::FindingId;
-use crate::viewer::{Command, FindingLine, FindingsList, FindingsListRow, Presence};
+use crate::viewer::{Batch, Command, FindingLine, FindingsList, FindingsListRow, Presence};
 
 use super::button::{ButtonKind, ButtonSize, button, icon_button};
 use super::chip::chip;
@@ -105,12 +105,10 @@ impl FindingsSheet {
         }
     }
 
-    /// The first two findings ticked and the third open, as a snapshot scene shows the list.
+    /// Nothing ticked, the third finding open and under the cursor, as a snapshot scene shows the list.
     #[cfg(feature = "snapshots")]
     pub fn stage_sample(&mut self, cx: &mut Context<Self>) {
-        self.list.toggle_under_cursor();
         self.list.cursor_down();
-        self.list.toggle_under_cursor();
         self.list.cursor_down();
         self.list.toggle_open_under_cursor();
         cx.notify();
@@ -179,9 +177,9 @@ impl FindingsSheet {
     }
 
     fn ask(&mut self, event: fn(Vec<FindingId>) -> FindingsEvent, cx: &mut Context<Self>) {
-        let selected = self.list.selected();
-        if !selected.is_empty() {
-            cx.emit(event(selected));
+        let targets = self.list.targets();
+        if !targets.is_empty() {
+            cx.emit(event(targets));
         }
     }
 
@@ -504,6 +502,16 @@ fn with_count(label: &str, count: usize) -> String {
     }
 }
 
+/// "Fix (3)" for three ticked rows, "Fix this" while none is ticked and the highlighted row is what
+/// it acts on.
+fn batch_label(label: &str, batch: Batch) -> String {
+    match batch {
+        Batch::Ticked(ticked) => with_count(label, ticked),
+        Batch::Highlighted => format!("{label} this"),
+        Batch::Nothing => label.to_owned(),
+    }
+}
+
 /// How each row touches the cursor row and the hovered one. A row with its body open has nothing
 /// touching it below, nor has the row under it above.
 fn places_of(
@@ -567,8 +575,16 @@ impl Render for FindingsSheet {
         }
         let colors = Colors::active(cx);
         let rows = self.list.rows();
-        let selected = self.list.selected().len();
-        let selection = Selection::of(selected > 0);
+        let batch = self.list.batch();
+        let selection = Selection::of(batch != Batch::Nothing);
+        let close_keys: Vec<KeyLabel> = std::iter::once(KeyLabel::Text("esc"))
+            .chain(
+                keymap(cx)
+                    .first_chord(Command::FindingsList)
+                    .into_iter()
+                    .flat_map(|chord| chord.caps().map(KeyLabel::of)),
+            )
+            .collect();
         let all_selected = self.list.all_selected();
         let header = div()
             .px_5()
@@ -605,7 +621,7 @@ impl Render for FindingsSheet {
                 Self::batch_button(
                     &colors,
                     "findings-dismiss",
-                    with_count("Dismiss", selected),
+                    batch_label("Dismiss", batch),
                     ButtonKind::Secondary,
                     selection,
                 )
@@ -617,7 +633,7 @@ impl Render for FindingsSheet {
                 Self::batch_button(
                     &colors,
                     "findings-fix",
-                    with_count("Fix", selected),
+                    batch_label("Fix", batch),
                     ButtonKind::Secondary,
                     selection,
                 )
@@ -629,7 +645,7 @@ impl Render for FindingsSheet {
                 Self::batch_button(
                     &colors,
                     "findings-comment",
-                    with_count("Comment", selected),
+                    batch_label("Comment", batch),
                     ButtonKind::Primary,
                     selection,
                 )
@@ -696,12 +712,12 @@ impl Render for FindingsSheet {
                     .on_key_down(cx.listener(Self::on_key_down))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .mt(px(80.))
-                    .w(px(820.))
+                    .w(px(880.))
                     .child(header)
                     .child(body)
                     .child(
                         picker_footer(&colors)
-                            .child(key_hint(&colors, &[KeyLabel::Text("esc")], "close"))
+                            .child(key_hint(&colors, &close_keys, "close"))
                             .child(key_hint(&colors, &[KeyLabel::Text("space")], "tick"))
                             .child(key_hint(&colors, &[KeyLabel::Text("return")], "open"))
                             .child(key_hint(&colors, &[KeyLabel::Text("a")], "all"))
