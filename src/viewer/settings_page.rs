@@ -5,7 +5,7 @@ use super::SettingProblem;
 pub enum SettingsPage {
     Agents,
     Code,
-    GitHub,
+    PullRequests,
     Keys,
     About,
 }
@@ -14,7 +14,7 @@ impl SettingsPage {
     pub const ALL: [Self; 5] = [
         Self::Agents,
         Self::Code,
-        Self::GitHub,
+        Self::PullRequests,
         Self::Keys,
         Self::About,
     ];
@@ -23,7 +23,7 @@ impl SettingsPage {
         match self {
             Self::Agents => "Agents",
             Self::Code => "Code",
-            Self::GitHub => "GitHub",
+            Self::PullRequests => "Pull requests",
             Self::Keys => "Keys",
             Self::About => "About",
         }

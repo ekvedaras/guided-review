@@ -807,7 +807,7 @@ impl OneStepLayout {
             Scene::SettingsComments => self.settings.update(cx, |settings, cx| {
                 settings.open(window, cx);
                 settings.stage_comment_now_primary(cx);
-                settings.stage_page(crate::viewer::SettingsPage::GitHub, cx);
+                settings.stage_page(crate::viewer::SettingsPage::PullRequests, cx);
             }),
             Scene::Shortcuts => self
                 .shortcuts

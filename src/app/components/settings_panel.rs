@@ -780,7 +780,7 @@ impl SettingsPanel {
                 )
                 .into_any_element(),
             ],
-            SettingsPage::GitHub => vec![
+            SettingsPage::PullRequests => vec![
                 Self::section(
                     colors,
                     "Comments",

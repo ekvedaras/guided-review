@@ -6,7 +6,7 @@ use std::path::PathBuf;
 fn the_pages_are_listed_agents_first_and_about_last() {
     let titles: Vec<_> = SettingsPage::ALL.iter().map(|page| page.title()).collect();
 
-    assert_eq!(titles, ["Agents", "Code", "GitHub", "Keys", "About"]);
+    assert_eq!(titles, ["Agents", "Code", "Pull requests", "Keys", "About"]);
 }
 
 #[test]
