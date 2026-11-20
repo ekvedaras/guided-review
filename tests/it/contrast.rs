@@ -1,5 +1,5 @@
 use gpui::Rgba;
-use guided_review::app::components::palette::{Appearance, Colors};
+use guided_review::app::components::palette::{Appearance, Colors, Tone};
 use guided_review::viewer::Capture;
 
 const BODY_TEXT: f32 = 4.5;
@@ -175,6 +175,49 @@ fn shortfalls(appearance: Appearance) -> Vec<String> {
                 .then(|| format!("{name}: {} on {} is {ratio:.2}", hex(text), hex(ground)))
         })
         .collect()
+}
+
+const STRONG_FILL_AGAINST_PAGE: f32 = 3.0;
+
+#[test]
+fn the_merged_and_closed_chips_are_strong_fills_with_white_content_in_both_appearances() {
+    for appearance in [Appearance::Light, Appearance::Dark] {
+        let colors = Colors::of(appearance);
+        for tone in [Tone::Accent, Tone::Danger] {
+            let strong = colors.strong_tone(tone);
+            assert_eq!(
+                strong.text, colors.on_accent_fill,
+                "{tone:?} {appearance:?} text"
+            );
+            assert!(
+                contrast(strong.text, strong.background) >= BODY_TEXT,
+                "{tone:?} {appearance:?}: white on its fill"
+            );
+            assert!(
+                contrast(strong.background, colors.background) >= STRONG_FILL_AGAINST_PAGE,
+                "{tone:?} {appearance:?}: the fill stands out from the page"
+            );
+        }
+    }
+}
+
+const INLINE_CODE_LIGHT: f32 = 1.2;
+const INLINE_CODE_DARK: f32 = 1.3;
+
+#[test]
+fn the_ground_of_inline_code_stands_out_from_the_page_and_from_a_card_in_both_appearances() {
+    for (appearance, least) in [
+        (Appearance::Light, INLINE_CODE_LIGHT),
+        (Appearance::Dark, INLINE_CODE_DARK),
+    ] {
+        let colors = Colors::of(appearance);
+        for (under, ground) in [("page", colors.background), ("card", colors.surface)] {
+            assert!(
+                contrast(colors.inline_code, ground) >= least,
+                "{appearance:?}: inline code on the {under}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -3,6 +3,7 @@
 //! (`Keymap`); the app binds from the keymap and the sheet reads it, so the two cannot drift apart.
 
 use super::chord::{Chord, Key, Modifier};
+use super::send_action::{SendAction, SendChoice, SendRole};
 
 const fn key(face: char) -> Chord {
     Chord::key(Key::Printed(face))
@@ -40,6 +41,11 @@ const LEFT: Chord = Chord::key(Key::Left);
 const RIGHT: Chord = Chord::key(Key::Right);
 const PRIMARY_ENTER: Chord = Chord::key(Key::Enter).with(Modifier::Primary);
 const PRIMARY_SHIFT_ENTER: Chord = PRIMARY_ENTER.with(Modifier::Shift);
+const PRIMARY_ALT_ENTER: Chord = PRIMARY_ENTER.with(Modifier::Alt);
+const PRIMARY_ALT_SHIFT_ENTER: Chord = PRIMARY_ALT_ENTER.with(Modifier::Shift);
+const PRIMARY_ALT_A: Chord = primary('a').with(Modifier::Alt);
+const PRIMARY_ALT_S: Chord = primary('s').with(Modifier::Alt);
+const PRIMARY_ALT_G: Chord = primary('g').with(Modifier::Alt);
 const ESCAPE: Chord = Chord::key(Key::Escape);
 const PRIMARY_K: Chord = primary('k');
 const PRIMARY_P: Chord = primary('p');
@@ -124,6 +130,9 @@ pub enum Command {
     CopyCode,
     AddToReview,
     AskAgent,
+    CommentNow,
+    AskAgentNow,
+    SuggestChange,
     CloseBox,
     WrapLines,
     HideWhitespace,
@@ -146,7 +155,39 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Self; 32] = [
+    /// The send action a command runs in a comment or reply box.
+    pub fn send_action(self) -> Option<SendAction> {
+        match self {
+            Self::AddToReview => Some(SendAction::AddToReview),
+            Self::CommentNow => Some(SendAction::CommentNow),
+            Self::SuggestChange => Some(SendAction::SuggestChange),
+            Self::AskAgent => Some(SendAction::AskAgent),
+            Self::AskAgentNow => Some(SendAction::AskAgentNow),
+            _ => None,
+        }
+    }
+
+    /// The keys a command has with no `[keys]` entry. A send action holds Cmd+Enter while it is
+    /// the primary one and Cmd+Shift+Enter while it is the secondary one; any other keeps a key of
+    /// its own, which no main key can clash with.
+    pub fn default_chords_for(self, choice: SendChoice) -> &'static [Chord] {
+        let Some(action) = self.send_action() else {
+            return self.default_chords();
+        };
+        match choice.role_of(action) {
+            SendRole::Primary => &[PRIMARY_ENTER],
+            SendRole::Secondary => &[PRIMARY_SHIFT_ENTER],
+            SendRole::Other => match action {
+                SendAction::AddToReview => &[PRIMARY_ALT_A],
+                SendAction::CommentNow => &[PRIMARY_ALT_ENTER],
+                SendAction::SuggestChange => &[PRIMARY_ALT_S],
+                SendAction::AskAgent => &[PRIMARY_ALT_G],
+                SendAction::AskAgentNow => &[PRIMARY_ALT_SHIFT_ENTER],
+            },
+        }
+    }
+
+    pub const ALL: [Self; 35] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
@@ -160,6 +201,9 @@ impl Command {
         Self::CopyCode,
         Self::AddToReview,
         Self::AskAgent,
+        Self::CommentNow,
+        Self::AskAgentNow,
+        Self::SuggestChange,
         Self::CloseBox,
         Self::WrapLines,
         Self::HideWhitespace,
@@ -200,8 +244,11 @@ impl Command {
             Self::Jump => &[PRIMARY_K],
             Self::ToggleRead => &[M],
             Self::CopyCode => &[PRIMARY_C],
-            Self::AddToReview => &[PRIMARY_ENTER],
-            Self::AskAgent => &[PRIMARY_SHIFT_ENTER],
+            Self::AddToReview
+            | Self::AskAgent
+            | Self::CommentNow
+            | Self::AskAgentNow
+            | Self::SuggestChange => self.default_chords_for(SendChoice::default()),
             Self::CloseBox => &[ESCAPE],
             Self::WrapLines => &[W],
             Self::HideWhitespace => &[S],
@@ -235,6 +282,9 @@ impl Command {
             Self::CopyCode => "copy_code",
             Self::AddToReview => "add_to_review",
             Self::AskAgent => "ask_agent",
+            Self::CommentNow => "comment_now",
+            Self::AskAgentNow => "ask_agent_now",
+            Self::SuggestChange => "suggest_change",
             Self::CloseBox => "close_box",
             Self::WrapLines => "wrap_lines",
             Self::HideWhitespace => "hide_whitespace",
@@ -290,7 +340,12 @@ impl Command {
             | Self::ToggleAutoMerge => KeyScope::Page,
             Self::Jump | Self::SwitchPr | Self::Settings | Self::CloseWindow => KeyScope::Window,
             Self::Quit => KeyScope::App,
-            Self::AddToReview | Self::AskAgent | Self::CloseBox => KeyScope::TextBox,
+            Self::AddToReview
+            | Self::AskAgent
+            | Self::CommentNow
+            | Self::AskAgentNow
+            | Self::SuggestChange
+            | Self::CloseBox => KeyScope::TextBox,
             Self::CopyCode => KeyScope::NotTyping,
         }
     }
@@ -307,7 +362,12 @@ impl Command {
             | Self::ReadUp
             | Self::Jump => ShortcutGroup::Navigate,
             Self::ToggleRead | Self::CopyCode | Self::AskAboutStep => ShortcutGroup::Read,
-            Self::AddToReview | Self::AskAgent | Self::CloseBox => ShortcutGroup::Comment,
+            Self::AddToReview
+            | Self::AskAgent
+            | Self::CommentNow
+            | Self::AskAgentNow
+            | Self::SuggestChange
+            | Self::CloseBox => ShortcutGroup::Comment,
             Self::WrapLines
             | Self::HideWhitespace
             | Self::MoreAbove
@@ -344,6 +404,9 @@ impl Command {
             Self::CopyCode => "Copy the selected code",
             Self::AddToReview => "Add the comment or reply to your review",
             Self::AskAgent => "Add it and ask your agent",
+            Self::CommentNow => "Post the comment or reply at once, without your review",
+            Self::AskAgentNow => "Post it at once and ask your agent",
+            Self::SuggestChange => "Put the commented lines in the box as a suggestion",
             Self::CloseBox => "Leave the box you are typing in",
             Self::WrapLines => "Wrap long lines",
             Self::HideWhitespace => "Hide whitespace-only changes",

@@ -10,7 +10,7 @@ use crate::ide::IdeTemplate;
 use crate::instructions::{Agent, Instructions, InstructionsChoice, InstructionsKind};
 use crate::pull_request::RepoName;
 use crate::viewer::{
-    KeyChanges, KeyProblem, Keymap, MergeMethod, MoreLines, ResolvedKeymap, WrittenKeys,
+    KeyChanges, KeyProblem, Keymap, MergeMethod, MoreLines, ResolvedKeymap, SendChoice, WrittenKeys,
 };
 
 /// `config.toml` in the config folder.
@@ -42,6 +42,13 @@ pub struct Config {
     /// `"owner/repo" = "squash"`: a repo's own merge method, over `merge_method`.
     #[serde(default)]
     merge_methods: BTreeMap<String, String>,
+    /// A send action (`"add_to_review"`, `"comment_now"`, `"suggest_change"`, `"ask_agent"` or
+    /// `"ask_agent_now"`): the one with Cmd+Enter and the accent colour.
+    #[serde(default)]
+    primary_comment_action: Option<String>,
+    /// The send action with Cmd+Shift+Enter, one other than the primary.
+    #[serde(default)]
+    secondary_comment_action: Option<String>,
 }
 
 /// Which model answers an Ask, and how hard it thinks.
@@ -233,6 +240,13 @@ impl Config {
         .unwrap_or_default()
     }
 
+    pub fn send_choice(&self) -> SendChoice {
+        SendChoice::of_config_text(
+            self.primary_comment_action.as_deref(),
+            self.secondary_comment_action.as_deref(),
+        )
+    }
+
     pub fn keymap(&self) -> Result<Keymap, Vec<KeyProblem>> {
         self.key_changes().keymap()
     }
@@ -247,6 +261,7 @@ impl Config {
                 .iter()
                 .map(|(name, value)| (name.clone(), written_keys(value))),
         )
+        .with_send_choice(self.send_choice())
     }
 
     /// Every clone Settings names, whatever its repo.

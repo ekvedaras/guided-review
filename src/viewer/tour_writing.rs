@@ -22,7 +22,7 @@ pub enum WritingStage {
 }
 
 impl TourWriting {
-    pub(super) fn starting() -> Self {
+    pub fn starting() -> Self {
         Self {
             stage: WritingStage::Starting,
             terminal: None,
@@ -72,7 +72,7 @@ impl TourWriting {
         self.stage = WritingStage::Failed(reason);
     }
 
-    pub(super) fn status_is(&mut self, status: AgentStatus) {
+    pub fn status_is(&mut self, status: AgentStatus) {
         self.status = Some(status);
         if self.stage != WritingStage::Writing {
             return;
@@ -95,7 +95,16 @@ impl TourWriting {
         }
     }
 
-    pub(super) fn screen_is(&mut self, lines: Vec<String>) {
+    /// The text of the latest step Claude printed on its screen (a line led by `•`, `⏺` or `●`). Its spinner
+    /// word, tool output, prompt box and status bar are not steps.
+    pub fn latest_step(&self) -> Option<String> {
+        self.screen.iter().rev().find_map(|line| {
+            let step = line.trim_start().strip_prefix(['•', '⏺', '●'])?.trim();
+            (!step.is_empty()).then(|| step.to_owned())
+        })
+    }
+
+    pub fn screen_is(&mut self, lines: Vec<String>) {
         self.screen = lines;
     }
 

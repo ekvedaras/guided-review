@@ -210,6 +210,37 @@ fn when_nothing_blocks_the_pr_the_same_key_merges_it_now_after_the_second_press(
 }
 
 #[test]
+fn from_the_confirming_press_until_github_answers_the_merge_is_in_flight_and_more_presses_send_nothing()
+ {
+    let pull = Pull::new();
+    let (mut review, github, now) = read_merging(
+        &pull,
+        Merging {
+            mergeability: Mergeability::Now,
+            ..blocked_merging()
+        },
+    );
+    assert_eq!(review.merge_in_flight(), None);
+
+    review.ask_to_change_merging(now);
+    review.ask_to_change_merging(now);
+
+    assert_eq!(
+        review.merge_in_flight(),
+        Some(MergeChange::MergeNow(MergeMethod::Merge))
+    );
+    assert_eq!(review.ask_to_change_merging(now), PressStep::Nothing);
+    review.ask_to_change_merging(now);
+    drive_without_agents(&mut review, &github, &pull.source(), now);
+
+    assert_eq!(review.merge_in_flight(), None);
+    assert_eq!(
+        merging_calls(&pull),
+        [MergeChange::MergeNow(MergeMethod::Merge)]
+    );
+}
+
+#[test]
 fn a_merged_or_closed_pr_says_so_and_neither_key_nor_the_palette_offers_a_change() {
     let pull = Pull::new();
     for (status, label) in [(PrStatus::Merged, "Merged"), (PrStatus::Closed, "Closed")] {

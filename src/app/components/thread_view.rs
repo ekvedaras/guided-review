@@ -13,13 +13,12 @@ use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
 use crate::app::components::overlay::popover;
 use crate::viewer::{
-    Audience, CommentId, HandOffButton, Reaction, ReactionChange, ReactionCount, SendMode, Sending,
-    ThreadAction, ThreadActionResult, ThreadComment, ThreadId, ThreadView,
+    Audience, CommentId, HandOffButton, Keymap, Reaction, ReactionChange, ReactionCount,
+    SendAction, SendMode, SendRole, Sending, ThreadAction, ThreadActionResult, ThreadComment,
+    ThreadId, ThreadView,
 };
 
-use super::button::{
-    ButtonKind, ButtonSize, button, button_icon, icon_button, icon_label_button, joined,
-};
+use super::button::{ButtonKind, ButtonSize, button, chord_keys, icon_button, icon_label_button};
 use super::card::card;
 use super::chip::chip;
 use super::comment_composer::task_button;
@@ -84,12 +83,15 @@ impl ThreadUi {
     }
 }
 
+type OnSend = Rc<dyn Fn(SendAction, &mut App)>;
+
 struct ReplyBox<'a> {
     colors: Colors,
     thread_id: &'a ThreadId,
     can_reply_now: bool,
     can_ask_agent: bool,
     sending: Sending,
+    keymap: Arc<Keymap>,
     on_action: &'a OnThreadAction,
     on_reply_draft: &'a OnReplyDraft,
     ui: &'a Entity<ThreadUi>,
@@ -510,6 +512,7 @@ impl ThreadElement {
             can_reply_now,
             can_ask_agent,
             sending,
+            keymap,
             on_action,
             on_reply_draft,
             ui,
@@ -519,24 +522,56 @@ impl ThreadElement {
         reply: &str,
     ) -> AnyElement {
         let thread_id = thread_id.clone();
-        let send = {
-            let (ui, on_action, thread_id) = (ui.clone(), Rc::clone(on_action), thread_id.clone());
-            move |mode: SendMode, audience: Audience| {
-                let (ui, on_action, thread_id) =
-                    (ui.clone(), Rc::clone(&on_action), thread_id.clone());
-                move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                    send_reply(&ui, &on_action, &thread_id, mode, audience, cx);
+        let mut offered = vec![SendAction::AddToReview];
+        if sending.on_github() {
+            if can_reply_now {
+                offered.push(SendAction::CommentNow);
+            }
+            if can_ask_agent {
+                offered.push(SendAction::AskAgent);
+                if can_reply_now {
+                    offered.push(SendAction::AskAgentNow);
                 }
             }
+        } else if sending.tasks().len() > 1 {
+            offered.push(SendAction::CommentNow);
+        }
+        let act: OnSend = {
+            let (ui, on_action, thread_id) = (ui.clone(), Rc::clone(on_action), thread_id.clone());
+            Rc::new(move |action, cx| {
+                let (mode, audience) = match action {
+                    SendAction::AddToReview | SendAction::SuggestChange => {
+                        match sending.tasks().first() {
+                            Some(&task) => (task, Audience::Agent),
+                            None => (SendMode::AddToReview, Audience::Author),
+                        }
+                    }
+                    SendAction::CommentNow => match sending.tasks().get(1) {
+                        Some(&task) => (task, Audience::Agent),
+                        None => (SendMode::CommentNow, Audience::Author),
+                    },
+                    SendAction::AskAgent => (SendMode::AddToReview, Audience::Agent),
+                    SendAction::AskAgentNow => (SendMode::CommentNow, Audience::Agent),
+                };
+                send_reply(&ui, &on_action, &thread_id, mode, audience, cx);
+            })
         };
         let text = if is_busy {
             div().child(reply.to_owned()).into_any_element()
         } else {
-            let (ui, on_action, submitted_thread) =
-                (ui.clone(), Rc::clone(on_action), thread_id.clone());
-            let (ask_ui, ask_action, asked_thread) =
-                (ui.clone(), Rc::clone(&on_action), thread_id.clone());
-            let (on_edit, on_cancel) = (Rc::clone(on_reply_draft), Rc::clone(on_reply_draft));
+            let on_edit = Rc::clone(on_reply_draft);
+            let on_cancel = Rc::clone(on_reply_draft);
+            let typed = |pressed: SendAction| {
+                let runs = keymap.send_key_runs(pressed, &offered);
+                let act = Rc::clone(&act);
+                (runs.is_some(), move |_: &mut Window, cx: &mut App| {
+                    act(runs.unwrap_or(pressed), cx);
+                })
+            };
+            let (submits, on_submit) = typed(SendAction::AddToReview);
+            let (asks, on_ask) = typed(SendAction::AskAgent);
+            let (posts, on_post) = typed(SendAction::CommentNow);
+            let (asks_now, on_ask_now) = typed(SendAction::AskAgentNow);
             TextBox::new(
                 SharedString::from(format!("reply-text-{thread_id}")),
                 focus,
@@ -544,23 +579,14 @@ impl ThreadElement {
                 Lines::Multi,
             )
             .on_edit(move |text, _, cx| on_edit(ReplyDraftChange::Edit(text), cx))
-            .on_submit(move |_, cx| {
-                let (mode, audience) = match sending.tasks().first() {
-                    Some(&task) => (task, Audience::Agent),
-                    None => (SendMode::AddToReview, Audience::Author),
-                };
-                send_reply(&ui, &on_action, &submitted_thread, mode, audience, cx);
+            .on_submit(move |window, cx| {
+                if submits {
+                    on_submit(window, cx);
+                }
             })
-            .on_submit_to_agent(can_ask_agent && sending.on_github(), move |_, cx| {
-                send_reply(
-                    &ask_ui,
-                    &ask_action,
-                    &asked_thread,
-                    SendMode::AddToReview,
-                    Audience::Agent,
-                    cx,
-                );
-            })
+            .on_submit_to_agent(asks, on_ask)
+            .on_submit_now(posts, on_post)
+            .on_submit_to_agent_now(asks_now, on_ask_now)
             .on_cancel(move |_, cx| on_cancel(ReplyDraftChange::Discard, cx))
             .into_any_element()
         };
@@ -579,89 +605,53 @@ impl ThreadElement {
                 move |_, _, cx| on_reply_draft(ReplyDraftChange::Discard, cx)
             })
         });
-        let task_buttons = (!is_busy && !sending.on_github()).then(|| {
-            div().flex().flex_wrap().items_center().gap_2().children(
-                sending.tasks().iter().enumerate().map(|(index, &mode)| {
-                    let (icon, label) = task_button(mode);
-                    let kind = if index == 0 {
-                        ButtonKind::Primary
-                    } else {
-                        ButtonKind::Secondary
-                    };
-                    icon_label_button(
-                        &colors,
-                        SharedString::from(format!("reply-task-{index}-{id}")),
-                        kind,
-                        ButtonSize::Small,
-                        icon,
-                        label,
-                    )
-                    .on_click(send(mode, Audience::Agent))
-                }),
-            )
-        });
-        let buttons = (!is_busy && sending.on_github()).then(|| {
-            let ask_agent = can_ask_agent.then(|| {
-                let mut parts = vec![
-                    icon_label_button(
-                        &colors,
-                        SharedString::from(format!("reply-ask-{id}")),
-                        ButtonKind::Joined,
-                        ButtonSize::Small,
-                        Icon::Sparkles,
-                        "Ask agent",
-                    )
-                    .tooltip(tooltip(|_| {
-                        "Ask agent: adds the reply to the review for your agent".into()
-                    }))
-                    .on_click(send(SendMode::AddToReview, Audience::Agent)),
-                ];
-                if can_reply_now {
-                    parts.push(
-                        button(
-                            &colors,
-                            SharedString::from(format!("reply-ask-now-{id}")),
-                            ButtonKind::Joined,
-                            ButtonSize::Small,
-                        )
-                        .child(button_icon(
-                            &colors,
-                            ButtonKind::Joined,
-                            ButtonSize::Small,
-                            Icon::Zap,
-                        ))
-                        .child("now")
-                        .tooltip(tooltip(|_| "Ask agent now: posts the reply at once".into()))
-                        .on_click(send(SendMode::CommentNow, Audience::Agent)),
-                    );
-                }
-                joined(&colors, parts)
+        let send_buttons = (!is_busy).then(|| {
+            let buttons = keymap.send_plan(&offered).into_iter().map(|planned| {
+                let kind = match planned.role {
+                    SendRole::Primary => ButtonKind::Primary,
+                    SendRole::Secondary | SendRole::Other => ButtonKind::Secondary,
+                };
+                let action = planned.action;
+                let act = Rc::clone(&act);
+                let task = |index: usize| sending.tasks().get(index).copied().map(task_button);
+                let (name, icon, label) = match (action, sending.on_github()) {
+                    (SendAction::AddToReview | SendAction::SuggestChange, false) => {
+                        let (icon, label) = task(0).unzip();
+                        ("task-0", icon, label.unwrap_or("Add"))
+                    }
+                    (SendAction::CommentNow, false) => {
+                        let (icon, label) = task(1).unzip();
+                        ("task-1", icon, label.unwrap_or("Send"))
+                    }
+                    (SendAction::AddToReview | SendAction::SuggestChange, true) => {
+                        ("add", None, "Add to review")
+                    }
+                    (SendAction::CommentNow, true) => ("now", None, "Reply now"),
+                    (SendAction::AskAgent, _) => ("ask", Some(Icon::Sparkles), "Ask agent"),
+                    (SendAction::AskAgentNow, _) => ("ask-now", Some(Icon::Zap), "Ask agent now"),
+                };
+                let id = SharedString::from(format!("reply-{name}-{id}"));
+                let base = match icon {
+                    Some(icon) => small_button(&colors, id, kind, icon, label),
+                    None => plain_button(&colors, id, kind, label),
+                };
+                base.child(chord_keys(&colors, kind, planned.chord))
+                    .when(action == SendAction::AskAgent, |button| {
+                        button.tooltip(tooltip(|_| {
+                            "Ask agent: adds the reply to the review for your agent".into()
+                        }))
+                    })
+                    .when(action == SendAction::AskAgentNow, |button| {
+                        button.tooltip(tooltip(|_| "Ask agent now: posts the reply at once".into()))
+                    })
+                    .on_click(move |_, _, cx| act(action, cx))
             });
             div()
                 .flex()
                 .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(
-                    button(
-                        &colors,
-                        SharedString::from(format!("reply-add-{id}")),
-                        ButtonKind::Primary,
-                        ButtonSize::Small,
-                    )
-                    .child("Add to review")
-                    .on_click(send(SendMode::AddToReview, Audience::Author)),
-                )
-                .children(can_reply_now.then(|| {
-                    plain_button(
-                        &colors,
-                        SharedString::from(format!("reply-now-{id}")),
-                        ButtonKind::Secondary,
-                        "Reply now",
-                    )
-                    .on_click(send(SendMode::CommentNow, Audience::Author))
-                }))
-                .children(ask_agent)
+                .children(buttons)
         });
         slide_in(
             div()
@@ -683,8 +673,7 @@ impl ThreadElement {
                             div().absolute().top(px(4.)).right(px(4.)).child(cancel)
                         })),
                 )
-                .children(task_buttons)
-                .children(buttons),
+                .children(send_buttons),
             SharedString::from(format!("reply-box-{id}")),
             STATE,
             Edge::Bottom,
@@ -1238,6 +1227,7 @@ impl RenderOnce for ThreadElement {
                             can_reply_now,
                             can_ask_agent,
                             sending,
+                            keymap: crate::app::keymap::shared_keymap(cx),
                             on_action: &on_action,
                             on_reply_draft: &on_reply_draft,
                             ui: &ui,

@@ -15,8 +15,8 @@ use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use crate::viewer::{
-    CloneRowProblem, MergeMethod, MoreLines, Motion, Presence, SaveOutcome, SettingProblem,
-    Settings,
+    CloneRowProblem, MergeMethod, MoreLines, Motion, Presence, SaveOutcome, SendAction, SendRole,
+    SettingProblem, Settings,
 };
 
 use super::button::{
@@ -1178,6 +1178,91 @@ impl SettingsPanel {
             )
     }
 
+    /// The Comments section: the two send actions that hold the main keys.
+    fn comment_actions(editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(Self::send_action_row(
+                editing,
+                SendRole::Primary,
+                colors,
+                cx,
+            ))
+            .child(Self::send_action_row(
+                editing,
+                SendRole::Secondary,
+                colors,
+                cx,
+            ))
+    }
+
+    fn send_action_row(
+        editing: &Editing,
+        role: SendRole,
+        colors: &Colors,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let settings = &editing.settings;
+        let (name, id, chosen, other, about) = match role {
+            SendRole::Primary => (
+                "Primary",
+                "primary-comment-action",
+                settings.primary_comment_action(),
+                settings.secondary_comment_action(),
+                "The accent button, first in the row",
+            ),
+            SendRole::Secondary | SendRole::Other => (
+                "Secondary",
+                "secondary-comment-action",
+                settings.secondary_comment_action(),
+                settings.primary_comment_action(),
+                "The second button in the row",
+            ),
+        };
+        let segments = SendAction::ALL
+            .into_iter()
+            .map(|action| {
+                Segment::new(
+                    action.config_text(),
+                    action.label(),
+                    cx.listener(move |this, _, _, cx| {
+                        this.edit(cx, |editing| match role {
+                            SendRole::Primary => {
+                                editing.settings.set_primary_comment_action(action);
+                            }
+                            SendRole::Secondary | SendRole::Other => {
+                                editing.settings.set_secondary_comment_action(action);
+                            }
+                        });
+                    }),
+                )
+            })
+            .collect();
+        let key = chosen
+            .command()
+            .default_chords_for(settings.send_choice())
+            .first()
+            .map_or_default(|chord| chord.spelled());
+        let note = div().text_xs().text_color(colors.muted_text).child(format!(
+            "{about}, with {key}. Picking {} here swaps the two. A key set under Keys wins.",
+            other.label()
+        ));
+        setting_row(
+            name,
+            note,
+            Segmented::new(
+                id,
+                SegmentLayout::Row {
+                    segment_width: px(116.),
+                },
+                segments,
+            )
+            .picked(SendAction::ALL.iter().position(|action| *action == chosen)),
+        )
+    }
+
     fn merge_method(editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {
         let chosen = editing.settings.merge_method();
         let segments = MergeMethod::ALL
@@ -1584,15 +1669,18 @@ impl SettingsPanel {
     /// A made-up key change, one key waiting to be pressed and one clash, for the pictures.
     #[cfg(feature = "snapshots")]
     pub fn stage_sample_keys(&mut self, cx: &mut Context<Self>) {
-        use crate::viewer::{Chord, Command};
         self.edit(cx, |editing| {
-            for (command, text) in [(Command::WrapLines, "y"), (Command::Jump, "n")] {
+            use crate::viewer::Chord;
+            for (command, text) in [
+                (crate::viewer::Command::WrapLines, "y"),
+                (crate::viewer::Command::Jump, "n"),
+            ] {
                 if let Some(chord) = Chord::parse(text) {
                     editing.settings.set_key(command, chord);
                 }
             }
         });
-        self.start_recording(Command::ToggleRead, cx);
+        self.start_recording(crate::viewer::Command::ToggleRead, cx);
     }
 
     /// Scrolls the form to the Keys section, for the pictures.
@@ -1606,6 +1694,26 @@ impl SettingsPanel {
     pub fn scroll_to_more_lines(&self) {
         self.scroll
             .set_offset(gpui::point(px(0.), px(-MORE_LINES_OFFSET)));
+    }
+
+    /// Scrolls the form to the Comments section, for the pictures.
+    #[cfg(feature = "snapshots")]
+    pub fn scroll_to_comments(&self) {
+        self.scroll
+            .set_offset(gpui::point(px(0.), px(-COMMENTS_OFFSET)));
+    }
+
+    /// Picks Comment now as the primary action and Suggest change as the secondary one, for the pictures.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_comment_now_primary(&mut self, cx: &mut Context<Self>) {
+        self.edit(cx, |editing| {
+            editing
+                .settings
+                .set_primary_comment_action(SendAction::CommentNow);
+            editing
+                .settings
+                .set_secondary_comment_action(SendAction::SuggestChange);
+        });
     }
 
     /// Scrolls the form to its last section, for the pictures.
@@ -1622,6 +1730,10 @@ const KEYS_SECTION: usize = 10;
 /// How far down the form the More lines section starts, in pixels.
 #[cfg(feature = "snapshots")]
 const MORE_LINES_OFFSET: f32 = 760.;
+
+/// How far down the form the Comments section starts, in pixels.
+#[cfg(feature = "snapshots")]
+const COMMENTS_OFFSET: f32 = 1050.;
 
 /// The form's header and its four sections, which the scroll counts as items.
 #[cfg(feature = "snapshots")]
@@ -1968,6 +2080,13 @@ impl Render for SettingsPanel {
                             "More lines",
                             "How many lines the arrows on a gap and the [ and ] keys show at a time.",
                             more_lines,
+                        ))
+                        .child(Self::section_rule(&colors))
+                        .child(Self::section(
+                            &colors,
+                            "Comments",
+                            "Which send actions of a comment or reply box you reach for most. Where a box lacks one, the nearest it has stands in.",
+                            Self::comment_actions(editing, &colors, cx),
                         ))
                         .child(Self::section_rule(&colors))
                         .child(Self::section(

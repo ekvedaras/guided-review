@@ -26,8 +26,9 @@ use crate::review_subject::{BranchName, ReviewSubject};
 use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
     AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
-    LineKind, LineLocation, MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus,
-    PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness, TerminalId, TextBox,
+    LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
+    OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness, TerminalId,
+    TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue};
@@ -66,6 +67,8 @@ enum Scene {
     SettingsKeys,
     FocusedChange,
     SettingsMoreLines,
+    SettingsComments,
+    CommentComposerNowPrimary,
     PieceLabelsShown,
     PieceLabelsHidden,
     BasicOverview,
@@ -104,10 +107,13 @@ enum Scene {
     AiReviewAskWhy,
     AiReviewOutdated,
     AiReviewThreadFromFinding,
+    BasicGuidedWriting,
+    TitleBarMerging,
+    FoldedMarkdownParts,
 }
 
 impl Scene {
-    const ALL: [Self; 66] = [
+    const ALL: [Self; 71] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -136,6 +142,8 @@ impl Scene {
         Self::SettingsKeys,
         Self::FocusedChange,
         Self::SettingsMoreLines,
+        Self::SettingsComments,
+        Self::CommentComposerNowPrimary,
         Self::PieceLabelsShown,
         Self::PieceLabelsHidden,
         Self::BasicOverview,
@@ -174,6 +182,9 @@ impl Scene {
         Self::AiReviewAskWhy,
         Self::AiReviewOutdated,
         Self::AiReviewThreadFromFinding,
+        Self::BasicGuidedWriting,
+        Self::TitleBarMerging,
+        Self::FoldedMarkdownParts,
     ];
 
     fn file_name(self) -> &'static str {
@@ -244,6 +255,11 @@ impl Scene {
             Self::AiReviewAskWhy => "86-ai-review-ask-why",
             Self::AiReviewOutdated => "87-ai-review-outdated",
             Self::AiReviewThreadFromFinding => "88-ai-review-thread-from-finding",
+            Self::BasicGuidedWriting => "89-basic-guided-writing",
+            Self::SettingsComments => "90-settings-comments",
+            Self::CommentComposerNowPrimary => "91-comment-composer-now-primary",
+            Self::TitleBarMerging => "92-title-bar-merging",
+            Self::FoldedMarkdownParts => "93-folded-markdown-parts",
         }
     }
 
@@ -344,7 +360,7 @@ impl Scene {
                     ..blocked
                 },
             ),
-            Self::TitleBarMergeNow => status(
+            Self::TitleBarMergeNow | Self::TitleBarMerging => status(
                 Readiness::Ready,
                 Checks::Passing,
                 Merging {
@@ -602,6 +618,21 @@ impl OneStepLayout {
         }
     }
 
+    /// The scene shows a folded box, which names its parts by section; an open one is folded.
+    fn fold_box(&mut self, path: &FilePath, cx: &mut Context<Self>) {
+        let fold = self.row_of_box(path, cx).and_then(|row| {
+            match self.session.read(cx).rows().row(row)? {
+                PageRow::PieceHeader(heading) => heading.fold.clone(),
+                _ => None,
+            }
+        });
+        if let Some(fold) = fold.filter(|fold| !fold.is_folded) {
+            self.change_review(cx, |review| {
+                review.toggle_box_fold(&fold.screen, &fold.path);
+            });
+        }
+    }
+
     /// The first file box with piece labels shows them or not, and the page goes to its header.
     fn stage_piece_labels(&mut self, labels: PieceLabels, cx: &mut Context<Self>) {
         self.open_every_box(cx);
@@ -719,6 +750,17 @@ impl OneStepLayout {
                 cx.set_global(StagedFinishReview(true));
             }
             Scene::CommentComposer => self.compose_on_first_added_lines(window, cx),
+            Scene::CommentComposerNowPrimary => {
+                if let Ok(keymap) =
+                    crate::config::Config::from_text(
+                    "primary_comment_action = \"comment_now\"\nsecondary_comment_action = \"suggest_change\"\n",
+                )
+                        .map(|config| config.resolved_keymap().keymap)
+                {
+                    crate::app::keymap::set_keymap(keymap, cx);
+                }
+                self.compose_on_first_added_lines(window, cx);
+            }
             Scene::AskPanel => self.ask_about_screen(window, cx),
             Scene::SwitchingVeil => {
                 if let Some(other) = sample_pr(OTHER_PR).map(ReviewSubject::from) {
@@ -760,6 +802,11 @@ impl OneStepLayout {
                 settings.open(window, cx);
                 settings.stage_sample_edits(cx);
                 settings.scroll_to_more_lines();
+            }),
+            Scene::SettingsComments => self.settings.update(cx, |settings, cx| {
+                settings.open(window, cx);
+                settings.stage_comment_now_primary(cx);
+                settings.scroll_to_comments();
             }),
             Scene::Shortcuts => self
                 .shortcuts
@@ -929,6 +976,14 @@ impl OneStepLayout {
                     }
                 }
             }
+            Scene::FoldedMarkdownParts => {
+                if let Some(path) = self.go_to_first_markdown_box(cx) {
+                    self.fold_box(&path, cx);
+                    if let Some(row) = self.row_of_box(&path, cx) {
+                        self.scroll_to_row(row.saturating_sub(2));
+                    }
+                }
+            }
             Scene::BasicOverview => self.session.update(cx, ReviewSession::stage_basic),
             Scene::BasicOverviewFiles => {
                 self.session.update(cx, ReviewSession::stage_basic);
@@ -967,6 +1022,9 @@ impl OneStepLayout {
             Scene::BasicGuidedReady => self
                 .session
                 .update(cx, ReviewSession::stage_basic_guided_ready),
+            Scene::BasicGuidedWriting => self
+                .session
+                .update(cx, ReviewSession::stage_basic_guided_writing),
             Scene::SwitchedSummary => self.change_review(cx, |review| {
                 review.go_to_summary();
                 review.steps_carried_read_ticks_are(3);
@@ -983,12 +1041,20 @@ impl OneStepLayout {
             | Scene::TitleBarAutoMergeOff
             | Scene::TitleBarAutoMergeOn
             | Scene::TitleBarMergeNow
+            | Scene::TitleBarMerging
             | Scene::TitleBarChecksList
             | Scene::TitleBarMerged
             | Scene::TitleBarClosed => {
                 if let Some(status) = scene.staged_status() {
                     self.session
                         .update(cx, |session, cx| session.stage_pr_status(status, cx));
+                }
+                if scene == Scene::TitleBarMerging {
+                    self.change_review(cx, |review| {
+                        review.stage_merge_in_flight(Some(MergeChange::MergeNow(
+                            MergeMethod::Squash,
+                        )));
+                    });
                 }
                 self.checks_hover.chip = scene == Scene::TitleBarChecksList;
             }
@@ -1028,7 +1094,8 @@ impl OneStepLayout {
             | Scene::SettingsEdited
             | Scene::SettingsEditedEnd
             | Scene::SettingsKeys
-            | Scene::SettingsMoreLines => self
+            | Scene::SettingsMoreLines
+            | Scene::SettingsComments => self
                 .settings
                 .update(cx, |settings, cx| settings.close(window, cx)),
             Scene::JumpPalette | Scene::JumpActions => self
@@ -1043,7 +1110,13 @@ impl OneStepLayout {
                 });
                 cx.set_global(StagedFinishReview(false));
             }
-            Scene::CommentComposer => {
+            Scene::CommentComposer | Scene::CommentComposerNowPrimary => {
+                if scene == Scene::CommentComposerNowPrimary {
+                    crate::app::keymap::set_keymap(
+                        crate::app::keymap::configured_keymap().keymap,
+                        cx,
+                    );
+                }
                 self.session.update(cx, |session, cx| {
                     let drafts: Vec<_> = session
                         .review()
@@ -1148,6 +1221,7 @@ impl OneStepLayout {
             | Scene::BasicFile
             | Scene::BasicRead
             | Scene::BasicGuidedReady
+            | Scene::BasicGuidedWriting
             | Scene::LocalOverview
             | Scene::LocalMoveOffer
             | Scene::LocalFile
@@ -1172,9 +1246,11 @@ impl OneStepLayout {
             | Scene::TitleBarAutoMergeOff
             | Scene::TitleBarAutoMergeOn
             | Scene::TitleBarMergeNow
+            | Scene::TitleBarMerging
             | Scene::TitleBarChecksList
             | Scene::TitleBarMerged
             | Scene::TitleBarClosed => {
+                self.change_review(cx, |review| review.stage_merge_in_flight(None));
                 self.session.update(cx, ReviewSession::unstage_pr_status);
                 self.checks_hover.chip = false;
             }
@@ -1188,6 +1264,12 @@ impl OneStepLayout {
             Scene::RefreshRunning => self
                 .session
                 .update(cx, ReviewSession::unstage_refresh_running),
+            Scene::FoldedMarkdownParts => {
+                if let Some(path) = self.go_to_first_markdown_box(cx) {
+                    self.open_box(&path, cx);
+                }
+                self.go_to_first_open_code(cx);
+            }
             Scene::RenderedMarkdown => {
                 if let Some(path) = self.markdown_box(cx) {
                     self.change_review(cx, |review| {
@@ -1268,7 +1350,7 @@ fn sample_agent_screen() -> Vec<String> {
 }
 
 /// Long enough to scroll in the issue card, and to show Markdown the card renders.
-const ISSUE_BODY: &str = "The title bar should say which issue the PR is about, so a reviewer can open it without leaving the review.
+const ISSUE_BODY: &str = "The title bar should say which issue the PR is about, so a reviewer can open it without leaving the review, and see what the PR `Closes` or is `Part of` before opening a single file, or reading the diff.
 
 ## What to show
 

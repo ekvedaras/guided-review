@@ -263,6 +263,9 @@ pub struct PieceLabel {
     /// A part the tour numbers (`hunk-1`) where the file has no symbol to name it by; the number
     /// means nothing to the reader, so it is not shown.
     pub is_part: bool,
+    /// What names a numbered part where the page can tell: the section a Markdown part sits in,
+    /// else its first line. Set only on the markers of a folded box, which have no code to name them.
+    pub part_name: Option<Arc<str>>,
 }
 
 impl PieceLabel {
@@ -273,14 +276,21 @@ impl PieceLabel {
             symbol: id.symbol_path().filter(|_| !id.is_hunk()).map(Arc::from),
             symbol_name: id.symbol_name().filter(|_| !id.is_hunk()).map(Arc::from),
             is_part: id.is_hunk(),
+            part_name: None,
         }
     }
 
+    pub(super) fn named_as_part(mut self, name: Option<Arc<str>>) -> Self {
+        self.part_name = name;
+        self
+    }
+
     /// What a marker inside a box of several pieces names: the symbol, the file for a whole-file
-    /// piece, and nothing for a numbered part, which the gap above it already sets apart.
+    /// piece, and for a numbered part only its `part_name`, as the gap above it already sets it apart.
     pub fn shown_name(&self) -> Option<Arc<str>> {
         self.symbol
             .clone()
+            .or_else(|| self.part_name.clone())
             .or_else(|| (!self.is_part).then(|| Arc::clone(&self.file_name)))
     }
 }

@@ -28,3 +28,7 @@ The view is a display option like whitespace and wrap, so it is not in the state
 
 - Relative images inside a rendered Markdown file are not loaded from the repo.
 - A removed run that ends a list or a quote is shown as its own removed block after it, not as a change of it.
+
+## Folded boxes name their parts
+
+2026-11-20, #160. A Markdown file is cut into one numbered piece per hunk (`hunk-N`), and a numbered part has no name to show, so a folded box listed its parts as empty rows. A folded box now names each part: the Markdown section its first changed line sits in (`section_title_at`, the last heading above it outside code fences), else `line N` (YAML, JSON and XML parts, or Markdown above its first heading). Only folded boxes do this (`PieceLabel::part_name`); an open box keeps its gaps and no labels, as the gap already sets a part apart. Agent's choice over hiding the rows: a folded box is read to see what the step covers. Test: `tests/it/piece_labels.rs`.

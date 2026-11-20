@@ -61,5 +61,7 @@ pub struct GuidedTourBanner {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuidedTourStage {
     pub line: String,
+    /// What the agent last printed, so a long writing is not silent.
+    pub activity: Option<String>,
     pub can_try_again: bool,
 }

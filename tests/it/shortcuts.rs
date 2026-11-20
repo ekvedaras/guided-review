@@ -93,6 +93,22 @@ fn the_keys_the_app_had_before_the_sheet_still_work() {
 }
 
 #[test]
+fn the_send_now_actions_have_keys_beside_add_to_review_and_ask_agent() {
+    let keys = |command: Command| command.default_chords()[0].keystroke();
+
+    assert_eq!(keys(Command::CommentNow), "secondary-alt-enter");
+    assert_eq!(keys(Command::AskAgentNow), "secondary-alt-shift-enter");
+    for command in [Command::CommentNow, Command::AskAgentNow] {
+        assert_eq!(command.scope(), KeyScope::TextBox);
+        assert_eq!(command.group(), ShortcutGroup::Comment);
+    }
+    assert_eq!(
+        Command::of_config_name("ask_agent_now"),
+        Some(Command::AskAgentNow)
+    );
+}
+
+#[test]
 fn copying_code_works_with_a_comment_box_open_but_not_while_typing_in_it() {
     assert_eq!(Command::CopyCode.scope(), KeyScope::NotTyping);
 }

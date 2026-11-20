@@ -5,7 +5,7 @@ use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use guided_review::pull_request::RepoName;
 use guided_review::viewer::{
-    Chord, CloneRow, CloneRowProblem, Command, KeyProblem, MergeMethod, SaveOutcome,
+    Chord, CloneRow, CloneRowProblem, Command, KeyProblem, MergeMethod, SaveOutcome, SendAction,
     SettingProblem, Settings,
 };
 use std::path::{Path, PathBuf};
@@ -1145,6 +1145,61 @@ fn a_chosen_merge_method_is_written_and_a_merge_commit_leaves_no_line() {
     settings.set_merge_method(MergeMethod::Merge);
     settings.save().unwrap();
     assert_eq!(config_text(home.path()), "ask_model = \"sonnet\" # quick\n");
+}
+
+#[test]
+fn chosen_primary_and_secondary_actions_are_written_and_the_defaults_leave_no_line() {
+    let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
+    assert_eq!(settings.primary_comment_action(), SendAction::AddToReview);
+    assert_eq!(settings.secondary_comment_action(), SendAction::AskAgent);
+
+    settings.set_primary_comment_action(SendAction::CommentNow);
+    settings.set_secondary_comment_action(SendAction::SuggestChange);
+    assert_eq!(
+        settings.keymap().chords(Command::CommentNow),
+        Command::AddToReview.default_chords()
+    );
+    settings.save().unwrap();
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"sonnet\" # quick\nprimary_comment_action = \"comment_now\"\nsecondary_comment_action = \"suggest_change\"\n"
+    );
+
+    settings.set_primary_comment_action(SendAction::AddToReview);
+    settings.set_secondary_comment_action(SendAction::AskAgent);
+    settings.save().unwrap();
+    assert_eq!(config_text(home.path()), "ask_model = \"sonnet\" # quick\n");
+}
+
+#[test]
+fn picking_the_secondarys_action_as_primary_swaps_them_and_both_are_written() {
+    let (home, mut settings) = loaded_from("");
+
+    settings.set_primary_comment_action(SendAction::AskAgent);
+    settings.save().unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "primary_comment_action = \"ask_agent\"\nsecondary_comment_action = \"add_to_review\"\n"
+    );
+    let (_, reloaded) = loaded_from(&config_text(home.path()));
+    assert_eq!(reloaded.primary_comment_action(), SendAction::AskAgent);
+    assert_eq!(reloaded.secondary_comment_action(), SendAction::AddToReview);
+}
+
+#[test]
+fn a_key_equal_to_what_the_primary_action_gives_leaves_no_keys_line() {
+    let (home, mut settings) = loaded_from("primary_comment_action = \"comment_now\"\n");
+
+    settings.set_key(Command::CommentNow, Chord::parse("primary-j").unwrap());
+    settings.set_key(Command::CommentNow, Chord::parse("primary-enter").unwrap());
+    settings.save().unwrap();
+
+    assert!(!settings.is_key_changed(Command::CommentNow));
+    assert_eq!(
+        config_text(home.path()),
+        "primary_comment_action = \"comment_now\"\n"
+    );
 }
 
 #[test]

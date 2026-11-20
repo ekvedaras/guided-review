@@ -191,11 +191,7 @@ impl Note {
 
     /// GitHub renders Markdown inside `<details>` only after a blank line.
     fn folded(&self, uploaded: &HashMap<&Path, String>) -> String {
-        let summary = self
-            .title
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
+        let summary = summary_html(&self.title);
         let mark = match &self.mark {
             Mark::Hidden(mark) => format!("<!-- {mark} -->\n"),
             Mark::Text(_) => String::new(),
@@ -216,6 +212,29 @@ impl Note {
             body.trim()
         )
     }
+}
+
+/// GitHub shows back-ticks in a `<summary>` as they are, so a pair becomes `<code>`.
+fn summary_html(title: &str) -> String {
+    let escape = |text: &str| {
+        text.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let mut html = String::new();
+    let mut rest = title;
+    while let Some((before, after)) = rest.split_once('`') {
+        let Some((code, tail)) = after.split_once('`') else {
+            break;
+        };
+        html.push_str(&escape(before));
+        html.push_str("<code>");
+        html.push_str(&escape(code));
+        html.push_str("</code>");
+        rest = tail;
+    }
+    html.push_str(&escape(rest));
+    html
 }
 
 /// The first eight bytes of the SHA-256 of `contents` one after another, in hex.

@@ -73,6 +73,19 @@ impl ReviewCore {
         step
     }
 
+    /// The confirmed change GitHub has not answered yet.
+    pub fn merge_in_flight(&self) -> Option<MergeChange> {
+        self.merging_to_send()
+    }
+
+    /// The title bar of a snapshot scene as if a merge change were sent and GitHub has not answered.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_merge_in_flight(&mut self, change: Option<MergeChange>) {
+        if let Some(controls) = &mut self.pr_controls {
+            controls.stage_merging_to_send(change);
+        }
+    }
+
     pub(super) fn readiness_to_send(&self) -> Option<Readiness> {
         self.pr_controls.as_ref()?.readiness_to_send()
     }

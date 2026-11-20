@@ -108,13 +108,14 @@ use crate::viewer::{
     CheckList, CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox,
     CommentGesture, CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction,
     FixState, GitHubPort, HandOffId, InFlight, Intent, JobProgress, LabelSwitch, LineLocation,
-    MergeOffer, Merging, NextScreen, NoteSubject, NotesButton, OpenPrStatus, Overlay, OverviewPage,
-    OverviewStats, PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress,
-    ReadStep, ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening,
-    RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow,
-    Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
-    StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
-    ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
+    MergeChange, MergeOffer, Merging, NextScreen, NoteSubject, NotesButton, OpenPrStatus, Overlay,
+    OverviewPage, OverviewStats, PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment,
+    ReadProgress, ReadStep, ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave,
+    Reopening, RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow,
+    RouteStopRow, Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet,
+    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId,
+    ThreadRowPlace, ThreadView, ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch,
+    WindowMoment, pluralised,
 };
 use crate::viewer::{
     DEFAULT_WHY_QUESTION, FindingRefusal, FindingRow, FixReply, IssueDetails, RelatedIssue,
@@ -1978,6 +1979,14 @@ impl OneStepLayout {
                         .text_color(colors.muted_text)
                         .child(SharedString::from(stage.line.clone())),
                 )
+                .children(stage.activity.clone().map(|activity| {
+                    div()
+                        .text_xs()
+                        .font_family(*CODE_FONT)
+                        .text_color(colors.muted_text)
+                        .truncate()
+                        .child(SharedString::from(activity))
+                }))
                 .child(div().flex().gap_2().children(show).children(try_again))
         });
         let banner = guided_tour.banner.as_ref().map(|banner| {
@@ -2681,6 +2690,7 @@ impl OneStepLayout {
         let is_local = local_heading.is_some();
         let can_open_on_github = review.can_open_on_github();
         let status = review.pr_status().cloned();
+        let merge_in_flight = review.merge_in_flight();
         let jump = button(
             &colors,
             "title-bar-jump",
@@ -2844,12 +2854,9 @@ impl OneStepLayout {
                             }
                         }
                     }))
-                    .children(
-                        status
-                            .as_ref()
-                            .and_then(PrStatus::open)
-                            .and_then(|status| merge_button(&colors, status.merging, cx)),
-                    )
+                    .children(status.as_ref().and_then(PrStatus::open).and_then(|status| {
+                        merge_button(&colors, status.merging, merge_in_flight, cx)
+                    }))
                     .child(div().flex_1())
                     .child(jump)
                     .children(self.issue_button(&colors, cx))
@@ -3101,7 +3108,16 @@ impl OneStepLayout {
                         .text_color(colors.muted_text)
                         .child(issue.link.label()),
                 )
-                .child(div().flex_1().min_w_0().truncate().child(title))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(InlineMarkdown::new(
+                            format!("title-bar-issue-title-{place}"),
+                            &title,
+                        )),
+                )
         });
         let rows: Vec<_> = rows.collect();
         let card = self.issue_hover.shown().and_then(|place| {
@@ -4438,28 +4454,41 @@ const TITLE_SHRINKS_FIRST: f32 = 10_000.;
 /// In place of the status chip and the merge button once the PR is merged or closed, in GitHub's
 /// colour for it. Nothing is left to change, so it is no button.
 fn closed_pr_chip(colors: &Colors, tone: Tone, mark: Icon, label: &'static str) -> Div {
+    let strong = colors.strong_tone(tone);
     chip(colors, tone)
+        .bg(strong.background)
+        .border_color(strong.border)
+        .text_color(strong.text)
         .h(ButtonSize::Small.height())
         .px_2()
         .gap_1p5()
         .rounded(px(CONTROL_RADIUS))
         .font_weight(FontWeight::MEDIUM)
-        .child(sized_icon(
-            mark,
-            colors.tone(tone).text,
-            ButtonSize::Small.icon_size(),
-        ))
+        .child(sized_icon(mark, strong.text, ButtonSize::Small.icon_size()))
         .child(label)
 }
 
 /// Beside the PR status: Auto-merge, Auto-merge on or Merge now, as `Shift+M` would act; hidden
 /// where GitHub would refuse. A click is the key, so it too needs a second click within 10 s.
+/// From the confirming click until GitHub answers it is a chip saying what is under way, so there
+/// is nothing to click twice.
 fn merge_button(
     colors: &Colors,
     merging: Merging,
+    in_flight: Option<MergeChange>,
     cx: &mut Context<OneStepLayout>,
-) -> Option<Stateful<Div>> {
+) -> Option<AnyElement> {
     let label = merging.button_label()?;
+    if let Some(change) = in_flight {
+        let doing = match change {
+            MergeChange::MergeNow(_) => "Merging",
+            MergeChange::EnableAutoMerge(_) => "Turning on auto-merge",
+            MergeChange::DisableAutoMerge => "Turning off auto-merge",
+        };
+        return Some(
+            closed_pr_chip(colors, Tone::Accent, Icon::GitMerge, doing).into_any_element(),
+        );
+    }
     let icon = match merging.offer().ok()? {
         MergeOffer::DisableAutoMerge => Icon::Clock,
         MergeOffer::EnableAutoMerge | MergeOffer::MergeNow => Icon::GitMerge,
@@ -4486,7 +4515,8 @@ fn merge_button(
         .tooltip(tooltip(|_| "Click twice to confirm".into()))
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::ToggleAutoMerge, window, cx);
-        })),
+        }))
+        .into_any_element(),
     )
 }
 

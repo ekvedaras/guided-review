@@ -45,6 +45,9 @@ actions!(
         Newline,
         Submit,
         SubmitToAgent,
+        SubmitNow,
+        SubmitToAgentNow,
+        SuggestChange,
         Cancel,
         Copy,
         Cut,
@@ -184,6 +187,9 @@ pub struct TextBox {
     on_edit: Option<OnText>,
     on_submit: Option<OnKey>,
     on_submit_to_agent: Option<OnKey>,
+    on_submit_now: Option<OnKey>,
+    on_submit_to_agent_now: Option<OnKey>,
+    on_suggest_change: Option<OnKey>,
     on_cancel: Option<OnKey>,
 }
 
@@ -198,6 +204,9 @@ impl TextBox {
             on_edit: None,
             on_submit: None,
             on_submit_to_agent: None,
+            on_submit_now: None,
+            on_submit_to_agent_now: None,
+            on_suggest_change: None,
             on_cancel: None,
         }
     }
@@ -222,6 +231,36 @@ impl TextBox {
         self
     }
 
+    /// Primary-alt-enter: posts the text at once. Without it the key does nothing.
+    pub fn on_submit_now(
+        mut self,
+        enabled: bool,
+        on_submit_now: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_submit_now = enabled.then(|| Rc::new(on_submit_now) as OnKey);
+        self
+    }
+
+    /// Primary-alt-shift-enter: posts the text at once and asks the agent.
+    pub fn on_submit_to_agent_now(
+        mut self,
+        enabled: bool,
+        on_submit_to_agent_now: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_submit_to_agent_now = enabled.then(|| Rc::new(on_submit_to_agent_now) as OnKey);
+        self
+    }
+
+    /// The key of Suggest change: puts the commented lines in the box as a suggestion.
+    pub fn on_suggest_change(
+        mut self,
+        enabled: bool,
+        on_suggest_change: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_suggest_change = enabled.then(|| Rc::new(on_suggest_change) as OnKey);
+        self
+    }
+
     pub fn on_cancel(mut self, on_cancel: impl Fn(&mut Window, &mut App) + 'static) -> Self {
         self.on_cancel = Some(Rc::new(on_cancel));
         self
@@ -240,6 +279,9 @@ impl RenderOnce for TextBox {
             state.on_edit = self.on_edit;
             state.on_submit = self.on_submit;
             state.on_submit_to_agent = self.on_submit_to_agent;
+            state.on_submit_now = self.on_submit_now;
+            state.on_submit_to_agent_now = self.on_submit_to_agent_now;
+            state.on_suggest_change = self.on_suggest_change;
             state.on_cancel = self.on_cancel;
         });
         let key_context = match self.lines {
@@ -279,6 +321,9 @@ impl RenderOnce for TextBox {
             .on_action(window.listener_for(&state, EditState::newline))
             .on_action(window.listener_for(&state, EditState::submit))
             .on_action(window.listener_for(&state, EditState::submit_to_agent))
+            .on_action(window.listener_for(&state, EditState::submit_now))
+            .on_action(window.listener_for(&state, EditState::submit_to_agent_now))
+            .on_action(window.listener_for(&state, EditState::suggest_change))
             .on_action(window.listener_for(&state, EditState::cancel))
             .on_action(window.listener_for(&state, EditState::copy))
             .on_action(window.listener_for(&state, EditState::cut))
@@ -314,6 +359,9 @@ struct EditState {
     on_edit: Option<OnText>,
     on_submit: Option<OnKey>,
     on_submit_to_agent: Option<OnKey>,
+    on_submit_now: Option<OnKey>,
+    on_submit_to_agent_now: Option<OnKey>,
+    on_suggest_change: Option<OnKey>,
     on_cancel: Option<OnKey>,
 }
 
@@ -374,6 +422,9 @@ impl EditState {
             on_edit: None,
             on_submit: None,
             on_submit_to_agent: None,
+            on_submit_now: None,
+            on_submit_to_agent_now: None,
+            on_suggest_change: None,
             on_cancel: None,
         }
     }
@@ -618,6 +669,29 @@ impl EditState {
     fn submit_to_agent(&mut self, _: &SubmitToAgent, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(on_submit) = self.on_submit_to_agent.clone() {
             cx.defer_in(window, move |_, window, cx| on_submit(window, cx));
+        }
+    }
+
+    fn submit_now(&mut self, _: &SubmitNow, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(on_submit) = self.on_submit_now.clone() {
+            cx.defer_in(window, move |_, window, cx| on_submit(window, cx));
+        }
+    }
+
+    fn submit_to_agent_now(
+        &mut self,
+        _: &SubmitToAgentNow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(on_submit) = self.on_submit_to_agent_now.clone() {
+            cx.defer_in(window, move |_, window, cx| on_submit(window, cx));
+        }
+    }
+
+    fn suggest_change(&mut self, _: &SuggestChange, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(on_suggest) = self.on_suggest_change.clone() {
+            cx.defer_in(window, move |_, window, cx| on_suggest(window, cx));
         }
     }
 

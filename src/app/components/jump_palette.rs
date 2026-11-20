@@ -340,6 +340,7 @@ fn piece_label(colors: &Colors, label: PieceLabel) -> impl IntoElement {
         symbol,
         symbol_name,
         is_part: _,
+        part_name: _,
     } = label;
     div()
         .flex()

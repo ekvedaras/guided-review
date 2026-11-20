@@ -15,3 +15,7 @@ Known risk: the store is not in GitHub's documented API. It takes the token `gh`
 A diagram is found by its own text, which also finds diagrams added before the fold existed. A picture's address is new on every upload, so a picture or summary carries a hidden comment, `<!-- guided-review picture <digest> -->` or `<!-- guided-review summary <digest> -->`. The digest covers the picture's bytes, or the summary's text and all of its pictures, so a redrawn picture or an edited summary can be added again.
 
 A `#` line inside a `<details>` fold belongs to the fold, so a folded summary's headings do not end the `Notes` section.
+
+## Back-ticks in a fold's title
+
+2026-11-20. GitHub does not render Markdown inside `<summary>`, so a title's back-tick pairs are written as `<code>` (escaped inside); an unpaired back-tick stays. Code: `summary_html` in `src/viewer/pr_notes.rs`, issue #170.

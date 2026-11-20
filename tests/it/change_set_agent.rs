@@ -171,11 +171,8 @@ fn a_pr_never_looks_in_a_folder_for_its_agent() {
 fn the_sidebar_calls_a_local_reviews_agent_an_agent_and_a_prs_a_tour_agent() {
     let agent = on("t2", AgentStatus::Idle);
 
-    assert_eq!(agent.line_for(&local()), "Agent `t2`: idle");
-    assert_eq!(
-        agent.line_for(&PR.parse().unwrap()),
-        "Tour agent `t2`: idle"
-    );
+    assert_eq!(agent.line_for(&local()), "Agent: idle");
+    assert_eq!(agent.line_for(&PR.parse().unwrap()), "Tour agent: idle");
     assert_eq!(TourAgentState::None.line_for(&local()), "Agent: none");
 }
 

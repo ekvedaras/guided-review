@@ -955,8 +955,10 @@ fn inline_text(
         .into_any_element()
 }
 
-/// Inline code gets a third of an em of space on each side inside its background, as padding.
-const CODE_PADDING: &str = "\u{2004}";
+/// Inline code gets a space on each side inside its background, as padding. A no-break space, since gpui
+/// keeps it with the code word when wrapping, where it would wrap before a closing U+2004 and leave it alone
+/// in a box on the next line.
+const CODE_PADDING: &str = "\u{00A0}";
 
 /// Runs joined into one line of text, with no colours in it, so one parse serves every theme.
 #[derive(Debug, PartialEq)]
@@ -1006,6 +1008,15 @@ impl InlineText {
         }
     }
 
+    /// The code words themselves, without the padding around them, which stays in the text's font.
+    fn code_words(&self) -> Vec<Range<usize>> {
+        self.styled
+            .iter()
+            .filter(|(_, run)| run.code)
+            .map(|(range, _)| range.clone())
+            .collect()
+    }
+
     fn highlights(&self, colors: &Colors) -> Vec<(Range<usize>, HighlightStyle)> {
         self.styled
             .iter()
@@ -1037,7 +1048,15 @@ fn styled_text(
         Some(selected) => with_selection(&highlights, selected, colors.text_selection),
         None => highlights,
     };
-    let styled = StyledText::new(inline.text.clone()).with_highlights(highlights);
+    let code_font = SharedString::from(*CODE_FONT);
+    let styled = StyledText::new(inline.text.clone())
+        .with_highlights(highlights)
+        .with_font_family_overrides(
+            inline
+                .code_words()
+                .into_iter()
+                .map(|range| (range, code_font.clone())),
+        );
     let layout = styled.layout().clone();
     let backgrounds = (!inline.code_ranges.is_empty())
         .then(|| code_backgrounds(layout.clone(), inline.code_ranges.clone()));
@@ -1123,41 +1142,51 @@ fn code_backgrounds(layout: TextLayout, ranges: Vec<Range<usize>>) -> AnyElement
         |_, _, _| (),
         move |_, (), window, cx| {
             let colors = Colors::active(cx);
-            let (color, edge) = (colors.surface, colors.subtle_border);
+            let (color, edge) = (colors.inline_code, colors.subtle_border);
             let line_height = layout.line_height();
             let inset = line_height * 0.1;
             let text = layout.text();
+            let line_left = layout.bounds().left();
             for range in &ranges {
-                let mut points = range
+                let points = range
                     .clone()
                     .chain([range.end])
                     .filter(|&index| text.is_char_boundary(index))
                     .filter_map(|index| layout.position_for_index(index));
-                let Some(mut start) = points.next() else {
-                    continue;
-                };
-                let mut end = start;
-                for at in points {
-                    if at.y != start.y {
-                        paint_code_background(
-                            window,
-                            start,
-                            end.x,
-                            line_height,
-                            inset,
-                            (color, edge),
-                        );
-                        start = at;
-                    }
-                    end = at;
+                for (start, end_x) in code_box_rows(points, line_left) {
+                    paint_code_background(window, start, end_x, line_height, inset, (color, edge));
                 }
-                paint_code_background(window, start, end.x, line_height, inset, (color, edge));
             }
         },
     )
     .absolute()
     .size_full()
     .into_any_element()
+}
+
+/// One box per line the code covers, as its top-left corner and right edge, from the positions of the
+/// code's characters and its end. gpui places the index a line wraps at on the end of the line before,
+/// though its character starts the next line, so a box on a wrapped line starts at the line's left.
+fn code_box_rows(
+    points: impl IntoIterator<Item = gpui::Point<gpui::Pixels>>,
+    line_left: gpui::Pixels,
+) -> Vec<(gpui::Point<gpui::Pixels>, gpui::Pixels)> {
+    let mut points = points.into_iter();
+    let Some(mut start) = points.next() else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    let mut end = start;
+    for at in points {
+        if at.y != start.y {
+            rows.push((start, end.x));
+            start = point(line_left, at.y);
+        }
+        end = at;
+    }
+    rows.push((start, end.x));
+    rows.retain(|(start, end_x)| *end_x > start.x);
+    rows
 }
 
 fn paint_code_background(
@@ -1168,9 +1197,6 @@ fn paint_code_background(
     inset: gpui::Pixels,
     (color, edge): (gpui::Rgba, gpui::Rgba),
 ) {
-    if end_x <= start.x {
-        return;
-    }
     let bounds = gpui::Bounds::from_corners(
         point(start.x, start.y + inset),
         point(end_x, start.y + line_height - inset),
@@ -1306,14 +1332,48 @@ mod tests {
     }
 
     #[test]
+    fn code_that_starts_a_wrapped_line_has_its_box_from_the_line_left() {
+        let left = px(5.);
+        let at = |x: f32, y: f32| point(px(x), px(y));
+        let padding_wrapped_at = at(300., 0.);
+        let code_letters = [at(13., 20.), at(21., 20.), at(29., 20.)];
+
+        let rows = code_box_rows([padding_wrapped_at].into_iter().chain(code_letters), left);
+
+        assert_eq!(rows, vec![(at(5., 20.), px(29.))]);
+    }
+
+    #[test]
+    fn code_that_wraps_mid_word_has_a_box_on_each_line() {
+        let at = |x: f32, y: f32| point(px(x), px(y));
+        let points = [
+            at(200., 0.),
+            at(208., 0.),
+            at(216., 0.),
+            at(13., 20.),
+            at(21., 20.),
+        ];
+
+        let rows = code_box_rows(points, px(5.));
+
+        assert_eq!(rows, vec![(at(200., 0.), px(216.)), (at(5., 20.), px(21.))]);
+    }
+
+    #[test]
+    fn code_padding_is_a_character_gpui_never_wraps_at() {
+        // gpui's line wrapper glues only U+00A0, U+202F and U+2011 to their word; it may break before any other space.
+        assert_eq!(CODE_PADDING, "\u{00A0}");
+    }
+
+    #[test]
     fn a_changed_title_is_not_drawn_from_the_old_parse() {
         assert_eq!(
             parsed_inline("old `title`").text.as_ref(),
-            "old \u{2004}title\u{2004}"
+            "old \u{00A0}title\u{00A0}"
         );
         assert_eq!(
             parsed_inline("new `title`").text.as_ref(),
-            "new \u{2004}title\u{2004}"
+            "new \u{00A0}title\u{00A0}"
         );
     }
 
@@ -1333,6 +1393,18 @@ mod tests {
             dark.first().and_then(|(_, style)| style.color),
             Some(Colors::of(Appearance::Dark).accent.into())
         );
+    }
+
+    #[test]
+    fn inline_code_words_are_set_apart_from_their_padding() {
+        let text = InlineText::of(&runs_of(&Markdown::parse("a `bc` d").blocks));
+
+        let words: Vec<&str> = text
+            .code_words()
+            .into_iter()
+            .filter_map(|range| text.text.get(range))
+            .collect();
+        assert_eq!(words, ["bc"]);
     }
 
     #[test]

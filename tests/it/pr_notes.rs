@@ -112,6 +112,26 @@ fn a_title_with_html_in_it_shows_as_text_in_the_summary() {
 }
 
 #[test]
+fn back_ticks_in_a_title_become_code_in_the_summary() {
+    let changed = with_diagram_in_notes("", "Run `a < b` then `c`", DIAGRAM).unwrap();
+
+    assert!(
+        changed.contains("<summary>Run <code>a &lt; b</code> then <code>c</code></summary>"),
+        "{changed}"
+    );
+}
+
+#[test]
+fn a_back_tick_with_no_partner_stays_as_it_is_in_the_summary() {
+    let changed = with_diagram_in_notes("", "It's `odd", DIAGRAM).unwrap();
+
+    assert!(
+        changed.contains("<summary>It's `odd</summary>"),
+        "{changed}"
+    );
+}
+
+#[test]
 fn a_description_with_no_notes_section_gets_one_at_its_end() {
     assert_eq!(
         with_diagram_in_notes("## Why\n\nBecause.\n", "Checkout flow", DIAGRAM).unwrap(),

@@ -9,7 +9,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, px,
 };
 
-use crate::app::components::markdown_view::{MarkdownView, PreparedMarkdown};
+use crate::app::components::markdown_view::{InlineMarkdown, MarkdownView, PreparedMarkdown};
 use crate::app::components::palette::{CARD_RADIUS, Colors, Tone};
 use crate::issue::IssueLink;
 use crate::viewer::{IssueDetails, IssueState};
@@ -127,7 +127,10 @@ pub fn issue_card(
                     .flex_1()
                     .min_w_0()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(SharedString::from(details.title.to_string())),
+                    .child(InlineMarkdown::new(
+                        format!("issue-card-title-{link}"),
+                        &details.title,
+                    )),
             ),
     )
     .child(

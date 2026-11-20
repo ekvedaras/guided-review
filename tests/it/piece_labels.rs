@@ -67,6 +67,26 @@ impl Pull {
         Self { repo, base, head }
     }
 
+    /// `docs/guide.md` changes a line under "Two" and a line under "Four", far apart, so its two
+    /// hunks are two numbered parts.
+    fn of_guide() -> Self {
+        let repo = FixtureRepo::cloned_from("acme/shop");
+        let guide = |two: &str, four: &str| -> String {
+            let filler = |count: usize| "filler\n\n".repeat(count);
+            format!(
+                "# Guide\n\n## One\n\n{}## Two\n\n{two}\n\n{}## Three\n\n{}## Four\n\n{four}\n",
+                filler(10),
+                filler(10),
+                filler(10),
+            )
+        };
+        repo.write("docs/guide.md", &guide("old two", "old four"));
+        let base = repo.commit("base");
+        repo.write("docs/guide.md", &guide("new two", "new four"));
+        let head = repo.commit("head");
+        Self { repo, base, head }
+    }
+
     fn open(&self) -> Review {
         let symbols = |file: &str, names: &[&str]| -> Vec<Value> {
             names
@@ -187,6 +207,28 @@ fn a_file_of_tiny_pieces_opens_with_no_labels_and_a_file_of_larger_pieces_with_t
     assert_eq!(
         markers_of(&review, "app/Large.php"),
         ["app/Large.php#Cart::x", "app/Large.php#Cart::y"]
+    );
+}
+
+#[test]
+fn a_folded_markdown_box_names_each_part_by_the_section_it_sits_in() {
+    let pull = Pull::of_guide();
+    let mut review = pull.open_with(vec![json!({"file": "docs/guide.md"})]);
+
+    review.toggle_fold(&"cart".into());
+
+    let names: Vec<_> = review
+        .page()
+        .rows()
+        .iter()
+        .filter_map(|row| match row {
+            PageRow::PieceMarker(heading) => heading.label.shown_name(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        names.iter().map(|name| &**name).collect::<Vec<_>>(),
+        ["Two", "Four"]
     );
 }
 

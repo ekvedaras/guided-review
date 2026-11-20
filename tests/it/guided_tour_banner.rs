@@ -5,8 +5,9 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, TourPin};
 use guided_review::update::Build;
 use guided_review::viewer::{
-    AgentLinkOff, Effect, GuidedTourProgress, GuidedTourRefusal, Intent, PaletteAction, Review,
-    ReviewStateFile, Screen, TourAgentState, WindowMoment,
+    AgentLinkOff, AgentStatus, Effect, GuidedTourProgress, GuidedTourRefusal, Intent,
+    PaletteAction, Review, ReviewStateFile, Screen, TerminalId, TourAgentState, TourWriting,
+    WindowMoment,
 };
 use serde_json::json;
 
@@ -125,6 +126,115 @@ fn with_the_agent_link_off_writing_is_refused_and_nothing_starts() {
         review.overview_page().write_guided_tour_refusal,
         Some(GuidedTourRefusal::AgentLinkOff)
     );
+}
+
+fn writing_with(status: AgentStatus, screen: &[&str]) -> GuidedTourProgress {
+    let mut writing = TourWriting::starting();
+    writing.status_is(status);
+    writing.screen_is(screen.iter().map(|line| (*line).to_owned()).collect());
+    GuidedTourProgress::Writing(writing)
+}
+
+#[test]
+fn the_stage_shows_the_last_line_the_agent_printed() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+
+    review.guided_tour_is(writing_with(
+        AgentStatus::Working,
+        &["• old news", "  • Reading a.txt  ", "", "   "],
+    ));
+
+    let stage = review.guided_tour_stage().unwrap();
+    assert_eq!(stage.activity.as_deref(), Some("Reading a.txt"));
+}
+
+#[test]
+fn the_stage_shows_the_latest_step_of_a_claude_screen_not_its_spinner_or_tool_output() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+
+    review.guided_tour_is(writing_with(
+        AgentStatus::Working,
+        &[
+            "• Skill(tour)",
+            "  ⎿  Loaded skill",
+            "• Writing the tour and its pictures now.",
+            "• Running guided-review check 'https://github.com/acme/shop/…",
+            "  ⎿  $ guided-review check 'https://github.com/acme/shop/pull/7'",
+            "· Beboppin'… (Write pictures, explainer, tour; run check · 54s)",
+        ],
+    ));
+
+    let stage = review.guided_tour_stage().unwrap();
+    assert_eq!(
+        stage.activity.as_deref(),
+        Some("Running guided-review check 'https://github.com/acme/shop/…")
+    );
+}
+
+#[test]
+fn the_stage_reads_a_step_marked_with_a_filled_circle_too() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+
+    review.guided_tour_is(writing_with(
+        AgentStatus::Working,
+        &["⏺ Writing the tour: 4 steps", "✻ Checking the tour…"],
+    ));
+
+    let stage = review.guided_tour_stage().unwrap();
+    assert_eq!(stage.activity.as_deref(), Some("Writing the tour: 4 steps"));
+}
+
+#[test]
+fn the_stage_has_no_activity_while_only_a_spinner_word_shows() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+
+    review.guided_tour_is(writing_with(
+        AgentStatus::Working,
+        &["✶ Beboppin'… (12s)", "  ⎿  $ ls"],
+    ));
+
+    assert_eq!(review.guided_tour_stage().unwrap().activity, None);
+}
+
+#[test]
+fn the_stage_has_no_activity_before_the_agent_printed_anything() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+
+    review.guided_tour_is(writing_with(AgentStatus::Working, &["", " "]));
+
+    assert_eq!(review.guided_tour_stage().unwrap().activity, None);
+}
+
+#[test]
+fn the_stage_says_when_the_agent_waits_for_the_reviewer() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+
+    review.guided_tour_is(writing_with(AgentStatus::WaitingForYou, &[]));
+
+    let line = review.guided_tour_stage().unwrap().line;
+    assert!(line.contains("waits for you"), "{line}");
+}
+
+#[test]
+fn while_a_guided_tour_is_written_the_stage_speaks_for_the_agent_so_the_sidebar_has_one_agent_line()
+{
+    let shop = Shop::new();
+    let mut review = shop.basic();
+    let agent = TourAgentState::Agent {
+        terminal: TerminalId::new("t11"),
+        status: AgentStatus::Working,
+    };
+    assert!(review.shows_tour_agent_line(&agent));
+
+    review.guided_tour_is(writing_with(AgentStatus::Working, &[]));
+
+    assert!(!review.shows_tour_agent_line(&agent));
 }
 
 #[test]

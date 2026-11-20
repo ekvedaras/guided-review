@@ -26,6 +26,7 @@ use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::chip::{chip, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
+use super::markdown_view::InlineMarkdown;
 use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
@@ -600,7 +601,12 @@ impl PrSwitcherView {
             .when(shown.words.title_is_branch, |title| {
                 title.font_family(*CODE_FONT).text_size(px(13.))
             })
-            .child(shown.words.title.clone());
+            .child(if shown.words.title_is_branch {
+                shown.words.title.clone().into_any_element()
+            } else {
+                InlineMarkdown::new(format!("switcher-title-{index}"), &shown.words.title)
+                    .into_any_element()
+            });
         let facts = div()
             .min_w_0()
             .truncate()

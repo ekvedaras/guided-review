@@ -9,7 +9,7 @@ use super::key_cap::{CapGround, chord_caps};
 use super::palette::{CONTROL_RADIUS, Colors};
 use super::tooltip::tooltip;
 use crate::app::keymap::keymap;
-use crate::viewer::Command;
+use crate::viewer::{Chord, Command};
 
 /// How loud a button is. A screen has one `Primary`: the step the reader takes next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -289,8 +289,11 @@ pub fn toggle_button(
 
 /// The keys that do what the button does, at its trailing end, on the button's own ground.
 pub fn button_keys(colors: &Colors, kind: ButtonKind, command: Command, cx: &App) -> Div {
-    let caps = keymap(cx)
-        .first_chord(command)
-        .map(|chord| chord_caps(colors, chord, CapGround::of(kind)));
+    chord_keys(colors, kind, keymap(cx).first_chord(command))
+}
+
+/// The same for a key already looked up; no key draws nothing.
+pub fn chord_keys(colors: &Colors, kind: ButtonKind, chord: Option<Chord>) -> Div {
+    let caps = chord.map(|chord| chord_caps(colors, chord, CapGround::of(kind)));
     div().flex_none().ml_1().children(caps)
 }

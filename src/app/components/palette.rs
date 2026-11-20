@@ -322,6 +322,8 @@ pub struct Colors {
     pub pressed: Rgba,
     pub border: Rgba,
     pub subtle_border: Rgba,
+    /// Behind inline code in prose, on the page or on a card.
+    pub inline_code: Rgba,
     pub text: Rgba,
     /// The sidebar's labels: a step quieter than `text`, so the page leads.
     pub sidebar_text: Rgba,
@@ -346,6 +348,10 @@ pub struct Colors {
     pub accent_fill_hover: Gradient,
     pub accent_fill_pressed: Rgba,
     pub on_accent_fill: Rgba,
+    /// A merged PR's chip in the title bar, flat, under `on_accent_fill`; brighter in the dark, to stand out from the page.
+    pub merged_fill: Rgba,
+    /// A closed PR's chip, likewise.
+    pub closed_fill: Rgba,
     pub warning: Rgba,
     pub warning_background: Rgba,
     pub warning_border: Rgba,
@@ -446,6 +452,7 @@ impl Colors {
             pressed: rgb(ink::S4),
             border: rgb(0xc9ccd8),
             subtle_border: rgb(0xe3e5ee),
+            inline_code: rgb(0xdfe3ef),
             text,
             sidebar_text: rgb(ink::S10),
             muted_text,
@@ -463,6 +470,8 @@ impl Colors {
             accent_fill_hover: Gradient::of(0x6462ee, 0x5650cc),
             accent_fill_pressed: rgb(iris::S700),
             on_accent_fill: rgb(WHITE),
+            merged_fill: rgb(iris::S700),
+            closed_fill: rgb(red::S700),
             warning: rgb(amber::S700),
             warning_background: rgb(amber::S50),
             warning_border: rgb(amber::S300),
@@ -517,6 +526,7 @@ impl Colors {
             pressed: rgb(0x38393e),
             border: rgb(0x3c3d43),
             subtle_border: rgb(0x292b2f),
+            inline_code: rgb(0x34363c),
             text,
             sidebar_text: rgb(0xdddde0),
             muted_text,
@@ -534,6 +544,8 @@ impl Colors {
             accent_fill_hover: Gradient::of(iris::S600, iris::S700),
             accent_fill_pressed: rgb(0x403a9c),
             on_accent_fill: rgb(WHITE),
+            merged_fill: rgb(iris::S600),
+            closed_fill: rgb(red::S600),
             warning: rgb(amber::S400),
             warning_background: rgb(amber::S950),
             warning_border: rgb(amber::S800),
@@ -618,6 +630,20 @@ impl Colors {
             text,
             background,
             border,
+        }
+    }
+
+    /// A tone as a strong fill with white content, for a state that must be seen from afar: a merged or closed PR.
+    pub fn strong_tone(&self, tone: Tone) -> ToneColors {
+        let fill = match tone {
+            Tone::Accent => self.merged_fill,
+            Tone::Danger => self.closed_fill,
+            Tone::Neutral | Tone::Success | Tone::Warning => return self.tone(tone),
+        };
+        ToneColors {
+            text: self.on_accent_fill,
+            background: fill,
+            border: fill,
         }
     }
 
