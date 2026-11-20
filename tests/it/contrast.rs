@@ -1,5 +1,5 @@
 use gpui::Rgba;
-use guided_review::app::components::palette::{Appearance, Colors};
+use guided_review::app::components::palette::{Appearance, Colors, Tone};
 use guided_review::viewer::Capture;
 
 const BODY_TEXT: f32 = 4.5;
@@ -175,6 +175,30 @@ fn shortfalls(appearance: Appearance) -> Vec<String> {
                 .then(|| format!("{name}: {} on {} is {ratio:.2}", hex(text), hex(ground)))
         })
         .collect()
+}
+
+const STRONG_FILL_AGAINST_PAGE: f32 = 3.0;
+
+#[test]
+fn the_merged_and_closed_chips_are_strong_fills_with_white_content_in_both_appearances() {
+    for appearance in [Appearance::Light, Appearance::Dark] {
+        let colors = Colors::of(appearance);
+        for tone in [Tone::Accent, Tone::Danger] {
+            let strong = colors.strong_tone(tone);
+            assert_eq!(
+                strong.text, colors.on_accent_fill,
+                "{tone:?} {appearance:?} text"
+            );
+            assert!(
+                contrast(strong.text, strong.background) >= BODY_TEXT,
+                "{tone:?} {appearance:?}: white on its fill"
+            );
+            assert!(
+                contrast(strong.background, colors.background) >= STRONG_FILL_AGAINST_PAGE,
+                "{tone:?} {appearance:?}: the fill stands out from the page"
+            );
+        }
+    }
 }
 
 #[test]

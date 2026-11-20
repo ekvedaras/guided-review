@@ -4445,17 +4445,17 @@ const TITLE_SHRINKS_FIRST: f32 = 10_000.;
 /// In place of the status chip and the merge button once the PR is merged or closed, in GitHub's
 /// colour for it. Nothing is left to change, so it is no button.
 fn closed_pr_chip(colors: &Colors, tone: Tone, mark: Icon, label: &'static str) -> Div {
+    let strong = colors.strong_tone(tone);
     chip(colors, tone)
+        .bg(strong.background)
+        .border_color(strong.border)
+        .text_color(strong.text)
         .h(ButtonSize::Small.height())
         .px_2()
         .gap_1p5()
         .rounded(px(CONTROL_RADIUS))
         .font_weight(FontWeight::MEDIUM)
-        .child(sized_icon(
-            mark,
-            colors.tone(tone).text,
-            ButtonSize::Small.icon_size(),
-        ))
+        .child(sized_icon(mark, strong.text, ButtonSize::Small.icon_size()))
         .child(label)
 }
 
