@@ -139,6 +139,7 @@ mod reviewing_mark;
 mod running_binary;
 mod screen_travel;
 mod settings;
+mod settings_pages;
 mod shortcuts;
 mod show;
 mod step_details;

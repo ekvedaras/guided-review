@@ -16,7 +16,7 @@ use crate::ide::{IdeChoice, IdeTemplate};
 use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use crate::viewer::{
     CloneRowProblem, MergeMethod, MoreLines, Motion, Presence, SaveOutcome, SendAction, SendRole,
-    SettingProblem, Settings,
+    SettingProblem, Settings, SettingsPage,
 };
 
 use super::button::{
@@ -25,7 +25,7 @@ use super::button::{
 use super::chip::{build_chip, chip, dropping_in, notice_band};
 use super::icon::{Icon, sized_icon};
 use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, pop_when_shown, slide_in};
-use super::overlay::{close_presence, rise_for, scrim_fade};
+use super::overlay::{close_presence, picker_row_at, rise_for, scrim_fade, touching_places};
 use super::palette::{
     CARD_RADIUS, CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, TEXT_FONT, Tone, inside_edge,
 };
@@ -37,8 +37,10 @@ use super::version_link::version_link;
 
 mod keys;
 
+/// The list of pages on the sheet's left.
+const PAGE_LIST_WIDTH: f32 = 180.;
 /// The widest a sheet over a review grows on a wide window.
-const SHEET_WIDTH: f32 = 860.;
+const SHEET_WIDTH: f32 = PAGE_LIST_WIDTH + 860.;
 /// The column the header, the sections and the action bar's contents line up in.
 const COLUMN_WIDTH: f32 = 780.;
 
@@ -89,6 +91,7 @@ impl ClonePart {
 }
 
 struct ShownProblem {
+    page: SettingsPage,
     slot: Slot,
     clone_part: Option<ClonePart>,
     message: SharedString,
@@ -111,6 +114,7 @@ impl ShownProblem {
             SettingProblem::Key(_) => Slot::Keys,
         };
         Self {
+            page: SettingsPage::of(problem),
             slot,
             clone_part,
             message: problem.message().into(),
@@ -300,6 +304,8 @@ pub struct SettingsPanel {
     notice: Option<SharedString>,
     clone_focus: Vec<FocusHandle>,
     recording: Option<keys::Recording>,
+    page: SettingsPage,
+    hovered_page: Option<SettingsPage>,
     scroll: ScrollHandle,
     /// Where this app's binary is, so the reviewer can tell which install runs.
     running_binary: SharedString,
@@ -324,6 +330,8 @@ impl SettingsPanel {
             notice: None,
             clone_focus: Vec::new(),
             recording: None,
+            page: SettingsPage::Agents,
+            hovered_page: None,
             scroll: ScrollHandle::new(),
             running_binary: crate::platform::running_binary()
                 .map_or_else(|_| "unknown".into(), |exe| exe.display().to_string().into()),
@@ -359,6 +367,13 @@ impl SettingsPanel {
             Ok(editing) => Loaded::Ready(Box::new(editing)),
             Err(error) => Loaded::Failed(format!("{error:#}").into()),
         });
+        self.page = match &self.loaded {
+            Some(Loaded::Ready(editing)) => {
+                SettingsPage::Agents.after_refusal(&editing.settings.problems_on_open())
+            }
+            _ => SettingsPage::Agents,
+        };
+        self.scroll.set_offset(gpui::point(px(0.), px(0.)));
         self.presence.open(Instant::now());
         self.recording = None;
         self.clone_focus.clear();
@@ -430,6 +445,7 @@ impl SettingsPanel {
         let Some(editing) = self.editing_mut() else {
             return;
         };
+        let mut refused = None;
         match editing.settings.save() {
             Ok(SaveOutcome::NothingChanged) => {
                 self.close(window, cx);
@@ -444,10 +460,71 @@ impl SettingsPanel {
             Ok(SaveOutcome::Refused(problems)) => {
                 editing.note = None;
                 editing.problems = problems.iter().map(ShownProblem::of).collect();
+                refused = Some(problems);
             }
             Err(error) => editing.note = Some(format!("{error:#}").into()),
         }
+        if let Some(problems) = refused {
+            self.show_page(self.page.after_refusal(&problems), cx);
+        }
         cx.notify();
+    }
+
+    fn show_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
+        if self.page != page {
+            self.page = page;
+            self.scroll.set_offset(gpui::point(px(0.), px(0.)));
+        }
+        cx.notify();
+    }
+
+    fn page_list(
+        &self,
+        editing: &Editing,
+        colors: &Colors,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let pages = SettingsPage::ALL;
+        let keys_clash = !editing.settings.key_problems().is_empty();
+        div()
+            .flex_none()
+            .w(px(PAGE_LIST_WIDTH))
+            .pt_6()
+            .border_r_1()
+            .border_color(colors.subtle_border)
+            .flex()
+            .flex_col()
+            .children(pages.iter().enumerate().map(|(index, &page)| {
+                let above = index
+                    .checked_sub(1)
+                    .and_then(|above| pages.get(above))
+                    .copied();
+                let below = pages.get(index + 1).copied();
+                let (place, hovered_touching) =
+                    touching_places(page, above, below, self.page, self.hovered_page);
+                let has_problem = editing.problems.iter().any(|problem| problem.page == page)
+                    || (page == SettingsPage::Keys && keys_clash);
+                picker_row_at(
+                    colors,
+                    SharedString::from(format!("settings-page-{}", page.title())),
+                    place,
+                    hovered_touching,
+                )
+                .h(px(32.))
+                .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+                    if *is_hovered {
+                        this.hovered_page = Some(page);
+                    } else if this.hovered_page == Some(page) {
+                        this.hovered_page = None;
+                    }
+                    cx.notify();
+                }))
+                .on_click(cx.listener(move |this, _, _, cx| this.show_page(page, cx)))
+                .child(div().flex_1().child(page.title()))
+                .when(has_problem, |row| {
+                    row.child(sized_icon(Icon::CircleAlert, colors.danger, px(14.)))
+                })
+            }))
     }
 
     fn open_default_file(&mut self, kind: InstructionsKind, cx: &mut Context<Self>) {
@@ -647,6 +724,105 @@ impl SettingsPanel {
 
     fn section_rule(colors: &Colors) -> impl IntoElement {
         column(div().h(px(1.)).bg(colors.subtle_border))
+    }
+
+    /// Only the shown page's sections are built, so the long Keys list costs nothing elsewhere.
+    fn page_sections(
+        &self,
+        editing: &Editing,
+        colors: &Colors,
+        cx: &Context<Self>,
+    ) -> Vec<gpui::AnyElement> {
+        let sections: Vec<gpui::AnyElement> = match self.page {
+            SettingsPage::Agents => vec![
+                Self::section(
+                    colors,
+                    "Summary instructions",
+                    "How the tour writer writes the reviewer summary at the start of a tour.",
+                    self.instructions(InstructionsKind::Summary, editing, colors, cx),
+                )
+                .into_any_element(),
+                Self::section(
+                    colors,
+                    "Review instructions",
+                    "What the review agent looks for when it reviews a change.",
+                    self.instructions(InstructionsKind::Review, editing, colors, cx),
+                )
+                .into_any_element(),
+                Self::section(
+                    colors,
+                    "Ask",
+                    "The model and effort Ask uses.",
+                    self.ask(editing, colors, cx),
+                )
+                .into_any_element(),
+            ],
+            SettingsPage::Code => vec![
+                Self::section(
+                    colors,
+                    "Open code in",
+                    "The editor a code link opens. With none, code opens on GitHub.",
+                    self.ide(editing, colors, cx),
+                )
+                .into_any_element(),
+                Self::section(
+                    colors,
+                    "More lines",
+                    "How many lines the arrows on a gap and the [ and ] keys show at a time.",
+                    self.more_lines(editing, colors, cx),
+                )
+                .into_any_element(),
+                Self::section(
+                    colors,
+                    "Clones",
+                    "Where each repo is cloned on this machine.",
+                    self.clones(editing, colors, cx),
+                )
+                .into_any_element(),
+            ],
+            SettingsPage::GitHub => vec![
+                Self::section(
+                    colors,
+                    "Comments",
+                    "Which send actions of a comment or reply box you reach for most. Where a box lacks one, the nearest it has stands in.",
+                    Self::comment_actions(editing, colors, cx),
+                )
+                .into_any_element(),
+                Self::section(
+                    colors,
+                    "Merge",
+                    "How auto-merge and Merge now merge a PR.",
+                    Self::merge_method(editing, colors, cx),
+                )
+                .into_any_element(),
+            ],
+            SettingsPage::Keys => vec![
+                Self::section(
+                    colors,
+                    "Keys",
+                    "What each key does. Change takes the next key you press; Esc leaves it as it was.",
+                    self.keys(editing, colors, cx),
+                )
+                .into_any_element(),
+            ],
+            SettingsPage::About => vec![
+                Self::section(
+                    colors,
+                    "Version",
+                    "The build this app runs and where its binary is.",
+                    self.version(colors),
+                )
+                .into_any_element(),
+            ],
+        };
+        let mut shown = Vec::with_capacity(sections.len() * 2);
+        for (index, section) in sections.into_iter().enumerate() {
+            if index > 0 {
+                shown.push(Self::section_rule(colors).into_any_element());
+            }
+            shown.push(section);
+        }
+        shown
     }
 
     fn instructions(
@@ -1616,7 +1792,8 @@ impl SettingsPanel {
             .flex_none()
             .flex()
             .justify_center()
-            .px_8()
+            .pl(px(PAGE_LIST_WIDTH + 32.))
+            .pr_8()
             .bg(colors.overlay)
             .when(
                 matches!(self.placement, Placement::SheetOverReview),
@@ -1683,24 +1860,10 @@ impl SettingsPanel {
         self.start_recording(crate::viewer::Command::ToggleRead, cx);
     }
 
-    /// Scrolls the form to the Keys section, for the pictures.
+    /// Shows one page, for the pictures.
     #[cfg(feature = "snapshots")]
-    pub fn scroll_to_keys(&self) {
-        self.scroll.scroll_to_item(KEYS_SECTION);
-    }
-
-    /// Scrolls the form to the More lines section, for the pictures.
-    #[cfg(feature = "snapshots")]
-    pub fn scroll_to_more_lines(&self) {
-        self.scroll
-            .set_offset(gpui::point(px(0.), px(-MORE_LINES_OFFSET)));
-    }
-
-    /// Scrolls the form to the Comments section, for the pictures.
-    #[cfg(feature = "snapshots")]
-    pub fn scroll_to_comments(&self) {
-        self.scroll
-            .set_offset(gpui::point(px(0.), px(-COMMENTS_OFFSET)));
+    pub fn stage_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
+        self.show_page(page, cx);
     }
 
     /// Picks Comment now as the primary action and Suggest change as the secondary one, for the pictures.
@@ -1716,28 +1879,12 @@ impl SettingsPanel {
         });
     }
 
-    /// Scrolls the form to its last section, for the pictures.
+    /// Scrolls the form to its end, for the pictures.
     #[cfg(feature = "snapshots")]
     pub fn scroll_to_end(&self) {
-        self.scroll.scroll_to_item(SECTION_COUNT);
+        self.scroll.scroll_to_bottom();
     }
 }
-
-/// Where the Keys section sits among the form's children, sections and rules alike.
-#[cfg(feature = "snapshots")]
-const KEYS_SECTION: usize = 10;
-
-/// How far down the form the More lines section starts, in pixels.
-#[cfg(feature = "snapshots")]
-const MORE_LINES_OFFSET: f32 = 760.;
-
-/// How far down the form the Comments section starts, in pixels.
-#[cfg(feature = "snapshots")]
-const COMMENTS_OFFSET: f32 = 1050.;
-
-/// The form's header and its four sections, which the scroll counts as items.
-#[cfg(feature = "snapshots")]
-const SECTION_COUNT: usize = 4;
 
 /// The Settings column: as wide as the window allows, up to `COLUMN_WIDTH`, centred.
 fn column(content: impl IntoElement) -> gpui::Div {
@@ -1980,6 +2127,7 @@ impl Render for SettingsPanel {
         let header = div()
             .flex_none()
             .w_full()
+            .pl(px(PAGE_LIST_WIDTH))
             .pt_5()
             .pb_4()
             .border_b_1()
@@ -2005,7 +2153,7 @@ impl Render for SettingsPanel {
                             .child(
                                 div()
                                     .text_color(colors.muted_text)
-                                    .child("How tours are summarised, where code opens, how Ask thinks, where your clones live and which keys do what."),
+                                    .child("How agents work, where code opens, how PRs are commented on and merged, and which keys do what."),
                             ),
                     )
                     .child(close),
@@ -2028,94 +2176,25 @@ impl Render for SettingsPanel {
                 None,
             ),
             Loaded::Ready(editing) => {
-                let summary = self.instructions(InstructionsKind::Summary, editing, &colors, cx);
-                let review = self.instructions(InstructionsKind::Review, editing, &colors, cx);
-                let ide = self.ide(editing, &colors, cx);
-                let ask = self.ask(editing, &colors, cx);
-                let more_lines = self.more_lines(editing, &colors, cx);
-                let clones = self.clones(editing, &colors, cx);
-                let keys = self.keys(editing, &colors, cx);
+                let form = div()
+                    .id("settings-form")
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .flex()
+                    .flex_col()
+                    .gap_6()
+                    .pt_6()
+                    .pb_10()
+                    .children(self.page_sections(editing, &colors, cx));
                 (
                     div()
-                        .id("settings-form")
                         .flex_1()
                         .min_h_0()
-                        .overflow_y_scroll()
-                        .track_scroll(&self.scroll)
                         .flex()
-                        .flex_col()
-                        .gap_6()
-                        .pt_6()
-                        .pb_10()
-                        .child(Self::section(
-                            &colors,
-                            "Summary instructions",
-                            "How the tour writer writes the reviewer summary at the start of a tour.",
-                            summary,
-                        ))
-                        .child(Self::section_rule(&colors))
-                        .child(Self::section(
-                            &colors,
-                            "Review instructions",
-                            "What the review agent looks for when it reviews a change.",
-                            review,
-                        ))
-                        .child(Self::section_rule(&colors))
-                        .child(Self::section(
-                            &colors,
-                            "Open code in",
-                            "The editor a code link opens. With none, code opens on GitHub.",
-                            ide,
-                        ))
-                        .child(Self::section_rule(&colors))
-                        .child(Self::section(
-                            &colors,
-                            "Ask",
-                            "The model and effort Ask uses.",
-                            ask,
-                        ))
-                        .child(Self::section_rule(&colors))
-                        .child(Self::section(
-                            &colors,
-                            "More lines",
-                            "How many lines the arrows on a gap and the [ and ] keys show at a time.",
-                            more_lines,
-                        ))
-                        .child(Self::section_rule(&colors))
-                        .child(Self::section(
-                            &colors,
-                            "Comments",
-                            "Which send actions of a comment or reply box you reach for most. Where a box lacks one, the nearest it has stands in.",
-                            Self::comment_actions(editing, &colors, cx),
-                        ))
-                        .child(Self::section_rule(&colors))
-                        .child(Self::section(
-                            &colors,
-                            "Merge",
-                            "How auto-merge and Merge now merge a PR.",
-                            Self::merge_method(editing, &colors, cx),
-                        ))
-                        .child(Self::section_rule(&colors))
-                        .child(Self::section(
-                            &colors,
-                            "Clones",
-                            "Where each repo is cloned on this machine.",
-                            clones,
-                        ))
-                        .child(Self::section_rule(&colors))
-                        .child(Self::section(
-                            &colors,
-                            "Keys",
-                            "What each key does. Change takes the next key you press; Esc leaves it as it was.",
-                            keys,
-                        ))
-                        .child(Self::section_rule(&colors))
-                        .child(Self::section(
-                            &colors,
-                            "Version",
-                            "The build this app runs and where its binary is.",
-                            self.version(&colors),
-                        ))
+                        .child(self.page_list(editing, &colors, cx))
+                        .child(form)
                         .into_any_element(),
                     Some(self.action_bar(editing, &colors, cx)),
                 )

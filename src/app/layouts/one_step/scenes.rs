@@ -791,22 +791,23 @@ impl OneStepLayout {
             Scene::SettingsEditedEnd => self.settings.update(cx, |settings, cx| {
                 settings.open(window, cx);
                 settings.stage_sample_edits(cx);
+                settings.stage_page(crate::viewer::SettingsPage::Code, cx);
                 settings.scroll_to_end();
             }),
             Scene::SettingsKeys => self.settings.update(cx, |settings, cx| {
                 settings.open(window, cx);
                 settings.stage_sample_keys(cx);
-                settings.scroll_to_keys();
+                settings.stage_page(crate::viewer::SettingsPage::Keys, cx);
             }),
             Scene::SettingsMoreLines => self.settings.update(cx, |settings, cx| {
                 settings.open(window, cx);
                 settings.stage_sample_edits(cx);
-                settings.scroll_to_more_lines();
+                settings.stage_page(crate::viewer::SettingsPage::Code, cx);
             }),
             Scene::SettingsComments => self.settings.update(cx, |settings, cx| {
                 settings.open(window, cx);
                 settings.stage_comment_now_primary(cx);
-                settings.scroll_to_comments();
+                settings.stage_page(crate::viewer::SettingsPage::GitHub, cx);
             }),
             Scene::Shortcuts => self
                 .shortcuts
