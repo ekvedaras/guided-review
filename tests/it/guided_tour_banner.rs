@@ -142,11 +142,62 @@ fn the_stage_shows_the_last_line_the_agent_printed() {
 
     review.guided_tour_is(writing_with(
         AgentStatus::Working,
-        &["old news", "  Reading a.txt  ", "", "   "],
+        &["• old news", "  • Reading a.txt  ", "", "   "],
     ));
 
     let stage = review.guided_tour_stage().unwrap();
     assert_eq!(stage.activity.as_deref(), Some("Reading a.txt"));
+}
+
+#[test]
+fn the_stage_shows_the_latest_step_of_a_claude_screen_not_its_spinner_or_tool_output() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+
+    review.guided_tour_is(writing_with(
+        AgentStatus::Working,
+        &[
+            "• Skill(tour)",
+            "  ⎿  Loaded skill",
+            "• Writing the tour and its pictures now.",
+            "• Running guided-review check 'https://github.com/acme/shop/…",
+            "  ⎿  $ guided-review check 'https://github.com/acme/shop/pull/7'",
+            "· Beboppin'… (Write pictures, explainer, tour; run check · 54s)",
+        ],
+    ));
+
+    let stage = review.guided_tour_stage().unwrap();
+    assert_eq!(
+        stage.activity.as_deref(),
+        Some("Running guided-review check 'https://github.com/acme/shop/…")
+    );
+}
+
+#[test]
+fn the_stage_reads_a_step_marked_with_a_filled_circle_too() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+
+    review.guided_tour_is(writing_with(
+        AgentStatus::Working,
+        &["⏺ Writing the tour: 4 steps", "✻ Checking the tour…"],
+    ));
+
+    let stage = review.guided_tour_stage().unwrap();
+    assert_eq!(stage.activity.as_deref(), Some("Writing the tour: 4 steps"));
+}
+
+#[test]
+fn the_stage_has_no_activity_while_only_a_spinner_word_shows() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+
+    review.guided_tour_is(writing_with(
+        AgentStatus::Working,
+        &["✶ Beboppin'… (12s)", "  ⎿  $ ls"],
+    ));
+
+    assert_eq!(review.guided_tour_stage().unwrap().activity, None);
 }
 
 #[test]

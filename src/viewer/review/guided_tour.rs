@@ -97,13 +97,7 @@ impl ReviewCore {
                     }
                 }
                 .to_owned(),
-                activity: writing
-                    .screen
-                    .iter()
-                    .rev()
-                    .map(|line| line.trim())
-                    .find(|line| !line.is_empty())
-                    .map(str::to_owned),
+                activity: writing.latest_step(),
                 can_try_again: false,
             }),
             GuidedTourProgress::Failed(reason) => Some(GuidedTourStage {

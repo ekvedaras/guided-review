@@ -95,6 +95,15 @@ impl TourWriting {
         }
     }
 
+    /// The text of the latest step Claude printed on its screen (a line led by `•`, `⏺` or `●`). Its spinner
+    /// word, tool output, prompt box and status bar are not steps.
+    pub fn latest_step(&self) -> Option<String> {
+        self.screen.iter().rev().find_map(|line| {
+            let step = line.trim_start().strip_prefix(['•', '⏺', '●'])?.trim();
+            (!step.is_empty()).then(|| step.to_owned())
+        })
+    }
+
     pub fn screen_is(&mut self, lines: Vec<String>) {
         self.screen = lines;
     }
