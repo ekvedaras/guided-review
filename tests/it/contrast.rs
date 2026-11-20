@@ -201,6 +201,25 @@ fn the_merged_and_closed_chips_are_strong_fills_with_white_content_in_both_appea
     }
 }
 
+const INLINE_CODE_LIGHT: f32 = 1.2;
+const INLINE_CODE_DARK: f32 = 1.3;
+
+#[test]
+fn the_ground_of_inline_code_stands_out_from_the_page_and_from_a_card_in_both_appearances() {
+    for (appearance, least) in [
+        (Appearance::Light, INLINE_CODE_LIGHT),
+        (Appearance::Dark, INLINE_CODE_DARK),
+    ] {
+        let colors = Colors::of(appearance);
+        for (under, ground) in [("page", colors.background), ("card", colors.surface)] {
+            assert!(
+                contrast(colors.inline_code, ground) >= least,
+                "{appearance:?}: inline code on the {under}"
+            );
+        }
+    }
+}
+
 #[test]
 fn every_text_colour_of_the_light_appearance_reads_at_body_contrast() {
     assert_eq!(shortfalls(Appearance::Light), Vec::<String>::new());

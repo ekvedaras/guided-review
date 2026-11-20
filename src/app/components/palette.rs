@@ -322,6 +322,8 @@ pub struct Colors {
     pub pressed: Rgba,
     pub border: Rgba,
     pub subtle_border: Rgba,
+    /// Behind inline code in prose, on the page or on a card.
+    pub inline_code: Rgba,
     pub text: Rgba,
     /// The sidebar's labels: a step quieter than `text`, so the page leads.
     pub sidebar_text: Rgba,
@@ -450,6 +452,7 @@ impl Colors {
             pressed: rgb(ink::S4),
             border: rgb(0xc9ccd8),
             subtle_border: rgb(0xe3e5ee),
+            inline_code: rgb(0xdfe3ef),
             text,
             sidebar_text: rgb(ink::S10),
             muted_text,
@@ -523,6 +526,7 @@ impl Colors {
             pressed: rgb(0x38393e),
             border: rgb(0x3c3d43),
             subtle_border: rgb(0x292b2f),
+            inline_code: rgb(0x34363c),
             text,
             sidebar_text: rgb(0xdddde0),
             muted_text,

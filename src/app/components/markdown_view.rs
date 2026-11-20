@@ -1140,7 +1140,7 @@ fn code_backgrounds(layout: TextLayout, ranges: Vec<Range<usize>>) -> AnyElement
         |_, _, _| (),
         move |_, (), window, cx| {
             let colors = Colors::active(cx);
-            let (color, edge) = (colors.surface, colors.subtle_border);
+            let (color, edge) = (colors.inline_code, colors.subtle_border);
             let line_height = layout.line_height();
             let inset = line_height * 0.1;
             let text = layout.text();
