@@ -1006,6 +1006,15 @@ impl InlineText {
         }
     }
 
+    /// The code words themselves, without the padding around them, which stays in the text's font.
+    fn code_words(&self) -> Vec<Range<usize>> {
+        self.styled
+            .iter()
+            .filter(|(_, run)| run.code)
+            .map(|(range, _)| range.clone())
+            .collect()
+    }
+
     fn highlights(&self, colors: &Colors) -> Vec<(Range<usize>, HighlightStyle)> {
         self.styled
             .iter()
@@ -1037,7 +1046,15 @@ fn styled_text(
         Some(selected) => with_selection(&highlights, selected, colors.text_selection),
         None => highlights,
     };
-    let styled = StyledText::new(inline.text.clone()).with_highlights(highlights);
+    let code_font = SharedString::from(*CODE_FONT);
+    let styled = StyledText::new(inline.text.clone())
+        .with_highlights(highlights)
+        .with_font_family_overrides(
+            inline
+                .code_words()
+                .into_iter()
+                .map(|range| (range, code_font.clone())),
+        );
     let layout = styled.layout().clone();
     let backgrounds = (!inline.code_ranges.is_empty())
         .then(|| code_backgrounds(layout.clone(), inline.code_ranges.clone()));
@@ -1333,6 +1350,18 @@ mod tests {
             dark.first().and_then(|(_, style)| style.color),
             Some(Colors::of(Appearance::Dark).accent.into())
         );
+    }
+
+    #[test]
+    fn inline_code_words_are_set_apart_from_their_padding() {
+        let text = InlineText::of(&runs_of(&Markdown::parse("a `bc` d").blocks));
+
+        let words: Vec<&str> = text
+            .code_words()
+            .into_iter()
+            .filter_map(|range| text.text.get(range))
+            .collect();
+        assert_eq!(words, ["bc"]);
     }
 
     #[test]
