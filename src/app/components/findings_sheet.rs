@@ -22,9 +22,11 @@ use super::key_cap::{KeyLabel, key_hint};
 use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::OVERLAY;
 use super::overlay::{
-    close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
+    close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
+    touching_places,
 };
 use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, Tone};
+use super::sidebar_row::RowPlace;
 
 /// What the reviewer asked of the selected findings, or of one of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +63,15 @@ pub struct FindingsSheet {
     focus: FocusHandle,
     owner_focus: FocusHandle,
     list: FindingsList,
+    /// The row under the mouse, so the cursor row squares the corner it shares with it.
+    hovered: Option<RowSpot>,
+}
+
+/// A row of the list: its place among the open rows or among the dismissed ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowSpot {
+    Open(usize),
+    Dismissed(usize),
 }
 
 impl EventEmitter<FindingsEvent> for FindingsSheet {}
@@ -74,6 +85,7 @@ impl FindingsSheet {
             focus: cx.focus_handle(),
             owner_focus,
             list: FindingsList::default(),
+            hovered: None,
         }
     }
 
@@ -86,6 +98,7 @@ impl FindingsSheet {
             self.close(window, cx);
         } else {
             self.list = list;
+            self.hovered = None;
             self.presence.open(Instant::now());
             window.focus(&self.focus, cx);
             cx.notify();
@@ -197,15 +210,26 @@ impl FindingsSheet {
     fn row(
         colors: &Colors,
         row: &FindingsListRow,
+        spot: RowSpot,
+        place: (RowPlace, Option<RowPlace>),
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let (tick_id, open_id, go_id) = (row.id.clone(), row.id.clone(), row.id.clone());
-        let summary = picker_row(
+        let summary = picker_row_at(
             colors,
             SharedString::from(format!("findings-row-{}", row.id)),
-            row.is_under_cursor,
+            place.0,
+            place.1,
         )
         .py_1p5()
+        .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+            if *is_hovered {
+                this.hovered = Some(spot);
+            } else if this.hovered == Some(spot) {
+                this.hovered = None;
+            }
+            cx.notify();
+        }))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.list.move_cursor_to(&open_id);
             this.list.toggle_open_under_cursor();
@@ -305,15 +329,26 @@ impl FindingsSheet {
     fn dismissed_row(
         colors: &Colors,
         row: &FindingsListRow,
+        spot: RowSpot,
+        place: (RowPlace, Option<RowPlace>),
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let (tick_id, cursor_id, restore_id) = (row.id.clone(), row.id.clone(), row.id.clone());
-        picker_row(
+        picker_row_at(
             colors,
             SharedString::from(format!("findings-dismissed-row-{}", row.id)),
-            row.is_under_cursor,
+            place.0,
+            place.1,
         )
         .py_1p5()
+        .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+            if *is_hovered {
+                this.hovered = Some(spot);
+            } else if this.hovered == Some(spot) {
+                this.hovered = None;
+            }
+            cx.notify();
+        }))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.list.move_cursor_to_dismissed(&cursor_id);
             cx.notify();
@@ -368,12 +403,16 @@ impl FindingsSheet {
     fn dismissed_section(
         colors: &Colors,
         list: &FindingsList,
+        has_open_rows: bool,
+        cursor: Option<RowSpot>,
+        hovered: Option<RowSpot>,
         cx: &mut Context<Self>,
     ) -> Option<gpui::Div> {
         let rows = list.dismissed_rows();
         if rows.is_empty() {
             return None;
         }
+        let places = places_of(&rows, RowSpot::Dismissed, cursor, hovered);
         let is_shown = list.dismissed_are_shown();
         let ticked = list.selected_dismissed().len();
         let header = div()
@@ -384,8 +423,9 @@ impl FindingsSheet {
             .items_center()
             .gap_2()
             .cursor_pointer()
-            .border_t_1()
-            .border_color(colors.subtle_border)
+            .when(has_open_rows, |header| {
+                header.border_t_1().border_color(colors.subtle_border)
+            })
             .on_click(cx.listener(|this, _, _, cx| {
                 this.list.toggle_dismissed_shown();
                 cx.notify();
@@ -403,14 +443,14 @@ impl FindingsSheet {
                 div()
                     .flex_1()
                     .text_color(colors.muted_text)
-                    .child(format!("Dismissed ({})", rows.len())),
+                    .child(with_count("Dismissed", rows.len())),
             )
             .when(is_shown, |header| {
                 header.child(
                     Self::batch_button(
                         colors,
                         "findings-restore-selected",
-                        format!("Restore ({ticked})"),
+                        with_count("Restore", ticked),
                         ButtonKind::Secondary,
                         Selection::of(ticked > 0),
                     )
@@ -428,7 +468,11 @@ impl FindingsSheet {
                 is_shown
                     .then(|| {
                         rows.iter()
-                            .map(|row| Self::dismissed_row(colors, row, cx))
+                            .zip(places)
+                            .enumerate()
+                            .map(|(at, (row, place))| {
+                                Self::dismissed_row(colors, row, RowSpot::Dismissed(at), place, cx)
+                            })
                             .collect::<Vec<_>>()
                     })
                     .into_iter()
@@ -450,6 +494,40 @@ impl FindingsSheet {
             Selection::Unselected => base.opacity(0.45).cursor_default(),
         }
     }
+}
+
+/// "Fix (3)", or just "Fix" while nothing is counted: a zero says nothing.
+fn with_count(label: &str, count: usize) -> String {
+    match count {
+        0 => label.to_owned(),
+        count => format!("{label} ({count})"),
+    }
+}
+
+/// How each row touches the cursor row and the hovered one. A row with its body open has nothing
+/// touching it below, nor has the row under it above.
+fn places_of(
+    rows: &[FindingsListRow],
+    spot_of: fn(usize) -> RowSpot,
+    cursor: Option<RowSpot>,
+    hovered: Option<RowSpot>,
+) -> Vec<(RowPlace, Option<RowPlace>)> {
+    rows.iter()
+        .enumerate()
+        .map(|(at, row)| {
+            let Some(cursor) = cursor else {
+                return (RowPlace::Apart, None);
+            };
+            let above = at
+                .checked_sub(1)
+                .filter(|above| rows.get(*above).is_some_and(|row| !row.is_open))
+                .map(spot_of);
+            let below = Some(at + 1)
+                .filter(|below| !row.is_open && rows.get(*below).is_some())
+                .map(spot_of);
+            touching_places(spot_of(at), above, below, cursor, hovered)
+        })
+        .collect()
 }
 
 /// The code lines a finding is about, with their line numbers; nothing for a finding on no lines.
@@ -507,7 +585,7 @@ impl Render for FindingsSheet {
                     .flex_1()
                     .text_base()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(format!("Findings ({})", rows.len())),
+                    .child(with_count("Findings", rows.len())),
             )
             .child(
                 div()
@@ -527,7 +605,7 @@ impl Render for FindingsSheet {
                 Self::batch_button(
                     &colors,
                     "findings-dismiss",
-                    format!("Dismiss ({selected})"),
+                    with_count("Dismiss", selected),
                     ButtonKind::Secondary,
                     selection,
                 )
@@ -539,7 +617,7 @@ impl Render for FindingsSheet {
                 Self::batch_button(
                     &colors,
                     "findings-fix",
-                    format!("Fix ({selected})"),
+                    with_count("Fix", selected),
                     ButtonKind::Secondary,
                     selection,
                 )
@@ -551,7 +629,7 @@ impl Render for FindingsSheet {
                 Self::batch_button(
                     &colors,
                     "findings-comment",
-                    format!("Comment ({selected})"),
+                    with_count("Comment", selected),
                     ButtonKind::Primary,
                     selection,
                 )
@@ -570,19 +648,41 @@ impl Render for FindingsSheet {
                 )
                 .on_click(cx.listener(|this, _, window, cx| this.close(window, cx))),
             );
+        let dismissed = self.list.dismissed_rows();
+        let cursor = rows
+            .iter()
+            .position(|row| row.is_under_cursor)
+            .map(RowSpot::Open)
+            .or_else(|| {
+                dismissed
+                    .iter()
+                    .position(|row| row.is_under_cursor)
+                    .map(RowSpot::Dismissed)
+            });
+        let places = places_of(&rows, RowSpot::Open, cursor, self.hovered);
         let body = div()
             .id("findings-rows")
             .max_h(px(440.))
             .overflow_y_scroll()
-            .py_2()
+            .pb_2()
+            .when(!rows.is_empty(), Styled::pt_2)
             .flex()
             .flex_col()
             .children(
                 rows.iter()
-                    .map(|row| Self::row(&colors, row, cx))
+                    .zip(places)
+                    .enumerate()
+                    .map(|(at, (row, place))| Self::row(&colors, row, RowSpot::Open(at), place, cx))
                     .collect::<Vec<_>>(),
             )
-            .children(Self::dismissed_section(&colors, &self.list, cx));
+            .children(Self::dismissed_section(
+                &colors,
+                &self.list,
+                !rows.is_empty(),
+                cursor,
+                self.hovered,
+                cx,
+            ));
         modal_layer_for(&colors, "findings-scrim", &self.presence)
             .on_mouse_down(
                 MouseButton::Left,

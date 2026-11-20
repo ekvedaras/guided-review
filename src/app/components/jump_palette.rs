@@ -17,9 +17,11 @@ use super::key_cap::{CapGround, KeyLabel, chord_caps, key_hint};
 use super::markdown_view::InlineMarkdown;
 use super::motion::OVERLAY;
 use super::overlay::{
-    close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row, rise_for,
+    close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
+    touching_places,
 };
 use super::palette::Colors;
+use super::sidebar_row::RowPlace;
 use super::text_box::TextBox;
 use super::text_input::Lines;
 use crate::app::keymap::keymap;
@@ -44,6 +46,8 @@ pub struct JumpPalette {
     /// Of the entries, headings not counted.
     entry_count: usize,
     selected: usize,
+    /// The entry under the mouse, so the selected row squares the corner it shares with it.
+    hovered: Option<usize>,
     focus: FocusHandle,
     owner_focus: FocusHandle,
 }
@@ -154,6 +158,7 @@ impl JumpPalette {
             rows: Vec::new(),
             entry_count: 0,
             selected: 0,
+            hovered: None,
             focus: cx.focus_handle(),
             owner_focus,
         }
@@ -202,6 +207,7 @@ impl JumpPalette {
         }
         self.entry_count = index;
         self.selected = 0;
+        self.hovered = None;
     }
 
     fn pick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -245,7 +251,13 @@ impl JumpPalette {
             .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
     }
 
-    fn row(&self, index: usize, shown: &ShownEntry, cx: &mut Context<Self>) -> impl IntoElement {
+    fn row(
+        &self,
+        index: usize,
+        shown: &ShownEntry,
+        place: (RowPlace, Option<RowPlace>),
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let colors = Colors::active(cx);
         let is_selected = index == self.selected;
         let label = match &shown.label {
@@ -274,12 +286,21 @@ impl JumpPalette {
                 .map(|chord| chord_caps(&colors, chord, CapGround::Page)),
             PaletteEntry::Place(_) => None,
         };
-        picker_row(
+        picker_row_at(
             &colors,
             SharedString::from(format!("jump-{index}")),
-            is_selected,
+            place.0,
+            place.1,
         )
         .h(px(32.))
+        .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+            if *is_hovered {
+                this.hovered = Some(index);
+            } else if this.hovered == Some(index) {
+                this.hovered = None;
+            }
+            cx.notify();
+        }))
         .on_click(cx.listener(move |this, _, window, cx| {
             this.selected = index;
             this.pick(window, cx);
@@ -367,14 +388,28 @@ impl Render for JumpPalette {
             .position(|row| matches!(row, ShownRow::Entry { index, .. } if *index == self.selected))
             .unwrap_or(0);
         let first_shown = selected_row.saturating_sub(VISIBLE_ROWS - 1);
+        let entry_at = |position: Option<usize>| match position.and_then(|at| self.rows.get(at)) {
+            Some(ShownRow::Entry { index, .. }) => Some(*index),
+            _ => None,
+        };
         let rows: Vec<_> = self
             .rows
             .iter()
+            .enumerate()
             .skip(first_shown)
             .take(VISIBLE_ROWS)
-            .map(|row| match row {
+            .map(|(position, row)| match row {
                 ShownRow::Heading(group) => heading_row(&colors, *group).into_any_element(),
-                ShownRow::Entry { index, entry } => self.row(*index, entry, cx).into_any_element(),
+                ShownRow::Entry { index, entry } => {
+                    let place = touching_places(
+                        *index,
+                        entry_at(position.checked_sub(1)),
+                        entry_at(Some(position + 1)),
+                        self.selected,
+                        self.hovered,
+                    );
+                    self.row(*index, entry, place, cx).into_any_element()
+                }
             })
             .collect();
         modal_layer_for(&colors, "jump-palette-scrim", &self.presence)

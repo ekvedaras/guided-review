@@ -187,15 +187,36 @@ pub fn overlay_panel(colors: &Colors) -> Div {
         .text_color(colors.text)
 }
 
-/// A row of a picker list (jump palette, PR switcher): the selected one sits on `current` with
-/// its edge, the others light up under the mouse, and every one darkens while pressed.
-pub fn picker_row(colors: &Colors, id: impl Into<ElementId>, is_selected: bool) -> Stateful<Div> {
-    let place = if is_selected {
+/// Where a picker row sits against the selected row and the hovered one, from the rows directly
+/// above and below it (`None` at a heading, an unfolded body or an edge: nothing touches there).
+/// Every list of rows that touch builds its rows from this and `picker_row_at`, so the corners they
+/// share are squared in one way.
+pub fn touching_places<T: PartialEq + Copy>(
+    row: T,
+    above: Option<T>,
+    below: Option<T>,
+    selected: T,
+    hovered: Option<T>,
+) -> (RowPlace, Option<RowPlace>) {
+    let place = if row == selected {
         RowPlace::Current
+    } else if below == Some(selected) {
+        RowPlace::JustAboveCurrent
+    } else if above == Some(selected) {
+        RowPlace::JustBelowCurrent
     } else {
         RowPlace::Apart
     };
-    picker_row_at(colors, id, place, None)
+    let hovered_touching = match hovered {
+        Some(hovered) if row == selected && hovered != selected && above == Some(hovered) => {
+            Some(RowPlace::JustAboveCurrent)
+        }
+        Some(hovered) if row == selected && hovered != selected && below == Some(hovered) => {
+            Some(RowPlace::JustBelowCurrent)
+        }
+        _ => None,
+    };
+    (place, hovered_touching)
 }
 
 /// A picker row that touches its neighbours: the selected row and a hovered neighbour square the
@@ -253,4 +274,45 @@ pub fn picker_footer(colors: &Colors) -> Div {
         .bg(colors.header_band())
         .text_xs()
         .text_color(colors.muted_text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_selected_row_squares_the_side_a_hovered_neighbour_touches() {
+        assert_eq!(
+            touching_places(2, Some(1), Some(3), 2, Some(3)),
+            (RowPlace::Current, Some(RowPlace::JustBelowCurrent))
+        );
+        assert_eq!(
+            touching_places(2, Some(1), Some(3), 2, Some(1)),
+            (RowPlace::Current, Some(RowPlace::JustAboveCurrent))
+        );
+    }
+
+    #[test]
+    fn a_neighbour_of_the_selected_row_knows_which_side_touches_it() {
+        assert_eq!(
+            touching_places(1, Some(0), Some(2), 2, None),
+            (RowPlace::JustAboveCurrent, None)
+        );
+        assert_eq!(
+            touching_places(3, Some(2), None, 2, None),
+            (RowPlace::JustBelowCurrent, None)
+        );
+    }
+
+    #[test]
+    fn rows_apart_from_the_selected_one_square_nothing() {
+        assert_eq!(
+            touching_places(0, None, Some(1), 3, Some(1)),
+            (RowPlace::Apart, None)
+        );
+        assert_eq!(
+            touching_places(2, None, None, 2, Some(3)),
+            (RowPlace::Current, None)
+        );
+    }
 }
