@@ -161,3 +161,27 @@
 **Merge method**: How a merge lands on the base branch: a merge commit, a squash or a rebase. The reviewer's choice is a setting, `merge_method` (a merge commit when not set), which `[merge_methods]` can change per repo; when the repo does not allow it, its first allowed method is used, and the toast that asks for the second press names the one used. Avoid: merge strategy, merge type.
 
 **Merge now**: What the auto-merge key and button offer instead when nothing blocks the PR, so GitHub would refuse auto-merge: a merge at once with the merge method, confirmed the same way. Avoid: force merge, admin merge.
+
+**AI review**: A code review of a whole review subject that the app asks a review agent to do, when the reviewer wants it. Its result is the findings file, shown in the sidebar and, in later steps, on the lines. Avoid: auto review, bot review.
+
+**Finding**: One thing an AI review reports, before the reviewer acts on it: an id, a severity, a Markdown body and an anchor (lines of either side of one changed file, a whole changed file, or the whole change). Avoid: AI comment, suggestion (a GitHub suggestion is a code change in a comment), issue.
+
+**Findings list**: The sheet that lists every open finding as one compact row (severity, `file:line`, first line), to tick, open and decide in a batch: Dismiss, or Comment (each as is, marked 🤖, into the pending review or the tasks of a local review). Avoid: findings panel.
+
+**Severity**: How much a finding matters: `must fix`, `should fix` or `nit`, most severe first. Avoid: priority, level.
+
+**Use / Use as is / Dismiss**: What the reviewer does with one finding. Use puts its text in a comment box on its lines (a task in a local review) to edit and send; Use as is sends it at once to Add to review (Add to tasks), starting with 🤖; Dismiss drops it, and the next AI review is told not to report it again. A decided finding is kept in the review's state file. A dismissed one stays under Dismissed in the Findings list, kept with its text even when a later run's file no longer holds it, and Restore opens it again, so the next run is no longer told of it; a used or fixed one is not shown again. The comment box, queued comment and thread made from a used finding carry it: the thread's header shows AI and its severity, with its fix request and Ask why talk, kept in the state file, so the link outlives a reopen and a re-pin.
+
+**Findings file**: What the review agent writes beside the tour (`<number>.findings.json`, the path `guided-review findings-path <key>` prints): the tour's pin (`pr` or `local`, `base`, `head`) and `findings`. `check-findings` checks it and pins it, `findings-done` tells the app, which reads the file whole, never half of it. The file is the state: an app that is not running reads it when it opens the review. Avoid: report, review file.
+
+**Review agent**: The AI session, in its own herdr terminal and apart from the tour agent, that does one review subject's AI review. Avoid: reviewer (that is the person), review subagent.
+
+**Review worktree**: The throwaway checkout of the reviewed head (a PR's pinned head, a local review's snapshot commit) that the review agent works in, outside the clone. It is made when the run starts and removed when the agent ends; the app sweeps leftovers at start. Avoid: sandbox, scratch checkout.
+
+**Run (AI review)**: One go of the review agent, from Run AI review to `findings-done`: not run, starting, running, or failed (it went idle, errored or ended without `findings-done`). Run again and Try again start a new run that replaces the agent and the worktree of the old one. Avoid: job, session.
+
+**Ask why**: The reviewer's question about one finding. While the review agent lives, it goes onto the finding's thread (kept in the review's state file, for a PR too) and the review agent answers with `guided-review agent-reply <key> <finding id>`; once it is gone, the question opens in the Ask panel on the finding's lines, with the finding told. Avoid: explain, challenge.
+
+**Outdated finding**: A finding whose lines new commits changed after the review agent wrote it. A re-pin moves every finding with its lines, like a local thread, and pins the findings file to the new head; an outdated one is kept, marked Outdated, with what its lines said, since it may already be fixed. Its decisions, fix requests and questions follow it. Avoid: stale finding.
+
+**Fix request**: A finding the reviewer sent to the tour agent to fix in code, alone or in a batch with others. A batch goes as one message in reading order; the tour agent starts one subagent, makes one commit per finding, and answers each with `guided-review fix-reply` (`--working`, `--fixed <commit>` or `--not-fixed --body`). When it needs a decision first it asks with `--question --body`: the question shows on the finding's thread, the finding waits for the reviewer, and the reviewer's answer is typed to the tour agent as the next message. A fixed finding is closed like a dismissed one and its commit is named in the sidebar; a not fixed one stays, with the reason. Avoid: task (that is a local review's comment), auto-fix.

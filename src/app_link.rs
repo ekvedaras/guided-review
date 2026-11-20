@@ -13,10 +13,11 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::app_folders::AppFolders;
+use crate::findings::FindingId;
 use crate::review_subject::ReviewSubject;
 use crate::tour::StepId;
 use crate::update::ReleaseInstall;
-use crate::viewer::{AgentReplied, HandOffId};
+use crate::viewer::{AgentReplied, FixReply, HandOffId, WhyReply};
 
 const APP_COMMAND_VARIABLE: &str = "GUIDED_REVIEW_APP_COMMAND";
 const START_WAIT: Duration = Duration::from_secs(20);
@@ -119,6 +120,22 @@ pub enum Request {
         #[serde(default)]
         replied: AgentReplied,
     },
+    /// The tour agent's word on one finding of a fix request.
+    FixReplied {
+        pr: String,
+        finding: FindingId,
+        reply: FixReply,
+    },
+    /// The review agent's word on a question about one finding.
+    WhyReplied {
+        pr: String,
+        finding: FindingId,
+        reply: WhyReply,
+    },
+    /// The review agent's findings are checked and on disk: the app shows them.
+    FindingsDone {
+        pr: String,
+    },
     /// Show Settings: over the PR on screen, or in a window of its own when no PR is open.
     ShowSettings,
     /// Show the PR switcher, as a launch from the Desktop entry does: over the PR on screen, or in a
@@ -193,6 +210,9 @@ impl RequestLine {
             Request::Quit => self.replacing.as_deref() == Some(build),
             Request::Open(_)
             | Request::AgentReplied { .. }
+            | Request::FixReplied { .. }
+            | Request::WhyReplied { .. }
+            | Request::FindingsDone { .. }
             | Request::ShowSettings
             | Request::ShowSwitcher => self.across_builds == AcrossBuilds::AnyBuild,
         }
@@ -250,6 +270,19 @@ pub enum Answer {
     HandOffAnswered {
         pr: String,
     },
+    /// The finding's fix state is updated and shown.
+    FixAnswered {
+        pr: String,
+    },
+    /// The answer is on the finding's thread and shown.
+    WhyAnswered {
+        pr: String,
+    },
+    /// The window read the findings file of this review again and shows `count` findings.
+    FindingsRead {
+        pr: String,
+        count: usize,
+    },
     /// The window shows another PR, so the hand-off is not the app's to mark.
     NotShown {
         pr: String,
@@ -290,6 +323,20 @@ impl std::fmt::Display for Answer {
             Self::HandOffAnswered { pr } => {
                 write!(f, "guided-review app marked the hand-off answered on {pr}")
             }
+            Self::FixAnswered { pr } => {
+                write!(f, "guided-review app took the fix answer on {pr}")
+            }
+            Self::WhyAnswered { pr } => {
+                write!(
+                    f,
+                    "guided-review app put the answer on the finding's thread on {pr}"
+                )
+            }
+            Self::FindingsRead { pr, count } => write!(
+                f,
+                "guided-review app read {count} finding{} of {pr}",
+                if *count == 1 { "" } else { "s" }
+            ),
             Self::NotShown { pr } => write!(f, "guided-review app does not show {pr}"),
             Self::ShowingSettings => write!(f, "guided-review app is showing Settings"),
             Self::ShowingSwitcher => write!(f, "guided-review app is showing the PR switcher"),

@@ -17,7 +17,7 @@ use super::threads::{AGENT_MARK, CommentId, ReviewThread, ThreadId};
 use super::tour_agent::{AgentStatus, SendOutcome, TourAgents, TourKind};
 
 /// The word as a shell reads it as it is, or in single quotes when a character in it would split or expand.
-fn shell_word(text: &str) -> String {
+pub(super) fn shell_word(text: &str) -> String {
     let plain = |c: char| c.is_ascii_alphanumeric() || "_./:@%+=,-".contains(c);
     if !text.is_empty() && text.chars().all(plain) {
         text.to_owned()

@@ -321,6 +321,7 @@ impl OpenedChangeSet {
         let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
         self.repin_waiting_guided_tour(&source, &base, &tips.head)?;
         let repinned = repin_tour(
+            &self.folders,
             &subject,
             &Tour::shown_path_for(&self.folders, &subject),
             &self.state_file(),

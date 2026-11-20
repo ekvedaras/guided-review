@@ -15,6 +15,7 @@ use super::button::{
 };
 use super::card::card;
 use super::chip::callout;
+use super::finding_view::finding_chips;
 use super::icon::Icon;
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in};
 use super::palette::{Colors, Tone};
@@ -372,6 +373,15 @@ impl RenderOnce for QueuedCommentNote {
             .gap_1()
             .m_2()
             .text_sm()
+            .children((!self.queued.draft.from_findings.is_empty()).then(|| {
+                div().flex().items_center().gap_2().children(
+                    self.queued
+                        .draft
+                        .from_findings
+                        .iter()
+                        .flat_map(|finding| finding_chips(&colors, finding.severity)),
+                )
+            }))
             .child(self.queued.draft.body.clone())
             .child(div().text_xs().text_color(colors.warning).child(format!(
                 "Not sent yet, will be tried again: {}",

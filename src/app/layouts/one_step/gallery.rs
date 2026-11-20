@@ -85,6 +85,7 @@ fn queued_comment() -> QueuedCommentNote {
     QueuedCommentNote::new(
         QueuedComment {
             draft: CommentDraft {
+                from_findings: Vec::new(),
                 place: CommentPlace::File(path()),
                 body: "Could this keep the old name for one release?".to_owned(),
                 written_at: None,
@@ -180,6 +181,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
         hand_off_line: is_open.then(|| Arc::from("The agent is working on it")),
         agent_is_working: is_open,
         hand_off_button: None,
+        from_findings: Vec::new(),
     };
     ThreadElement::new(
         Arc::new(view),

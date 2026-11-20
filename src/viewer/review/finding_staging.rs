@@ -1,0 +1,130 @@
+//! What a snapshot scene shows of the findings' fixes and threads.
+
+use super::ReviewCore;
+use crate::findings::{Anchor, Finding};
+use crate::viewer::ai_review::AiReview;
+use crate::viewer::finding_decisions::Fate;
+use crate::viewer::finding_threads::FindingThreads;
+use crate::viewer::fix_requests::FixRequests;
+use crate::viewer::step_page::Side;
+use crate::viewer::threads::{CommentId, ReviewThread, ThreadComment, ThreadId};
+
+const STAGED_THREAD: &str = "staged-from-finding";
+
+impl ReviewCore {
+    /// The fixes a snapshot scene shows on the open findings.
+    pub fn stage_fix_requests(&mut self) {
+        let findings = match &self.ai_review {
+            AiReview::Findings(file) => file.findings.clone(),
+            _ => Vec::new(),
+        };
+        self.show_staged_fix_requests(&findings);
+    }
+
+    pub fn unstage_fix_requests(&mut self) {
+        self.show_staged_fix_requests(&[]);
+    }
+
+    fn show_staged_fix_requests(&mut self, findings: &[Finding]) {
+        self.record_reporting("the staged fix requests", |state| {
+            *state.fix_requests_mut() = FixRequests::staged(findings);
+        });
+        self.place_threads();
+    }
+
+    /// The last open finding, dismissed, as a snapshot scene shows the dismissed section.
+    pub fn stage_dismissed_finding(&mut self) {
+        let Some(finding) = (match &self.ai_review {
+            AiReview::Findings(file) => file.findings.last().cloned(),
+            _ => None,
+        }) else {
+            return;
+        };
+        let id = finding.id.clone();
+        self.record_reporting("the staged dismissed finding", |state| {
+            state.decide_finding(finding, Fate::Dismissed);
+        });
+        self.close_finding(&id);
+    }
+
+    /// The first open finding, asked to fix and asked why about, then used: its comment became a thread on
+    /// its lines, which carries what was said about it.
+    pub fn stage_thread_from_finding(&mut self) {
+        let Some(finding) = (match &self.ai_review {
+            AiReview::Findings(file) => file.findings.first().cloned(),
+            _ => None,
+        }) else {
+            return;
+        };
+        let Anchor::Lines { file, side, lines } = &finding.anchor else {
+            return;
+        };
+        let id = ThreadId::new(STAGED_THREAD);
+        let thread = ReviewThread {
+            id: id.clone(),
+            is_resolved: false,
+            is_outdated: false,
+            path: file.clone(),
+            line: Some(lines.end),
+            start_line: None,
+            side: Side::from(*side),
+            is_file_comment: false,
+            original_line: Some(lines.end),
+            original_start_line: None,
+            original_commit: None,
+            comments: vec![ThreadComment {
+                id: CommentId::new(STAGED_THREAD),
+                author: "reviewer".to_owned(),
+                avatar_url: None,
+                is_bot: false,
+                by_agent: None,
+                by_viewer: true,
+                body: finding.body.clone(),
+                url: String::new(),
+                reactions: Vec::new(),
+            }],
+        };
+        let used = std::slice::from_ref(&finding);
+        self.record_reporting("the staged thread from a finding", |state| {
+            *state.fix_requests_mut() = FixRequests::staged(used);
+            *state.finding_threads_mut() = FindingThreads::staged(used);
+            state.finding_used(finding.clone(), Some(id));
+        });
+        self.close_finding(&finding.id);
+        self.staged_threads = vec![thread.clone()];
+        self.pulled_threads.push(thread);
+        self.place_threads();
+    }
+
+    pub fn unstage_thread_from_finding(&mut self) {
+        self.record_reporting("the staged thread from a finding", |state| {
+            state.forget_findings_used_in(&ThreadId::new(STAGED_THREAD));
+        });
+        self.show_staged_fix_requests(&[]);
+        self.show_staged_finding_threads(&[]);
+        let staged = std::mem::take(&mut self.staged_threads);
+        self.pulled_threads
+            .retain(|thread| !staged.iter().any(|gone| gone.id == thread.id));
+        self.place_threads();
+    }
+
+    /// The Ask why threads a snapshot scene shows on the open findings.
+    pub fn stage_finding_threads(&mut self) {
+        let findings = match &self.ai_review {
+            AiReview::Findings(file) => file.findings.clone(),
+            _ => Vec::new(),
+        };
+        self.show_staged_finding_threads(&findings);
+    }
+
+    pub fn unstage_finding_threads(&mut self) {
+        self.show_staged_finding_threads(&[]);
+    }
+
+    fn show_staged_finding_threads(&mut self, findings: &[Finding]) {
+        self.record_reporting("the staged finding threads", |state| {
+            *state.finding_threads_mut() = FindingThreads::staged(findings);
+        });
+        self.place_threads();
+    }
+}

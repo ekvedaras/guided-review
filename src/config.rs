@@ -7,8 +7,8 @@ use serde::Deserialize;
 use crate::app_folders::AppFolders;
 use crate::home::expand_home;
 use crate::ide::IdeTemplate;
+use crate::instructions::{Agent, Instructions, InstructionsChoice, InstructionsKind};
 use crate::pull_request::RepoName;
-use crate::summary_instructions::{SummaryInstructions, SummaryInstructionsChoice};
 use crate::viewer::{
     KeyChanges, KeyProblem, Keymap, MergeMethod, MoreLines, ResolvedKeymap, WrittenKeys,
 };
@@ -27,7 +27,9 @@ pub struct Config {
     #[serde(default)]
     ide: Option<String>,
     #[serde(default)]
-    summary_instructions: SummaryInstructionsChoice,
+    summary_instructions: InstructionsChoice,
+    #[serde(default)]
+    review_instructions: InstructionsChoice,
     /// `wrap_lines = "l"` or `next_screen = ["right", "j"]`, by `Command::config_name`.
     #[serde(default)]
     keys: BTreeMap<String, toml::Value>,
@@ -156,6 +158,7 @@ impl AskSettings {
 
 impl Config {
     pub const SUMMARY_INSTRUCTIONS_OFF_ENV: &'static str = "GUIDED_REVIEW_SUMMARY_INSTRUCTIONS_OFF";
+    pub const REVIEW_INSTRUCTIONS_OFF_ENV: &'static str = "GUIDED_REVIEW_REVIEW_INSTRUCTIONS_OFF";
 
     pub fn from_text(text: &str) -> anyhow::Result<Self> {
         Self::parse(text, "the config")
@@ -182,12 +185,16 @@ impl Config {
         }
     }
 
-    /// What the config says, or the default file `summary.md` in the config folder when it says nothing and the file exists.
-    pub fn summary_instructions(&self, folders: &AppFolders) -> SummaryInstructions {
-        if std::env::var_os(Self::SUMMARY_INSTRUCTIONS_OFF_ENV).is_some() {
-            return SummaryInstructions::none();
+    /// What the config says, or the default file (`summary.md`, `review.md`) in the config folder when it says nothing and the file exists.
+    pub fn instructions<A: Agent>(&self, folders: &AppFolders) -> Instructions<A> {
+        if std::env::var_os(A::KIND.off_env()).is_some() {
+            return Instructions::none();
         }
-        self.summary_instructions.resolve(folders)
+        match A::KIND {
+            InstructionsKind::Summary => &self.summary_instructions,
+            InstructionsKind::Review => &self.review_instructions,
+        }
+        .resolve(folders)
     }
 
     pub fn ask_settings(&self) -> AskSettings {

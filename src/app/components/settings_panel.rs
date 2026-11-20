@@ -13,7 +13,7 @@ use gpui::{
 use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
-use crate::summary_instructions::{SkillName, SummaryInstructionsChoice};
+use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use crate::viewer::{
     CloneRowProblem, MergeMethod, MoreLines, Motion, Presence, SaveOutcome, SettingProblem,
     Settings,
@@ -63,7 +63,7 @@ impl EventEmitter<SettingsEvent> for SettingsPanel {}
 /// The setting a red line belongs under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Slot {
-    SummaryInstructions,
+    Instructions(InstructionsKind),
     Ide,
     AskModel,
     AskEffort,
@@ -102,8 +102,8 @@ impl ShownProblem {
         };
         let slot = match problem {
             SettingProblem::Clone { row, .. } => Slot::Clone(*row),
-            SettingProblem::SummaryFileGone(_)
-            | SettingProblem::SummaryInstructionsUnreadable(_) => Slot::SummaryInstructions,
+            SettingProblem::InstructionsFileGone(kind, _)
+            | SettingProblem::InstructionsUnreadable(kind, _) => Slot::Instructions(*kind),
             SettingProblem::AskEffortUnknown(_) => Slot::AskEffort,
             SettingProblem::AskModelBlank => Slot::AskModel,
             SettingProblem::IdeTemplateBlank => Slot::Ide,
@@ -127,12 +127,34 @@ struct CustomEntry {
     focus: Option<FocusHandle>,
 }
 
+/// What the panel keeps beside one setting of instructions, besides the setting.
+struct InstructionsEntry {
+    skill: CustomEntry,
+    default_file: SharedString,
+    default_file_exists: bool,
+}
+
+impl InstructionsEntry {
+    fn load(settings: &Settings, kind: InstructionsKind, cx: &mut Context<SettingsPanel>) -> Self {
+        let skill_text = settings.instructions(kind).skill_text();
+        Self {
+            skill: CustomEntry {
+                is_open: skill_text.is_some(),
+                text: skill_text.unwrap_or_default().to_owned(),
+                focus: Some(cx.focus_handle()),
+            },
+            default_file: settings.default_file(kind).display().to_string().into(),
+            default_file_exists: settings.default_file_exists(kind),
+        }
+    }
+}
+
 /// A config that loaded, being edited.
 struct Editing {
     settings: Settings,
     skills: Vec<(SkillName, SharedString)>,
-    default_file: SharedString,
-    default_file_exists: bool,
+    summary: InstructionsEntry,
+    review: InstructionsEntry,
     /// What the Default segments stand for, said beside the setting's name.
     default_model_note: SharedString,
     default_effort_note: SharedString,
@@ -140,7 +162,6 @@ struct Editing {
     default_more_lines_note: SharedString,
     ide: CustomEntry,
     model: CustomEntry,
-    skill: CustomEntry,
     /// The text the reviewer typed for the number, kept as typed while it is not a number yet.
     more_lines: CustomEntry,
     folder_labels: Vec<SharedString>,
@@ -161,6 +182,8 @@ impl Editing {
                 (skill, label)
             })
             .collect();
+        let summary = InstructionsEntry::load(&settings, InstructionsKind::Summary, cx);
+        let review = InstructionsEntry::load(&settings, InstructionsKind::Review, cx);
         let entry = |is_open: bool, text: &str| CustomEntry {
             is_open,
             text: text.to_owned(),
@@ -174,8 +197,6 @@ impl Editing {
             settings.ask_model().custom_text().is_some(),
             settings.ask_model_custom_text(),
         );
-        let skill_text = settings.summary_instructions().skill_text();
-        let skill = entry(skill_text.is_some(), skill_text.unwrap_or_default());
         let more_lines = entry(true, &settings.more_lines_text());
         let problems = settings
             .problems_on_open()
@@ -183,8 +204,6 @@ impl Editing {
             .map(ShownProblem::of)
             .collect();
         let mut editing = Self {
-            default_file: settings.default_file().display().to_string().into(),
-            default_file_exists: settings.default_file_exists(),
             default_model_note: format!("Default is {}", AskSettings::default().model).into(),
             default_effort_note: format!("Default is {}", AskSettings::default().effort).into(),
             default_effort_level: effort_level(&AskEffortChoice::of(Some(
@@ -199,9 +218,10 @@ impl Editing {
             .into(),
             settings,
             skills,
+            summary,
+            review,
             ide,
             model,
-            skill,
             more_lines,
             folder_labels: Vec::new(),
             problems,
@@ -234,6 +254,20 @@ impl Editing {
             .iter()
             .filter(move |problem| problem.slot == slot)
             .map(|problem| &problem.message)
+    }
+
+    fn instructions_entry(&self, kind: InstructionsKind) -> &InstructionsEntry {
+        match kind {
+            InstructionsKind::Summary => &self.summary,
+            InstructionsKind::Review => &self.review,
+        }
+    }
+
+    fn instructions_entry_mut(&mut self, kind: InstructionsKind) -> &mut InstructionsEntry {
+        match kind {
+            InstructionsKind::Summary => &mut self.summary,
+            InstructionsKind::Review => &mut self.review,
+        }
     }
 
     fn has_problem_under(&self, slot: Slot) -> bool {
@@ -416,13 +450,13 @@ impl SettingsPanel {
         cx.notify();
     }
 
-    fn open_default_file(&mut self, cx: &mut Context<Self>) {
+    fn open_default_file(&mut self, kind: InstructionsKind, cx: &mut Context<Self>) {
         let Some(editing) = self.editing_mut() else {
             return;
         };
-        match editing.settings.create_default_file() {
+        match editing.settings.create_default_file(kind) {
             Ok(file) => {
-                editing.default_file_exists = true;
+                editing.instructions_entry_mut(kind).default_file_exists = true;
                 // In the reviewer's IDE when one is set: the system's app for `.md` may be any.
                 match editing.settings.ide().template() {
                     Some(template) => {
@@ -471,17 +505,17 @@ impl SettingsPanel {
         .detach();
     }
 
-    fn pick_summary_file(&mut self, cx: &mut Context<Self>) {
+    fn pick_instructions_file(&mut self, kind: InstructionsKind, cx: &mut Context<Self>) {
         let options = PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: None,
         };
-        self.pick_path(options, cx, |editing, path| {
+        self.pick_path(options, cx, move |editing, path| {
             editing
                 .settings
-                .set_summary_instructions(SummaryInstructionsChoice::OtherFile(path));
+                .set_instructions(kind, InstructionsChoice::OtherFile(path));
         });
     }
 
@@ -615,86 +649,97 @@ impl SettingsPanel {
         column(div().h(px(1.)).bg(colors.subtle_border))
     }
 
-    fn summary_instructions(
+    fn instructions(
         &self,
+        kind: InstructionsKind,
         editing: &Editing,
         colors: &Colors,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let choice = editing.settings.summary_instructions();
-        let is_skill = editing.skill.is_open;
+        let id = |suffix: &str| SharedString::from(format!("{}-{suffix}", kind.label()));
+        let entry = editing.instructions_entry(kind);
+        let choice = editing.settings.instructions(kind);
+        let is_skill = entry.skill.is_open;
         let picked = if is_skill {
             Some(2)
         } else {
             match choice {
-                SummaryInstructionsChoice::DefaultFile => Some(0),
-                SummaryInstructionsChoice::OtherFile(_) => Some(1),
-                SummaryInstructionsChoice::Skill(_) => Some(2),
-                SummaryInstructionsChoice::Off => Some(3),
-                SummaryInstructionsChoice::Unreadable(_) => None,
+                InstructionsChoice::DefaultFile => Some(0),
+                InstructionsChoice::OtherFile(_) => Some(1),
+                InstructionsChoice::Skill(_) => Some(2),
+                InstructionsChoice::Off => Some(3),
+                InstructionsChoice::Unreadable(_) => None,
             }
         };
         let segments = vec![
             Segment::new(
-                "summary-default",
+                id("default"),
                 "Default file",
-                cx.listener(|this, _, _, cx| {
+                cx.listener(move |this, _, _, cx| {
                     this.edit(cx, |editing| {
-                        editing.skill.is_open = false;
+                        editing.instructions_entry_mut(kind).skill.is_open = false;
                         editing
                             .settings
-                            .set_summary_instructions(SummaryInstructionsChoice::DefaultFile);
+                            .set_instructions(kind, InstructionsChoice::DefaultFile);
                     });
                 }),
             ),
             Segment::new(
-                "summary-other-file",
+                id("other-file"),
                 "Other file…",
-                cx.listener(|this, _, _, cx| {
-                    this.edit(cx, |editing| editing.skill.is_open = false);
-                    this.pick_summary_file(cx);
+                cx.listener(move |this, _, _, cx| {
+                    this.edit(cx, |editing| {
+                        editing.instructions_entry_mut(kind).skill.is_open = false;
+                    });
+                    this.pick_instructions_file(kind, cx);
                 }),
             ),
             Segment::new(
-                "summary-skill",
+                id("skill"),
                 "Skill",
-                cx.listener(|this, _, _, cx| this.edit(cx, |editing| editing.skill.is_open = true)),
+                cx.listener(move |this, _, _, cx| {
+                    this.edit(cx, |editing| {
+                        editing.instructions_entry_mut(kind).skill.is_open = true;
+                    });
+                }),
             ),
             Segment::new(
-                "summary-off",
+                id("off"),
                 "Off",
-                cx.listener(|this, _, _, cx| {
+                cx.listener(move |this, _, _, cx| {
                     this.edit(cx, |editing| {
-                        editing.skill.is_open = false;
+                        editing.instructions_entry_mut(kind).skill.is_open = false;
                         editing
                             .settings
-                            .set_summary_instructions(SummaryInstructionsChoice::Off);
+                            .set_instructions(kind, InstructionsChoice::Off);
                     });
                 }),
             ),
         ];
-        let has_problem = editing.has_problem_under(Slot::SummaryInstructions);
+        let has_problem = editing.has_problem_under(Slot::Instructions(kind));
         let control = Segmented::new(
-            "summary-mode",
+            id("mode"),
             SegmentLayout::Row {
                 segment_width: px(116.),
             },
             segments,
         )
         .picked(picked)
-        .invalid(matches!(choice, SummaryInstructionsChoice::Unreadable(_)));
-        let detail =
-            if is_skill {
-                Some(self.skill_picker(editing, colors, cx).into_any_element())
-            } else {
-                match choice {
-                    SummaryInstructionsChoice::DefaultFile => {
-                        let (status, action) = if editing.default_file_exists {
+        .invalid(matches!(choice, InstructionsChoice::Unreadable(_)));
+        let detail = if is_skill {
+            Some(
+                self.skill_picker(kind, editing, colors, cx)
+                    .into_any_element(),
+            )
+        } else {
+            match choice {
+                    InstructionsChoice::DefaultFile => {
+                        let (status, action) = if entry.default_file_exists {
                             (
                                 (Tone::Success, "Found"),
                                 icon_label_button(
                                     colors,
-                                    "summary-default-open",
+                                    id("default-open"),
                                     ButtonKind::Secondary,
                                     ButtonSize::Small,
                                     Icon::FileText,
@@ -706,7 +751,7 @@ impl SettingsPanel {
                                 (Tone::Warning, "Not created yet"),
                                 icon_label_button(
                                     colors,
-                                    "summary-default-open",
+                                    id("default-open"),
                                     ButtonKind::Tinted,
                                     ButtonSize::Small,
                                     Icon::FilePlus,
@@ -715,15 +760,17 @@ impl SettingsPanel {
                             )
                         };
                         Some(
-                            file_row(colors, editing.default_file.clone(), has_problem)
+                            file_row(colors, entry.default_file.clone(), has_problem)
                                 .child(chip(colors, status.0).py_0p5().child(status.1))
                                 .child(action.on_click(
-                                    cx.listener(|this, _, _, cx| this.open_default_file(cx)),
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.open_default_file(kind, cx);
+                                    }),
                                 ))
                                 .into_any_element(),
                         )
                     }
-                    SummaryInstructionsChoice::OtherFile(path) => Some(
+                    InstructionsChoice::OtherFile(path) => Some(
                         file_row(colors, path.display().to_string().into(), has_problem)
                             .when(has_problem, |row| {
                                 row.child(chip(colors, Tone::Danger).py_0p5().child("Missing"))
@@ -731,29 +778,36 @@ impl SettingsPanel {
                             .child(
                                 icon_label_button(
                                     colors,
-                                    "summary-other-file-pick",
+                                    id("other-file-pick"),
                                     ButtonKind::Secondary,
                                     ButtonSize::Small,
                                     Icon::FolderOpen,
                                     "Choose…",
                                 )
-                                .on_click(cx.listener(|this, _, _, cx| this.pick_summary_file(cx))),
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.pick_instructions_file(kind, cx);
+                                })),
                             )
                             .into_any_element(),
                     ),
-                    SummaryInstructionsChoice::Skill(_) => {
-                        Some(self.skill_picker(editing, colors, cx).into_any_element())
+                    InstructionsChoice::Skill(_) => {
+                        Some(self.skill_picker(kind, editing, colors, cx).into_any_element())
                     }
-                    SummaryInstructionsChoice::Off => Some(
+                    InstructionsChoice::Off => Some(
                         div()
                             .text_sm()
                             .text_color(colors.muted_text)
-                            .child("The tour writer gets no summary instructions.")
+                            .child(match kind {
+                                InstructionsKind::Summary => "The tour writer gets no summary instructions.",
+                                InstructionsKind::Review => {
+                                    "The review agent gets no guidance, only how to report what it finds."
+                                }
+                            })
                             .into_any_element(),
                     ),
-                    SummaryInstructionsChoice::Unreadable(_) => None,
+                    InstructionsChoice::Unreadable(_) => None,
                 }
-            };
+        };
         div()
             .flex()
             .flex_col()
@@ -762,19 +816,20 @@ impl SettingsPanel {
             .children(detail)
             .child(Self::problem_lines(
                 editing,
-                Slot::SummaryInstructions,
+                Slot::Instructions(kind),
                 colors,
             ))
     }
 
     fn skill_picker(
         &self,
+        kind: InstructionsKind,
         editing: &Editing,
         colors: &Colors,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let chosen = match editing.settings.summary_instructions() {
-            SummaryInstructionsChoice::Skill(name) => Some(name),
+        let chosen = match editing.settings.instructions(kind) {
+            InstructionsChoice::Skill(name) => Some(name),
             _ => None,
         };
         let skills = editing
@@ -785,7 +840,7 @@ impl SettingsPanel {
                 let picked = name.clone();
                 toggle_button(
                     colors,
-                    SharedString::from(format!("summary-skill-{index}")),
+                    SharedString::from(format!("{}-skill-{index}", kind.label())),
                     chosen == Some(name),
                     ButtonSize::Small,
                 )
@@ -793,25 +848,28 @@ impl SettingsPanel {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let picked = picked.clone();
                     this.edit(cx, |editing| {
-                        picked.as_str().clone_into(&mut editing.skill.text);
+                        picked
+                            .as_str()
+                            .clone_into(&mut editing.instructions_entry_mut(kind).skill.text);
                         editing
                             .settings
-                            .set_summary_instructions(SummaryInstructionsChoice::Skill(picked));
+                            .set_instructions(kind, InstructionsChoice::Skill(picked));
                     });
                 }))
             });
-        let typed = editing.skill.focus.as_ref().map(|focus| {
+        let skill = &editing.instructions_entry(kind).skill;
+        let typed = skill.focus.as_ref().map(|focus| {
             self.text_box(
-                "summary-skill-name",
+                SharedString::from(format!("{}-skill-name", kind.label())),
                 focus,
-                &editing.skill.text,
+                &skill.text,
                 false,
                 cx,
-                |editing, text| {
+                move |editing, text| {
                     editing
                         .settings
-                        .set_summary_instructions(SummaryInstructionsChoice::skill_named(&text));
-                    editing.skill.text = text;
+                        .set_instructions(kind, InstructionsChoice::skill_named(&text));
+                    editing.instructions_entry_mut(kind).skill.text = text;
                 },
             )
         });
@@ -825,7 +883,10 @@ impl SettingsPanel {
                 ))
                 .child(div().flex().flex_wrap().gap_2().children(skills))
                 .children(typed),
-            "summary-skill-rise",
+            match kind {
+                InstructionsKind::Summary => "summary-skill-rise",
+                InstructionsKind::Review => "review-skill-rise",
+            },
         )
     }
 
@@ -1855,7 +1916,8 @@ impl Render for SettingsPanel {
                 None,
             ),
             Loaded::Ready(editing) => {
-                let summary = self.summary_instructions(editing, &colors, cx);
+                let summary = self.instructions(InstructionsKind::Summary, editing, &colors, cx);
+                let review = self.instructions(InstructionsKind::Review, editing, &colors, cx);
                 let ide = self.ide(editing, &colors, cx);
                 let ask = self.ask(editing, &colors, cx);
                 let more_lines = self.more_lines(editing, &colors, cx);
@@ -1878,6 +1940,13 @@ impl Render for SettingsPanel {
                             "Summary instructions",
                             "How the tour writer writes the reviewer summary at the start of a tour.",
                             summary,
+                        ))
+                        .child(Self::section_rule(&colors))
+                        .child(Self::section(
+                            &colors,
+                            "Review instructions",
+                            "What the review agent looks for when it reviews a change.",
+                            review,
                         ))
                         .child(Self::section_rule(&colors))
                         .child(Self::section(

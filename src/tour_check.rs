@@ -1,9 +1,9 @@
 use std::fmt;
 
 use crate::coverage;
+use crate::instructions::SummaryInstructions;
 use crate::language::Language;
 use crate::pieces::ChangedFile;
-use crate::summary_instructions::SummaryInstructions;
 use crate::tour::{GuidedTour, PieceRef, Step, StepId};
 
 pub const MAX_SUMMARY_BULLETS: usize = 3;

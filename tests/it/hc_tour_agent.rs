@@ -5,8 +5,8 @@ use guided_review::hc_tour_agent::HcTourAgents;
 use guided_review::platform::Os;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
-    AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
-    TourAgentPort, TourAgentStart,
+    AgentLinkOff, AgentRole, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, ReviewAgentStart,
+    SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
 };
 use tempfile::TempDir;
 
@@ -678,11 +678,70 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
     for needed in [
         "Bash(guided-review open:*)",
         "Bash(guided-review agent-reply:*)",
+        "Bash(guided-review fix-reply:*)",
         "Bash(guided-review check:*)",
         "Skill(tour)",
     ] {
         assert!(tools.contains(&needed), "{needed} missing from {tools:?}");
     }
+}
+
+#[test]
+fn a_review_agent_is_labelled_for_review_and_started_with_the_tools_it_may_and_may_not_use() {
+    let dir = TempDir::new().unwrap();
+    answer(dir.path(), "run", r#"{"address":"t9"}"#);
+
+    let started = adapter(dir.path())
+        .start_review(&ReviewAgentStart {
+            subject: pr(),
+            name: "review-acme-shop-7".to_owned(),
+            folder: PathBuf::from("/worktrees/7"),
+            first_task: "You are the review agent".to_owned(),
+            tools: "Grep,Glob".to_owned(),
+            denied_tools: "Bash(git push:*)".to_owned(),
+        })
+        .unwrap();
+
+    assert_eq!(started, TerminalId::new("t9"));
+    assert_eq!(
+        calls(dir.path(), "calls"),
+        [format!(
+            "run --bg --json --outlive-parent --no-parent --name review-acme-shop-7 --cwd /worktrees/7 \
+             --label app=guided-review --label gr.review={PR} --label gr.started-by=app \
+             --label herdr.space=guided-review --label herdr.tab=review-acme-shop-7 \
+             -- env PATH= claude You are the review agent --permission-mode auto \
+             --allowedTools Grep,Glob --disallowedTools Bash(git push:*)"
+        )]
+    );
+}
+
+#[test]
+fn review_agents_are_found_by_their_own_label_and_listed_with_their_role() {
+    let dir = TempDir::new().unwrap();
+    answer(
+        dir.path(),
+        "ls",
+        r#"{"terminals":[{"address":"t9","state":"live"}]}"#,
+    );
+    answer(
+        dir.path(),
+        "get",
+        &format!(
+            r#"{{"address":"t9","labels":{{"gr.review":"{PR}","gr.started-by":"app"}},"status":{{"state":"working"}},"status_ms":5}}"#
+        ),
+    );
+
+    let found = adapter(dir.path()).review_terminals_of(&pr()).unwrap();
+    let listed = adapter(dir.path()).app_started().unwrap();
+
+    assert_eq!(found, [TerminalId::new("t9")]);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].role, AgentRole::Review);
+    assert_eq!(listed[0].subject, Some(pr()));
+    assert_eq!(
+        calls(dir.path(), "calls")[0],
+        format!("ls --label app=guided-review --label gr.review={PR} --json")
+    );
 }
 
 fn start_shop_agent(agents: &HcTourAgents) -> anyhow::Result<TerminalId> {
@@ -891,6 +950,7 @@ fn the_app_started_agents_are_listed_with_their_pr_status_and_when_it_changed() 
         agents,
         [AppAgent {
             terminal: TerminalId::new("t9"),
+            role: AgentRole::Tour,
             subject: Some(pr()),
             status: AgentStatus::Idle,
             status_since_ms: 1_793_954_000_972,

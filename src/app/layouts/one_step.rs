@@ -38,6 +38,8 @@ use crate::app::components::diff_view::{
     hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
     rendered_block_row, rendered_file_waiting_row,
 };
+use crate::app::components::finding_view::{FindingQuestions, finding_card};
+use crate::app::components::findings_sheet::{FindingsEvent, FindingsSheet};
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish, OnMarkDone};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::guided_tour_banner::{GuidedTourReadyBanner, switch_button};
@@ -89,30 +91,35 @@ use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::prose_selection::ProseSelections;
 use crate::app::review_session::{ReviewSession, SessionEvent, SessionWiring, TourWork};
 use crate::app::sidebar_rows::{
-    SidebarDiskNews, SidebarGuidedTour, SidebarMoveOffer, SidebarRows, SidebarTourAgent, WriteOffer,
+    SidebarAiReview, SidebarDiskNews, SidebarGuidedTour, SidebarMoveOffer, SidebarRows,
+    SidebarTourAgent, WriteOffer,
 };
 use crate::app::updater::{UpdateInstalled, Updater, Updates};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
+use crate::findings::FindingId;
 use crate::ide::{Ide, NoIde};
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
 use crate::update::Build;
 use crate::viewer::{
-    AgentReplied, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView, CheckList,
-    CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox, CommentGesture,
-    CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction, GitHubPort,
-    HandOffId, InFlight, Intent, JobProgress, LabelSwitch, LineLocation, MergeOffer, Merging,
-    NextScreen, NoteSubject, NotesButton, OpenPrStatus, Overlay, OverviewPage, OverviewStats,
-    PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress, ReadStep,
-    ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs,
-    RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen,
-    ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
+    AgentReplied, AiReviewAction, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView,
+    CheckList, CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox,
+    CommentGesture, CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction,
+    FixState, GitHubPort, HandOffId, InFlight, Intent, JobProgress, LabelSwitch, LineLocation,
+    MergeOffer, Merging, NextScreen, NoteSubject, NotesButton, OpenPrStatus, Overlay, OverviewPage,
+    OverviewStats, PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress,
+    ReadStep, ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening,
+    RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow,
+    Screen, ScreenFooter, ScreenTravel, SelectedRows, SendMode, SettingsSheet, StepHeading, StepId,
     StepIntro, SummaryColumns, SummaryStatsRow, TextBox, ThreadId, ThreadRowPlace, ThreadView,
     ToastTone, Toolbar, TourLead, Travel, TreeRowKind, ViewSwitch, WindowMoment, pluralised,
 };
-use crate::viewer::{IssueDetails, RelatedIssue};
+use crate::viewer::{
+    DEFAULT_WHY_QUESTION, FindingRefusal, FindingRow, FixReply, IssueDetails, RelatedIssue,
+    WhyAsked, WhyReply,
+};
 use issue_card::{CardSide, IssueHover, issue_card};
 
 #[cfg(feature = "snapshots")]
@@ -146,6 +153,7 @@ actions!(
         ToggleAutoMerge,
         ToggleRead,
         ToggleShortcuts,
+        ToggleFindingsList,
         OpenPrOnGitHub,
         OpenIssue,
         AskToOpenPr,
@@ -180,6 +188,8 @@ pub struct OneStepLayout {
     focus: FocusHandle,
     /// The comment being written takes keys with this one.
     composer_focus: FocusHandle,
+    /// The Ask why boxes open on findings.
+    finding_questions: FindingQuestions,
     ask: Entity<AskPanel>,
     code_selection: Option<CodeSelection>,
     /// The sidebar row touching the current one that the mouse is on, so the current row squares the corners they share.
@@ -211,6 +221,7 @@ pub struct OneStepLayout {
     jump: Entity<JumpPalette>,
     pr_switcher: Entity<PrSwitcherView>,
     shortcuts: Entity<ShortcutsSheet>,
+    findings: Entity<FindingsSheet>,
     picture_zoom: Entity<PictureZoom>,
     settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
@@ -311,6 +322,11 @@ impl OneStepLayout {
         })
         .detach();
         let shortcuts = cx.new(|cx| ShortcutsSheet::new(focus.clone(), cx));
+        let findings = cx.new(|cx| FindingsSheet::new(focus.clone(), cx));
+        cx.subscribe_in(&findings, window, |this, sheet, event, window, cx| {
+            this.findings_asked(sheet, event, window, cx);
+        })
+        .detach();
         let picture_zoom = cx.new(|cx| PictureZoom::new(focus.clone(), cx));
         cx.subscribe_in(
             &jump,
@@ -413,6 +429,7 @@ impl OneStepLayout {
             description_diagrams: DiagramSet::default(),
             focus,
             composer_focus: cx.focus_handle(),
+            finding_questions: FindingQuestions::default(),
             ask,
             code_selection: None,
             hovered_touching_row: None,
@@ -431,6 +448,7 @@ impl OneStepLayout {
             jump,
             pr_switcher,
             shortcuts,
+            findings,
             picture_zoom,
             settings,
             loading,
@@ -492,6 +510,37 @@ impl OneStepLayout {
     ) -> anyhow::Result<()> {
         self.session
             .update(cx, |session, cx| session.hand_off_replied(id, replied, cx))
+    }
+
+    pub fn fix_replied(
+        &mut self,
+        finding: &FindingId,
+        reply: &FixReply,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        self.session
+            .update(cx, |session, cx| session.fix_replied(finding, reply, cx))
+    }
+
+    pub fn why_replied(
+        &mut self,
+        finding: &FindingId,
+        reply: &WhyReply,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        self.session
+            .update(cx, |session, cx| session.why_replied(finding, reply, cx))
+    }
+
+    pub fn findings_catch_up(
+        &self,
+        cx: &Context<Self>,
+    ) -> impl FnOnce() -> anyhow::Result<()> + Send + use<> {
+        self.session.read(cx).findings_catch_up()
+    }
+
+    pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
+        self.session.update(cx, ReviewSession::findings_done)
     }
 
     pub fn reload_tour(&mut self, cx: &mut Context<Self>) {
@@ -1119,6 +1168,273 @@ impl OneStepLayout {
         }
     }
 
+    /// Use, Use as is and Dismiss, which decide one finding.
+    fn finding_actions(
+        &self,
+        colors: &Colors,
+        finding: &FindingRow,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let small_button = |name: &str, kind, icon, label| {
+            icon_label_button(
+                colors,
+                SharedString::from(format!("finding-{name}-{}", finding.id)),
+                kind,
+                ButtonSize::Small,
+                icon,
+                label,
+            )
+        };
+        let (use_id, as_is_id, dismiss_id, fix_id, why_id, answer_id) = (
+            finding.id.clone(),
+            finding.id.clone(),
+            finding.id.clone(),
+            finding.id.clone(),
+            finding.id.clone(),
+            finding.id.clone(),
+        );
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                small_button("use", ButtonKind::Secondary, Icon::Pencil, "Use").on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.use_finding(&use_id, window, cx);
+                    }),
+                ),
+            )
+            .child(
+                small_button("use-as-is", ButtonKind::Ghost, Icon::Send, "Use as is").on_click(
+                    cx.listener(move |this, _, window, cx| {
+                        this.use_finding_as_is(&as_is_id, window, cx);
+                    }),
+                ),
+            )
+            .when(finding.can_fix, |actions| {
+                actions.child(
+                    small_button("fix", ButtonKind::Secondary, Icon::Zap, "Fix").on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            let refused = this
+                                .session
+                                .update(cx, |session, cx| {
+                                    session.fix_findings(std::slice::from_ref(&fix_id), cx)
+                                })
+                                .into_iter()
+                                .next();
+                            this.finding_refused(
+                                refused.map_or(Ok(()), |(_, refusal)| Err(refusal)),
+                                cx,
+                            );
+                        }),
+                    ),
+                )
+            })
+            .when(finding.can_answer_fix, |actions| {
+                actions.child(
+                    small_button("answer-fix", ButtonKind::Primary, Icon::Send, "Answer").on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            this.open_fix_answer(&answer_id, window, cx);
+                        }),
+                    ),
+                )
+            })
+            .when(finding.can_ask_why, |actions| {
+                actions.child(
+                    small_button("ask-why", ButtonKind::Ghost, Icon::Sparkles, "Ask why").on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            this.open_why_question(&why_id, window, cx);
+                        }),
+                    ),
+                )
+            })
+            .child(
+                small_button("dismiss", ButtonKind::Ghost, Icon::Close, "Dismiss").on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        let dismissed = this
+                            .session
+                            .update(cx, |session, cx| session.dismiss_finding(&dismiss_id, cx));
+                        this.finding_refused(dismissed, cx);
+                    }),
+                ),
+            )
+    }
+
+    /// What the findings list asked: a batch is done by the session, and the list shows what is left.
+    fn findings_asked(
+        &mut self,
+        sheet: &Entity<FindingsSheet>,
+        event: &FindingsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let refused = match event {
+            FindingsEvent::Dismiss(ids) => self
+                .session
+                .update(cx, |session, cx| session.dismiss_findings(ids, cx)),
+            FindingsEvent::Restore(ids) => self
+                .session
+                .update(cx, |session, cx| session.restore_findings(ids, cx)),
+            FindingsEvent::Comment(ids) => self
+                .session
+                .update(cx, |session, cx| session.comment_findings(ids, cx)),
+            FindingsEvent::Fix(ids) => self
+                .session
+                .update(cx, |session, cx| session.fix_findings(ids, cx)),
+            FindingsEvent::GoTo(id) => {
+                self.session.update(cx, |session, cx| {
+                    session.change(cx, |review| review.go_to_finding(id));
+                });
+                self.scroll_to_finding(id, cx);
+                return;
+            }
+        };
+        if let Some((_, refusal)) = refused.first() {
+            let others = refused.len().saturating_sub(1);
+            let note = if others == 0 {
+                refusal.to_string()
+            } else {
+                format!("{refusal}, and {others} more were left open")
+            };
+            post_toast(cx, ToastTone::Neutral, note);
+        }
+        let list = self.session.read(cx).review().findings_list();
+        sheet.update(cx, |sheet, cx| sheet.refresh(&list, window, cx));
+        cx.notify();
+    }
+
+    fn use_finding(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let used = self.session.update(cx, |session, cx| {
+            session.change(cx, |review| review.use_finding(id))
+        });
+        match used {
+            Ok(place) => self.go_to_comment_box(place, window, cx),
+            Err(refusal) => self.finding_refused(Err(refusal), cx),
+        }
+    }
+
+    /// Use as is refused for a box open on the finding's lines: the reviewer is taken to that box.
+    fn use_finding_as_is(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let sent = self
+            .session
+            .update(cx, |session, cx| session.use_finding_as_is(id, cx));
+        if let Err(FindingRefusal::DraftInTheWay(place)) = &sent {
+            self.go_to_comment_box(place.clone(), window, cx);
+        }
+        self.finding_refused(sent, cx);
+    }
+
+    /// The box takes the keys and the page scrolls until it shows.
+    fn go_to_comment_box(
+        &mut self,
+        place: CommentPlace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let row = self.session.read(cx).rows().row_of_comment_box(&place);
+        self.session
+            .update(cx, |session, cx| session.compose(place, cx));
+        window.focus(&self.composer_focus, cx);
+        if let Some(row) = row {
+            self.screen_list.scroll_to_reveal_item(row);
+        }
+        cx.notify();
+    }
+
+    /// Ask why opens a box under the finding, with the usual question in it to ask as is or to edit.
+    fn open_why_question(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self
+            .finding_questions
+            .open(id, DEFAULT_WHY_QUESTION, "to ask", cx);
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Answer opens the same box under the finding, empty, for what the tour agent asked before fixing.
+    fn open_fix_answer(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self.finding_questions.open(id, "", "to answer", cx);
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    fn type_why_question(&mut self, id: &FindingId, text: String) {
+        self.finding_questions.type_in(id, text);
+    }
+
+    fn give_up_why_question(
+        &mut self,
+        id: &FindingId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.finding_questions.close(id);
+        window.focus(&self.focus, cx);
+    }
+
+    /// The typed question goes to the review agent on the finding's thread while it lives, else into the
+    /// Ask panel. A question that was refused stays in its box.
+    fn send_why_question(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.session.read(cx).review().fix_state_of(id) == Some(&FixState::Asked) {
+            self.send_fix_answer(id, window, cx);
+            return;
+        }
+        let question = self
+            .finding_questions
+            .text_of(id)
+            .unwrap_or_default()
+            .to_owned();
+        let asked = self
+            .ask
+            .update(cx, |panel, cx| panel.ask_why(id, &question, window, cx));
+        if asked.is_ok() {
+            self.finding_questions.close(id);
+            if asked == Ok(WhyAsked::ToReviewAgent) {
+                window.focus(&self.focus, cx);
+            }
+        }
+        if asked == Ok(WhyAsked::ToReviewAgent) {
+            self.session.update(cx, ReviewSession::deliver_questions);
+        }
+        self.finding_refused(asked.map(|_| ()), cx);
+    }
+
+    /// The typed answer goes to the tour agent when it is idle. An answer that was refused stays in its box.
+    fn send_fix_answer(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let answer = self
+            .finding_questions
+            .text_of(id)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        if answer.is_empty() {
+            return;
+        }
+        let sent = self.session.update(cx, |session, cx| {
+            session.answer_fix_question(id, &answer, cx)
+        });
+        if sent.is_ok() {
+            self.finding_questions.close(id);
+            window.focus(&self.focus, cx);
+        }
+        self.finding_refused(sent, cx);
+    }
+
+    fn finding_refused(&mut self, done: Result<(), FindingRefusal>, cx: &mut Context<Self>) {
+        if let Err(refusal) = done {
+            post_toast(cx, ToastTone::Neutral, refusal.to_string());
+        }
+        cx.notify();
+    }
+
+    /// Run AI review, from the summary, the sidebar and the palette: the review takes the asking, and the
+    /// session starts the review agent.
+    fn run_ai_review(&mut self, cx: &mut Context<Self>) {
+        let asked = self.session.update(cx, ReviewSession::run_ai_review);
+        if let Err(refusal) = asked {
+            post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned());
+        }
+    }
+
     /// `D` and the palette's actions: the first ask says what asking again does.
     fn change_readiness(&mut self, cx: &mut Context<Self>) {
         let step = self.session.update(cx, |session, cx| {
@@ -1250,6 +1566,27 @@ impl OneStepLayout {
     }
 
     /// Carries out what the review decides the reader's intent does.
+    /// To the next finding, scrolled to its row; the screen's top when its row is not on the page.
+    fn go_to_next_finding(&mut self, cx: &mut Context<Self>) {
+        let row = self.session.update(cx, |session, cx| {
+            let id = session.change(cx, |review| review.go_to_next_finding())?;
+            session.rows().row_of_finding(&id)
+        });
+        self.screen_list.scroll_to(ListOffset {
+            item_ix: row.unwrap_or(0),
+            offset_in_item: px(0.),
+        });
+    }
+
+    /// After the review went to a finding's screen: its row is on the page the session just built.
+    fn scroll_to_finding(&mut self, id: &FindingId, cx: &mut Context<Self>) {
+        let row = self.session.read(cx).rows().row_of_finding(id);
+        self.screen_list.scroll_to(ListOffset {
+            item_ix: row.unwrap_or(0),
+            offset_in_item: px(0.),
+        });
+    }
+
     fn act(&mut self, intent: Intent, window: &mut Window, cx: &mut Context<Self>) {
         let effect = self
             .session
@@ -1296,6 +1633,11 @@ impl OneStepLayout {
             Effect::Toggle(Overlay::Shortcuts) => self
                 .shortcuts
                 .update(cx, |sheet, cx| sheet.toggle(window, cx)),
+            Effect::Toggle(Overlay::Findings) => {
+                let list = self.session.read(cx).review().findings_list();
+                self.findings
+                    .update(cx, |sheet, cx| sheet.toggle(list, window, cx));
+            }
             Effect::OpenSettings => self
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
@@ -1303,6 +1645,7 @@ impl OneStepLayout {
                 .pr_switcher
                 .update(cx, |switcher, cx| switcher.show(window, cx)),
             Effect::AskAboutScreen => self.ask_about_screen(window, cx),
+            Effect::NextFinding => self.go_to_next_finding(cx),
             Effect::OpenFinishForm => self.open_finish_form(cx),
             Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
             Effect::OpenPr => self.session.update(cx, ReviewSession::open_pr),
@@ -1336,6 +1679,10 @@ impl OneStepLayout {
                 ),
             },
             Effect::WriteGuidedTour => self.write_guided_tour(cx),
+            Effect::RunAiReview => self.run_ai_review(cx),
+            Effect::Refused(Refusal::AiReview(refusal)) => {
+                post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned());
+            }
             Effect::SwitchToGuidedTour => self.switch_to_guided_tour(cx),
             Effect::Refused(Refusal::GuidedTour(refusal)) => {
                 post_toast(cx, ToastTone::Neutral, refusal.reason().to_owned());
@@ -1376,6 +1723,115 @@ impl OneStepLayout {
             self.session
                 .update(cx, |session, _| session.saw_end_of_screen());
         }
+    }
+
+    /// What the review agent left: its findings by severity, or why its file was not read.
+    fn ai_review_block(
+        colors: &Colors,
+        ai_review: &SidebarAiReview,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let show = ai_review.can_show_agent.then(|| {
+            icon_label_button(
+                colors,
+                "show-review-agent",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Terminal,
+                "Show agent",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::show_review_agent);
+            }))
+        });
+        let list = (ai_review.has_findings || ai_review.has_dismissed_findings).then(|| {
+            icon_label_button(
+                colors,
+                "findings-list",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::ListChecks,
+                "Findings list",
+            )
+            .child(button_keys(
+                colors,
+                ButtonKind::Ghost,
+                Command::FindingsList,
+                cx,
+            ))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::ToggleFindingsList, window, cx);
+            }))
+        });
+        let next = ai_review.has_findings.then(|| {
+            icon_label_button(
+                colors,
+                "next-finding",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::ArrowRight,
+                "Next finding",
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::NextFinding, window, cx);
+            }))
+        });
+        let action = ai_review.action.map(|action| {
+            icon_label_button(
+                colors,
+                "sidebar-run-ai-review",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                ai_review_icon(action),
+                action.label(),
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::RunAiReview, window, cx);
+            }))
+        });
+        div()
+            .id("ai-review")
+            .flex()
+            .flex_col()
+            .gap_1()
+            .text_xs()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child("AI review"))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_x_1()
+                            .min_w_0()
+                            .text_color(if ai_review.is_failure {
+                                colors.danger
+                            } else {
+                                colors.muted_text
+                            })
+                            .children(ai_review.line.split(" · ").enumerate().map(|(at, part)| {
+                                let text = if at == 0 {
+                                    part.to_owned()
+                                } else {
+                                    format!("· {part}")
+                                };
+                                div().whitespace_nowrap().child(text)
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_x_2()
+                    .gap_y_1()
+                    .children(show)
+                    .children(list)
+                    .children(next)
+                    .children(action),
+            )
     }
 
     /// Names the PR's tour agent and its status, or why tour agents are off, with Show agent.
@@ -1984,6 +2440,7 @@ impl OneStepLayout {
             .tour_agent
             .is_shown
             .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
+        let ai_review = Self::ai_review_block(&colors, &sidebar.ai_review, cx);
         let repin_progress = session.repin_progress();
         let disk_news = sidebar
             .disk_news
@@ -2099,6 +2556,7 @@ impl OneStepLayout {
             .children(finish_dialog)
             .children(guided_tour)
             .children(tour_agent)
+            .child(ai_review)
             .children(clone_offer)
             .children(changes_not_shown)
             .children(problems)
@@ -3416,6 +3874,22 @@ impl OneStepLayout {
                     ThreadRowPlace::AfterCode => div().pb_3().child(thread).into_any_element(),
                 }
             }
+            PageRow::Finding(finding) => {
+                let actions = self.finding_actions(&colors, &finding, cx);
+                let question = self.finding_questions.view(
+                    &colors,
+                    &finding.id,
+                    cx.entity(),
+                    Self::type_why_question,
+                    Self::send_why_question,
+                    Self::give_up_why_question,
+                );
+                let card = finding_card(&colors, &finding, question, actions);
+                match finding.place {
+                    ThreadRowPlace::UnderLine => hung_row().child(card).into_any_element(),
+                    ThreadRowPlace::AfterCode => div().pb_3().child(card).into_any_element(),
+                }
+            }
             PageRow::QueuedComment(queued) => hung_row()
                 .child(self.queued_comment(&queued, cx))
                 .into_any_element(),
@@ -3770,6 +4244,19 @@ impl OneStepLayout {
                 cx,
             ))
         });
+        let run_ai_review = toolbar.run_ai_review.map(|action| {
+            icon_label_button(
+                &colors,
+                "run-ai-review",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                ai_review_icon(action),
+                action.label(),
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::RunAiReview, window, cx);
+            }))
+        });
         let comment_on_file = toolbar.comment_on_file.as_ref().map(|path| {
             let comment_path = path.clone();
             icon_label_button(
@@ -3795,6 +4282,7 @@ impl OneStepLayout {
             .children(fold)
             .children(full_diff)
             .child(div().flex_1())
+            .children(run_ai_review)
             .children(comment_on_file)
             .children(toggles)
             .children(ask.map(|ask| div().pl_1().child(ask)))
@@ -4921,6 +5409,13 @@ fn tool_button(
 
 /// A diff toolbar toggle, a part of the toolbar's joined group: its icon and name, and a check
 /// while it is on.
+fn ai_review_icon(action: AiReviewAction) -> Icon {
+    match action {
+        AiReviewAction::TryAgain => Icon::Refresh,
+        AiReviewAction::Run | AiReviewAction::RunAgain => Icon::Sparkles,
+    }
+}
+
 fn toolbar_toggle(
     colors: &Colors,
     id: &'static str,
@@ -5237,6 +5732,9 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &ToggleRead, window, cx| {
                 this.act(Intent::ToggleRead, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleFindingsList, window, cx| {
+                this.act(Intent::ToggleFindingsList, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ToggleShortcuts, window, cx| {
                 this.act(Intent::ToggleShortcuts, window, cx);
             }))
@@ -5341,6 +5839,7 @@ impl Render for OneStepLayout {
             .child(self.jump.clone())
             .child(self.pr_switcher.clone())
             .child(self.shortcuts.clone())
+            .child(self.findings.clone())
             .child(self.picture_zoom.clone())
             .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))
             .children(frame_painted_marker)

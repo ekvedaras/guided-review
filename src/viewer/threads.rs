@@ -15,6 +15,7 @@ use super::outdated_lines::FollowedLines;
 use super::reactions::{Reaction, ReactionCount};
 use super::review::StepId;
 use super::step_page::{LineLocation, PieceDiff, Side};
+use super::used_findings::{FindingsOfThreads, UsedFinding};
 use crate::line_number::LineNumber;
 
 /// GitHub's node id of a review thread.
@@ -196,10 +197,12 @@ pub struct ThreadView {
     pub hand_off_button: Option<HandOffButton>,
     /// An outdated thread's lines, followed to the head, and what they were.
     pub followed: Option<FollowedLines>,
+    /// The findings of the AI review its comment was made from.
+    pub from_findings: Vec<UsedFinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum Home {
+pub(super) enum Home {
     Step(StepId),
     SafetyNet,
     File(FilePath),
@@ -272,19 +275,7 @@ impl ThreadPlacement {
         followed: &BTreeMap<ThreadId, FollowedLines>,
         display: &DiffDisplay,
     ) -> Self {
-        let steps: Vec<(StepId, Vec<PieceDiff>)> = tour
-            .steps()
-            .into_iter()
-            .map(|step| {
-                let parts = step
-                    .pieces
-                    .iter()
-                    .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
-                    .filter_map(|part| PieceDiff::of(&part, files, display))
-                    .collect();
-                (step.id.clone(), parts)
-            })
-            .collect();
+        let steps = step_pieces(tour, files, display);
         let mut homes: BTreeMap<Home, Vec<ReviewThread>> = BTreeMap::new();
         for thread in threads {
             let home = steps
@@ -322,7 +313,27 @@ impl ThreadPlacement {
     }
 }
 
-fn hangs_under_a_row(piece: &PieceDiff, location: &LineLocation) -> bool {
+/// The code each step shows, in the tour's order.
+pub(super) fn step_pieces(
+    tour: &GuidedTour,
+    files: &[ChangedFile],
+    display: &DiffDisplay,
+) -> Vec<(StepId, Vec<PieceDiff>)> {
+    tour.steps()
+        .into_iter()
+        .map(|step| {
+            let parts = step
+                .pieces
+                .iter()
+                .flat_map(|pointer| coverage::shown_parts(pointer, tour, files))
+                .filter_map(|part| PieceDiff::of(&part, files, display))
+                .collect();
+            (step.id.clone(), parts)
+        })
+        .collect()
+}
+
+pub(super) fn hangs_under_a_row(piece: &PieceDiff, location: &LineLocation) -> bool {
     piece.lines().any(|row| row.holds(location))
 }
 
@@ -341,6 +352,7 @@ pub(super) fn views(
     files_at_head: &FilesAtHead,
     work: &ThreadWork<'_>,
     hand_offs: &HandOffs,
+    findings: FindingsOfThreads<'_>,
 ) -> Vec<ThreadView> {
     let ThreadWork {
         reply_drafts,
@@ -373,6 +385,7 @@ pub(super) fn views(
             agent_is_working: hand_offs.is_working_on(&thread.id),
             hand_off_button: hand_offs.button_in(&thread.id),
             thread: without_working_on_it(thread, hand_offs),
+            from_findings: findings.of_thread(&thread.id),
         })
         .collect()
 }

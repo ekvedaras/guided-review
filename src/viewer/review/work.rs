@@ -6,7 +6,7 @@ use crate::viewer::comments::CommentResult;
 use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
 use crate::viewer::problems::{Problem, ProblemKind, Read};
 use crate::viewer::related_issues::RelatedIssues;
-use crate::viewer::tour_agent::TourAgentState;
+use crate::viewer::tour_agent::{TourAgentState, TourKind};
 use crate::viewer::work_agenda::{
     AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, WORKING_TREE_RECHECK, Work,
     WorkKind, WorkOutcome,
@@ -102,7 +102,17 @@ impl ReviewCore {
                 Job::TakeSeenMarksOff(requests)
             }
             WorkKind::DeliverHandOff => {
-                Job::DeliverHandOff(self.state.hand_offs().delivery_request(&self.subject)?)
+                match self.state.hand_offs().delivery_request(&self.subject) {
+                    Some(request) => Job::DeliverHandOff(request),
+                    None => Job::DeliverFixRequests(self.state.fix_requests().delivery_request(
+                        &self.subject,
+                        if self.tour.guided().is_some() {
+                            TourKind::Guided
+                        } else {
+                            TourKind::Basic
+                        },
+                    )?),
+                }
             }
             WorkKind::CheckAgentLink => {
                 if !self.agent_link_is_off {
@@ -216,6 +226,18 @@ impl ReviewCore {
                     .ok();
                 return after;
             }
+            Done::FixDelivery(outcome) => {
+                let after = if outcome.started_an_agent() {
+                    AfterLanding::FollowNewTourAgent
+                } else {
+                    AfterLanding::Nothing
+                };
+                self.record_reporting("the fix requests", |state| {
+                    state.fix_requests_mut().apply_delivery(outcome);
+                });
+                self.place_threads();
+                return after;
+            }
             Done::AgentLink(state) => {
                 if state.can_retry() {
                     self.work
@@ -245,6 +267,12 @@ impl ReviewCore {
         if let TourAgentState::Agent { status, .. } = state {
             self.record_hand_offs(|hand_offs| hand_offs.agent_status_is(*status))
                 .ok();
+            if !self.state.fix_requests().is_empty() {
+                self.record_reporting("the fix requests", |state| {
+                    state.fix_requests_mut().agent_status_is(*status);
+                });
+                self.place_threads();
+            }
             self.work.want(WorkKind::TakeSeenMarksOff);
         }
         self.work.want(WorkKind::DeliverHandOff);

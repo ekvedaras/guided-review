@@ -61,6 +61,10 @@ fn xdg_variables_name_the_folders_and_the_socket_lives_beside_the_lock_whatever_
         folders.summary_file(),
         Path::new("/cfg/guided-review/summary.md")
     );
+    assert_eq!(
+        folders.review_file(),
+        Path::new("/cfg/guided-review/review.md")
+    );
     assert_eq!(folders.tours(), Path::new("/st/guided-review/tours"));
     assert_eq!(folders.state_files(), Path::new("/st/guided-review/state"));
     assert_eq!(folders.evals(), Path::new("/st/guided-review/evals"));

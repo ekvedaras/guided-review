@@ -29,6 +29,7 @@ use super::key_cap::{KeyLabel, key_hint};
 use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
+    touching_places,
 };
 use super::palette::{CODE_FONT, Colors, INNER_RADIUS, Tone};
 use super::scrollbar::{ScrollbarDrag, TRACK_WIDTH, drag_listener, scrollbar};
@@ -781,28 +782,9 @@ impl PrSwitcherView {
                     .checked_sub(1)
                     .and_then(|above| row_at(self.lines.get(above)));
                 let below = row_at(self.lines.get(ix + 1));
-                let place = if nth == selected {
-                    RowPlace::Current
-                } else if below == Some(selected) {
-                    RowPlace::JustAboveCurrent
-                } else if above == Some(selected) {
-                    RowPlace::JustBelowCurrent
-                } else {
-                    RowPlace::Apart
-                };
-                let hovered_touching = match hovered {
-                    Some(hovered) if hovered != selected && above == Some(hovered) => {
-                        Some(RowPlace::JustAboveCurrent)
-                    }
-                    Some(hovered) if hovered != selected && below == Some(hovered) => {
-                        Some(RowPlace::JustBelowCurrent)
-                    }
-                    _ => None,
-                };
+                let place = touching_places(nth, above, below, selected, hovered);
                 match self.shown.get(nth) {
-                    Some(shown) => self
-                        .row(nth, shown, (place, hovered_touching), cx)
-                        .into_any_element(),
+                    Some(shown) => self.row(nth, shown, place, cx).into_any_element(),
                     None => div().into_any_element(),
                 }
             }

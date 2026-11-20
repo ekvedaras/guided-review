@@ -7,13 +7,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::file_path::FilePath;
+use crate::findings::{FindingId, Severity};
 use crate::local_facts::LocalChange;
 use crate::pieces::PieceId;
 use crate::tour::Step;
+use crate::viewer::finding_threads::WhyMessage;
 use crate::viewer::{
-    Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines, LabelSwitch, LineKind,
-    LineLocation, Markdown, NextScreen, NotesButton, OverviewPage, Place, QueuedComment,
-    ReadSubject, RenderedBlock, Screen, StepId, SummaryStats, ThreadView, TourLead, ViewSwitch,
+    AiReviewAction, Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines,
+    LabelSwitch, LineKind, LineLocation, Markdown, NextScreen, NotesButton, OverviewPage, Place,
+    QueuedComment, ReadSubject, RenderedBlock, Screen, StepId, SummaryStats, ThreadView, TourLead,
+    ViewSwitch,
 };
 
 #[derive(Clone)]
@@ -64,6 +67,8 @@ pub enum PageRow {
         reply_lines: Option<usize>,
     },
     QueuedComment(Arc<QueuedComment>),
+    /// A finding of the AI review, under its line inside the piece box, or after the code.
+    Finding(Arc<FindingRow>),
     /// A comment box; its text is read from the review when drawn, so only its line count is a part of the row.
     Composer {
         place: Arc<CommentPlace>,
@@ -85,6 +90,30 @@ pub enum ThreadRowPlace {
     UnderLine,
     /// Follows the step's code, for a thread with no line to hang under.
     AfterCode,
+}
+
+/// A finding of the AI review as a page shows it.
+#[derive(Debug, Clone)]
+pub struct FindingRow {
+    pub id: FindingId,
+    pub severity: Severity,
+    /// Markdown, as the review agent wrote it.
+    pub body: Arc<str>,
+    pub place: ThreadRowPlace,
+    /// Where the fix the reviewer asked for is, when one was asked for.
+    pub fix: Option<Arc<str>>,
+    /// False while a fix is asked for or under way.
+    pub can_fix: bool,
+    /// The tour agent asked something before fixing and waits for the reviewer's answer.
+    pub can_answer_fix: bool,
+    /// Ask why: the questions and the review agent's answers, oldest first.
+    pub thread: Arc<[WhyMessage]>,
+    /// Where the latest question is, once one was asked.
+    pub asked: Option<Arc<str>>,
+    /// False while a question waits for its answer.
+    pub can_ask_why: bool,
+    /// Set when new commits changed its lines: what they said when the review agent wrote it.
+    pub outdated: Option<Arc<[String]>>,
 }
 
 /// An ask button and what it asks about.
@@ -110,6 +139,8 @@ pub struct StepHeading {
 
 /// The controls over a screen's pieces, in one row.
 pub struct Toolbar {
+    /// The button that starts the AI review, on the screens that open a review.
+    pub run_ai_review: Option<AiReviewAction>,
     pub ask: Option<AskAt>,
     /// The file a basic tour's screen shows, which the reviewer can comment on as a whole.
     pub comment_on_file: Option<FilePath>,

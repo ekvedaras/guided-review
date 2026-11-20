@@ -5,6 +5,8 @@ pub mod chip;
 pub mod comment_composer;
 pub mod diagram;
 pub mod diff_view;
+pub mod finding_view;
+pub mod findings_sheet;
 pub mod finish_review;
 pub mod fold_toggle;
 pub mod guided_tour_banner;

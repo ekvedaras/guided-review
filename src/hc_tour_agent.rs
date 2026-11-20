@@ -15,8 +15,8 @@ use crate::json::at;
 use crate::platform::{HerdrRaise, Os, RaiseFailed};
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
-    AgentLinkOff, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, SendOutcome, TerminalId,
-    TourAgentPort, TourAgentStart,
+    AgentLinkOff, AgentRole, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, ReviewAgentStart,
+    SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
 };
 
 const APP_LABEL: &str = "app=guided-review";
@@ -132,17 +132,18 @@ fn space_of(place: &str) -> &str {
         .map_or(place, |(space, _tab)| space)
 }
 
-fn label_of(subject: &ReviewSubject) -> String {
-    format!("{}={subject}", subject.agent_label_key())
+fn label_of(role: AgentRole, subject: &ReviewSubject) -> String {
+    format!("{}={subject}", role.label_key(subject))
 }
 
-/// The subject a terminal is the tour agent of, read from its labels.
-fn subject_labelled_in(terminal: &Value) -> Option<ReviewSubject> {
-    ReviewSubject::AGENT_LABEL_KEYS.into_iter().find_map(|key| {
-        at(terminal, &format!("/labels/{key}"))
+/// The subject a terminal is an agent of, and in which role, read from its labels.
+fn subject_labelled_in(terminal: &Value) -> Option<(AgentRole, ReviewSubject)> {
+    AgentRole::label_keys().find_map(|(key, role)| {
+        let subject = at(terminal, &format!("/labels/{key}"))
             .as_str()?
             .parse()
-            .ok()
+            .ok()?;
+        Some((role, subject))
     })
 }
 
@@ -176,15 +177,11 @@ impl TourAgentPort for HcTourAgents {
     }
 
     fn terminals_of(&self, subject: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>> {
-        let label = label_of(subject);
-        let listed = self.hc(&["ls", "--label", APP_LABEL, "--label", &label, "--json"])?;
-        Ok(at(&listed, "/terminals")
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|terminal| at(terminal, "/address").as_str())
-            .map(TerminalId::new)
-            .collect())
+        self.terminals_with(AgentRole::Tour, subject)
+    }
+
+    fn review_terminals_of(&self, subject: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>> {
+        self.terminals_with(AgentRole::Review, subject)
     }
 
     fn live_terminals(&self) -> anyhow::Result<Vec<LiveTerminal>> {
@@ -209,8 +206,13 @@ impl TourAgentPort for HcTourAgents {
     }
 
     fn claim(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
-        self.hc(&["label", terminal.as_str(), APP_LABEL, &label_of(subject)])
-            .map(drop)
+        self.hc(&[
+            "label",
+            terminal.as_str(),
+            APP_LABEL,
+            &label_of(AgentRole::Tour, subject),
+        ])
+        .map(drop)
     }
 
     fn release(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
@@ -332,9 +334,11 @@ impl TourAgentPort for HcTourAgents {
             .filter_map(|terminal| at(terminal, "/address").as_str())
             .map(|address| {
                 let got = self.hc(&["get", address, "--json"])?;
+                let labelled = subject_labelled_in(&got);
                 Ok(AppAgent {
                     terminal: TerminalId::new(address),
-                    subject: subject_labelled_in(&got),
+                    role: labelled.as_ref().map_or(AgentRole::Tour, |(role, _)| *role),
+                    subject: labelled.map(|(_, subject)| subject),
                     status: state_of(&got),
                     status_since_ms: at(&got, "/status_ms").as_u64().unwrap_or(0),
                 })
@@ -343,48 +347,28 @@ impl TourAgentPort for HcTourAgents {
     }
 
     fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId> {
-        let folder = start.folder.display().to_string();
-        let subject_label = label_of(&start.subject);
-        let path = format!("PATH={}", self.agents_path);
-        let tab = &start.name;
-        let space_label = format!("herdr.space={AGENTS_SPACE}");
-        let tab_label = format!("herdr.tab={tab}");
-        let args = [
-            "run",
-            "--bg",
-            "--json",
-            "--outlive-parent",
-            "--no-parent",
-            "--name",
-            &start.name,
-            "--cwd",
-            &folder,
-            "--label",
-            APP_LABEL,
-            "--label",
-            &subject_label,
-            "--label",
-            STARTED_BY_APP_LABEL,
-            "--label",
-            &space_label,
-            "--label",
-            &tab_label,
-            "--",
-            "env",
-            &path,
-            "claude",
-            &start.first_task,
-            "--permission-mode",
-            "auto",
-            "--allowedTools",
-            &tour_agent_tools(&start.folder, &self.tours, start.summary_skill.as_deref()),
-        ];
-        let started = self.hc(&args)?;
-        let address = at(&started, "/address")
-            .as_str()
-            .context("`hc run` did not say which terminal it started")?;
-        self.name_place(tab, &start.subject);
-        Ok(TerminalId::new(address))
+        let tools = tour_agent_tools(&start.folder, &self.tours, start.summary_skill.as_deref());
+        self.run_agent(&RunAgent {
+            role: AgentRole::Tour,
+            subject: &start.subject,
+            name: &start.name,
+            folder: &start.folder,
+            first_task: &start.first_task,
+            tools: &tools,
+            denied_tools: None,
+        })
+    }
+
+    fn start_review(&self, start: &ReviewAgentStart) -> anyhow::Result<TerminalId> {
+        self.run_agent(&RunAgent {
+            role: AgentRole::Review,
+            subject: &start.subject,
+            name: &start.name,
+            folder: &start.folder,
+            first_task: &start.first_task,
+            tools: &start.tools,
+            denied_tools: Some(&start.denied_tools),
+        })
     }
 
     fn kill(&self, terminal: &TerminalId) -> anyhow::Result<()> {
@@ -445,7 +429,82 @@ enum Naming {
     GivenUp,
 }
 
+/// What `hc run` starts an agent with.
+struct RunAgent<'a> {
+    role: AgentRole,
+    subject: &'a ReviewSubject,
+    name: &'a str,
+    folder: &'a Path,
+    first_task: &'a str,
+    tools: &'a str,
+    denied_tools: Option<&'a str>,
+}
+
 impl HcTourAgents {
+    fn terminals_with(
+        &self,
+        role: AgentRole,
+        subject: &ReviewSubject,
+    ) -> anyhow::Result<Vec<TerminalId>> {
+        let label = label_of(role, subject);
+        let listed = self.hc(&["ls", "--label", APP_LABEL, "--label", &label, "--json"])?;
+        Ok(at(&listed, "/terminals")
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|terminal| at(terminal, "/address").as_str())
+            .map(TerminalId::new)
+            .collect())
+    }
+
+    fn run_agent(&self, agent: &RunAgent) -> anyhow::Result<TerminalId> {
+        let folder = agent.folder.display().to_string();
+        let subject_label = label_of(agent.role, agent.subject);
+        let path = format!("PATH={}", self.agents_path);
+        let tab = agent.name;
+        let space_label = format!("herdr.space={AGENTS_SPACE}");
+        let tab_label = format!("herdr.tab={tab}");
+        let mut args = vec![
+            "run",
+            "--bg",
+            "--json",
+            "--outlive-parent",
+            "--no-parent",
+            "--name",
+            tab,
+            "--cwd",
+            &folder,
+            "--label",
+            APP_LABEL,
+            "--label",
+            &subject_label,
+            "--label",
+            STARTED_BY_APP_LABEL,
+            "--label",
+            &space_label,
+            "--label",
+            &tab_label,
+            "--",
+            "env",
+            &path,
+            "claude",
+            agent.first_task,
+            "--permission-mode",
+            "auto",
+            "--allowedTools",
+            agent.tools,
+        ];
+        if let Some(denied) = agent.denied_tools {
+            args.extend(["--disallowedTools", denied]);
+        }
+        let started = self.hc(&args)?;
+        let address = at(&started, "/address")
+            .as_str()
+            .context("`hc run` did not say which terminal it started")?;
+        self.name_place(tab, agent.subject);
+        Ok(TerminalId::new(address))
+    }
+
     /// `agent.focus` switches the Herdr window to the terminal but leaves the window behind ours.
     fn bring_herdr_to_the_front(&self) -> anyhow::Result<()> {
         let raised = self.raise_herdr();
@@ -502,7 +561,7 @@ impl HcTourAgents {
         } else {
             return Ok(());
         };
-        if let Some(subject) = subject_labelled_in(got) {
+        if let Some((_, subject)) = subject_labelled_in(got) {
             self.name_place(tab, &subject);
         }
         Ok(())

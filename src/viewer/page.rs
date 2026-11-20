@@ -9,14 +9,17 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::findings::FindingId;
+
 pub use rows::{
-    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow,
-    PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter, ShownLine,
-    StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar,
-    line_count, pluralised,
+    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FoldControl, FullDiffControl,
+    HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter,
+    ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace,
+    Toolbar, line_count, pluralised,
 };
 
 use super::ask::{Place, ShownOn};
+use super::comments::CommentPlace;
 use super::file_block::FileBlock;
 use super::focused_change::PageChange;
 use super::jump::{JumpPlace, JumpTarget};
@@ -215,6 +218,20 @@ impl Page {
             PageRow::Line(line) => Some(line),
             _ => None,
         }
+    }
+
+    /// The row a finding is on; `None` when this page does not show it.
+    pub fn row_of_finding(&self, id: &FindingId) -> Option<usize> {
+        self.rows
+            .iter()
+            .position(|row| matches!(row, PageRow::Finding(finding) if finding.id == *id))
+    }
+
+    /// The row of the comment box at `place`; `None` when this page does not show it.
+    pub fn row_of_comment_box(&self, place: &CommentPlace) -> Option<usize> {
+        self.rows.iter().position(
+            |row| matches!(row, PageRow::Composer { place: shown, .. } if **shown == *place),
+        )
     }
 
     /// The first row that shows the line.

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
-use guided_review::agent_reply::{AgentReply, agent_reply};
+use guided_review::agent_reply::{AgentReply, ReplyTo, agent_reply, why_reply};
 use guided_review::app_folders::AppFolders;
 use guided_review::app_link::{
     Answer, AppFolder, AppListener, BindError, Caller, OpenRequest, Request, hand_over,
@@ -10,21 +10,29 @@ use guided_review::app_link::{
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{Eval, EvalStore, Skill, TourSource};
+use guided_review::findings::FindingId;
+use guided_review::findings::FindingsFile;
+use guided_review::findings_check;
+use guided_review::findings_done::findings_done;
+use guided_review::fix_reply::fix_reply;
 use guided_review::github::GitHub;
+use guided_review::instructions::SummaryInstructions;
 use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject};
 use guided_review::outline::Outline;
 use guided_review::pieces;
 use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
+use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
+use guided_review::review_worktree::GitReviewWorktrees;
 use guided_review::show::Show;
-use guided_review::summary_instructions::SummaryInstructions;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
 use guided_review::update::{AppVersion, ReleaseInstall, Version};
-use guided_review::viewer::{HandOffId, RefreshBrief, ReviewStateFile};
+use guided_review::viewer::FixReply;
+use guided_review::viewer::{RefreshBrief, ReviewStateFile};
 use std::os::unix::process::CommandExt;
 
 #[derive(Parser)]
@@ -41,6 +49,14 @@ enum Command {
     Outline { subject: ReviewSubject },
     /// Print where the tour file of a PR lives
     TourPath { subject: ReviewSubject },
+    /// Print what the review agent is told: the protocol, the review instructions, what to skip
+    ReviewBrief { subject: ReviewSubject },
+    /// Print where the findings file of a review lives
+    FindingsPath { subject: ReviewSubject },
+    /// Pin the findings file of a review to its commits, then list what is wrong with its anchors
+    CheckFindings { subject: ReviewSubject },
+    /// Tell the app the review agent's findings file is written and checked
+    FindingsDone { subject: ReviewSubject },
     /// Print the diff of the given pieces
     Show {
         subject: ReviewSubject,
@@ -84,17 +100,39 @@ enum Command {
     /// Write the files the release archives' Desktop entries are made of, for every OS
     #[command(hide = true)]
     DesktopEntryTemplate { out: std::path::PathBuf },
-    /// Answer a reviewer's hand-off on its GitHub thread; the reply starts with the robot mark
+    /// Answer a reviewer's hand-off on its GitHub thread, the reply starting with the robot mark, or a
+    /// question on a finding on its thread
     AgentReply {
         subject: ReviewSubject,
-        /// The hand-off id from the message, like `h0`
-        hand_off: HandOffId,
+        /// The hand-off id from the message, like `h0`, or the finding's id
+        id: String,
         /// The answer in GitHub markdown; `-` reads it from stdin, which keeps its line breaks
         #[arg(long, required_unless_present = "working", conflicts_with = "working")]
         body: Option<String>,
         /// Post "Working on it…" now; the answer with --body replaces it
         #[arg(long)]
         working: bool,
+    },
+    /// Say where the tour agent is with one finding of a fix request
+    FixReply {
+        subject: ReviewSubject,
+        /// The finding id from the message
+        finding: String,
+        /// You started on this finding
+        #[arg(long, group = "outcome")]
+        working: bool,
+        /// You fixed it, in this commit
+        #[arg(long, group = "outcome", value_name = "COMMIT")]
+        fixed: Option<String>,
+        /// You did not fix it; give the reason with --body
+        #[arg(long, group = "outcome", requires = "body")]
+        not_fixed: bool,
+        /// You need a decision from the reviewer before you fix it; give the question with --body
+        #[arg(long, group = "outcome", requires = "body")]
+        question: bool,
+        /// The reason or the question, in markdown; `-` reads it from stdin, which keeps its line breaks
+        #[arg(long, requires = "outcome", conflicts_with_all = ["working", "fixed"])]
+        body: Option<String>,
     },
     /// Run the app itself; `open` starts it when none answers
     #[command(hide = true)]
@@ -133,6 +171,13 @@ fn main() -> anyhow::Result<()> {
             around,
         } => show(&subject, &ids, around),
         Command::TourPath { subject } => tour_path(&subject),
+        Command::ReviewBrief { subject } => review_brief(&subject),
+        Command::FindingsPath { subject } => findings_path(&subject),
+        Command::CheckFindings { subject } => check_findings(&subject),
+        Command::FindingsDone { subject } => {
+            println!("{}", findings_done(&AppFolders::running()?, &subject)?);
+            Ok(())
+        }
         Command::Check { subject } => check(&subject),
         Command::Repin { subject } => repin_command(&subject),
         Command::Refresh { subject, done } => refresh(&subject, done),
@@ -149,7 +194,7 @@ fn main() -> anyhow::Result<()> {
         }
         Command::AgentReply {
             subject,
-            hand_off,
+            id,
             body,
             working: _,
         } => {
@@ -161,14 +206,46 @@ fn main() -> anyhow::Result<()> {
                 Some(body) => AgentReply::Answer(body.trim_end()),
                 None => AgentReply::WorkingOnIt,
             };
-            let said = agent_reply(
-                &GitHub::from_env(),
-                &AppFolders::running()?,
-                &subject,
-                hand_off,
-                &reply,
-            )?;
+            let folders = AppFolders::running()?;
+            let said = match ReplyTo::of(&folders, &subject, &id)? {
+                ReplyTo::Finding(finding) => why_reply(&folders, &subject, &finding, &reply)?,
+                ReplyTo::HandOff(hand_off) => {
+                    agent_reply(&GitHub::from_env(), &folders, &subject, hand_off, &reply)?
+                }
+            };
             println!("{said}");
+            Ok(())
+        }
+        Command::FixReply {
+            subject,
+            finding,
+            working: _,
+            fixed,
+            not_fixed: _,
+            question,
+            body,
+        } => {
+            let reply = match (fixed, body) {
+                (Some(commit), _) => FixReply::Fixed { commit },
+                (None, Some(body)) => {
+                    let body = match body.as_str() {
+                        "-" => std::io::read_to_string(std::io::stdin())?,
+                        _ => body,
+                    };
+                    let text = body.trim_end().to_owned();
+                    if question {
+                        FixReply::Question { text }
+                    } else {
+                        FixReply::NotFixed { reason: text }
+                    }
+                }
+                (None, None) => FixReply::Working,
+            };
+            let finding = FindingId::try_from(finding).map_err(anyhow::Error::msg)?;
+            println!(
+                "{}",
+                fix_reply(&AppFolders::running()?, &subject, &finding, &reply)?
+            );
             Ok(())
         }
         Command::Serve => serve(),
@@ -226,7 +303,7 @@ fn opened(subject: &ReviewSubject) -> anyhow::Result<OpenedSubject> {
 fn summary_instructions() -> anyhow::Result<SummaryInstructions> {
     let folders = AppFolders::running()?;
     match Config::load_from(&folders) {
-        Ok(config) => Ok(config.summary_instructions(&folders)),
+        Ok(config) => Ok(config.instructions(&folders)),
         Err(error) => {
             eprintln!("warning: summary instructions not read: {error:#}");
             Ok(SummaryInstructions::none())
@@ -267,6 +344,52 @@ fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result
         }
         .render()?
     );
+    Ok(())
+}
+
+fn review_brief(subject: &ReviewSubject) -> anyhow::Result<()> {
+    let brief = ReviewBrief::of(&AppFolders::running()?, subject);
+    if let Some(warning) = brief.warning() {
+        eprintln!("warning: {warning}");
+    }
+    print!("{brief}");
+    Ok(())
+}
+
+fn findings_path(subject: &ReviewSubject) -> anyhow::Result<()> {
+    println!(
+        "{}",
+        Tour::findings_path_for(&AppFolders::running()?, subject).display()
+    );
+    Ok(())
+}
+
+fn check_findings(subject: &ReviewSubject) -> anyhow::Result<()> {
+    let opened = opened(subject)?;
+    let subject = &opened.subject();
+    let folders = AppFolders::running()?;
+    let path = Tour::findings_path_for(&folders, subject);
+    let mut findings = FindingsFile::load_of(&path, subject)?;
+
+    let code = opened.code_to_read()?;
+    if findings.pin.head.is_empty() {
+        let agent_head = GitReviewWorktrees::under(folders.review_worktrees()).head_of(subject);
+        findings.pin.pin_to(
+            subject,
+            &code.merge_base()?,
+            agent_head.as_ref().unwrap_or(&code.tips.head),
+        );
+    } else if findings.pin.head != code.tips.head {
+        println!("warning: {}", subject.moved_on());
+    }
+    findings.save(&path)?;
+    let files = pieces::cut(code.source.as_ref(), &findings.pin.base, &findings.pin.head)?;
+
+    let report = findings_check::check(&findings, &files);
+    print!("{report}");
+    if !report.errors.is_empty() {
+        std::process::exit(1);
+    }
     Ok(())
 }
 

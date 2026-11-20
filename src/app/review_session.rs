@@ -2,6 +2,8 @@
 //! to GitHub, the code source and the tour tools. Layouts draw from it and forward the reader's input to it.
 
 use crate::file_path::FilePath;
+use crate::findings::FindingId;
+use crate::viewer::{FixReply, WhyReply, catch_up_findings};
 use std::collections::{HashMap, HashSet};
 use std::ops::{ControlFlow, Range};
 use std::path::PathBuf;
@@ -20,19 +22,21 @@ use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
 use crate::app::page_rows::{PageRows, RowsChange};
+use crate::app::review_agent;
 use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::github::{GhCloner, GitHub};
-use crate::opened_subject::OpenedChangeSet;
+use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
-    AfterJob, AfterLanding, AgentReplied, Ask, Audience, CloneOffer, CommentOutcome, CommentPlace,
-    CommentResult, FinishResult, GitHubPort, HandOffButton, HandOffId, ImageCache, JobOutcome,
-    JobProgress, LineLocation, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief,
-    RepinnedTour, ReplacingJob, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob,
-    TerminalId, TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
+    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer,
+    CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal, FinishResult,
+    GitHubPort, HandOffButton, HandOffId, ImageCache, JobOutcome, JobProgress, LineLocation,
+    NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, ReplacingJob,
+    Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId, TextBox,
+    ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
+    TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -117,6 +121,13 @@ pub struct ReviewSession {
     is_unread_end_staged: bool,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
+    /// The review agent's start, or the look for one an earlier app left running.
+    ai_review_start: Option<Task<()>>,
+    /// Follows the review agent's status for as long as its run lasts.
+    ai_review_follow: Option<Task<()>>,
+    /// Ask why questions being typed into the review agent; one message at a time.
+    questions_delivery: Option<Task<()>>,
+    is_delivering_questions: bool,
     /// Wakes the session when the review's earliest work wanted later falls due.
     work_timer: Option<Task<()>>,
     old_head: Option<OldHead>,
@@ -229,6 +240,10 @@ impl ReviewSession {
             is_unread_end_staged: false,
             tour_agent_follow: None,
             show_agent: None,
+            ai_review_start: None,
+            ai_review_follow: None,
+            questions_delivery: None,
+            is_delivering_questions: false,
             work_timer: None,
             old_head: review.old_head(),
             refresh_brief: review.refresh_brief(),
@@ -457,6 +472,59 @@ impl ReviewSession {
         self.review.saw_end_of_screen();
     }
 
+    pub fn dismiss_finding(
+        &mut self,
+        id: &FindingId,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FindingRefusal> {
+        self.change(cx, |review| review.dismiss_finding(id))
+    }
+
+    /// Dismiss in the findings list: each selected finding goes, and a refused one is told back.
+    pub fn dismiss_findings(
+        &mut self,
+        ids: &[FindingId],
+        cx: &mut Context<Self>,
+    ) -> Vec<(FindingId, FindingRefusal)> {
+        self.change(cx, |review| review.dismiss_findings(ids))
+            .refused
+    }
+
+    /// Restore in the findings list: each dismissed finding is open again, and a refused one is told back.
+    pub fn restore_findings(
+        &mut self,
+        ids: &[FindingId],
+        cx: &mut Context<Self>,
+    ) -> Vec<(FindingId, FindingRefusal)> {
+        self.change(cx, |review| review.restore_findings(ids))
+            .refused
+    }
+
+    /// Fix, on one finding or in the findings list: the findings go to the tour agent as one message.
+    pub fn fix_findings(
+        &mut self,
+        ids: &[FindingId],
+        cx: &mut Context<Self>,
+    ) -> Vec<(FindingId, FindingRefusal)> {
+        self.change(cx, |review| review.fix_findings(ids)).refused
+    }
+
+    /// Comment in the findings list: each selected finding goes in as is, as Use as is does.
+    pub fn comment_findings(
+        &mut self,
+        ids: &[FindingId],
+        cx: &mut Context<Self>,
+    ) -> Vec<(FindingId, FindingRefusal)> {
+        let mode = self.review.add_mode();
+        let batch = self.change(cx, |review| review.comment_findings(ids, mode));
+        for request in batch.done {
+            let place = request.place().clone();
+            let audience = request.audience();
+            self.run_comment_request(&place, request, (mode, audience), cx);
+        }
+        batch.refused
+    }
+
     pub fn send_comment(
         &mut self,
         place: &CommentPlace,
@@ -467,6 +535,30 @@ impl ReviewSession {
         let Some(request) = self.review.start_sending(place, mode, audience) else {
             return;
         };
+        self.run_comment_request(place, request, (mode, audience), cx);
+    }
+
+    /// Use as is on a finding: it goes to Add to review, or Add to tasks in a local review, unread.
+    pub fn use_finding_as_is(
+        &mut self,
+        id: &FindingId,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FindingRefusal> {
+        let mode = self.review.add_mode();
+        let request = self.change(cx, |review| review.use_finding_as_is(id, mode))?;
+        let place = request.place().clone();
+        let audience = request.audience();
+        self.run_comment_request(&place, request, (mode, audience), cx);
+        Ok(())
+    }
+
+    fn run_comment_request(
+        &mut self,
+        place: &CommentPlace,
+        request: CommentRequest,
+        (mode, audience): (SendMode, Audience),
+        cx: &mut Context<Self>,
+    ) {
         let github = Arc::clone(&self.github);
         let state_file = self.review.state_file();
         let place = place.clone();
@@ -1420,8 +1512,137 @@ impl ReviewSession {
         )
         .detach();
         self.follow_tour_agent(cx);
+        self.resume_ai_review(cx);
         self.review.pull_from_github();
         self.run_due_work(cx);
+    }
+
+    /// Run AI review, Run again and Try again: the review takes the asking, and the review agent starts in
+    /// a worktree of the reviewed head, off the UI thread as it runs `git` and `hc`.
+    pub fn run_ai_review(&mut self, cx: &mut Context<Self>) -> Result<(), AiReviewRefusal> {
+        self.change(cx, |review| review.ask_to_run_ai_review())?;
+        // The agent of an earlier run ends when the new one starts, which its follow must not take for
+        // the end of the new run.
+        self.ai_review_follow = None;
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        let (subject, head) = (self.review.subject().clone(), self.review.head().clone());
+        self.ai_review_start = Some(self.run_off_thread(
+            cx,
+            move || {
+                let repo = writer_folder(&subject, &folders);
+                agents.start(&subject, &repo, &head, &subject)
+            },
+            |this, started, cx| {
+                let has_started = started.is_ok();
+                this.change(cx, |review| review.ai_review_agent_started(started));
+                if has_started {
+                    this.follow_ai_review(cx);
+                }
+            },
+        ));
+        Ok(())
+    }
+
+    /// After a restart, or a review opened again: a review agent still alive for the subject is the run.
+    fn resume_ai_review(&mut self, cx: &mut Context<Self>) {
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let subject = self.review.subject().clone();
+        self.ai_review_start = Some(self.run_off_thread(
+            cx,
+            move || agents.lookup(&subject),
+            |this, found, cx| {
+                if let TourAgentState::Agent { terminal, status } = found {
+                    this.change(cx, |review| {
+                        review.ai_review_agent_resumed(terminal, Some(status));
+                    });
+                    this.follow_ai_review(cx);
+                    this.deliver_questions(cx);
+                }
+            },
+        ));
+    }
+
+    /// Keeps the review agent's status in the run until its terminal ends, then removes its worktree. A
+    /// thread of its own blocks on herdr's events, like the tour agent's follow.
+    fn follow_ai_review(&mut self, cx: &mut Context<Self>) {
+        let (changes, mut arrived) = futures::channel::mpsc::unbounded();
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let (followed, ended_by) = (agents.clone(), self.review.subject().clone());
+        let subject = ended_by.clone();
+        std::thread::spawn(move || {
+            followed.follow(&subject, &mut |state| match state {
+                TourAgentState::Agent { status, .. } => {
+                    match changes.unbounded_send(Some(status)) {
+                        Ok(()) => ControlFlow::Continue(()),
+                        Err(_) => ControlFlow::Break(()),
+                    }
+                }
+                _ => ControlFlow::Continue(()),
+            });
+            // The receiver is gone when the run ended first: nobody is left to tell the stream is over.
+            changes.unbounded_send(None).ok();
+        });
+        self.ai_review_follow = Some(cx.spawn(async move |this, cx| {
+            while let Some(status) = futures::StreamExt::next(&mut arrived).await {
+                let Some(status) = status else {
+                    this.update(cx, |this, cx| {
+                        this.change(cx, |review| review.ai_review_agent_gone());
+                    })
+                    .ok();
+                    cx.background_executor()
+                        .spawn(async move {
+                            if let Err(error) = agents.end(&ended_by) {
+                                eprintln!(
+                                    "could not end the review agent of {ended_by}: {error:#}"
+                                );
+                            }
+                        })
+                        .await;
+                    break;
+                };
+                let shown = this.update(cx, |this, cx| {
+                    this.change(cx, |review| review.ai_review_agent_status(status));
+                    this.deliver_questions(cx);
+                });
+                if shown.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Ask why questions that wait go to the review agent once it is idle, off the UI thread as it runs `hc`.
+    pub fn deliver_questions(&mut self, cx: &mut Context<Self>) {
+        if self.is_delivering_questions {
+            return;
+        }
+        let Some(delivery) = self.review.why_delivery() else {
+            return;
+        };
+        self.is_delivering_questions = true;
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        self.questions_delivery = Some(self.run_off_thread(
+            cx,
+            move || delivery.run(&agents),
+            |this, outcome, cx| {
+                this.is_delivering_questions = false;
+                this.change(cx, |review| review.why_delivered(outcome));
+            },
+        ));
+    }
+
+    pub fn show_review_agent(&mut self, cx: &mut Context<Self>) {
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let subject = self.review.subject().clone();
+        self.show_agent = Some(self.run_off_thread(
+            cx,
+            move || agents.show(&subject),
+            |this, shown, cx| {
+                this.review.show_agent_result(shown.as_ref().err());
+                this.show_problems(cx);
+            },
+        ));
     }
 
     /// Looks for the PR's tour agent and keeps its status. The follow is a thread of its own because it
@@ -1561,6 +1782,71 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
         self.change(cx, |review| review.hand_off_replied(id, replied))
+    }
+
+    pub fn fix_replied(
+        &mut self,
+        finding: &FindingId,
+        reply: &FixReply,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        let taken = self.change(cx, |review| review.fix_replied(finding, reply));
+        if taken.is_ok() && matches!(reply, FixReply::Question { .. }) {
+            post_toast(
+                cx,
+                ToastTone::Neutral,
+                format!("The tour agent asks you something about finding {finding}"),
+            );
+        }
+        taken
+    }
+
+    /// The reviewer's answer to the tour agent's question on a finding; it goes to the agent when it is idle.
+    pub fn answer_fix_question(
+        &mut self,
+        id: &FindingId,
+        answer: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FindingRefusal> {
+        self.change(cx, |review| review.answer_fix_question(id, answer))
+    }
+
+    pub fn why_replied(
+        &mut self,
+        finding: &FindingId,
+        reply: &WhyReply,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        self.change(cx, |review| review.why_replied(finding, reply))
+    }
+
+    /// What a review agent's word that it is done may first need: a findings file pinned to older
+    /// commits than the review's (the agent finished after a re-pin) follows to them. Reads code, so
+    /// it runs off the main thread.
+    pub fn findings_catch_up(&self) -> impl FnOnce() -> anyhow::Result<()> + Send + use<> {
+        let repinner = Arc::clone(&self.tour_work.repinner);
+        let state_file = self.review.state_file();
+        let tips = self.review.pinned_tips();
+        move || {
+            let source = (repinner.pick_code_source)(&tips)?;
+            catch_up_findings(
+                &repinner.folders,
+                &repinner.subject,
+                &state_file,
+                source.as_ref(),
+                &tips.base_branch_tip,
+                &tips.head,
+            )
+        }
+    }
+
+    /// The review agent says its findings are on disk: how many the review shows now.
+    pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
+        let folders = self.tour_work.repinner.folders.clone();
+        self.change(cx, |review| {
+            review.findings_done(&folders);
+            review.ai_review().counts().total()
+        })
     }
 
     /// Loads the pictures of the screen once each, off the main thread. A load that ends after `reopen`

@@ -3,6 +3,7 @@
 //! The window reports what it alone knows (an overlay open, a reopen under way, the end of the
 //! screen on show) and carries out the `Effect`; the rules that pick the effect are here, once.
 
+use super::ai_review_run::AiReviewRefusal;
 use super::file_tree::FolderPath;
 use super::guided_tour::GuidedTourRefusal;
 use super::jump::PaletteAction;
@@ -21,6 +22,10 @@ pub enum Intent {
     MarkReadAndGoOn,
     PreviousScreen,
     NextUnreadStep,
+    /// From the sidebar's AI review row and the palette: to the next finding, most severe first.
+    NextFinding,
+    /// From the sidebar's AI review row, its key and the palette: the list of findings, or closes it.
+    ToggleFindingsList,
     /// Ticks or unticks the step on screen.
     ToggleRead,
     ToggleWrapLines,
@@ -43,6 +48,8 @@ pub enum Intent {
     /// Write guided tour, from the overview, the sidebar or the palette.
     WriteGuidedTour,
     SwitchToGuidedTour,
+    /// Run AI review, Run again and Try again, from the overview, the sidebar or the palette.
+    RunAiReview,
     FinishReview,
     /// A re-review with nothing new to send is done, from the sidebar, the finish card or the palette.
     MarkDone,
@@ -74,6 +81,8 @@ impl From<PaletteAction> for Intent {
     fn from(action: PaletteAction) -> Self {
         match action {
             PaletteAction::NextUnreadStep => Self::NextUnreadStep,
+            PaletteAction::NextFinding => Self::NextFinding,
+            PaletteAction::FindingsList => Self::ToggleFindingsList,
             PaletteAction::MarkStepRead
             | PaletteAction::MarkStepUnread
             | PaletteAction::MarkFileRead
@@ -88,6 +97,7 @@ impl From<PaletteAction> for Intent {
             PaletteAction::AskAboutStep => Self::AskAboutScreen,
             PaletteAction::WriteGuidedTour => Self::WriteGuidedTour,
             PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
+            PaletteAction::RunAiReview => Self::RunAiReview,
             PaletteAction::FinishReview => Self::FinishReview,
             PaletteAction::MarkDone => Self::MarkDone,
             PaletteAction::SendTasks => Self::SendTasks,
@@ -127,6 +137,10 @@ pub enum Effect {
     WriteGuidedTour,
     /// The reviewer asked to switch to a ready guided tour.
     SwitchToGuidedTour,
+    /// Goes to the next finding and scrolls to it; the window does the scrolling.
+    NextFinding,
+    /// Starts the AI review's run: the review took it and the app makes the worktree and starts the agent.
+    RunAiReview,
     OpenFinishForm,
     /// Hands a local review's queued tasks to its agent.
     SendTasks,
@@ -179,6 +193,8 @@ pub enum Overlay {
     PrSwitcher,
     Settings,
     Shortcuts,
+    /// The AI review's findings, as a list to go through and act on in a batch.
+    Findings,
 }
 
 /// Why an intent does nothing now.
@@ -190,6 +206,8 @@ pub enum Refusal {
     SettingsOpen,
     /// A guided-tour action that does not apply now.
     GuidedTour(GuidedTourRefusal),
+    /// Run AI review does not apply now.
+    AiReview(AiReviewRefusal),
 }
 
 /// What only the window knows when an intent comes.
@@ -240,6 +258,7 @@ impl Intent {
             Self::NextScreen
             | Self::PreviousScreen
             | Self::NextUnreadStep
+            | Self::NextFinding
             | Self::ToggleRead
             | Self::MarkDone
             | Self::ToggleWrapLines
@@ -249,6 +268,7 @@ impl Intent {
             | Self::ToggleDraft
             | Self::ToggleAutoMerge
             | Self::ToggleJump
+            | Self::ToggleFindingsList
             | Self::ToggleSettings
             | Self::ShowSettings
             | Self::ToggleShortcuts => true,
@@ -259,6 +279,7 @@ impl Intent {
             | Self::AskAboutScreen
             | Self::WriteGuidedTour
             | Self::SwitchToGuidedTour
+            | Self::RunAiReview
             | Self::FinishReview
             | Self::SendTasks
             | Self::OpenPr
@@ -272,7 +293,10 @@ impl Intent {
         };
         let waits_for_settings = matches!(
             self,
-            Self::ToggleJump | Self::TogglePrSwitcher | Self::ShowPrSwitcher
+            Self::ToggleJump
+                | Self::ToggleFindingsList
+                | Self::TogglePrSwitcher
+                | Self::ShowPrSwitcher
         );
         if refused_while_reopening && moment.reopening == Reopening::Underway {
             Some(Refusal::Reopening)
@@ -300,6 +324,10 @@ impl ReviewCore {
             }),
             Intent::PreviousScreen => Effect::Change(ReviewChange::GoBack),
             Intent::NextUnreadStep => Effect::Change(ReviewChange::GoToNextUnread),
+            Intent::NextFinding if self.has_findings() => Effect::NextFinding,
+            Intent::ToggleFindingsList if self.can_list_findings() => {
+                Effect::Toggle(Overlay::Findings)
+            }
             Intent::ToggleRead => match self.screen() {
                 Screen::Step(id) => {
                     Effect::Change(ReviewChange::ToggleTick(ReadSubject::Step(id.clone())))
@@ -328,6 +356,10 @@ impl ReviewCore {
                 None => Effect::WriteGuidedTour,
                 Some(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
             },
+            Intent::RunAiReview => match self.run_ai_review_refusal() {
+                None => Effect::RunAiReview,
+                Some(refusal) => Effect::Refused(Refusal::AiReview(refusal)),
+            },
             Intent::SwitchToGuidedTour => match self.switch_to_guided_tour() {
                 Ok(()) => Effect::SwitchToGuidedTour,
                 Err(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
@@ -339,7 +371,10 @@ impl ReviewCore {
                 None => Effect::OpenFinishForm,
             },
             Intent::OpenPr if self.can_open_pr() => Effect::OpenPr,
-            Intent::OpenPr | Intent::MarkDone => Effect::Nothing,
+            Intent::NextFinding
+            | Intent::ToggleFindingsList
+            | Intent::OpenPr
+            | Intent::MarkDone => Effect::Nothing,
             Intent::OpenOnGitHub => self
                 .subject()
                 .pull_request()

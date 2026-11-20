@@ -239,9 +239,18 @@ impl AppFolders {
         self.config.join("summary.md")
     }
 
+    pub fn review_file(&self) -> PathBuf {
+        self.config.join("review.md")
+    }
+
     /// Where tours live unless `GUIDED_REVIEW_TOURS_DIR` says otherwise (see `Tour::tours_dir`).
     pub fn tours(&self) -> PathBuf {
         self.state.join("tours")
+    }
+
+    /// The throwaway checkouts of the review agents, which live as long as their agent does.
+    pub fn review_worktrees(&self) -> PathBuf {
+        self.cache.join("review-worktrees")
     }
 
     /// The state file of each PR, under owner folders, beside the app's own.

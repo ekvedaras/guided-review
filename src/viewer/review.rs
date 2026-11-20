@@ -1,7 +1,16 @@
+mod ask_why;
+mod finding_actions;
+mod finding_outcome;
+#[cfg(feature = "snapshots")]
+mod finding_staging;
 mod guided_tour;
+
+pub use ask_why::{DEFAULT_WHY_QUESTION, WhyAsked};
+pub use finding_outcome::{FindingRefusal, FindingsBatch};
 mod jobs;
 mod kept;
 mod pr_controls;
+mod run_ai_review;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -15,7 +24,7 @@ use crate::issue::IssueLink;
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::pieces::{self, ChangedFile, PieceId};
-use crate::pull_request::Sha;
+use crate::pull_request::{ChangeTips, Sha};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
@@ -23,6 +32,8 @@ use std::path::{Path, PathBuf};
 
 use crate::config::AskSettings;
 
+use super::ai_review::AiReview;
+use super::ai_review_run::{AiReviewRun, ReviewAgentLife};
 use super::ask::{Ask, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
@@ -39,6 +50,7 @@ use super::disk_news::DiskNews;
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
 use super::file_tree::{FileTree, FolderPath, TreeRow};
+use super::finding_placement::{FindingHome, FindingPlacement, FindingView};
 use super::finish_review::{
     ApproveWarning, FinishAction, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
     ReviewVerdict, SubmittedReview,
@@ -79,9 +91,12 @@ use super::thread_actions::{
 };
 use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement, ThreadWork};
 use super::typing_save::TypingSave;
+use super::used_findings::{FindingsOfThreads, thread_made_of};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
+use crate::app_folders::AppFolders;
 use crate::file_path::FilePath;
+use crate::findings::{Finding, FindingId};
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
 use crate::update::Build;
@@ -318,8 +333,14 @@ pub struct ReviewCore {
     steps_in_reading_order: Vec<Screen>,
     has_uncovered_changes: bool,
     pulled_threads: Vec<ReviewThread>,
+    /// A snapshot scene's threads, kept over the threads GitHub answers with while the scene shows.
+    #[cfg(feature = "snapshots")]
+    staged_threads: Vec<ReviewThread>,
     followed_lines: BTreeMap<ThreadId, FollowedLines>,
     threads: ThreadPlacement,
+    findings: FindingPlacement,
+    /// The finding the reviewer was last taken to, so the next one comes after it.
+    finding_cursor: Option<FindingId>,
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
     thread_fold_flipped: BTreeSet<ThreadId>,
     screen: Screen,
@@ -351,6 +372,11 @@ pub struct ReviewCore {
     replies_after_repin: Vec<(HandOffId, AgentReplied)>,
     /// The last news of the tour agent said tour agents cannot be reached. Not saved.
     agent_link_is_off: bool,
+    /// The review agent's findings, read from their file. Not saved: the file is the state.
+    ai_review: AiReview,
+    ai_review_run: AiReviewRun,
+    /// Not saved: the app looks for the review agent when it opens the review.
+    review_agent: ReviewAgentLife,
     /// What is known of the guided tour of a basic review's PR. Not saved: the app tells it at a build.
     guided_tour: GuidedTourProgress,
     /// After a switch from a basic tour: how many steps started read. Not saved.
@@ -652,8 +678,12 @@ impl ReviewCore {
             steps_in_reading_order,
             has_uncovered_changes,
             pulled_threads: Vec::new(),
+            #[cfg(feature = "snapshots")]
+            staged_threads: Vec::new(),
             followed_lines: BTreeMap::new(),
             threads: ThreadPlacement::default(),
+            findings: FindingPlacement::default(),
+            finding_cursor: None,
             thread_fold_flipped: BTreeSet::new(),
             screen,
             state: SavedState::new(state, state_file),
@@ -682,6 +712,9 @@ impl ReviewCore {
             reviewing_mark,
             replies_after_repin: Vec::new(),
             agent_link_is_off: false,
+            ai_review: AiReview::NotRun,
+            ai_review_run: AiReviewRun::NotRun,
+            review_agent: ReviewAgentLife::Gone,
             guided_tour: GuidedTourProgress::NotAsked,
             steps_started_read: None,
             read_carrier: None,
@@ -773,6 +806,100 @@ impl ReviewCore {
 
     pub(super) fn has_seen_end_of_screen(&self) -> bool {
         self.seen_end_of.as_ref() == Some(&self.screen)
+    }
+
+    pub const fn ai_review(&self) -> &AiReview {
+        &self.ai_review
+    }
+
+    /// The sample findings of a snapshot scene, and their removal.
+    #[cfg(feature = "snapshots")]
+    pub fn ai_review_is(&mut self, ai_review: AiReview) {
+        self.ai_review = ai_review;
+        self.place_threads();
+    }
+
+    /// The run a snapshot scene shows, and its removal.
+    #[cfg(feature = "snapshots")]
+    pub fn ai_review_run_is(&mut self, run: AiReviewRun) {
+        self.ai_review_run = run;
+    }
+
+    /// Reads the review agent's findings file again; `findings_done` is for the agent's word that it is done.
+    pub fn read_findings(&mut self, folders: &AppFolders) {
+        let mut read = AiReview::read(folders, &self.subject);
+        if let AiReview::Findings(file) = &mut read {
+            let decided = self.state.finding_decisions();
+            file.findings
+                .retain(|finding| !decided.has_decided(finding));
+            let held: Vec<FindingId> = file.findings.iter().map(|f| f.id.clone()).collect();
+            file.findings.extend(
+                decided
+                    .reopened()
+                    .filter(|reopened| !held.contains(&reopened.id))
+                    .cloned(),
+            );
+        }
+        self.run_ends_with(&read);
+        self.ai_review = read;
+        self.place_threads();
+    }
+
+    /// Goes to the screen of the next finding, most severe first, round again after the last.
+    pub fn go_to_next_finding(&mut self) -> Option<FindingId> {
+        let AiReview::Findings(file) = &self.ai_review else {
+            return None;
+        };
+        let mut by_severity: Vec<&Finding> = file.findings.iter().collect();
+        by_severity.sort_by_key(|finding| finding.severity);
+        let after_cursor = self
+            .finding_cursor
+            .as_ref()
+            .and_then(|cursor| by_severity.iter().position(|finding| finding.id == *cursor))
+            .map_or(0, |position| position + 1);
+        let next = by_severity
+            .get(after_cursor)
+            .or_else(|| by_severity.first())?
+            .id
+            .clone();
+        self.go_to_finding(&next).then_some(next)
+    }
+
+    pub(super) fn screen_of_home(&self, home: &FindingHome) -> Screen {
+        match home {
+            FindingHome::Step(id) => Screen::Step(id.clone()),
+            FindingHome::File(path) => Screen::File(path.clone()),
+            FindingHome::SafetyNet => Screen::SafetyNet,
+            FindingHome::Change if self.tour.guided().is_some() => Screen::Summary,
+            FindingHome::Change => Screen::Overview,
+        }
+    }
+
+    /// Goes to the screen of one finding, as Next finding does; false when it is not open.
+    pub fn go_to_finding(&mut self, id: &FindingId) -> bool {
+        let Some(home) = self.findings.home_of(id) else {
+            return false;
+        };
+        let screen = self.screen_of_home(home);
+        self.go_to_screen(screen);
+        if let Screen::Step(id) = &self.screen
+            && self.is_folded(id)
+        {
+            self.toggle_fold(&id.clone());
+        }
+        self.finding_cursor = Some(id.clone());
+        true
+    }
+
+    /// The findings of the open screen: on their lines, or after the code.
+    pub(super) fn findings_here(&self) -> &[FindingView] {
+        let home = match &self.screen {
+            Screen::Step(id) => FindingHome::Step(id.clone()),
+            Screen::File(path) => FindingHome::File(path.clone()),
+            Screen::SafetyNet => FindingHome::SafetyNet,
+            Screen::Summary | Screen::Overview => FindingHome::Change,
+        };
+        self.findings.in_home(&home)
     }
 
     /// For a failure the reviewer must know about; it stays until its kind is cleared.
@@ -960,6 +1087,7 @@ impl ReviewCore {
             self.display_options.files_at_head(),
             &self.thread_work(),
             self.state.hand_offs(),
+            FindingsOfThreads::of(&self.state),
         );
         self.mark_repin_status(&mut page.pieces);
         if let Some((read_head, since_files)) = self.changes_since_file_read(path) {
@@ -1218,6 +1346,7 @@ impl ReviewCore {
             self.display_options.files_at_head(),
             &self.thread_work(),
             self.state.hand_offs(),
+            FindingsOfThreads::of(&self.state),
         );
         if let Some(record) = self.repin_record() {
             self.mark_repin_status(&mut page.pieces);
@@ -1329,6 +1458,11 @@ impl ReviewCore {
         &self.head
     }
 
+    /// The commits the review reads between.
+    pub fn pinned_tips(&self) -> ChangeTips {
+        self.tour.pin().pinned_tips()
+    }
+
     /// What the AI is told about a place: pointers, the shown diff lines, step title and why.
     pub fn ask_context(&self, place: &Place) -> Option<String> {
         ask_context::context_for(&self.tour, &self.files, &self.links(), place)
@@ -1418,13 +1552,9 @@ impl ReviewCore {
     }
 
     /// The rows an Ask about lines or a piece is on, in its step at the tour head.
-    fn lines_of(&self, place: &Place) -> Option<SelectedLines> {
-        let (shown_on, only_piece) = match place {
-            Place::Tour | Place::Step { .. } | Place::File { .. } => return None,
-            Place::Piece { step, piece } => (ShownOn::Step { step: step.clone() }, Some(piece)),
-            Place::Lines { shown_on, .. } => (shown_on.clone(), None),
-        };
-        let pieces = match shown_on {
+    /// The pieces the screen shows, as its page draws them; `None` when the tour has no such screen.
+    fn pieces_shown_on(&self, shown_on: ShownOn) -> Option<Vec<PieceDiff>> {
+        Some(match shown_on {
             ShownOn::Step { step } => {
                 let links = self.links();
                 let display = self.display(&links);
@@ -1439,7 +1569,16 @@ impl ReviewCore {
                 let file = self.files.iter().find(|file| file.path == path)?;
                 FilePage::of(file, &self.files, &display).pieces
             }
+        })
+    }
+
+    fn lines_of(&self, place: &Place) -> Option<SelectedLines> {
+        let (shown_on, only_piece) = match place {
+            Place::Tour | Place::Step { .. } | Place::File { .. } => return None,
+            Place::Piece { step, piece } => (ShownOn::Step { step: step.clone() }, Some(piece)),
+            Place::Lines { shown_on, .. } => (shown_on.clone(), None),
         };
+        let pieces = self.pieces_shown_on(shown_on)?;
         let blocks = FileBlock::group(pieces);
         let shown: Vec<&DiffLine> = match only_piece {
             Some(id) => blocks
@@ -1580,6 +1719,7 @@ impl ReviewCore {
                 self.display_options.files_at_head(),
                 &self.thread_work(),
                 self.state.hand_offs(),
+                FindingsOfThreads::of(&self.state),
             );
             page
         })
@@ -1624,6 +1764,9 @@ impl ReviewCore {
         self.clear_problem(ProblemKind::ThreadsNotRead);
         self.github_answered(Affected::Comments);
         self.pulled_threads = threads.to_vec();
+        #[cfg(feature = "snapshots")]
+        self.pulled_threads
+            .extend(self.staged_threads.iter().cloned());
         self.place_threads();
     }
 
@@ -1654,13 +1797,27 @@ impl ReviewCore {
             ignores_whitespace: false,
             links: &links,
         };
-        self.threads = ThreadPlacement::of(
+        let threads = ThreadPlacement::of(
             &self.tour,
             &self.files,
             &self.pulled_threads,
             &self.followed_lines,
             &display,
         );
+        let findings = match &self.ai_review {
+            AiReview::Findings(file) => file.findings.as_slice(),
+            AiReview::NotRun | AiReview::Unreadable(_) => &[],
+        };
+        let findings = FindingPlacement::of(
+            &self.tour,
+            &self.files,
+            findings,
+            &display,
+            self.state.fix_requests(),
+            self.state.finding_threads(),
+        );
+        self.threads = threads;
+        self.findings = findings;
     }
 
     pub fn toggle_thread_fold(&mut self, thread_id: &ThreadId) {
@@ -2120,6 +2277,13 @@ impl ReviewCore {
         Ok(())
     }
 
+    /// A change kept in memory stays shown when its save fails; the failure goes to stderr.
+    pub(super) fn record_reporting(&mut self, what: &str, change: impl FnOnce(&mut ReviewState)) {
+        if let Err(error) = self.state.record(change) {
+            eprintln!("could not save {what}: {error:#}");
+        }
+    }
+
     /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a
     /// re-pin runs, so a hand-off is not delivered twice; only its save is refused then.
     fn record_hand_offs<T>(
@@ -2151,7 +2315,17 @@ impl ReviewCore {
     }
 
     fn land_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
+        let from_findings = outcome.request.draft.from_findings.clone();
         let threads = outcome.threads.clone();
+        let made = if from_findings.is_empty() {
+            None
+        } else {
+            thread_made_of(
+                &outcome.request.draft,
+                threads.as_ref(),
+                &self.pulled_threads,
+            )
+        };
         let hand_offs_before = self.state.hand_offs().all().len();
         let code = self.code_commented_on(&outcome);
         let result = self.comment_desk.apply_comment(
@@ -2161,6 +2335,11 @@ impl ReviewCore {
         );
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
+        match result {
+            Ok(CommentResult::Sent) => self.decide_used(from_findings, made.as_ref())?,
+            Ok(CommentResult::Queued(_)) => self.decide_used(from_findings, None)?,
+            _ => {}
+        }
         result
     }
 
@@ -2298,6 +2477,16 @@ impl ReviewCore {
             .chain(tick)
             .chain(ask)
             .chain(self.guided_tour_palette_actions())
+            .chain(self.has_findings().then_some(PaletteAction::NextFinding))
+            .chain(
+                self.can_list_findings()
+                    .then_some(PaletteAction::FindingsList),
+            )
+            .chain(
+                self.run_ai_review_refusal()
+                    .is_none()
+                    .then_some(PaletteAction::RunAiReview),
+            )
             .chain([wrap, whitespace])
             .chain(page_toggles)
             .chain(finish)

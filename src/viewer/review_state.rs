@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app_folders::{AppFolders, remove_if_there};
 use crate::file_path::FilePath;
+use crate::findings::{Finding, FindingId};
 use crate::pieces::PieceId;
 use crate::pull_request::{PullRequestUrl, RepoName, Sha};
 use crate::repin::{Repin, RepinStatus};
@@ -16,6 +17,9 @@ use crate::tour::Tour;
 
 use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
+use super::finding_decisions::{Fate, FindingDecisions};
+use super::finding_threads::{FindingThreads, NoQuestion, WhyAuthor, WhyReply};
+use super::fix_requests::{FixReply, FixRequests, NoFixQuestion, NoFixRequest};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
 use super::local_threads::LocalThreads;
 use super::move_to_pr::MovedReview;
@@ -112,6 +116,19 @@ struct ViewerSections {
     /// the new commits touched is not read as the reviewer unticking.
     #[serde(default)]
     github_baseline_due: bool,
+    /// A review agent was started and has not said findings-done since, so an idle one found
+    /// again later has stopped without its findings, whatever an earlier run left in the file.
+    #[serde(default)]
+    ai_run_open: bool,
+    /// What the reviewer did with the findings of an AI review.
+    #[serde(default, skip_serializing_if = "FindingDecisions::is_empty")]
+    finding_decisions: FindingDecisions,
+    /// The findings sent to the tour agent to fix, and where each fix is.
+    #[serde(default, skip_serializing_if = "FixRequests::is_empty")]
+    fix_requests: FixRequests,
+    /// Ask why: the threads under findings, with the review agent's answers.
+    #[serde(default, skip_serializing_if = "FindingThreads::is_empty")]
+    finding_threads: FindingThreads,
     /// Comments GitHub did not take, oldest first.
     #[serde(default)]
     comment_queue: Vec<QueuedComment>,
@@ -475,6 +492,97 @@ impl ReviewState {
         }
     }
 
+    /// Every snapshot of a finding kept beside the findings file (decisions, fix requests, questions) takes
+    /// the place a re-pin followed it to.
+    pub(super) fn follow_findings(&mut self, moved: &[Finding]) {
+        self.viewer.finding_decisions.follow(moved);
+        self.viewer.fix_requests.follow(moved);
+        self.viewer.finding_threads.follow(moved);
+    }
+
+    pub const fn ai_run_is_open(&self) -> bool {
+        self.viewer.ai_run_open
+    }
+
+    pub(super) const fn ai_run_is(&mut self, open: bool) {
+        self.viewer.ai_run_open = open;
+    }
+
+    pub const fn finding_decisions(&self) -> &FindingDecisions {
+        &self.viewer.finding_decisions
+    }
+
+    pub(super) fn decide_finding(&mut self, finding: Finding, fate: Fate) {
+        self.viewer.finding_decisions.record(finding, fate);
+    }
+
+    pub(super) fn finding_used(&mut self, finding: Finding, thread: Option<ThreadId>) {
+        self.viewer.finding_decisions.record_used(finding, thread);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub(super) fn forget_findings_used_in(&mut self, thread: &ThreadId) {
+        self.viewer.finding_decisions.forget_used_in(thread);
+    }
+
+    pub(super) fn restore_finding(&mut self, id: &FindingId) -> Option<Finding> {
+        self.viewer.finding_decisions.restore(id)
+    }
+
+    pub const fn fix_requests(&self) -> &FixRequests {
+        &self.viewer.fix_requests
+    }
+
+    pub(super) fn fix_requests_mut(&mut self) -> &mut FixRequests {
+        &mut self.viewer.fix_requests
+    }
+
+    /// The tour agent's word on one finding; a finding it fixed is closed like one the reviewer decided.
+    pub fn fix_replied(&mut self, id: &FindingId, reply: &FixReply) -> Result<(), NoFixRequest> {
+        let finding = self.viewer.fix_requests.replied(id, reply)?;
+        let said = match reply {
+            FixReply::Working => None,
+            FixReply::Question { text } => Some(text.clone()),
+            FixReply::Fixed { commit } => Some(format!("Fixed in {commit}")),
+            FixReply::NotFixed { reason } => Some(format!("Not fixed: {reason}")),
+        };
+        if let Some(said) = said {
+            self.viewer
+                .finding_threads
+                .say(finding.clone(), WhyAuthor::TourAgent, said);
+        }
+        if matches!(reply, FixReply::Fixed { .. }) {
+            self.viewer.finding_decisions.record(finding, Fate::Fixed);
+        }
+        Ok(())
+    }
+
+    /// The reviewer's answer to the tour agent's question: said on the finding's thread and queued for the agent.
+    pub fn fix_question_answered(
+        &mut self,
+        id: &FindingId,
+        answer: &str,
+    ) -> Result<(), NoFixQuestion> {
+        let finding = self.viewer.fix_requests.answered(id, answer)?;
+        self.viewer
+            .finding_threads
+            .say(finding, WhyAuthor::Reviewer, answer.to_owned());
+        Ok(())
+    }
+
+    pub const fn finding_threads(&self) -> &FindingThreads {
+        &self.viewer.finding_threads
+    }
+
+    pub(super) fn finding_threads_mut(&mut self) -> &mut FindingThreads {
+        &mut self.viewer.finding_threads
+    }
+
+    /// The review agent's word on a question about one finding.
+    pub fn why_replied(&mut self, id: &FindingId, reply: &WhyReply) -> Result<(), NoQuestion> {
+        self.viewer.finding_threads.replied(id, reply)
+    }
+
     pub fn hand_offs(&self) -> &HandOffs {
         &self.viewer.hand_offs
     }
@@ -729,7 +837,23 @@ impl ReviewState {
                 place,
                 body: String::new(),
                 written_at: head.cloned(),
+                from_findings: Vec::new(),
             });
+        }
+    }
+
+    /// The draft at `place` carries the finding's text, so the finding goes once it is sent.
+    pub(super) fn draft_carries(&mut self, place: &CommentPlace, finding: Finding) {
+        if let Some(draft) = self
+            .typed
+            .comment_drafts
+            .iter_mut()
+            .find(|d| &d.place == place)
+        {
+            draft
+                .from_findings
+                .retain(|carried| carried.id != finding.id);
+            draft.from_findings.push(finding);
         }
     }
 

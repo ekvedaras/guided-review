@@ -179,6 +179,10 @@ fn looseness(text: &str, query: &[char], query_text: &str) -> Option<usize> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaletteAction {
     NextUnreadStep,
+    /// To the next finding of the AI review, most severe first.
+    NextFinding,
+    /// Opens the list of the AI review's findings.
+    FindingsList,
     MarkStepRead,
     MarkStepUnread,
     /// A basic tour's read tick is per file.
@@ -200,6 +204,8 @@ pub enum PaletteAction {
     /// Asks the PR's tour agent to write the guided tour of a basic review.
     WriteGuidedTour,
     SwitchToGuidedTour,
+    /// Starts the review agent: the AI review of the subject.
+    RunAiReview,
     FinishReview,
     /// A re-review with nothing new to send: done, with no review on GitHub.
     MarkDone,
@@ -235,6 +241,8 @@ impl PaletteAction {
     pub fn label(self) -> &'static str {
         match self {
             Self::NextUnreadStep => "Next unread step",
+            Self::NextFinding => "Next finding",
+            Self::FindingsList => "Findings list",
             Self::MarkStepRead => "Mark step as read",
             Self::MarkStepUnread => "Mark step as unread",
             Self::MarkFileRead => "Mark file as read",
@@ -252,6 +260,7 @@ impl PaletteAction {
             Self::AskAboutStep => "Ask about this step",
             Self::WriteGuidedTour => "Write guided tour",
             Self::SwitchToGuidedTour => "Switch to guided tour",
+            Self::RunAiReview => "Run AI review",
             Self::FinishReview => "Finish review",
             Self::MarkDone => "Mark review done",
             Self::SendTasks => "Send tasks",
@@ -276,6 +285,7 @@ impl PaletteAction {
     pub fn command(self) -> Option<Command> {
         match self {
             Self::NextUnreadStep => Some(Command::NextUnreadStep),
+            Self::FindingsList => Some(Command::FindingsList),
             Self::MarkStepRead
             | Self::MarkStepUnread
             | Self::MarkFileRead
@@ -295,8 +305,10 @@ impl PaletteAction {
             Self::Shortcuts => Some(Command::Shortcuts),
             Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),
             Self::AskAboutStep => Some(Command::AskAboutStep),
-            Self::WriteGuidedTour
+            Self::NextFinding
+            | Self::WriteGuidedTour
             | Self::SwitchToGuidedTour
+            | Self::RunAiReview
             | Self::FinishReview
             | Self::MarkDone
             | Self::SendTasks

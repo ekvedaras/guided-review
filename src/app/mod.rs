@@ -12,6 +12,7 @@ pub mod keymap;
 mod layouts;
 mod page_rows;
 mod prose_selection;
+mod review_agent;
 mod review_session;
 mod settings_window;
 mod sidebar_rows;
@@ -38,12 +39,14 @@ use gpui_platform::application;
 
 use crate::app_folders::AppFolders;
 use crate::app_link::{Answer, AppListener, BUILD_WAIT, OpenRequest, Request};
+use crate::findings::FindingId;
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::open_review::{OpenedReview, open_review};
 use crate::opened_subject::clean_snapshot_refs;
 use crate::platform::{self, Os};
 use crate::review_subject::ReviewSubject;
+use crate::review_worktree::GitReviewWorktrees;
 use crate::tour::{Tour, ToursOnDisk};
 use crate::update::Build;
 use crate::viewer::{
@@ -53,9 +56,11 @@ use crate::viewer::{
     ReviewStateFile, ShowBuilding, ShowReview, ShowSettings, ShowSwitcher, ShowWriting, ToastTone,
     TourAgentPort, TourAgents, WriteDecision,
 };
+use crate::viewer::{FixReply, WhyReply};
 use components::ask_panel::AskPanel;
 pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
+use components::findings_sheet::FindingsSheet;
 use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
 use components::picture_zoom::PictureZoom;
@@ -67,8 +72,8 @@ use layouts::one_step::{
     AskAboutStep, AskToOpenPr, CloseWindow, Collaborators, CopySelection, FocusNextChange,
     FocusPreviousChange, GoBack, GoForward, GoToNextUnread, OneStepLayout, OpenIssue,
     OpenPrOnGitHub, ReadDown, ReadUp, ShowMoreAbove, ShowMoreBelow, ToggleAutoMerge, ToggleDraft,
-    ToggleFold, ToggleJump, TogglePieceLabels, TogglePrSwitcher, ToggleRead, ToggleRenderedView,
-    ToggleSettings, ToggleShortcuts, ToggleWhitespace, ToggleWrapLines,
+    ToggleFindingsList, ToggleFold, ToggleJump, TogglePieceLabels, TogglePrSwitcher, ToggleRead,
+    ToggleRenderedView, ToggleSettings, ToggleShortcuts, ToggleWhitespace, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -130,6 +135,7 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
         let active = cx.new(|_| ActivePr::remembering_in(remembered));
         let switching = pr_switching(&requests_to_self, &folders, active.clone(), cx);
         switching.refresh(cx);
+        let review_agents = review_agent::agents_of(&switching);
         cx.set_global(switching);
         tour_writer::resume(cx);
         let cleaned = folders.clone();
@@ -138,6 +144,20 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
                 // Nobody looks at the start's clean-up; a ref it keeps only waits for the next start.
                 for not_cleaned in clean_snapshot_refs(&cleaned) {
                     eprintln!("{not_cleaned}");
+                }
+                // A review agent outlives the app, and its checkout with it. Without herdr's answer
+                // which ones run, nothing is swept.
+                match review_agents.running_subjects() {
+                    Ok(running) => {
+                        for not_swept in
+                            GitReviewWorktrees::under(cleaned.review_worktrees()).sweep(&running)
+                        {
+                            eprintln!("{not_swept}");
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("kept the review worktrees, herdr did not say which agents run: {error:#}");
+                    }
                 }
             })
             .detach();
@@ -280,6 +300,13 @@ struct Screen {
 
 type SharedScreen = Rc<RefCell<Screen>>;
 
+/// The asker (a CLI call) may have given up and gone before the app answers; there is nobody left to tell.
+fn answer_asker(reply: &std::sync::mpsc::Sender<Answer>, answer: Answer) {
+    if reply.send(answer).is_err() {
+        eprintln!("the asker went away before the answer was ready");
+    }
+}
+
 async fn answer_requests(
     mut asked: UnboundedReceiver<Asked>,
     active: Entity<ActivePr>,
@@ -319,16 +346,16 @@ async fn answer_requests(
         };
         match request {
             Request::Quit => {
-                reply.send(Answer::Quitting).ok();
+                answer_asker(&reply, Answer::Quitting);
                 cx.update(|cx| cx.quit());
             }
             Request::ShowSettings => {
                 let answer = show_settings(&screen, &folders, cx);
-                reply.send(answer).ok();
+                answer_asker(&reply, answer);
             }
             Request::ShowSwitcher => {
                 let answer = show_switcher(&screen, cx);
-                reply.send(answer).ok();
+                answer_asker(&reply, answer);
             }
             Request::AgentReplied {
                 pr,
@@ -336,16 +363,37 @@ async fn answer_requests(
                 replied,
             } => {
                 let answer = mark_replied(&screen, pr, hand_off, &replied, cx);
-                reply.send(answer).ok();
+                answer_asker(&reply, answer);
+            }
+            Request::FixReplied {
+                pr,
+                finding,
+                reply: said,
+            } => {
+                let answer = take_fix_reply(&screen, pr, &finding, &said, cx);
+                answer_asker(&reply, answer);
+            }
+            Request::WhyReplied {
+                pr,
+                finding,
+                reply: said,
+            } => {
+                let answer = take_why_reply(&screen, pr, &finding, &said, cx);
+                answer_asker(&reply, answer);
+            }
+            Request::FindingsDone { pr } => {
+                let answer = read_findings(&screen, pr, cx).await;
+                answer_asker(&reply, answer);
             }
             Request::Open(open) => {
                 let pr = match open.subject.parse::<ReviewSubject>() {
                     Ok(subject) => subject,
                     Err(error) => {
                         eprintln!("refused to open {}: {error:#}", open.subject);
-                        reply
-                            .send(refused(&ReviewSubject::not_a_subject(&open.subject)))
-                            .ok();
+                        answer_asker(
+                            &reply,
+                            refused(&ReviewSubject::not_a_subject(&open.subject)),
+                        );
                         continue;
                     }
                 };
@@ -365,21 +413,19 @@ async fn answer_requests(
                         if decision == WriteDecision::StartWriter {
                             cx.update(|cx| tour_writer::start_writer(pr, cx));
                         }
-                        reply.send(Answer::Writing { pr: open.subject }).ok();
+                        answer_asker(&reply, Answer::Writing { pr: open.subject });
                         continue;
                     }
                 };
                 match decision {
                     OpenDecision::KeepInBackground => {
-                        reply
-                            .send(Answer::KeptInBackground { pr: open.subject })
-                            .ok();
+                        answer_asker(&reply, Answer::KeptInBackground { pr: open.subject });
                     }
                     OpenDecision::GuidedReady => {
-                        reply.send(Answer::GuidedReady { pr: open.subject }).ok();
+                        answer_asker(&reply, Answer::GuidedReady { pr: open.subject });
                     }
                     OpenDecision::Reload => {
-                        reply.send(Answer::Reloaded { pr: open.subject }).ok();
+                        answer_asker(&reply, Answer::Reloaded { pr: open.subject });
                         let window = screen.borrow().window.review();
                         if let Some(window) = window {
                             show_again(window, cx);
@@ -610,6 +656,88 @@ fn mark_replied(
             }
             Answer::HandOffAnswered { pr }
         }
+        Err(error) => refused(&format!("{error:#}")),
+    }
+}
+
+/// Only the review in the window holds the fix requests in memory; any other has the answer written
+/// into its state file by the command.
+fn take_fix_reply(
+    screen: &SharedScreen,
+    pr: String,
+    finding: &FindingId,
+    reply: &FixReply,
+    cx: &mut AsyncApp,
+) -> Answer {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window.review())
+    };
+    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
+    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+        return Answer::NotShown { pr };
+    };
+    let taken = cx.update(|cx| {
+        window
+            .update(cx, |layout, _, cx| layout.fix_replied(finding, reply, cx))
+            .and_then(|taken| taken)
+    });
+    match taken {
+        Ok(()) => Answer::FixAnswered { pr },
+        Err(error) => refused(&format!("{error:#}")),
+    }
+}
+
+/// Only the review in the window holds the finding threads in memory; any other has the answer written
+/// into its state file by the command.
+fn take_why_reply(
+    screen: &SharedScreen,
+    pr: String,
+    finding: &FindingId,
+    reply: &WhyReply,
+    cx: &mut AsyncApp,
+) -> Answer {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window.review())
+    };
+    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
+    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+        return Answer::NotShown { pr };
+    };
+    let taken = cx.update(|cx| {
+        window
+            .update(cx, |layout, _, cx| layout.why_replied(finding, reply, cx))
+            .and_then(|taken| taken)
+    });
+    match taken {
+        Ok(()) => Answer::WhyAnswered { pr },
+        Err(error) => refused(&format!("{error:#}")),
+    }
+}
+
+/// Only the review in the window holds findings to read again; any other reads its file when it opens.
+async fn read_findings(screen: &SharedScreen, pr: String, cx: &mut AsyncApp) -> Answer {
+    let (active, window) = {
+        let screen = screen.borrow();
+        (screen.active.clone(), screen.window.review())
+    };
+    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
+    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+        return Answer::NotShown { pr };
+    };
+    let catch_up = cx.update(|cx| window.update(cx, |layout, _, cx| layout.findings_catch_up(cx)));
+    if let Ok(catch_up) = catch_up
+        && let Err(error) = cx
+            .background_executor()
+            .spawn(async move { catch_up() })
+            .await
+    {
+        eprintln!("could not follow the findings to the review's commits: {error:#}");
+    }
+    let count = cx.update(|cx| window.update(cx, |layout, _, cx| layout.findings_done(cx)));
+    match count {
+        Ok(count) => Answer::FindingsRead { pr, count },
         Err(error) => refused(&format!("{error:#}")),
     }
 }
@@ -953,13 +1081,14 @@ pub fn apply_keymap(keymap: Keymap, cx: &mut App) {
 /// Every shortcut comes from the keymap the shortcuts sheet lists.
 fn bind_keys(keymap: &Keymap, cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
         AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
         PrSwitcherView::KEY_CONTEXT,
         SettingsPanel::KEY_CONTEXT,
         ShortcutsSheet::KEY_CONTEXT,
+        FindingsSheet::KEY_CONTEXT,
         PictureZoom::KEY_CONTEXT,
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
@@ -1005,6 +1134,7 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::AskAboutStep => KeyBinding::new(&keys, AskAboutStep, context),
                 Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
                 Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
+                Command::FindingsList => KeyBinding::new(&keys, ToggleFindingsList, context),
                 Command::OpenOnGitHub => KeyBinding::new(&keys, OpenPrOnGitHub, context),
                 Command::OpenIssue => KeyBinding::new(&keys, OpenIssue, context),
                 Command::OpenPr => KeyBinding::new(&keys, AskToOpenPr, context),

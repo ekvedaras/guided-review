@@ -5,14 +5,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::rows::{
-    AskAt, BinaryFileRow, BoxFold, DiagramRow, FoldControl, FullDiffControl, HunkGapRow, PageRow,
-    PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter, ShownLine,
-    StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar,
-    line_count,
+    AskAt, BinaryFileRow, BoxFold, DiagramRow, FindingRow, FoldControl, FullDiffControl,
+    HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter,
+    ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace,
+    Toolbar, line_count,
 };
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
 use crate::repin::RepinStatus;
+use crate::viewer::finding_placement::FindingView;
+use crate::viewer::fix_requests::FixState;
 use crate::viewer::focused_change::ChangeFile;
 use crate::viewer::review::ReviewCore;
 use crate::viewer::{
@@ -151,7 +153,9 @@ impl<'a> Builder<'a> {
                     .map(|summary| Arc::new(reviewer_summary_row(review, summary))),
                 description: review.pr_description().map(Arc::new),
             })));
+        self.finding_rows_of_the_whole_change();
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: review.ai_review_stage().action,
             ask: Some(AskAt {
                 id: "ask-tour".into(),
                 place: Place::Tour,
@@ -166,10 +170,22 @@ impl<'a> Builder<'a> {
         })));
     }
 
+    /// What the AI review found about the change as a whole, under the first screen's text.
+    fn finding_rows_of_the_whole_change(&mut self) {
+        let findings = self.review.findings_here().to_vec();
+        self.rows.extend(
+            findings
+                .into_iter()
+                .map(|view| finding_row(view, ThreadRowPlace::AfterCode)),
+        );
+    }
+
     fn overview_rows(&mut self) {
         self.rows
             .push(PageRow::Overview(Arc::new(self.review.overview_page())));
+        self.finding_rows_of_the_whole_change();
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: self.review.ai_review_stage().action,
             ask: Some(AskAt {
                 id: "ask-tour".into(),
                 place: Place::Tour,
@@ -188,6 +204,7 @@ impl<'a> Builder<'a> {
     fn file_rows(&mut self, path: &FilePath, page: FilePage) {
         let review = self.review;
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: None,
             ask: Some(AskAt {
                 id: format!("ask-file-{path}").into(),
                 place: Place::File { path: path.clone() },
@@ -228,11 +245,7 @@ impl<'a> Builder<'a> {
             };
             self.block_rows(block, None, Some(fold), shown);
         }
-        self.rows.extend(
-            after_code
-                .into_iter()
-                .map(|view| thread_row(view, ThreadRowPlace::AfterCode)),
-        );
+        self.rows_after_code(after_code);
         self.rows.push(screen_footer(
             review,
             review.file_to_tick_on_screen().map(ReadSubject::File),
@@ -284,6 +297,7 @@ impl<'a> Builder<'a> {
         let has_code = !page.pieces.is_empty();
         let folds = page.is_folded || step.skim || page.is_ticked;
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: None,
             ask: Some(AskAt {
                 id: format!("ask-step-{id}").into(),
                 place: Place::Step { step: id.clone() },
@@ -334,11 +348,7 @@ impl<'a> Builder<'a> {
             };
             self.block_rows(block, Some(&ask_of), Some(fold), shown);
         }
-        self.rows.extend(
-            after_code
-                .into_iter()
-                .map(|view| thread_row(view, ThreadRowPlace::AfterCode)),
-        );
+        self.rows_after_code(after_code);
         self.rows.push(footer);
         diagram
     }
@@ -347,6 +357,7 @@ impl<'a> Builder<'a> {
         let review = self.review;
         self.rows.push(PageRow::SafetyNetIntro);
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
+            run_ai_review: None,
             ask: None,
             comment_on_file: None,
             fold: None,
@@ -359,26 +370,52 @@ impl<'a> Builder<'a> {
         for block in FileBlock::group(page.pieces) {
             self.block_rows(block, None, None, DiffShown::Full);
         }
-        self.rows.extend(
-            after_code
-                .into_iter()
-                .map(|view| thread_row(view, ThreadRowPlace::AfterCode)),
-        );
+        self.rows_after_code(after_code);
         self.rows.push(screen_footer(review, None));
     }
 
-    /// Readies what hangs under the lines of the screen; returns the threads with no line to hang under.
-    fn hang_threads_and_comments(&mut self, threads: Vec<ThreadView>) -> Vec<ThreadView> {
-        let (under_a_line, after_code): (Vec<_>, Vec<_>) = threads
+    /// Readies what hangs under the lines of the screen; returns what has no line to hang under.
+    fn hang_threads_and_comments(&mut self, threads: Vec<ThreadView>) -> AfterCode {
+        let (under_a_line, threads_after_code): (Vec<_>, Vec<_>) = threads
             .into_iter()
             .partition(|thread| thread.anchor.is_some());
+        let (findings_under_a_line, findings_after_code): (Vec<_>, Vec<_>) = self
+            .review
+            .findings_here()
+            .iter()
+            .cloned()
+            .partition(|view| view.anchor.is_some());
         self.under_lines = UnderLines::of(
             under_a_line
                 .into_iter()
                 .map(UnderLine::Thread)
+                .chain(findings_under_a_line.into_iter().map(UnderLine::Finding))
                 .chain(comments_and_asks(self.review)),
         );
-        after_code
+        AfterCode {
+            threads: threads_after_code,
+            findings: findings_after_code,
+        }
+    }
+
+    /// Threads, then findings, each finding with the comment box and the queued comment made from it,
+    /// since no row of code shows their lines either.
+    fn rows_after_code(&mut self, after_code: AfterCode) {
+        self.rows.extend(
+            after_code
+                .threads
+                .into_iter()
+                .map(|view| thread_row(view, ThreadRowPlace::AfterCode)),
+        );
+        let left = self.under_lines.take_findings_left();
+        for view in after_code.findings.into_iter().chain(left) {
+            let comments = CommentPlace::of_finding(&view.finding.anchor)
+                .map_or_else(Vec::new, |place| {
+                    self.under_lines.take_comments(&Hangs::of_comment(&place))
+                });
+            self.rows.push(finding_row(view, ThreadRowPlace::AfterCode));
+            self.hang(comments);
+        }
     }
 
     fn block_rows(
@@ -712,9 +749,45 @@ fn thread_row(view: ThreadView, place: ThreadRowPlace) -> PageRow {
     }
 }
 
-/// What hangs under a row of code, in this order: threads, queued comments, comment boxes, ask markers.
+fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
+    let can_fix = !view.fix.as_ref().is_some_and(FixState::is_in_progress);
+    let can_answer_fix = view.fix.as_ref() == Some(&FixState::Asked);
+    let can_ask_why = !view
+        .thread
+        .as_ref()
+        .is_some_and(|thread| thread.state().is_in_progress());
+    PageRow::Finding(Arc::new(FindingRow {
+        id: view.finding.id,
+        severity: view.finding.severity,
+        body: view.finding.body.into(),
+        place,
+        fix: view.fix.map(|state| state.line().into()),
+        can_fix,
+        can_answer_fix,
+        asked: view
+            .thread
+            .as_ref()
+            .and_then(crate::viewer::FindingThread::asked_line)
+            .map(Into::into),
+        thread: view
+            .thread
+            .as_ref()
+            .map_or_else(|| Arc::from([]), |thread| thread.messages().into()),
+        can_ask_why,
+        outdated: view.finding.outdated.map(|outdated| outdated.before.into()),
+    }))
+}
+
+/// What follows the code of a screen: what has no line to hang under.
+struct AfterCode {
+    threads: Vec<ThreadView>,
+    findings: Vec<FindingView>,
+}
+
+/// What hangs under a row of code, in this order: threads, findings, queued comments, comment boxes, ask markers.
 enum UnderLine {
     Thread(ThreadView),
+    Finding(FindingView),
     Queued(QueuedComment),
     CommentBox(CommentPlace),
     AskMarker(AskAt),
@@ -724,6 +797,7 @@ impl UnderLine {
     fn at(&self) -> Option<Hangs> {
         match self {
             Self::Thread(view) => view.anchor.clone().map(Hangs::Line),
+            Self::Finding(view) => view.anchor.clone().map(Hangs::Line),
             Self::Queued(queued) => Some(Hangs::of_comment(&queued.draft.place)),
             Self::CommentBox(place) => Some(Hangs::of_comment(place)),
             Self::AskMarker(ask) => match &ask.place {
@@ -736,6 +810,7 @@ impl UnderLine {
     fn into_row(self, review: &ReviewCore) -> PageRow {
         match self {
             Self::Thread(view) => thread_row(view, ThreadRowPlace::UnderLine),
+            Self::Finding(view) => finding_row(view, ThreadRowPlace::UnderLine),
             Self::Queued(queued) => PageRow::QueuedComment(Arc::new(queued)),
             Self::CommentBox(place) => comment_box_row(place, review),
             Self::AskMarker(ask) => PageRow::AskMarker(Arc::new(ask)),
@@ -783,6 +858,35 @@ impl UnderLines {
 
     fn take_whole_file(&mut self, path: &FilePath) -> Vec<UnderLine> {
         self.take(&Hangs::File(path.clone()))
+    }
+
+    /// The findings whose line no row of the screen shows, in the order of their ids.
+    fn take_findings_left(&mut self) -> Vec<FindingView> {
+        let mut left: Vec<FindingView> = Vec::new();
+        for items in self.by_line.values_mut() {
+            let (findings, others): (Vec<_>, Vec<_>) = std::mem::take(items)
+                .into_iter()
+                .partition(|item| matches!(item, UnderLine::Finding(_)));
+            *items = others;
+            left.extend(findings.into_iter().filter_map(|item| match item {
+                UnderLine::Finding(view) => Some(view),
+                _ => None,
+            }));
+        }
+        left.sort_by_key(|view| view.finding.id.to_string());
+        left
+    }
+
+    /// The comment boxes and queued comments at `at` that no row took.
+    fn take_comments(&mut self, at: &Hangs) -> Vec<UnderLine> {
+        let Some(items) = self.by_line.get_mut(at) else {
+            return Vec::new();
+        };
+        let (comments, others): (Vec<_>, Vec<_>) = std::mem::take(items)
+            .into_iter()
+            .partition(|item| matches!(item, UnderLine::CommentBox(_) | UnderLine::Queued(_)));
+        *items = others;
+        comments
     }
 
     fn take(&mut self, at: &Hangs) -> Vec<UnderLine> {

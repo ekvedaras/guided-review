@@ -5,6 +5,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::file_path::FilePath;
+use crate::findings::{Anchor, Finding};
 use crate::line_number::{InvalidLineNumber, LineNumber};
 use crate::pull_request::{PullRequestUrl, Sha};
 
@@ -36,6 +37,25 @@ impl CommentPlace {
 
     pub fn on_file(path: &FilePath) -> Self {
         Self::File(path.clone())
+    }
+
+    /// Where a comment made from a finding goes; one about the whole change has no place.
+    pub fn of_finding(anchor: &Anchor) -> Option<Self> {
+        match anchor {
+            Anchor::Change => None,
+            Anchor::File { file } => Some(Self::on_file(file)),
+            Anchor::Lines { file, side, lines } => {
+                let at = |line| LineLocation {
+                    path: file.clone(),
+                    side: Side::from(*side),
+                    line,
+                };
+                Some(Self::Lines {
+                    start: at(lines.start),
+                    end: at(lines.end),
+                })
+            }
+        }
     }
 
     pub fn is_file_comment(&self) -> bool {
@@ -135,6 +155,9 @@ pub struct CommentDraft {
         deserialize_with = "head_or_none"
     )]
     pub written_at: Option<Sha>,
+    /// The findings of the AI review whose text Use or Use as is put in it: they go once it is sent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub from_findings: Vec<Finding>,
 }
 
 /// Files from before `written_at` was optional hold an empty text for "unknown".
@@ -350,6 +373,14 @@ impl CommentRequest {
             tour_head,
             home,
         }
+    }
+
+    pub const fn place(&self) -> &CommentPlace {
+        &self.draft.place
+    }
+
+    pub const fn audience(&self) -> Audience {
+        self.audience
     }
 
     /// Looks at the PR's head again first: the tour may have fallen behind since the last check.
