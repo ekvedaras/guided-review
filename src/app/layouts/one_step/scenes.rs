@@ -26,8 +26,9 @@ use crate::review_subject::{BranchName, ReviewSubject};
 use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
     AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
-    LineKind, LineLocation, MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus,
-    PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness, TerminalId, TextBox,
+    LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
+    OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness, TerminalId,
+    TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue};
@@ -107,10 +108,12 @@ enum Scene {
     AiReviewOutdated,
     AiReviewThreadFromFinding,
     BasicGuidedWriting,
+    TitleBarMerging,
+    FoldedMarkdownParts,
 }
 
 impl Scene {
-    const ALL: [Self; 69] = [
+    const ALL: [Self; 71] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -180,6 +183,8 @@ impl Scene {
         Self::AiReviewOutdated,
         Self::AiReviewThreadFromFinding,
         Self::BasicGuidedWriting,
+        Self::TitleBarMerging,
+        Self::FoldedMarkdownParts,
     ];
 
     fn file_name(self) -> &'static str {
@@ -253,6 +258,8 @@ impl Scene {
             Self::BasicGuidedWriting => "89-basic-guided-writing",
             Self::SettingsComments => "90-settings-comments",
             Self::CommentComposerNowPrimary => "91-comment-composer-now-primary",
+            Self::TitleBarMerging => "92-title-bar-merging",
+            Self::FoldedMarkdownParts => "93-folded-markdown-parts",
         }
     }
 
@@ -353,7 +360,7 @@ impl Scene {
                     ..blocked
                 },
             ),
-            Self::TitleBarMergeNow => status(
+            Self::TitleBarMergeNow | Self::TitleBarMerging => status(
                 Readiness::Ready,
                 Checks::Passing,
                 Merging {
@@ -605,6 +612,21 @@ impl OneStepLayout {
             }
         });
         if let Some(fold) = fold.filter(|fold| fold.is_folded) {
+            self.change_review(cx, |review| {
+                review.toggle_box_fold(&fold.screen, &fold.path);
+            });
+        }
+    }
+
+    /// The scene shows a folded box, which names its parts by section; an open one is folded.
+    fn fold_box(&mut self, path: &FilePath, cx: &mut Context<Self>) {
+        let fold = self.row_of_box(path, cx).and_then(|row| {
+            match self.session.read(cx).rows().row(row)? {
+                PageRow::PieceHeader(heading) => heading.fold.clone(),
+                _ => None,
+            }
+        });
+        if let Some(fold) = fold.filter(|fold| !fold.is_folded) {
             self.change_review(cx, |review| {
                 review.toggle_box_fold(&fold.screen, &fold.path);
             });
@@ -952,6 +974,14 @@ impl OneStepLayout {
                     }
                 }
             }
+            Scene::FoldedMarkdownParts => {
+                if let Some(path) = self.go_to_first_markdown_box(cx) {
+                    self.fold_box(&path, cx);
+                    if let Some(row) = self.row_of_box(&path, cx) {
+                        self.scroll_to_row(row);
+                    }
+                }
+            }
             Scene::BasicOverview => self.session.update(cx, ReviewSession::stage_basic),
             Scene::BasicOverviewFiles => {
                 self.session.update(cx, ReviewSession::stage_basic);
@@ -1009,12 +1039,20 @@ impl OneStepLayout {
             | Scene::TitleBarAutoMergeOff
             | Scene::TitleBarAutoMergeOn
             | Scene::TitleBarMergeNow
+            | Scene::TitleBarMerging
             | Scene::TitleBarChecksList
             | Scene::TitleBarMerged
             | Scene::TitleBarClosed => {
                 if let Some(status) = scene.staged_status() {
                     self.session
                         .update(cx, |session, cx| session.stage_pr_status(status, cx));
+                }
+                if scene == Scene::TitleBarMerging {
+                    self.change_review(cx, |review| {
+                        review.stage_merge_in_flight(Some(MergeChange::MergeNow(
+                            MergeMethod::Squash,
+                        )));
+                    });
                 }
                 self.checks_hover.chip = scene == Scene::TitleBarChecksList;
             }
@@ -1206,9 +1244,11 @@ impl OneStepLayout {
             | Scene::TitleBarAutoMergeOff
             | Scene::TitleBarAutoMergeOn
             | Scene::TitleBarMergeNow
+            | Scene::TitleBarMerging
             | Scene::TitleBarChecksList
             | Scene::TitleBarMerged
             | Scene::TitleBarClosed => {
+                self.change_review(cx, |review| review.stage_merge_in_flight(None));
                 self.session.update(cx, ReviewSession::unstage_pr_status);
                 self.checks_hover.chip = false;
             }
@@ -1222,6 +1262,12 @@ impl OneStepLayout {
             Scene::RefreshRunning => self
                 .session
                 .update(cx, ReviewSession::unstage_refresh_running),
+            Scene::FoldedMarkdownParts => {
+                if let Some(path) = self.go_to_first_markdown_box(cx) {
+                    self.open_box(&path, cx);
+                }
+                self.go_to_first_open_code(cx);
+            }
             Scene::RenderedMarkdown => {
                 if let Some(path) = self.markdown_box(cx) {
                     self.change_review(cx, |review| {

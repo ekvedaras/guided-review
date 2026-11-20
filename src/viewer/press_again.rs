@@ -83,6 +83,12 @@ impl<T: Copy + PartialEq> PressAgain<T> {
         self.to_send
     }
 
+    /// A snapshot scene shows the change as sent, without sending it.
+    #[cfg(feature = "snapshots")]
+    pub(super) fn stage_to_send(&mut self, change: Option<T>) {
+        self.to_send = change;
+    }
+
     /// GitHub answered `change`, so it is no longer to send.
     pub(super) fn landed(&mut self, change: T) {
         if self.to_send == Some(change) {

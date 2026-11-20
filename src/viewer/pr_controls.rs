@@ -131,6 +131,11 @@ impl PrControls {
         self.readiness.to_send()
     }
 
+    #[cfg(feature = "snapshots")]
+    pub(super) fn stage_merging_to_send(&mut self, change: Option<MergeChange>) {
+        self.merging.stage_to_send(change);
+    }
+
     pub(super) fn merging_to_send(&self) -> Option<MergeChange> {
         self.merging.to_send()
     }
