@@ -5,6 +5,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::file_path::FilePath;
+use crate::findings::Anchor;
 use crate::line_number::{InvalidLineNumber, LineNumber};
 use crate::pull_request::{PullRequestUrl, Sha};
 
@@ -36,6 +37,25 @@ impl CommentPlace {
 
     pub fn on_file(path: &FilePath) -> Self {
         Self::File(path.clone())
+    }
+
+    /// Where a comment made from a finding goes; one about the whole change has no place.
+    pub fn of_finding(anchor: &Anchor) -> Option<Self> {
+        match anchor {
+            Anchor::Change => None,
+            Anchor::File { file } => Some(Self::on_file(file)),
+            Anchor::Lines { file, side, lines } => {
+                let at = |line| LineLocation {
+                    path: file.clone(),
+                    side: Side::from(*side),
+                    line,
+                };
+                Some(Self::Lines {
+                    start: at(lines.start),
+                    end: at(lines.end),
+                })
+            }
+        }
     }
 
     pub fn is_file_comment(&self) -> bool {

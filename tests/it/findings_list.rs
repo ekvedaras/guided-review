@@ -333,7 +333,7 @@ fn a_batch_comment_keeps_open_every_finding_whose_lines_have_a_box_with_text_in_
         on_line_2("c", "Third."),
     ]);
     let mut review = shop.open();
-    review.use_finding(&id("c")).unwrap();
+    let place = review.use_finding(&id("c")).unwrap();
 
     let batch = review.comment_findings(&[id("a"), id("b")], SendMode::AddToReview);
 
@@ -341,8 +341,8 @@ fn a_batch_comment_keeps_open_every_finding_whose_lines_have_a_box_with_text_in_
     assert_eq!(
         batch.refused,
         [
-            (id("a"), FindingRefusal::DraftInTheWay),
-            (id("b"), FindingRefusal::DraftInTheWay)
+            (id("a"), FindingRefusal::DraftInTheWay(place.clone())),
+            (id("b"), FindingRefusal::DraftInTheWay(place))
         ]
     );
 }

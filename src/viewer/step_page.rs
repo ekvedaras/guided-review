@@ -9,6 +9,7 @@ use super::highlight::Span;
 use crate::code_source::Line;
 use crate::coverage::{self, PiecePart};
 use crate::file_path::FilePath;
+use crate::findings::AnchorSide;
 use crate::line_number::LineNumber;
 use crate::local_facts::LocalChange;
 use crate::pieces::{ChangedFile, Piece, PieceId, PieceKind};
@@ -22,6 +23,15 @@ use super::threads::ThreadView;
 pub enum Side {
     Base,
     Head,
+}
+
+impl From<AnchorSide> for Side {
+    fn from(side: AnchorSide) -> Self {
+        match side {
+            AnchorSide::Base => Self::Base,
+            AnchorSide::Head => Self::Head,
+        }
+    }
 }
 
 /// Where a shown line lives. Comments and code links start from this.

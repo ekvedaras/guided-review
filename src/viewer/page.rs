@@ -19,6 +19,7 @@ pub use rows::{
 };
 
 use super::ask::{Place, ShownOn};
+use super::comments::CommentPlace;
 use super::file_block::FileBlock;
 use super::focused_change::PageChange;
 use super::jump::{JumpPlace, JumpTarget};
@@ -224,6 +225,13 @@ impl Page {
         self.rows
             .iter()
             .position(|row| matches!(row, PageRow::Finding(finding) if finding.id == *id))
+    }
+
+    /// The row of the comment box at `place`; `None` when this page does not show it.
+    pub fn row_of_comment_box(&self, place: &CommentPlace) -> Option<usize> {
+        self.rows.iter().position(
+            |row| matches!(row, PageRow::Composer { place: shown, .. } if **shown == *place),
+        )
     }
 
     /// The first row that shows the line.

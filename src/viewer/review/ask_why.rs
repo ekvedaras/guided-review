@@ -7,7 +7,7 @@ use std::time::Instant;
 use super::finding_outcome::FindingRefusal;
 use super::{Review, ReviewCore};
 use crate::config::AskSettings;
-use crate::findings::{Anchor, AnchorSide, Finding, FindingId};
+use crate::findings::{Anchor, Finding, FindingId};
 use crate::viewer::ai_review_run::ReviewAgentLife;
 use crate::viewer::ask::{Place, ShownOn};
 use crate::viewer::ask_desk::AskProcesses;
@@ -132,10 +132,7 @@ impl ReviewCore {
             (Anchor::Lines { file, side, lines }, Some(shown_on)) => {
                 let at = |line| LineLocation {
                     path: file.clone(),
-                    side: match side {
-                        AnchorSide::Base => Side::Base,
-                        AnchorSide::Head => Side::Head,
-                    },
+                    side: Side::from(*side),
                     line,
                 };
                 let (start, end) = (at(lines.start), at(lines.end));

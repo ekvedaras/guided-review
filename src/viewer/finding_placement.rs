@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::findings::{Anchor, AnchorSide, Finding, FindingId};
+use crate::findings::{Anchor, Finding, FindingId};
 use crate::pieces::ChangedFile;
 use crate::tour::Tour;
 
@@ -112,10 +112,7 @@ fn hangs_at(anchor: &Anchor) -> Option<LineLocation> {
     };
     Some(LineLocation {
         path: file.clone(),
-        side: match side {
-            AnchorSide::Base => Side::Base,
-            AnchorSide::Head => Side::Head,
-        },
+        side: Side::from(*side),
         line: lines.end,
     })
 }

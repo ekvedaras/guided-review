@@ -1,9 +1,9 @@
 //! What the reviewer does with one finding: use it, use it as is, dismiss it.
 
-use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
 use crate::support::fake_ports::GitHubFault;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::{FixtureRepo, file_path, line};
 use guided_review::findings::FindingId;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
@@ -11,8 +11,8 @@ use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentDraft, CommentPlace, CommentRefusal, CommentResult, FindingRefusal, Page, PageRow,
-    Review, SendMode,
+    CommentDraft, CommentPlace, CommentRefusal, CommentResult, FindingRefusal, LineLocation, Page,
+    PageRow, Review, SendMode, Side,
 };
 use serde_json::{Value, json};
 
@@ -71,6 +71,14 @@ fn on_line_2(id: &str, body: &str) -> Value {
         body,
         json!({"kind": "lines", "file": "README.md", "side": "head", "lines": [2, 2]}),
     )
+}
+
+fn line_2() -> LineLocation {
+    LineLocation {
+        path: file_path("README.md"),
+        side: Side::Head,
+        line: line(2),
+    }
 }
 
 fn id(text: &str) -> FindingId {
@@ -248,9 +256,70 @@ fn using_a_finding_as_is_does_not_send_a_comment_the_reviewer_is_writing_on_thos
 
     let refused = review.use_finding_as_is(&id("b"), SendMode::AddToReview);
 
-    assert!(matches!(refused, Err(FindingRefusal::DraftInTheWay)));
+    assert!(matches!(refused, Err(FindingRefusal::DraftInTheWay(_))));
     assert_eq!(shown_findings(review.page()), ["a", "b"]);
     assert_eq!(drafts(&review)[0].body, "One.");
+}
+
+/// The findings and comment boxes of a page, in order: `finding a`, `box`.
+fn findings_and_boxes(page: &Page) -> Vec<String> {
+    page.rows()
+        .iter()
+        .filter_map(|row| match row {
+            PageRow::Finding(finding) => Some(format!("finding {}", finding.id)),
+            PageRow::Composer { .. } => Some("box".to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn using_a_finding_on_a_whole_file_shows_its_comment_box_under_the_finding() {
+    let shop = Shop::with_findings(&[
+        finding(
+            "a",
+            "nit",
+            "Split it.",
+            json!({"kind": "file", "file": "README.md"}),
+        ),
+        on_line_2("b", "Two."),
+    ]);
+    let mut review = shop.open();
+
+    review.use_finding(&id("a")).unwrap();
+
+    assert_eq!(
+        findings_and_boxes(review.page()),
+        ["finding b", "finding a", "box"]
+    );
+}
+
+#[test]
+fn using_a_finding_in_a_folded_box_shows_its_comment_box_under_the_finding() {
+    let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
+    let mut review = shop.open();
+    let screen = review.screen().clone();
+    review.toggle_box_fold(&screen, &file_path("README.md"));
+    assert!(review.page().row_of_line(&line_2()).is_none());
+
+    review.use_finding(&id("a")).unwrap();
+
+    assert_eq!(findings_and_boxes(review.page()), ["finding a", "box"]);
+}
+
+#[test]
+fn using_a_finding_as_is_with_a_comment_box_on_its_lines_names_that_box() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+    let place = review.use_finding(&id("a")).unwrap();
+
+    let refused = review.use_finding_as_is(&id("b"), SendMode::AddToReview);
+
+    assert_eq!(
+        refused.err(),
+        Some(FindingRefusal::DraftInTheWay(place.clone()))
+    );
+    assert!(review.page().row_of_comment_box(&place).is_some());
 }
 
 #[test]

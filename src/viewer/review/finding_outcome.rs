@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::findings::FindingId;
-use crate::viewer::comments::CommentRefusal;
+use crate::viewer::comments::{CommentPlace, CommentRefusal};
 
 /// Why an action on a finding did not happen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,8 +16,8 @@ pub enum FindingRefusal {
     NoFindingsFile,
     /// The decision could not be kept.
     NotKept(String),
-    /// A comment box with text is open on those lines: sending the finding would send that text unread.
-    DraftInTheWay,
+    /// A comment box is open on those lines, at that place: sending the finding would send its text unread.
+    DraftInTheWay(CommentPlace),
     /// A fix is asked for already, or under way: asking again would send it twice.
     BeingFixed,
     /// A question on it waits for its answer: another would cross it.
@@ -35,9 +35,9 @@ impl fmt::Display for FindingRefusal {
             Self::IdTaken => f.write_str("A finding with the same id is open already"),
             Self::NoFindingsFile => f.write_str("The review has no findings to put it back among"),
             Self::NotKept(reason) => write!(f, "The decision could not be kept: {reason}"),
-            Self::DraftInTheWay => {
-                f.write_str("A comment box is open on these lines: use the finding there, or send that comment first")
-            }
+            Self::DraftInTheWay(_) => f.write_str(
+                "A comment box is open on these lines: Use adds the finding to it, or send that comment first",
+            ),
             Self::BeingFixed => f.write_str("A fix of this finding is asked for already"),
             Self::BeingAsked => {
                 f.write_str("A question on this finding waits for the review agent's answer")

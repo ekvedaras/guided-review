@@ -1,8 +1,7 @@
 use super::ReviewCore;
 use super::finding_outcome::{FindingRefusal, FindingsBatch};
 use crate::file_path::FilePath;
-use crate::findings::{Anchor, AnchorSide, Finding, FindingId};
-use crate::line_number::LineNumber;
+use crate::findings::{Anchor, Finding, FindingId};
 use crate::viewer::ai_review::AiReview;
 use crate::viewer::comment_desk::TourFreshness;
 use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, SendMode};
@@ -11,7 +10,6 @@ use crate::viewer::finding_threads::WhyAuthor;
 use crate::viewer::findings_list::{FindingLine, FindingsList};
 use crate::viewer::fix_requests::{FixReply, FixState};
 use crate::viewer::hand_offs::Audience;
-use crate::viewer::step_page::{LineLocation, Side};
 use crate::viewer::work_agenda::WorkKind;
 
 /// Starts a comment made from a finding the reviewer did not edit.
@@ -125,7 +123,7 @@ impl ReviewCore {
             return Err(FindingRefusal::Comment(refusal));
         }
         if self.state.draft_at(place).is_some() {
-            return Err(FindingRefusal::DraftInTheWay);
+            return Err(FindingRefusal::DraftInTheWay(place.clone()));
         }
         let text = findings
             .iter()
@@ -390,25 +388,11 @@ impl ReviewCore {
         if self.tour_freshness() == TourFreshness::Behind {
             return Err(FindingRefusal::Comment(CommentRefusal::TourIsOld));
         }
-        let at = |file: &FilePath, side: AnchorSide, line: LineNumber| LineLocation {
-            path: file.clone(),
-            side: match side {
-                AnchorSide::Base => Side::Base,
-                AnchorSide::Head => Side::Head,
-            },
-            line,
-        };
+        let is_changed = |file: &FilePath| self.files.iter().any(|changed| changed.path == *file);
         match anchor {
-            Anchor::File { file } if self.files.iter().any(|changed| changed.path == *file) => {
-                Ok(CommentPlace::on_file(file))
-            }
-            Anchor::Lines { file, side, lines }
-                if self.files.iter().any(|changed| changed.path == *file) =>
-            {
-                Ok(CommentPlace::Lines {
-                    start: at(file, *side, lines.start),
-                    end: at(file, *side, lines.end),
-                })
+            Anchor::File { file } | Anchor::Lines { file, .. } if is_changed(file) => {
+                CommentPlace::of_finding(anchor)
+                    .ok_or(FindingRefusal::Comment(CommentRefusal::NoLines))
             }
             Anchor::Change | Anchor::File { .. } | Anchor::Lines { .. } => {
                 Err(FindingRefusal::Comment(CommentRefusal::NoLines))

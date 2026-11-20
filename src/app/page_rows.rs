@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
 use crate::findings::FindingId;
+use crate::viewer::CommentPlace;
 use crate::viewer::{
     AskAt, BoxEdges, JumpTarget, LineKind, Page, PageRow, PinnedHeader, Review, RowSelection,
     SelectedRows, ShownLine, StepHeading, line_count,
@@ -186,6 +187,10 @@ impl PageRows {
 
     pub fn row_of_finding(&self, id: &FindingId) -> Option<usize> {
         self.page.as_deref()?.row_of_finding(id)
+    }
+
+    pub fn row_of_comment_box(&self, place: &CommentPlace) -> Option<usize> {
+        self.page.as_deref()?.row_of_comment_box(place)
     }
 
     pub fn row_of_jump(&self, target: &JumpTarget) -> usize {

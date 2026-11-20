@@ -1206,11 +1206,8 @@ impl OneStepLayout {
             )
             .child(
                 small_button("use-as-is", ButtonKind::Ghost, Icon::Send, "Use as is").on_click(
-                    cx.listener(move |this, _, _, cx| {
-                        let sent = this
-                            .session
-                            .update(cx, |session, cx| session.use_finding_as_is(&as_is_id, cx));
-                        this.finding_refused(sent, cx);
+                    cx.listener(move |this, _, window, cx| {
+                        this.use_finding_as_is(&as_is_id, window, cx);
                     }),
                 ),
             )
@@ -1310,10 +1307,38 @@ impl OneStepLayout {
         let used = self.session.update(cx, |session, cx| {
             session.change(cx, |review| review.use_finding(id))
         });
-        if used.is_ok() {
-            window.focus(&self.composer_focus, cx);
+        match used {
+            Ok(place) => self.go_to_comment_box(place, window, cx),
+            Err(refusal) => self.finding_refused(Err(refusal), cx),
         }
-        self.finding_refused(used.map(|_| ()), cx);
+    }
+
+    /// Use as is refused for a box open on the finding's lines: the reviewer is taken to that box.
+    fn use_finding_as_is(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let sent = self
+            .session
+            .update(cx, |session, cx| session.use_finding_as_is(id, cx));
+        if let Err(FindingRefusal::DraftInTheWay(place)) = &sent {
+            self.go_to_comment_box(place.clone(), window, cx);
+        }
+        self.finding_refused(sent, cx);
+    }
+
+    /// The box takes the keys and the page scrolls until it shows.
+    fn go_to_comment_box(
+        &mut self,
+        place: CommentPlace,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let row = self.session.read(cx).rows().row_of_comment_box(&place);
+        self.session
+            .update(cx, |session, cx| session.compose(place, cx));
+        window.focus(&self.composer_focus, cx);
+        if let Some(row) = row {
+            self.screen_list.scroll_to_reveal_item(row);
+        }
+        cx.notify();
     }
 
     /// Ask why opens a box under the finding, with the usual question in it to ask as is or to edit.

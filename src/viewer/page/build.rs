@@ -245,8 +245,7 @@ impl<'a> Builder<'a> {
             };
             self.block_rows(block, None, Some(fold), shown);
         }
-        self.rows.extend(after_code);
-        self.rows.extend(self.under_lines.take_findings_left());
+        self.rows_after_code(after_code);
         self.rows.push(screen_footer(
             review,
             review.file_to_tick_on_screen().map(ReadSubject::File),
@@ -349,8 +348,7 @@ impl<'a> Builder<'a> {
             };
             self.block_rows(block, Some(&ask_of), Some(fold), shown);
         }
-        self.rows.extend(after_code);
-        self.rows.extend(self.under_lines.take_findings_left());
+        self.rows_after_code(after_code);
         self.rows.push(footer);
         diagram
     }
@@ -372,14 +370,12 @@ impl<'a> Builder<'a> {
         for block in FileBlock::group(page.pieces) {
             self.block_rows(block, None, None, DiffShown::Full);
         }
-        self.rows.extend(after_code);
-        self.rows.extend(self.under_lines.take_findings_left());
+        self.rows_after_code(after_code);
         self.rows.push(screen_footer(review, None));
     }
 
-    /// Readies what hangs under the lines of the screen; returns the rows of what has no line to hang
-    /// under: threads, then findings.
-    fn hang_threads_and_comments(&mut self, threads: Vec<ThreadView>) -> Vec<PageRow> {
+    /// Readies what hangs under the lines of the screen; returns what has no line to hang under.
+    fn hang_threads_and_comments(&mut self, threads: Vec<ThreadView>) -> AfterCode {
         let (under_a_line, threads_after_code): (Vec<_>, Vec<_>) = threads
             .into_iter()
             .partition(|thread| thread.anchor.is_some());
@@ -396,15 +392,30 @@ impl<'a> Builder<'a> {
                 .chain(findings_under_a_line.into_iter().map(UnderLine::Finding))
                 .chain(comments_and_asks(self.review)),
         );
-        threads_after_code
-            .into_iter()
-            .map(|view| thread_row(view, ThreadRowPlace::AfterCode))
-            .chain(
-                findings_after_code
-                    .into_iter()
-                    .map(|view| finding_row(view, ThreadRowPlace::AfterCode)),
-            )
-            .collect()
+        AfterCode {
+            threads: threads_after_code,
+            findings: findings_after_code,
+        }
+    }
+
+    /// Threads, then findings, each finding with the comment box and the queued comment made from it,
+    /// since no row of code shows their lines either.
+    fn rows_after_code(&mut self, after_code: AfterCode) {
+        self.rows.extend(
+            after_code
+                .threads
+                .into_iter()
+                .map(|view| thread_row(view, ThreadRowPlace::AfterCode)),
+        );
+        let left = self.under_lines.take_findings_left();
+        for view in after_code.findings.into_iter().chain(left) {
+            let comments = CommentPlace::of_finding(&view.finding.anchor)
+                .map_or_else(Vec::new, |place| {
+                    self.under_lines.take_comments(&Hangs::of_comment(&place))
+                });
+            self.rows.push(finding_row(view, ThreadRowPlace::AfterCode));
+            self.hang(comments);
+        }
     }
 
     fn block_rows(
@@ -767,6 +778,12 @@ fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
     }))
 }
 
+/// What follows the code of a screen: what has no line to hang under.
+struct AfterCode {
+    threads: Vec<ThreadView>,
+    findings: Vec<FindingView>,
+}
+
 /// What hangs under a row of code, in this order: threads, findings, queued comments, comment boxes, ask markers.
 enum UnderLine {
     Thread(ThreadView),
@@ -844,7 +861,7 @@ impl UnderLines {
     }
 
     /// The findings whose line no row of the screen shows, in the order of their ids.
-    fn take_findings_left(&mut self) -> Vec<PageRow> {
+    fn take_findings_left(&mut self) -> Vec<FindingView> {
         let mut left: Vec<FindingView> = Vec::new();
         for items in self.by_line.values_mut() {
             let (findings, others): (Vec<_>, Vec<_>) = std::mem::take(items)
@@ -857,9 +874,19 @@ impl UnderLines {
             }));
         }
         left.sort_by_key(|view| view.finding.id.to_string());
-        left.into_iter()
-            .map(|view| finding_row(view, ThreadRowPlace::AfterCode))
-            .collect()
+        left
+    }
+
+    /// The comment boxes and queued comments at `at` that no row took.
+    fn take_comments(&mut self, at: &Hangs) -> Vec<UnderLine> {
+        let Some(items) = self.by_line.get_mut(at) else {
+            return Vec::new();
+        };
+        let (comments, others): (Vec<_>, Vec<_>) = std::mem::take(items)
+            .into_iter()
+            .partition(|item| matches!(item, UnderLine::CommentBox(_) | UnderLine::Queued(_)));
+        *items = others;
+        comments
     }
 
     fn take(&mut self, at: &Hangs) -> Vec<UnderLine> {
