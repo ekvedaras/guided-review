@@ -75,11 +75,15 @@ impl PrControls {
             })
     }
 
-    /// A merged or closed PR has nothing to change, so the key does nothing.
+    /// A merged or closed PR has nothing to change, so the key does nothing, and nor does it while
+    /// a confirmed change is on its way to GitHub.
     pub(super) fn ask_to_change_merging(&mut self, now: Instant) -> PressStep {
         let Some(status) = self.status.as_ref().and_then(PrStatus::open) else {
             return PressStep::Nothing;
         };
+        if self.merging.to_send().is_some() {
+            return PressStep::Nothing;
+        }
         let preferred = self.merge_method;
         let offered = status
             .merging

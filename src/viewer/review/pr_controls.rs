@@ -73,6 +73,11 @@ impl ReviewCore {
         step
     }
 
+    /// The confirmed change GitHub has not answered yet.
+    pub fn merge_in_flight(&self) -> Option<MergeChange> {
+        self.merging_to_send()
+    }
+
     pub(super) fn readiness_to_send(&self) -> Option<Readiness> {
         self.pr_controls.as_ref()?.readiness_to_send()
     }
