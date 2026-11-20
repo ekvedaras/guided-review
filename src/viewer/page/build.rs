@@ -16,11 +16,12 @@ use crate::repin::RepinStatus;
 use crate::viewer::finding_placement::FindingView;
 use crate::viewer::fix_requests::FixState;
 use crate::viewer::focused_change::ChangeFile;
+use crate::viewer::rendered_view::section_title_at;
 use crate::viewer::review::ReviewCore;
 use crate::viewer::{
-    BoxState, CommentPlace, FileBlock, FilePage, LineLocation, Markdown, NoteSubject, PieceDiff,
-    Place, QueuedComment, ReadSubject, SafetyNetPage, Screen, StepPage, ThreadView, TourLead,
-    hidden_lines_after, hidden_lines_before,
+    BoxState, CommentPlace, FileBlock, FilePage, LineKind, LineLocation, Markdown, NoteSubject,
+    PieceDiff, Place, QueuedComment, ReadSubject, SafetyNetPage, Screen, Side, StepPage,
+    ThreadView, TourLead, hidden_lines_after, hidden_lines_before,
 };
 use crate::viewer::{FileView, LabelSwitch, PageChange, PieceLabels, Rendering, ViewSwitch};
 
@@ -657,11 +658,43 @@ impl<'a> Builder<'a> {
                 ..whole_file_heading(block, fold)
             })));
             for piece in block.pieces_in_order() {
-                self.rows
-                    .push(PageRow::PieceMarker(Arc::new(heading_of(piece, ask_of))));
+                let mut marker = heading_of(piece, ask_of);
+                marker.label = marker.label.named_as_part(self.part_name(piece));
+                self.rows.push(PageRow::PieceMarker(Arc::new(marker)));
             }
         }
         self.rows.push(PageRow::PieceEnd);
+    }
+
+    /// What a folded box calls a numbered part, which has no code under it to say where it is: the
+    /// Markdown section it sits in, else the line it starts on.
+    fn part_name(&self, piece: &PieceDiff) -> Option<Arc<str>> {
+        if !piece.id.is_hunk() {
+            return None;
+        }
+        let first_line = piece
+            .hunks
+            .iter()
+            .flat_map(|hunk| &hunk.rows)
+            .skip_while(|row| matches!(row.kind, LineKind::Context { .. }))
+            .find(|row| row.location.side == Side::Head)
+            .map(|row| usize::from(row.location.line))?;
+        let is_markdown = Rendering::of(piece.id.path(), false, true) == Some(Rendering::Markdown);
+        let section = is_markdown
+            .then(|| {
+                let text = self
+                    .review
+                    .display_options()
+                    .files_at_head()
+                    .text(piece.id.path())?;
+                section_title_at(text, first_line)
+            })
+            .flatten();
+        Some(
+            section
+                .map_or_else(|| format!("line {first_line}"), str::to_owned)
+                .into(),
+        )
     }
 
     /// Hangs `here` under the row above.

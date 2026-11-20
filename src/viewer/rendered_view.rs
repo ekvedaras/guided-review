@@ -55,6 +55,40 @@ impl Rendering {
     }
 }
 
+/// The title of the section a line of Markdown sits in: the last heading at or above it, outside
+/// code fences. `line` counts from 1.
+pub(super) fn section_title_at(text: &str, line: usize) -> Option<&str> {
+    let mut fence: Option<char> = None;
+    let mut title = None;
+    for text_line in text.lines().take(line) {
+        let trimmed = text_line.trim_start();
+        let marker = ['`', '~']
+            .into_iter()
+            .find(|marker| trimmed.starts_with(&marker.to_string().repeat(3)));
+        match (fence, marker) {
+            (None, Some(marker)) => fence = Some(marker),
+            (Some(open), Some(marker)) if open == marker => fence = None,
+            (None, None) => {
+                if let Some(heading) = heading_title(trimmed) {
+                    title = Some(heading);
+                }
+            }
+            _ => {}
+        }
+    }
+    title
+}
+
+fn heading_title(trimmed: &str) -> Option<&str> {
+    let title = trimmed.trim_start_matches('#');
+    let level = trimmed.len() - title.len();
+    if !(1..=6).contains(&level) || !title.starts_with(' ') {
+        return None;
+    }
+    let title = title.trim().trim_end_matches('#').trim_end();
+    (!title.is_empty()).then_some(title)
+}
+
 /// The Code / Rendered switch in the header of a file box that offers it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ViewSwitch {
