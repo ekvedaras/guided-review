@@ -345,7 +345,7 @@ impl TourAgentState {
             Self::Unknown => format!("{who}: looking"),
             Self::LinkOff(reason) => format!("{who} is off: {reason}"),
             Self::None => format!("{who}: none"),
-            Self::Agent { terminal, status } => format!("{who} `{terminal}`: {status}"),
+            Self::Agent { status, .. } => format!("{who}: {status}"),
             Self::Choose(terminals) => {
                 let named: Vec<String> = terminals
                     .iter()

@@ -1185,6 +1185,32 @@ impl ReviewSession {
         });
     }
 
+    /// The PR in Basic mode while its guided tour is written: the stage, the agent's last line and one
+    /// Show agent in the sidebar.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_basic_guided_writing(&mut self, cx: &mut Context<Self>) {
+        self.stage_basic(cx);
+        let terminal = TerminalId::new("t11");
+        let before = std::mem::replace(
+            &mut self.tour_agent,
+            TourAgentState::Agent {
+                terminal,
+                status: crate::viewer::AgentStatus::Working,
+            },
+        );
+        self.tour_agent_before_staging.get_or_insert(before);
+        self.change(cx, |review| {
+            let mut writing = crate::viewer::TourWriting::starting();
+            writing.status_is(crate::viewer::AgentStatus::Working);
+            writing.screen_is(vec![
+                String::new(),
+                "⏺ Reading src/orders.rs".to_owned(),
+                "⏺ Writing the tour: 4 steps, one diagram".to_owned(),
+            ]);
+            review.guided_tour_is(crate::viewer::GuidedTourProgress::Writing(writing));
+        });
+    }
+
     /// The local review of the throwaway clone on disk, as `open <folder>` leaves it, so the switcher
     /// lists it; the review on screen stays.
     #[cfg(feature = "snapshots")]
@@ -1348,6 +1374,9 @@ impl ReviewSession {
 
     #[cfg(feature = "snapshots")]
     pub fn unstage_basic(&mut self, cx: &mut Context<Self>) {
+        if let Some(before) = self.tour_agent_before_staging.take() {
+            self.tour_agent = before;
+        }
         if let Some(source) = self.source_before_staging.take() {
             self.source = source;
         }

@@ -4,6 +4,7 @@ use crate::viewer::guided_tour::{
     GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage,
 };
 use crate::viewer::jump::PaletteAction;
+use crate::viewer::tour_agent::{AgentStatus, TourAgentState};
 use crate::viewer::tour_writing::{TourWriting, WritingStage};
 
 impl ReviewCore {
@@ -86,20 +87,36 @@ impl ReviewCore {
         match &self.guided_tour {
             GuidedTourProgress::NotAsked | GuidedTourProgress::Ready => None,
             GuidedTourProgress::Writing(writing) => Some(GuidedTourStage {
-                line: match writing.stage {
-                    WritingStage::Starting => "Guided tour: asking the tour agent to write it",
-                    WritingStage::Writing | WritingStage::Failed(_) => {
+                line: match (&writing.stage, writing.status) {
+                    (_, Some(AgentStatus::WaitingForYou)) => {
+                        "Guided tour: the tour agent waits for you in its terminal"
+                    }
+                    (WritingStage::Starting, _) => "Guided tour: asking the tour agent to write it",
+                    (WritingStage::Writing | WritingStage::Failed(_), _) => {
                         "Guided tour: the tour agent is writing it"
                     }
                 }
                 .to_owned(),
+                activity: writing
+                    .screen
+                    .iter()
+                    .rev()
+                    .map(|line| line.trim())
+                    .find(|line| !line.is_empty())
+                    .map(str::to_owned),
                 can_try_again: false,
             }),
             GuidedTourProgress::Failed(reason) => Some(GuidedTourStage {
                 line: format!("Guided tour failed: {reason}"),
+                activity: None,
                 can_try_again: self.write_guided_tour_refusal().is_none(),
             }),
         }
+    }
+
+    /// While a guided tour is written its stage speaks for the agent, so the sidebar has one agent line.
+    pub fn shows_tour_agent_line(&self, agent: &TourAgentState) -> bool {
+        self.guided_tour_stage().is_none() && agent.is_worth_a_line()
     }
 
     pub(in crate::viewer) fn guided_tour_palette_actions(&self) -> Vec<PaletteAction> {

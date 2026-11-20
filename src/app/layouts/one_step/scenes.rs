@@ -104,10 +104,11 @@ enum Scene {
     AiReviewAskWhy,
     AiReviewOutdated,
     AiReviewThreadFromFinding,
+    BasicGuidedWriting,
 }
 
 impl Scene {
-    const ALL: [Self; 66] = [
+    const ALL: [Self; 67] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -174,6 +175,7 @@ impl Scene {
         Self::AiReviewAskWhy,
         Self::AiReviewOutdated,
         Self::AiReviewThreadFromFinding,
+        Self::BasicGuidedWriting,
     ];
 
     fn file_name(self) -> &'static str {
@@ -244,6 +246,7 @@ impl Scene {
             Self::AiReviewAskWhy => "86-ai-review-ask-why",
             Self::AiReviewOutdated => "87-ai-review-outdated",
             Self::AiReviewThreadFromFinding => "88-ai-review-thread-from-finding",
+            Self::BasicGuidedWriting => "89-basic-guided-writing",
         }
     }
 
@@ -967,6 +970,9 @@ impl OneStepLayout {
             Scene::BasicGuidedReady => self
                 .session
                 .update(cx, ReviewSession::stage_basic_guided_ready),
+            Scene::BasicGuidedWriting => self
+                .session
+                .update(cx, ReviewSession::stage_basic_guided_writing),
             Scene::SwitchedSummary => self.change_review(cx, |review| {
                 review.go_to_summary();
                 review.steps_carried_read_ticks_are(3);
@@ -1148,6 +1154,7 @@ impl OneStepLayout {
             | Scene::BasicFile
             | Scene::BasicRead
             | Scene::BasicGuidedReady
+            | Scene::BasicGuidedWriting
             | Scene::LocalOverview
             | Scene::LocalMoveOffer
             | Scene::LocalFile

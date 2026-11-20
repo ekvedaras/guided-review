@@ -22,7 +22,7 @@ pub enum WritingStage {
 }
 
 impl TourWriting {
-    pub(super) fn starting() -> Self {
+    pub fn starting() -> Self {
         Self {
             stage: WritingStage::Starting,
             terminal: None,
@@ -72,7 +72,7 @@ impl TourWriting {
         self.stage = WritingStage::Failed(reason);
     }
 
-    pub(super) fn status_is(&mut self, status: AgentStatus) {
+    pub fn status_is(&mut self, status: AgentStatus) {
         self.status = Some(status);
         if self.stage != WritingStage::Writing {
             return;
@@ -95,7 +95,7 @@ impl TourWriting {
         }
     }
 
-    pub(super) fn screen_is(&mut self, lines: Vec<String>) {
+    pub fn screen_is(&mut self, lines: Vec<String>) {
         self.screen = lines;
     }
 

@@ -1979,6 +1979,14 @@ impl OneStepLayout {
                         .text_color(colors.muted_text)
                         .child(SharedString::from(stage.line.clone())),
                 )
+                .children(stage.activity.clone().map(|activity| {
+                    div()
+                        .text_xs()
+                        .font_family(*CODE_FONT)
+                        .text_color(colors.muted_text)
+                        .truncate()
+                        .child(SharedString::from(activity))
+                }))
                 .child(div().flex().gap_2().children(show).children(try_again))
         });
         let banner = guided_tour.banner.as_ref().map(|banner| {
