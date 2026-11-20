@@ -72,6 +72,7 @@ pub struct FindingsSheet {
 enum RowSpot {
     Open(usize),
     Dismissed(usize),
+    DismissedHeader,
 }
 
 impl EventEmitter<FindingsEvent> for FindingsSheet {}
@@ -153,7 +154,16 @@ impl FindingsSheet {
             "down" | "j" => self.list.cursor_down(),
             "up" | "k" => self.list.cursor_up(),
             "space" => self.list.toggle_under_cursor(),
-            "enter" => self.list.toggle_open_under_cursor(),
+            "right" => self.list.unfold_under_cursor(),
+            "left" => self.list.fold_under_cursor(),
+            "enter" => {
+                if self.list.is_on_dismissed_header() {
+                    self.list.toggle_dismissed_shown();
+                } else if let Some(id) = self.list.id_under_cursor().cloned() {
+                    self.close(window, cx);
+                    cx.emit(FindingsEvent::GoTo(id));
+                }
+            }
             "a" => self.list.toggle_all(),
             "d" => self.ask(FindingsEvent::Dismiss, cx),
             "c" => self.ask(FindingsEvent::Comment, cx),
@@ -162,13 +172,6 @@ impl FindingsSheet {
                 let selected = self.list.selected_dismissed();
                 if !selected.is_empty() {
                     cx.emit(FindingsEvent::Restore(selected));
-                }
-            }
-            "h" => self.list.toggle_dismissed_shown(),
-            "g" => {
-                if let Some(id) = self.list.id_under_cursor().cloned() {
-                    self.close(window, cx);
-                    cx.emit(FindingsEvent::GoTo(id));
                 }
             }
             _ => {}
@@ -413,17 +416,14 @@ impl FindingsSheet {
         let places = places_of(&rows, RowSpot::Dismissed, cursor, hovered);
         let is_shown = list.dismissed_are_shown();
         let ticked = list.selected_dismissed().len();
-        let header = div()
-            .id("findings-dismissed-header")
-            .px_5()
+        let place = if cursor == Some(RowSpot::DismissedHeader) {
+            RowPlace::Current
+        } else {
+            RowPlace::Apart
+        };
+        let header = picker_row_at(colors, "findings-dismissed-header", place, None)
             .py_2()
-            .flex()
-            .items_center()
             .gap_2()
-            .cursor_pointer()
-            .when(has_open_rows, |header| {
-                header.border_t_1().border_color(colors.subtle_border)
-            })
             .on_click(cx.listener(|this, _, _, cx| {
                 this.list.toggle_dismissed_shown();
                 cx.notify();
@@ -462,20 +462,37 @@ impl FindingsSheet {
                 )
             });
         Some(
-            div().flex().flex_col().child(header).children(
-                is_shown
-                    .then(|| {
-                        rows.iter()
-                            .zip(places)
-                            .enumerate()
-                            .map(|(at, (row, place))| {
-                                Self::dismissed_row(colors, row, RowSpot::Dismissed(at), place, cx)
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .into_iter()
-                    .flatten(),
-            ),
+            div()
+                .flex()
+                .flex_col()
+                .when(has_open_rows, |section| {
+                    section
+                        .mt_2()
+                        .border_t_1()
+                        .border_color(colors.subtle_border)
+                        .pt_2()
+                })
+                .child(header)
+                .children(
+                    is_shown
+                        .then(|| {
+                            rows.iter()
+                                .zip(places)
+                                .enumerate()
+                                .map(|(at, (row, place))| {
+                                    Self::dismissed_row(
+                                        colors,
+                                        row,
+                                        RowSpot::Dismissed(at),
+                                        place,
+                                        cx,
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .into_iter()
+                        .flatten(),
+                ),
         )
     }
 
@@ -674,6 +691,11 @@ impl Render for FindingsSheet {
                     .iter()
                     .position(|row| row.is_under_cursor)
                     .map(RowSpot::Dismissed)
+            })
+            .or_else(|| {
+                self.list
+                    .is_on_dismissed_header()
+                    .then_some(RowSpot::DismissedHeader)
             });
         let places = places_of(&rows, RowSpot::Open, cursor, self.hovered);
         let body = div()
@@ -719,14 +741,20 @@ impl Render for FindingsSheet {
                         picker_footer(&colors)
                             .child(key_hint(&colors, &close_keys, "close"))
                             .child(key_hint(&colors, &[KeyLabel::Text("space")], "tick"))
-                            .child(key_hint(&colors, &[KeyLabel::Text("return")], "open"))
+                            .child(key_hint(
+                                &colors,
+                                &[
+                                    KeyLabel::Icon(Icon::ArrowLeft),
+                                    KeyLabel::Icon(Icon::ArrowRight),
+                                ],
+                                "fold",
+                            ))
+                            .child(key_hint(&colors, &[KeyLabel::Text("return")], "show"))
                             .child(key_hint(&colors, &[KeyLabel::Text("a")], "all"))
                             .child(key_hint(&colors, &[KeyLabel::Text("d")], "dismiss"))
                             .child(key_hint(&colors, &[KeyLabel::Text("c")], "comment"))
                             .child(key_hint(&colors, &[KeyLabel::Text("x")], "fix"))
-                            .child(key_hint(&colors, &[KeyLabel::Text("h")], "dismissed"))
-                            .child(key_hint(&colors, &[KeyLabel::Text("r")], "restore"))
-                            .child(key_hint(&colors, &[KeyLabel::Text("g")], "show")),
+                            .child(key_hint(&colors, &[KeyLabel::Text("r")], "restore")),
                     ),
                 "findings-sheet-rise",
                 &self.presence,

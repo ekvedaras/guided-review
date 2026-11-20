@@ -636,20 +636,79 @@ fn the_dismissed_section_is_folded_until_toggled_and_opens_by_itself_when_nothin
 }
 
 #[test]
-fn the_cursor_runs_on_into_the_dismissed_rows_once_they_are_shown() {
+fn the_cursor_runs_on_to_the_dismissed_header_and_into_its_rows_once_they_are_shown() {
     let mut list = with_dismissed(&three(), &[on_line_2("d", "Gone.")]);
     for _ in 0..5 {
         list.cursor_down();
     }
-    assert_eq!(list.id_under_cursor(), Some(&id("a")));
+    assert!(list.is_on_dismissed_header());
+    assert_eq!(list.id_under_cursor(), None);
+    assert_eq!(list.dismissed_under_cursor(), None);
+    assert!(!list.rows()[2].is_under_cursor);
 
     list.toggle_dismissed_shown();
     for _ in 0..5 {
         list.cursor_down();
     }
+    assert!(!list.is_on_dismissed_header());
     assert_eq!(list.id_under_cursor(), None);
     assert!(list.dismissed_rows()[0].is_under_cursor);
-    assert!(!list.rows()[2].is_under_cursor);
+}
+
+#[test]
+fn right_unfolds_the_row_under_the_cursor_and_left_folds_it_one_row_open_at_a_time() {
+    let mut list = FindingsList::of(&three());
+
+    list.unfold_under_cursor();
+    assert!(list.rows()[0].is_open);
+    list.unfold_under_cursor();
+    assert!(list.rows()[0].is_open);
+    list.cursor_down();
+    list.unfold_under_cursor();
+    let open: Vec<bool> = list.rows().iter().map(|row| row.is_open).collect();
+    assert_eq!(open, [false, true, false]);
+
+    list.cursor_down();
+    list.fold_under_cursor();
+    assert!(list.rows()[1].is_open);
+    list.cursor_up();
+    list.fold_under_cursor();
+    assert!(list.rows().iter().all(|row| !row.is_open));
+}
+
+#[test]
+fn right_unfolds_the_dismissed_section_from_its_header_and_left_folds_it() {
+    let mut list = with_dismissed(&three(), &[on_line_2("d", "Gone.")]);
+    for _ in 0..3 {
+        list.cursor_down();
+    }
+
+    list.unfold_under_cursor();
+    assert!(list.dismissed_are_shown());
+    list.unfold_under_cursor();
+    assert!(list.dismissed_are_shown());
+    list.fold_under_cursor();
+    assert!(!list.dismissed_are_shown());
+    list.fold_under_cursor();
+    assert!(!list.dismissed_are_shown());
+    assert!(list.is_on_dismissed_header());
+}
+
+#[test]
+fn left_on_a_dismissed_row_goes_up_to_its_header_and_the_section_stays_unfolded() {
+    let mut list = with_dismissed(&three(), &[on_line_2("d", "Gone.")]);
+    list.toggle_dismissed_shown();
+    for _ in 0..4 {
+        list.cursor_down();
+    }
+    assert_eq!(list.dismissed_under_cursor(), Some(&id("d")));
+
+    list.unfold_under_cursor();
+    assert_eq!(list.dismissed_under_cursor(), Some(&id("d")));
+    list.fold_under_cursor();
+
+    assert!(list.is_on_dismissed_header());
+    assert!(list.dismissed_are_shown());
 }
 
 #[test]
@@ -663,7 +722,7 @@ fn ticking_a_dismissed_row_selects_it_apart_from_the_open_ones() {
     assert_eq!(list.selected(), [id("a")]);
     assert_eq!(list.selected_dismissed(), [id("e")]);
     assert!(list.dismissed_rows()[1].is_selected);
-    for _ in 0..3 {
+    for _ in 0..4 {
         list.cursor_down();
     }
     list.toggle_under_cursor();
@@ -702,6 +761,7 @@ fn a_batch_acts_on_the_ticked_rows_and_on_the_highlighted_one_when_none_is_ticke
 fn a_batch_has_nothing_to_act_on_while_the_cursor_is_on_a_dismissed_row_and_nothing_is_ticked() {
     let mut list = with_dismissed(&[three().remove(0)], &three()[1..2]);
     list.toggle_dismissed_shown();
+    list.cursor_down();
     list.cursor_down();
 
     assert_eq!(list.batch(), Batch::Nothing);

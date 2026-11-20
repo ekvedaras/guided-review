@@ -99,7 +99,7 @@ impl FindingsList {
             .map(|(position, finding)| FindingsListRow {
                 is_selected: self.dismissed_selected.contains(&finding.id),
                 is_under_cursor: self.dismissed_are_shown
-                    && position + self.findings.len() == self.cursor,
+                    && position + self.findings.len() + 1 == self.cursor,
                 ..Self::row_of(finding)
             })
             .collect()
@@ -136,23 +136,22 @@ impl FindingsList {
             return;
         }
         if let Some(position) = self.dismissed.iter().position(|finding| finding.id == *id) {
-            self.cursor = self.findings.len() + position;
+            self.cursor = self.findings.len() + 1 + position;
         }
     }
 
-    /// The cursor's row, when it is one of the open findings.
-    const fn cursor_is_on_open(&self) -> bool {
-        self.cursor < self.findings.len()
-    }
-
-    /// The last row the cursor can be on: the open findings, and the dismissed ones while shown.
+    /// The last row the cursor can be on: the open findings, then the Dismissed header and the dismissed
+    /// ones while shown.
     fn last_row(&self) -> usize {
+        if self.dismissed.is_empty() {
+            return self.findings.len().saturating_sub(1);
+        }
         let shown_dismissed = if self.dismissed_are_shown {
             self.dismissed.len()
         } else {
             0
         };
-        (self.findings.len() + shown_dismissed).saturating_sub(1)
+        self.findings.len() + shown_dismissed
     }
 
     /// The list with the code lines each finding is about, as `lines_of` finds them.
@@ -280,12 +279,37 @@ impl FindingsList {
     }
 
     pub fn dismissed_under_cursor(&self) -> Option<&FindingId> {
-        if !self.dismissed_are_shown || self.cursor_is_on_open() {
+        if !self.dismissed_are_shown {
             return None;
         }
         self.dismissed
-            .get(self.cursor - self.findings.len())
+            .get(self.cursor.checked_sub(self.findings.len() + 1)?)
             .map(|finding| &finding.id)
+    }
+
+    /// The Dismissed header is a stop of the cursor, right after the open rows.
+    pub fn is_on_dismissed_header(&self) -> bool {
+        !self.dismissed.is_empty() && self.cursor == self.findings.len()
+    }
+
+    /// Right: the row under the cursor shows its whole finding, or the Dismissed header unfolds its section.
+    pub fn unfold_under_cursor(&mut self) {
+        if self.is_on_dismissed_header() {
+            self.dismissed_are_shown = true;
+        } else if let Some(id) = self.id_under_cursor().cloned() {
+            self.open = Some(id);
+        }
+    }
+
+    /// Left: folds the open row, or the Dismissed section; from a dismissed row it goes up to the header.
+    pub fn fold_under_cursor(&mut self) {
+        if self.is_on_dismissed_header() {
+            self.dismissed_are_shown = false;
+        } else if self.dismissed_under_cursor().is_some() {
+            self.cursor = self.findings.len();
+        } else if self.open.as_ref() == self.id_under_cursor() {
+            self.open = None;
+        }
     }
 
     /// The row under the cursor shows its whole finding, or folds again; only one row is open.

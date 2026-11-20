@@ -1,1 +1,1 @@
-Press F to list findings, tick some to dismiss or comment on together, or open one to see its lines.
+Press F to list findings, unfold one with the right arrow, and press return to see it on its lines.
