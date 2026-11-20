@@ -3108,7 +3108,16 @@ impl OneStepLayout {
                         .text_color(colors.muted_text)
                         .child(issue.link.label()),
                 )
-                .child(div().flex_1().min_w_0().truncate().child(title))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(InlineMarkdown::new(
+                            format!("title-bar-issue-title-{place}"),
+                            &title,
+                        )),
+                )
         });
         let rows: Vec<_> = rows.collect();
         let card = self.issue_hover.shown().and_then(|place| {

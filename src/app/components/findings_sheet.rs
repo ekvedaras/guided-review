@@ -19,7 +19,7 @@ use super::chip::chip;
 use super::finding_view::tone_of;
 use super::icon::{Icon, sized_icon};
 use super::key_cap::{KeyLabel, key_hint};
-use super::markdown_view::{MarkdownView, parsed_markdown};
+use super::markdown_view::{InlineMarkdown, MarkdownView, parsed_markdown};
 use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
@@ -266,7 +266,10 @@ impl FindingsSheet {
                 .min_w_0()
                 .truncate()
                 .text_color(colors.text)
-                .child(row.first_line.clone()),
+                .child(InlineMarkdown::new(
+                    format!("findings-first-line-{}", row.id),
+                    &row.first_line,
+                )),
         )
         .children(row.fix.as_ref().map(|line| {
             div()
