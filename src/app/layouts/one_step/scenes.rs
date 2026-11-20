@@ -752,7 +752,9 @@ impl OneStepLayout {
             Scene::CommentComposer => self.compose_on_first_added_lines(window, cx),
             Scene::CommentComposerNowPrimary => {
                 if let Ok(keymap) =
-                    crate::config::Config::from_text("primary_comment_action = \"comment_now\"\n")
+                    crate::config::Config::from_text(
+                    "primary_comment_action = \"comment_now\"\nsecondary_comment_action = \"suggest_change\"\n",
+                )
                         .map(|config| config.resolved_keymap().keymap)
                 {
                     crate::app::keymap::set_keymap(keymap, cx);

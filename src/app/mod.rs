@@ -1130,6 +1130,7 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::AskAgent => KeyBinding::new(&keys, text_box::SubmitToAgent, context),
                 Command::CommentNow => KeyBinding::new(&keys, text_box::SubmitNow, context),
                 Command::AskAgentNow => KeyBinding::new(&keys, text_box::SubmitToAgentNow, context),
+                Command::SuggestChange => KeyBinding::new(&keys, text_box::SuggestChange, context),
                 Command::CloseBox => KeyBinding::new(&keys, text_box::Cancel, context),
                 Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),
                 Command::HideWhitespace => KeyBinding::new(&keys, ToggleWhitespace, context),

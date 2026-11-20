@@ -1,19 +1,19 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
+use gpui::prelude::FluentBuilder;
 use gpui::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
     StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use crate::viewer::{
-    BoxState, CommentDraft, CommentPlace, CommentProblem, PrimaryCommentAction, QueuedComment,
-    SendButton, SendMode, Sending,
+    BoxState, CommentDraft, CommentPlace, CommentProblem, QueuedComment, SendAction, SendMode,
+    SendRole, Sending,
 };
 
 use super::button::{
-    ButtonKind, ButtonSize, button as styled_button, button_icon, chord_keys, icon_label_button,
-    joined,
+    ButtonKind, ButtonSize, button as styled_button, chord_keys, icon_label_button,
 };
 use super::card::card;
 use super::chip::callout;
@@ -63,6 +63,54 @@ pub fn task_button(mode: SendMode) -> (Icon, &'static str) {
         SendMode::SendNow => (Icon::Send, "Send now"),
         SendMode::AddToTasks => (Icon::ListChecks, "Add to tasks"),
         SendMode::AddToReview | SendMode::CommentNow => (Icon::Send, "Send"),
+    }
+}
+
+/// The send actions a box has: the ones of GitHub, or a local review's tasks, and Suggest change
+/// where the lines can take one.
+fn offered_actions(capabilities: CommentCapabilities) -> Vec<SendAction> {
+    let mut offered = vec![SendAction::AddToReview];
+    let sending = capabilities.sending;
+    if sending.on_github() {
+        if capabilities.comment_now {
+            offered.push(SendAction::CommentNow);
+        }
+        if capabilities.ask_agent {
+            offered.push(SendAction::AskAgent);
+            if capabilities.comment_now {
+                offered.push(SendAction::AskAgentNow);
+            }
+        }
+    } else if sending.tasks().len() > 1 {
+        offered.push(SendAction::CommentNow);
+    }
+    if capabilities.suggest_change {
+        offered.push(SendAction::SuggestChange);
+    }
+    offered
+}
+
+/// A send button's id, icon and words. A local review's two task buttons stand for Add to review
+/// and Comment now.
+fn send_button_look(
+    action: SendAction,
+    sending: Sending,
+) -> (&'static str, Option<Icon>, &'static str) {
+    let task = |index: usize| sending.tasks().get(index).copied().map(task_button);
+    match (action, sending.on_github()) {
+        (SendAction::AddToReview, false) => task(0)
+            .map_or(("send-task-0", None, "Add"), |(icon, label)| {
+                ("send-task-0", Some(icon), label)
+            }),
+        (SendAction::CommentNow, false) => task(1)
+            .map_or(("send-task-1", None, "Send"), |(icon, label)| {
+                ("send-task-1", Some(icon), label)
+            }),
+        (SendAction::AddToReview, true) => ("add-to-review", None, "Add to review"),
+        (SendAction::CommentNow, true) => ("comment-now", Some(Icon::Send), "Comment now"),
+        (SendAction::SuggestChange, _) => ("suggest-change", Some(Icon::Diff), "Suggest change"),
+        (SendAction::AskAgent, _) => ("ask-agent", Some(Icon::Sparkles), "Ask agent"),
+        (SendAction::AskAgentNow, _) => ("ask-agent-now", Some(Icon::Zap), "Ask agent now"),
     }
 }
 
@@ -124,7 +172,6 @@ impl RenderOnce for CommentComposer {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let keymap = crate::app::keymap::shared_keymap(cx);
-        let chosen = keymap.primary_comment_action();
         let place = &self.draft.place;
         let id = SharedString::from(match place {
             CommentPlace::File(path) => format!("composer-{path}-file"),
@@ -133,32 +180,37 @@ impl RenderOnce for CommentComposer {
         let actions = self.actions;
         let on_focus = Rc::clone(&actions.on_focus);
         let sending = self.capabilities.sending;
+        let offered = offered_actions(self.capabilities);
+        let run = |action: SendAction| -> OnCompose {
+            let on_send_task = Rc::clone(&actions.on_send_task);
+            match action {
+                SendAction::AddToReview => match sending.tasks().first() {
+                    Some(&mode) => Rc::new(move |window, cx| on_send_task(mode, window, cx)),
+                    None => Rc::clone(&actions.on_add_to_review),
+                },
+                SendAction::CommentNow => match sending.tasks().get(1) {
+                    Some(&mode) => Rc::new(move |window, cx| on_send_task(mode, window, cx)),
+                    None => Rc::clone(&actions.on_comment_now),
+                },
+                SendAction::SuggestChange => Rc::clone(&actions.on_suggest_change),
+                SendAction::AskAgent => Rc::clone(&actions.on_ask_agent),
+                SendAction::AskAgentNow => Rc::clone(&actions.on_ask_agent_now),
+            }
+        };
         let body = if self.state == BoxState::Composing {
-            let on_submit: OnCompose = match sending.tasks().first() {
-                Some(&mode) => {
-                    let on_send_task = Rc::clone(&actions.on_send_task);
-                    Rc::new(move |window, cx| on_send_task(mode, window, cx))
-                }
-                None => Rc::clone(&actions.on_add_to_review),
-            };
             let (on_type, on_stop) = (Rc::clone(&actions.on_type), Rc::clone(&actions.on_stop));
-            let on_ask = Rc::clone(&actions.on_ask_agent);
-            let asks = self.capabilities.ask_agent;
-            let posts_now = self.capabilities.comment_now && sending.on_github();
-            let falls_back_to_adding = !posts_now && chosen == PrimaryCommentAction::CommentNow;
-            let on_comment_now: OnCompose = match sending.tasks().get(1) {
-                Some(&mode) => {
-                    let on_send_task = Rc::clone(&actions.on_send_task);
-                    Rc::new(move |window, cx| on_send_task(mode, window, cx))
-                }
-                None if posts_now => Rc::clone(&actions.on_comment_now),
-                None => Rc::clone(&actions.on_add_to_review),
+            let typed = |pressed: SendAction| {
+                let runs = keymap.send_key_runs(pressed, &offered);
+                let on_key = run(runs.unwrap_or(pressed));
+                (runs.is_some(), move |window: &mut Window, cx: &mut App| {
+                    on_key(window, cx);
+                })
             };
-            let on_ask_now = if posts_now {
-                Rc::clone(&actions.on_ask_agent_now)
-            } else {
-                Rc::clone(&actions.on_ask_agent)
-            };
+            let (submits, on_submit) = typed(SendAction::AddToReview);
+            let (asks, on_ask) = typed(SendAction::AskAgent);
+            let (posts, on_post) = typed(SendAction::CommentNow);
+            let (asks_now, on_ask_now) = typed(SendAction::AskAgentNow);
+            let (suggests, on_suggest) = typed(SendAction::SuggestChange);
             TextBox::new(
                 SharedString::from(format!("{id}-text")),
                 &self.focus,
@@ -166,68 +218,48 @@ impl RenderOnce for CommentComposer {
                 Lines::Multi,
             )
             .on_edit(move |body, window, cx| on_type(body, window, cx))
-            .on_submit(move |window, cx| on_submit(window, cx))
-            .on_cancel(move |window, cx| on_stop(window, cx))
-            .on_submit_to_agent(asks && sending.on_github(), move |window, cx| {
-                on_ask(window, cx);
+            .on_submit(move |window, cx| {
+                if submits {
+                    on_submit(window, cx);
+                }
             })
-            .on_submit_now(
-                posts_now || falls_back_to_adding || sending.tasks().len() > 1,
-                move |window, cx| on_comment_now(window, cx),
-            )
-            .on_submit_to_agent_now(
-                asks && sending.on_github() && (posts_now || falls_back_to_adding),
-                move |window, cx| on_ask_now(window, cx),
-            )
+            .on_cancel(move |window, cx| on_stop(window, cx))
+            .on_submit_to_agent(asks, on_ask)
+            .on_submit_now(posts, on_post)
+            .on_submit_to_agent_now(asks_now, on_ask_now)
+            .on_suggest_change(suggests, on_suggest)
             .into_any_element()
         } else {
             div().child(self.draft.body.clone()).into_any_element()
         };
-        let task_buttons = (self.state != BoxState::Sending && !sending.on_github()).then(|| {
-            let task_buttons =
-                chosen
-                    .ordered_tasks(sending)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, mode)| {
-                        let (icon, label) = task_button(mode);
-                        let on_send_task = Rc::clone(&actions.on_send_task);
-                        let kind = if index == 0 {
-                            ButtonKind::Primary
-                        } else {
-                            ButtonKind::Secondary
-                        };
-                        let position = sending.tasks().iter().position(|task| *task == mode);
-                        let keys = position.and_then(|position| {
-                            keymap.send_button_chord(SendButton::Task(position), true)
-                        });
-                        icon_label_button(
-                            &colors,
-                            SharedString::from(format!("send-task-{index}")),
-                            kind,
-                            ButtonSize::Regular,
-                            icon,
-                            label,
-                        )
-                        .child(chord_keys(&colors, kind, keys))
-                        .on_click(move |_, window, cx| on_send_task(mode, window, cx))
-                    });
+        let send_buttons = (self.state != BoxState::Sending).then(|| {
+            let buttons = keymap.send_plan(&offered).into_iter().map(|planned| {
+                let kind = match planned.role {
+                    SendRole::Primary => ButtonKind::Primary,
+                    SendRole::Secondary | SendRole::Other => ButtonKind::Secondary,
+                };
+                let on_click = run(planned.action);
+                let (id, icon, label) = send_button_look(planned.action, sending);
+                let base = match icon {
+                    Some(icon) => {
+                        icon_label_button(&colors, id, kind, ButtonSize::Regular, icon, label)
+                    }
+                    None => styled_button(&colors, id, kind, ButtonSize::Regular).child(label),
+                };
+                base.child(chord_keys(&colors, kind, planned.chord))
+                    .when(planned.action == SendAction::AskAgentNow, |button| {
+                        button.tooltip(tooltip(|_| {
+                            "Ask agent now: posts the comment at once".into()
+                        }))
+                    })
+                    .on_click(move |_, window, cx| on_click(window, cx))
+            });
             div()
                 .flex()
                 .flex_wrap()
                 .items_center()
                 .gap_2()
-                .children(task_buttons)
-                .children(self.capabilities.suggest_change.then(|| {
-                    button(
-                        &colors,
-                        "suggest-change",
-                        Icon::Diff,
-                        "Suggest change",
-                        ButtonKind::Secondary,
-                        Rc::clone(&actions.on_suggest_change),
-                    )
-                }))
+                .children(buttons)
                 .child(div().flex_1())
                 .child(button(
                     &colors,
@@ -236,129 +268,6 @@ impl RenderOnce for CommentComposer {
                     "Discard",
                     ButtonKind::Danger,
                     Rc::clone(&actions.on_discard),
-                ))
-        });
-        let buttons = (self.state != BoxState::Sending && sending.on_github()).then(|| {
-            let capabilities = self.capabilities;
-            let ask_agent = capabilities.ask_agent.then(|| {
-                let keys_of = |button| {
-                    chord_keys(
-                        &colors,
-                        ButtonKind::Joined,
-                        keymap.send_button_chord(button, capabilities.comment_now),
-                    )
-                };
-                let mut parts = vec![
-                    button(
-                        &colors,
-                        "ask-agent",
-                        Icon::Sparkles,
-                        "Ask agent",
-                        ButtonKind::Joined,
-                        actions.on_ask_agent,
-                    )
-                    .child(keys_of(SendButton::AskAgent)),
-                ];
-                if capabilities.comment_now {
-                    let on_ask_now = actions.on_ask_agent_now;
-                    parts.push(
-                        styled_button(
-                            &colors,
-                            "ask-agent-now",
-                            ButtonKind::Joined,
-                            ButtonSize::Regular,
-                        )
-                        .child(button_icon(
-                            &colors,
-                            ButtonKind::Joined,
-                            ButtonSize::Regular,
-                            Icon::Zap,
-                        ))
-                        .child("now")
-                        .child(keys_of(SendButton::AskAgentNow))
-                        .tooltip(tooltip(|_| {
-                            "Ask agent now: posts the comment at once".into()
-                        }))
-                        .on_click(move |_, window, cx| on_ask_now(window, cx)),
-                    );
-                }
-                joined(&colors, parts)
-            });
-            let on_add = actions.on_add_to_review;
-            let primary = chosen.effective(capabilities.comment_now);
-            let kind_of = |action: PrimaryCommentAction| {
-                if primary == action {
-                    ButtonKind::Primary
-                } else {
-                    ButtonKind::Secondary
-                }
-            };
-            let send_keys = |button, action| {
-                chord_keys(
-                    &colors,
-                    kind_of(action),
-                    keymap.send_button_chord(button, capabilities.comment_now),
-                )
-            };
-            let add_button = styled_button(
-                &colors,
-                "add-to-review",
-                kind_of(PrimaryCommentAction::AddToReview),
-                ButtonSize::Regular,
-            )
-            .child("Add to review")
-            .child(send_keys(
-                SendButton::AddToReview,
-                PrimaryCommentAction::AddToReview,
-            ))
-            .on_click(move |_, window, cx| on_add(window, cx))
-            .into_any_element();
-            let now_button = capabilities.comment_now.then(|| {
-                button(
-                    &colors,
-                    "comment-now",
-                    Icon::Send,
-                    "Comment now",
-                    kind_of(PrimaryCommentAction::CommentNow),
-                    actions.on_comment_now,
-                )
-                .child(send_keys(
-                    SendButton::CommentNow,
-                    PrimaryCommentAction::CommentNow,
-                ))
-                .into_any_element()
-            });
-            let (first, second) = if primary == PrimaryCommentAction::CommentNow {
-                (now_button, Some(add_button))
-            } else {
-                (Some(add_button), now_button)
-            };
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_2()
-                .children(first)
-                .children(second)
-                .children(capabilities.suggest_change.then(|| {
-                    button(
-                        &colors,
-                        "suggest-change",
-                        Icon::Diff,
-                        "Suggest change",
-                        ButtonKind::Secondary,
-                        actions.on_suggest_change,
-                    )
-                }))
-                .children(ask_agent)
-                .child(div().flex_1())
-                .child(button(
-                    &colors,
-                    "discard-comment",
-                    Icon::Trash,
-                    "Discard",
-                    ButtonKind::Danger,
-                    actions.on_discard,
                 ))
         });
         let rise_id = SharedString::from(format!("{id}-rise"));
@@ -412,8 +321,7 @@ impl RenderOnce for CommentComposer {
                         "Sending…"
                     })
             }))
-            .children(task_buttons)
-            .children(buttons);
+            .children(send_buttons);
         slide_in(composer, rise_id, STATE, Edge::Bottom, BOX_RISE)
     }
 }

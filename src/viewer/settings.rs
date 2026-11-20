@@ -15,7 +15,7 @@ use super::chord::Chord;
 use super::keymap::{KeyChanges, KeyProblem, Keymap, WrittenKeys};
 use super::merging::MergeMethod;
 use super::more_lines::{MoreLines, MoreLinesEntry};
-use super::primary_comment_action::PrimaryCommentAction;
+use super::send_action::{SendAction, SendChoice};
 use super::shortcuts::Command;
 
 /// The reviewer's settings in `config.toml` in the config folder, as the Settings panel shows and edits them.
@@ -227,6 +227,7 @@ const KEYS: &str = "keys";
 const MORE_LINES: &str = "more_lines";
 const MERGE_METHOD: &str = "merge_method";
 const PRIMARY_COMMENT_ACTION: &str = "primary_comment_action";
+const SECONDARY_COMMENT_ACTION: &str = "secondary_comment_action";
 const SKILLS_FOLDER: &str = ".claude/skills";
 
 /// A document `toml_edit` accepts and `toml` refuses holds something this config cannot read, so the setting says so.
@@ -551,12 +552,28 @@ impl Settings {
         self.edited.more_lines = MoreLinesEntry::of_text(text);
     }
 
-    pub fn primary_comment_action(&self) -> PrimaryCommentAction {
-        self.edited.keys.primary_comment_action()
+    pub fn primary_comment_action(&self) -> SendAction {
+        self.edited.keys.send_choice().primary()
     }
 
-    pub fn set_primary_comment_action(&mut self, action: PrimaryCommentAction) {
-        self.edited.keys.set_primary_comment_action(action);
+    pub fn send_choice(&self) -> SendChoice {
+        self.edited.keys.send_choice()
+    }
+
+    pub fn secondary_comment_action(&self) -> SendAction {
+        self.edited.keys.send_choice().secondary()
+    }
+
+    /// Picking what the secondary is makes the old primary the secondary.
+    pub fn set_primary_comment_action(&mut self, action: SendAction) {
+        let choice = self.edited.keys.send_choice().with_primary(action);
+        self.edited.keys.set_send_choice(choice);
+    }
+
+    /// Picking what the primary is makes the old secondary the primary.
+    pub fn set_secondary_comment_action(&mut self, action: SendAction) {
+        let choice = self.edited.keys.send_choice().with_secondary(action);
+        self.edited.keys.set_send_choice(choice);
     }
 
     /// The global `merge_method`; `[merge_methods]` per repo is edited in the config only.
@@ -619,12 +636,18 @@ impl Settings {
         if saved.keys.entries().ne(edited.keys.entries()) {
             write_keys(root, &saved.keys, &edited.keys)?;
         }
-        if saved.keys.primary_comment_action() != edited.keys.primary_comment_action() {
-            let action = edited.keys.primary_comment_action();
+        if saved.keys.send_choice() != edited.keys.send_choice() {
+            let (choice, default) = (edited.keys.send_choice(), SendChoice::default());
             set_text(
                 root,
                 PRIMARY_COMMENT_ACTION,
-                (action != PrimaryCommentAction::default()).then(|| action.config_text()),
+                (choice.primary() != default.primary()).then(|| choice.primary().config_text()),
+            );
+            set_text(
+                root,
+                SECONDARY_COMMENT_ACTION,
+                (choice.secondary() != default.secondary())
+                    .then(|| choice.secondary().config_text()),
             );
         }
         if saved.more_lines != edited.more_lines {
@@ -733,12 +756,12 @@ fn key_changes_in(document: &DocumentMut) -> KeyChanges {
         .into_iter()
         .flat_map(TableLike::iter)
         .map(|(name, item)| (name.to_owned(), written_keys(item)));
-    let action = document
-        .get(PRIMARY_COMMENT_ACTION)
-        .and_then(Item::as_str)
-        .and_then(PrimaryCommentAction::of_config_text)
-        .unwrap_or_default();
-    KeyChanges::new(entries).with_primary_comment_action(action)
+    let text_of = |name| document.get(name).and_then(Item::as_str);
+    let choice = SendChoice::of_config_text(
+        text_of(PRIMARY_COMMENT_ACTION),
+        text_of(SECONDARY_COMMENT_ACTION),
+    );
+    KeyChanges::new(entries).with_send_choice(choice)
 }
 
 fn written_keys(item: &Item) -> WrittenKeys {

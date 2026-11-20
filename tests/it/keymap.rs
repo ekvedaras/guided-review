@@ -3,9 +3,11 @@ use guided_review::app::keymap::chord_on;
 use guided_review::config::Config;
 use guided_review::platform::{Os, TextEdit};
 use guided_review::viewer::{
-    Chord, Command, KeyProblem, Keymap, Modifier, PrimaryCommentAction, SendButton, SendMode,
-    Sending,
+    Chord, Command, KeyProblem, Keymap, Modifier, SendAction, SendChoice, SendRole,
 };
+
+use SendAction::{AddToReview, AskAgent, AskAgentNow, CommentNow, SuggestChange};
+use SendRole::{Other, Primary, Secondary};
 
 fn chord(text: &str) -> Chord {
     Chord::parse(text).unwrap_or_else(|| panic!("{text} is not a chord"))
@@ -416,60 +418,99 @@ fn every_text_key_is_one_gpui_can_bind() {
     }
 }
 
-fn comment_keys(keymap: &Keymap) -> [Vec<String>; 4] {
-    [
-        Command::AddToReview,
-        Command::CommentNow,
-        Command::AskAgent,
-        Command::AskAgentNow,
-    ]
-    .map(|command| keys(keymap, command))
+const SEND_COMMANDS: [Command; 5] = [
+    Command::AddToReview,
+    Command::CommentNow,
+    Command::SuggestChange,
+    Command::AskAgent,
+    Command::AskAgentNow,
+];
+
+fn send_keys(keymap: &Keymap) -> Vec<String> {
+    SEND_COMMANDS
+        .map(|command| keys(keymap, command).join(" "))
+        .to_vec()
+}
+
+fn choice_config(primary: SendAction, secondary: SendAction) -> String {
+    format!(
+        "primary_comment_action = \"{}\"\nsecondary_comment_action = \"{}\"\n",
+        primary.config_text(),
+        secondary.config_text()
+    )
 }
 
 #[test]
-fn with_no_primary_comment_action_add_to_review_has_the_main_key() {
+fn with_no_choice_add_to_review_is_primary_and_ask_agent_secondary_and_the_rest_have_their_own_keys()
+ {
     let keymap = keymap_of("").unwrap();
 
+    assert_eq!(keymap.send_choice(), SendChoice::default());
     assert_eq!(
-        keymap.primary_comment_action(),
-        PrimaryCommentAction::AddToReview
-    );
-    assert_eq!(
-        comment_keys(&keymap),
+        send_keys(&keymap),
         [
-            vec!["primary-enter"],
-            vec!["primary-alt-enter"],
-            vec!["primary-shift-enter"],
-            vec!["primary-alt-shift-enter"],
+            "primary-enter",
+            "primary-alt-enter",
+            "primary-alt-s",
+            "primary-shift-enter",
+            "primary-alt-shift-enter",
         ]
     );
 }
 
 #[test]
-fn comment_now_as_primary_takes_the_main_keys_and_gives_add_to_review_the_secondary_ones() {
+fn the_primary_action_has_cmd_enter_the_secondary_cmd_shift_enter_and_the_others_keep_their_own() {
+    let keymap = keymap_of(&choice_config(CommentNow, SuggestChange)).unwrap();
+
+    assert_eq!(
+        send_keys(&keymap),
+        [
+            "primary-alt-a",
+            "primary-enter",
+            "primary-shift-enter",
+            "primary-alt-g",
+            "primary-alt-shift-enter",
+        ]
+    );
+}
+
+#[test]
+fn no_choice_of_primary_and_secondary_gives_two_send_actions_one_key() {
+    for primary in SendAction::ALL {
+        for secondary in SendAction::ALL.into_iter().filter(|it| *it != primary) {
+            let config = choice_config(primary, secondary);
+            let keymap = keymap_of(&config).unwrap();
+            let mut chords: Vec<_> = SEND_COMMANDS
+                .into_iter()
+                .flat_map(|command| keymap.chords(command).to_vec())
+                .collect();
+            let count = chords.len();
+            chords.sort_by_key(|chord| chord.written());
+            chords.dedup();
+
+            assert_eq!(chords.len(), count, "{config}");
+            assert_eq!(count, 5, "{config}");
+            assert_eq!(keys(&keymap, primary.command()), ["primary-enter"]);
+            assert_eq!(keys(&keymap, secondary.command()), ["primary-shift-enter"]);
+        }
+    }
+}
+
+#[test]
+fn a_config_made_before_the_secondary_setting_still_reads() {
     let keymap = keymap_of("primary_comment_action = \"comment_now\"\n").unwrap();
 
-    assert_eq!(
-        keymap.primary_comment_action(),
-        PrimaryCommentAction::CommentNow
-    );
-    assert_eq!(
-        comment_keys(&keymap),
-        [
-            vec!["primary-alt-enter"],
-            vec!["primary-enter"],
-            vec!["primary-alt-shift-enter"],
-            vec!["primary-shift-enter"],
-        ]
-    );
-    assert!(!keymap.is_changed(Command::CommentNow));
+    assert_eq!(keymap.send_choice(), SendChoice::new(CommentNow, AskAgent));
+    assert_eq!(keys(&keymap, Command::CommentNow), ["primary-enter"]);
+    assert_eq!(keys(&keymap, Command::AddToReview), ["primary-alt-a"]);
 }
 
 #[test]
-fn a_key_written_in_keys_wins_over_the_primary_comment_action() {
-    let keymap = keymap_of(
-        "primary_comment_action = \"comment_now\"\n\n[keys]\nadd_to_review = \"primary-j\"\n",
-    )
+fn a_key_written_in_keys_wins_over_the_choice() {
+    let keymap = keymap_of(&format!(
+        "{}\n[keys]\nadd_to_review = \"primary-j\"\n",
+        choice_config(CommentNow, AskAgent)
+    ))
     .unwrap();
 
     assert_eq!(keys(&keymap, Command::AddToReview), ["primary-j"]);
@@ -477,134 +518,193 @@ fn a_key_written_in_keys_wins_over_the_primary_comment_action() {
 }
 
 #[test]
-fn a_key_written_in_keys_that_the_primary_action_takes_is_a_clash() {
-    let problems = keymap_of(
-        "primary_comment_action = \"comment_now\"\n\n[keys]\nadd_to_review = \"primary-enter\"\n",
-    )
+fn a_key_written_in_keys_that_a_main_key_takes_is_a_clash() {
+    let problems = keymap_of(&format!(
+        "{}\n[keys]\nadd_to_review = \"primary-enter\"\n",
+        choice_config(CommentNow, AskAgent)
+    ))
     .unwrap_err();
 
-    assert!(matches!(
-        problems.as_slice(),
+    assert_eq!(
+        problems,
         [KeyProblem::Clash {
+            chord: chord("primary-enter"),
             commands: [Command::AddToReview, Command::CommentNow],
-            ..
         }]
-    ));
-}
-
-#[test]
-fn a_primary_comment_action_that_names_no_action_reads_as_add_to_review() {
-    let config = Config::from_text("primary_comment_action = \"post\"\n").unwrap();
-
-    assert_eq!(
-        config.primary_comment_action(),
-        PrimaryCommentAction::AddToReview
-    );
-    assert_eq!(
-        Config::from_text("primary_comment_action = \"comment_now\"\n")
-            .unwrap()
-            .primary_comment_action(),
-        PrimaryCommentAction::CommentNow
     );
 }
 
 #[test]
-fn a_box_with_one_send_action_makes_it_primary_whatever_is_chosen() {
+fn texts_that_name_no_action_or_the_same_one_twice_read_as_a_choice_of_two() {
+    let read = SendChoice::of_config_text;
+
+    assert_eq!(read(None, None), SendChoice::default());
+    assert_eq!(read(Some("post"), Some("send")), SendChoice::default());
     assert_eq!(
-        PrimaryCommentAction::CommentNow.effective(false),
-        PrimaryCommentAction::AddToReview
+        read(Some("ask_agent_now"), None),
+        SendChoice::new(AskAgentNow, AskAgent)
     );
     assert_eq!(
-        PrimaryCommentAction::CommentNow.effective(true),
-        PrimaryCommentAction::CommentNow
+        read(Some("ask_agent"), None),
+        SendChoice::new(AskAgent, AddToReview)
     );
     assert_eq!(
-        PrimaryCommentAction::AddToReview.effective(true),
-        PrimaryCommentAction::AddToReview
+        read(Some("comment_now"), Some("comment_now")),
+        SendChoice::new(CommentNow, AskAgent)
     );
 }
 
 #[test]
-fn a_local_review_puts_send_now_first_when_comment_now_is_primary() {
-    let local = Sending::Tasks(&SendMode::LOCAL);
+fn picking_the_other_ones_action_swaps_primary_and_secondary() {
+    let choice = SendChoice::default();
 
     assert_eq!(
-        PrimaryCommentAction::AddToReview.ordered_tasks(local),
-        [SendMode::AddToTasks, SendMode::SendNow]
+        choice.with_primary(AskAgent),
+        SendChoice::new(AskAgent, AddToReview)
     );
     assert_eq!(
-        PrimaryCommentAction::CommentNow.ordered_tasks(local),
-        [SendMode::SendNow, SendMode::AddToTasks]
+        choice.with_primary(CommentNow),
+        SendChoice::new(CommentNow, AskAgent)
     );
     assert_eq!(
-        PrimaryCommentAction::CommentNow.ordered_tasks(Sending::GitHub),
-        Vec::<SendMode>::new()
+        choice.with_secondary(AddToReview),
+        SendChoice::new(AskAgent, AddToReview)
     );
-}
-
-fn button_keys(config: &str, comment_now_is_offered: bool) -> Vec<Option<String>> {
-    let keymap = keymap_of(config).unwrap();
-    [
-        SendButton::AddToReview,
-        SendButton::CommentNow,
-        SendButton::AskAgent,
-        SendButton::AskAgentNow,
-        SendButton::Task(0),
-        SendButton::Task(1),
-    ]
-    .map(|button| {
-        keymap
-            .send_button_chord(button, comment_now_is_offered)
-            .map(Chord::written)
-    })
-    .to_vec()
-}
-
-fn some(texts: [&str; 6]) -> Vec<Option<String>> {
-    texts.map(|text| Some(text.to_owned())).to_vec()
+    assert_eq!(
+        choice.with_secondary(SuggestChange),
+        SendChoice::new(AddToReview, SuggestChange)
+    );
+    assert_eq!(choice.role_of(AddToReview), Primary);
+    assert_eq!(choice.role_of(AskAgent), Secondary);
+    assert_eq!(choice.role_of(CommentNow), Other);
 }
 
 #[test]
-fn send_buttons_show_the_keys_the_primary_action_gave_them() {
+fn an_action_a_box_does_not_offer_is_stood_in_for_by_the_nearest_one_it_does() {
+    assert_eq!(CommentNow.resolve(&[AddToReview, CommentNow]), CommentNow);
+    assert_eq!(CommentNow.resolve(&[AddToReview, AskAgent]), AddToReview);
     assert_eq!(
-        button_keys("", true),
-        some([
-            "primary-enter",
-            "primary-alt-enter",
-            "primary-shift-enter",
-            "primary-alt-shift-enter",
-            "primary-enter",
-            "primary-alt-enter",
-        ])
+        SuggestChange.resolve(&[AddToReview, CommentNow]),
+        AddToReview
+    );
+    assert_eq!(AskAgent.resolve(&[AddToReview, CommentNow]), AddToReview);
+    assert_eq!(
+        AskAgentNow.resolve(&[AddToReview, AskAgent, CommentNow]),
+        AskAgent
+    );
+    assert_eq!(AskAgentNow.resolve(&[AddToReview, CommentNow]), CommentNow);
+    assert_eq!(AskAgentNow.resolve(&[AddToReview]), AddToReview);
+}
+
+type Button = (SendAction, SendRole, Option<String>);
+
+fn plan(config: &str, offered: &[SendAction]) -> Vec<Button> {
+    keymap_of(config)
+        .unwrap()
+        .send_plan(offered)
+        .into_iter()
+        .map(|send| (send.action, send.role, send.chord.map(Chord::written)))
+        .collect()
+}
+
+fn button(action: SendAction, role: SendRole, keys: &str) -> Button {
+    (action, role, Some(keys.to_owned()))
+}
+
+const EVERY_ACTION: [SendAction; 5] = SendAction::ALL;
+
+#[test]
+fn a_box_lists_the_primary_first_then_the_secondary_then_the_rest_each_with_its_key() {
+    assert_eq!(
+        plan("", &EVERY_ACTION),
+        [
+            button(AddToReview, Primary, "primary-enter"),
+            button(AskAgent, Secondary, "primary-shift-enter"),
+            button(CommentNow, Other, "primary-alt-enter"),
+            button(SuggestChange, Other, "primary-alt-s"),
+            button(AskAgentNow, Other, "primary-alt-shift-enter"),
+        ]
     );
     assert_eq!(
-        button_keys("primary_comment_action = \"comment_now\"\n", true),
-        some([
-            "primary-alt-enter",
-            "primary-enter",
-            "primary-alt-shift-enter",
-            "primary-shift-enter",
-            "primary-alt-enter",
-            "primary-enter",
-        ])
+        plan(&choice_config(AskAgentNow, CommentNow), &EVERY_ACTION),
+        [
+            button(AskAgentNow, Primary, "primary-enter"),
+            button(CommentNow, Secondary, "primary-shift-enter"),
+            button(AddToReview, Other, "primary-alt-a"),
+            button(SuggestChange, Other, "primary-alt-s"),
+            button(AskAgent, Other, "primary-alt-g"),
+        ]
     );
 }
 
 #[test]
-fn the_only_send_action_left_shows_the_main_key_whatever_the_primary_action() {
-    let keys = button_keys("primary_comment_action = \"comment_now\"\n", false);
+fn a_main_action_the_box_lacks_is_stood_in_for_and_the_stand_in_shows_the_main_key() {
+    let no_comment_now = [AddToReview, SuggestChange, AskAgent];
 
-    assert_eq!(keys[0].as_deref(), Some("primary-enter"));
-    assert_eq!(keys[2].as_deref(), Some("primary-shift-enter"));
+    assert_eq!(
+        plan(&choice_config(CommentNow, AskAgent), &no_comment_now),
+        [
+            button(AddToReview, Primary, "primary-enter"),
+            button(AskAgent, Secondary, "primary-shift-enter"),
+            button(SuggestChange, Other, "primary-alt-s"),
+        ]
+    );
+    let reply = [AddToReview, CommentNow, AskAgent, AskAgentNow];
+    assert_eq!(
+        plan(&choice_config(SuggestChange, AskAgentNow), &reply),
+        [
+            button(AddToReview, Primary, "primary-enter"),
+            button(AskAgentNow, Secondary, "primary-shift-enter"),
+            button(CommentNow, Other, "primary-alt-enter"),
+            button(AskAgent, Other, "primary-alt-g"),
+        ]
+    );
 }
 
 #[test]
-fn send_buttons_show_keys_written_in_keys_and_none_for_an_emptied_command() {
-    let keys = button_keys(
-        "[keys]\ncomment_now = \"primary-j\"\nask_agent = []\n",
-        true,
-    );
+fn two_main_actions_that_end_up_as_one_leave_one_button() {
+    let local = [AddToReview, CommentNow];
 
-    assert_eq!(keys[1].as_deref(), Some("primary-j"));
-    assert_eq!(keys[2], None);
+    assert_eq!(
+        plan("", &local),
+        [
+            button(AddToReview, Primary, "primary-enter"),
+            button(CommentNow, Other, "primary-alt-enter"),
+        ]
+    );
+    assert_eq!(
+        plan(&choice_config(CommentNow, AddToReview), &local),
+        [
+            button(CommentNow, Primary, "primary-enter"),
+            button(AddToReview, Secondary, "primary-shift-enter"),
+        ]
+    );
+}
+
+#[test]
+fn a_button_shows_a_key_written_in_keys_and_none_for_an_emptied_command() {
+    let config = "[keys]\nadd_to_review = \"primary-j\"\nask_agent = []\n";
+
+    assert_eq!(
+        plan(config, &[AddToReview, AskAgent]),
+        [
+            button(AddToReview, Primary, "primary-j"),
+            (AskAgent, Secondary, None),
+        ]
+    );
+}
+
+#[test]
+fn a_key_runs_its_action_where_offered_and_a_main_key_runs_what_stands_in_for_it() {
+    let keymap = keymap_of(&choice_config(CommentNow, SuggestChange)).unwrap();
+    let reply = [AddToReview, AskAgent];
+
+    assert_eq!(keymap.send_key_runs(AskAgent, &reply), Some(AskAgent));
+    assert_eq!(keymap.send_key_runs(CommentNow, &reply), Some(AddToReview));
+    assert_eq!(
+        keymap.send_key_runs(SuggestChange, &reply),
+        Some(AddToReview)
+    );
+    assert_eq!(keymap.send_key_runs(AskAgentNow, &reply), None);
+    assert_eq!(keymap.send_key_runs(AddToReview, &reply), Some(AddToReview));
 }
