@@ -107,8 +107,8 @@ use crate::viewer::{
     AgentReplied, AiReviewAction, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView,
     CheckList, CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox,
     CommentGesture, CommentPlace, Departure, DiskOffer, Effect, FileToggle, FileView, FinishAction,
-    GitHubPort, HandOffId, InFlight, Intent, JobProgress, LabelSwitch, LineLocation, MergeOffer,
-    Merging, NextScreen, NoteSubject, NotesButton, OpenPrStatus, Overlay, OverviewPage,
+    FixState, GitHubPort, HandOffId, InFlight, Intent, JobProgress, LabelSwitch, LineLocation,
+    MergeOffer, Merging, NextScreen, NoteSubject, NotesButton, OpenPrStatus, Overlay, OverviewPage,
     OverviewStats, PageRow, PieceLabels, Place, PrStatus, PressStep, QueuedComment, ReadProgress,
     ReadStep, ReadSubject, ReadUnit, Readiness, Refusal, Reopen, ReopenAfterSave, Reopening,
     RestartArgs, RestartGuard, RestartStep, Review, ReviewChange, ReviewerSummaryRow, RouteStopRow,
@@ -1185,7 +1185,8 @@ impl OneStepLayout {
                 label,
             )
         };
-        let (use_id, as_is_id, dismiss_id, fix_id, why_id) = (
+        let (use_id, as_is_id, dismiss_id, fix_id, why_id, answer_id) = (
+            finding.id.clone(),
             finding.id.clone(),
             finding.id.clone(),
             finding.id.clone(),
@@ -1228,6 +1229,15 @@ impl OneStepLayout {
                                 refused.map_or(Ok(()), |(_, refusal)| Err(refusal)),
                                 cx,
                             );
+                        }),
+                    ),
+                )
+            })
+            .when(finding.can_answer_fix, |actions| {
+                actions.child(
+                    small_button("answer-fix", ButtonKind::Primary, Icon::Send, "Answer").on_click(
+                        cx.listener(move |this, _, window, cx| {
+                            this.open_fix_answer(&answer_id, window, cx);
                         }),
                     ),
                 )
@@ -1308,7 +1318,16 @@ impl OneStepLayout {
 
     /// Ask why opens a box under the finding, with the usual question in it to ask as is or to edit.
     fn open_why_question(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
-        let focus = self.finding_questions.open(id, DEFAULT_WHY_QUESTION, cx);
+        let focus = self
+            .finding_questions
+            .open(id, DEFAULT_WHY_QUESTION, "to ask", cx);
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Answer opens the same box under the finding, empty, for what the tour agent asked before fixing.
+    fn open_fix_answer(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self.finding_questions.open(id, "", "to answer", cx);
         window.focus(&focus, cx);
         cx.notify();
     }
@@ -1330,6 +1349,10 @@ impl OneStepLayout {
     /// The typed question goes to the review agent on the finding's thread while it lives, else into the
     /// Ask panel. A question that was refused stays in its box.
     fn send_why_question(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.session.read(cx).review().fix_state_of(id) == Some(&FixState::Asked) {
+            self.send_fix_answer(id, window, cx);
+            return;
+        }
         let question = self
             .finding_questions
             .text_of(id)
@@ -1348,6 +1371,27 @@ impl OneStepLayout {
             self.session.update(cx, ReviewSession::deliver_questions);
         }
         self.finding_refused(asked.map(|_| ()), cx);
+    }
+
+    /// The typed answer goes to the tour agent when it is idle. An answer that was refused stays in its box.
+    fn send_fix_answer(&mut self, id: &FindingId, window: &mut Window, cx: &mut Context<Self>) {
+        let answer = self
+            .finding_questions
+            .text_of(id)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        if answer.is_empty() {
+            return;
+        }
+        let sent = self.session.update(cx, |session, cx| {
+            session.answer_fix_question(id, &answer, cx)
+        });
+        if sent.is_ok() {
+            self.finding_questions.close(id);
+            window.focus(&self.focus, cx);
+        }
+        self.finding_refused(sent, cx);
     }
 
     fn finding_refused(&mut self, done: Result<(), FindingRefusal>, cx: &mut Context<Self>) {

@@ -1790,7 +1790,25 @@ impl ReviewSession {
         reply: &FixReply,
         cx: &mut Context<Self>,
     ) -> anyhow::Result<()> {
-        self.change(cx, |review| review.fix_replied(finding, reply))
+        let taken = self.change(cx, |review| review.fix_replied(finding, reply));
+        if taken.is_ok() && matches!(reply, FixReply::Question { .. }) {
+            post_toast(
+                cx,
+                ToastTone::Neutral,
+                format!("The tour agent asks you something about finding {finding}"),
+            );
+        }
+        taken
+    }
+
+    /// The reviewer's answer to the tour agent's question on a finding; it goes to the agent when it is idle.
+    pub fn answer_fix_question(
+        &mut self,
+        id: &FindingId,
+        answer: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FindingRefusal> {
+        self.change(cx, |review| review.answer_fix_question(id, answer))
     }
 
     pub fn why_replied(

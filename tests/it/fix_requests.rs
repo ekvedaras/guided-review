@@ -463,3 +463,164 @@ fn the_sidebar_names_the_commits_of_the_fixes_made() {
         review.ai_review_stage().line
     );
 }
+
+/// A fix request that the tour agent has started on and then asked the reviewer about.
+fn asked_by_the_tour_agent(
+    shop: &Shop,
+    review: &mut Review,
+    fake: &Arc<FakeTourAgent>,
+    text: &str,
+) {
+    let agents = agents_of(fake);
+    review.fix_findings(&[id("a"), id("b")]);
+    shop.deliver(review, &agents);
+    fake.set_status("t1", AgentStatus::Working);
+    review.tour_agent_is(&agents.lookup(&pr()));
+    review
+        .fix_replied(
+            &id("a"),
+            &FixReply::Question {
+                text: text.to_owned(),
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_question_from_the_tour_agent_waits_for_the_reviewer_even_when_the_agent_goes_idle() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First."), on_line("b", 2, "Second.")]);
+    let mut review = shop.open();
+    let fake = idle_agent();
+    let agents = agents_of(&fake);
+    asked_by_the_tour_agent(&shop, &mut review, &fake, "Rename it to what?");
+
+    fake.set_status("t1", AgentStatus::Idle);
+    review.tour_agent_is(&agents.lookup(&pr()));
+
+    assert_eq!(review.fix_state_of(&id("a")), Some(&FixState::Asked));
+    assert_eq!(
+        said_on_thread(&review, "a").last(),
+        Some(&(WhyAuthor::TourAgent, "Rename it to what?".to_owned()))
+    );
+    let row = fix_rows(&review).remove(0);
+    assert_eq!(
+        row.fix.as_deref(),
+        Some("The tour agent asks you something: answer it below")
+    );
+    assert!(row.can_answer_fix);
+    assert!(!row.can_fix);
+    assert!(
+        !fix_rows(&review)[1].can_answer_fix,
+        "only a finding with a question can be answered"
+    );
+}
+
+fn fix_rows(review: &Review) -> Vec<Arc<guided_review::viewer::FindingRow>> {
+    review
+        .page()
+        .rows()
+        .iter()
+        .filter_map(|row| match row {
+            PageRow::Finding(finding) => Some(Arc::clone(finding)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_reviewers_answer_is_typed_into_the_tour_agent_and_said_on_the_thread() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First."), on_line("b", 2, "Second.")]);
+    let mut review = shop.open();
+    let fake = idle_agent();
+    let agents = agents_of(&fake);
+    asked_by_the_tour_agent(&shop, &mut review, &fake, "Rename it to what?");
+    fake.set_status("t1", AgentStatus::Idle);
+    review.tour_agent_is(&agents.lookup(&pr()));
+    let sent_before = fake.calls().len();
+
+    review
+        .answer_fix_question(&id("a"), "Call it total.")
+        .unwrap();
+    assert_eq!(
+        review.fix_state_of(&id("a")),
+        Some(&FixState::AnswerQueued {
+            answer: "Call it total.".to_owned()
+        })
+    );
+    shop.deliver(&mut review, &agents);
+
+    let calls = fake.calls();
+    let Some(TourAgentCall::Send { text, .. }) = calls.get(sent_before) else {
+        panic!("{calls:?}");
+    };
+    for part in [
+        "Call it total.",
+        "guided-review fix-reply",
+        "--not-fixed",
+        "a",
+    ] {
+        assert!(text.contains(part), "{part} missing from {text}");
+    }
+    assert_eq!(review.fix_state_of(&id("a")), Some(&FixState::Delivered));
+    assert_eq!(
+        said_on_thread(&review, "a").last(),
+        Some(&(WhyAuthor::Reviewer, "Call it total.".to_owned()))
+    );
+}
+
+#[test]
+fn an_answer_waits_for_a_busy_tour_agent() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First."), on_line("b", 2, "Second.")]);
+    let mut review = shop.open();
+    let fake = idle_agent();
+    let agents = agents_of(&fake);
+    asked_by_the_tour_agent(&shop, &mut review, &fake, "Rename it to what?");
+    review
+        .answer_fix_question(&id("a"), "Call it total.")
+        .unwrap();
+
+    shop.deliver(&mut review, &agents);
+    assert!(matches!(
+        review.fix_state_of(&id("a")),
+        Some(FixState::AnswerQueued { .. })
+    ));
+
+    fake.set_status("t1", AgentStatus::Idle);
+    review.tour_agent_is(&agents.lookup(&pr()));
+    shop.deliver(&mut review, &agents);
+
+    assert_eq!(review.fix_state_of(&id("a")), Some(&FixState::Delivered));
+}
+
+#[test]
+fn only_a_question_the_tour_agent_asked_can_be_answered() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    assert_eq!(
+        review.answer_fix_question(&id("a"), "Yes."),
+        Err(FindingRefusal::NoFixQuestion)
+    );
+
+    review.fix_findings(&[id("a")]);
+    assert_eq!(
+        review.answer_fix_question(&id("a"), "Yes."),
+        Err(FindingRefusal::NoFixQuestion)
+    );
+}
+
+#[test]
+fn the_fix_request_tells_the_tour_agent_to_ask_through_the_app_not_in_its_terminal() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    let fake = idle_agent();
+
+    review.fix_findings(&[id("a")]);
+    shop.deliver(&mut review, &agents_of(&fake));
+
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(text.contains("--question --body -"), "{text}");
+    assert!(text.contains("not in your terminal"), "{text}");
+}

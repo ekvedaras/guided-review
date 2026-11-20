@@ -110,16 +110,25 @@ pub struct FindingQuestions(HashMap<FindingId, OpenQuestion>);
 
 struct OpenQuestion {
     text: String,
+    /// What Enter does in this box: "to ask" or "to answer".
+    send_hint: &'static str,
     focus: FocusHandle,
 }
 
 impl FindingQuestions {
     /// Opens the box on the finding with `text` in it, or finds the one open; returns its focus.
-    pub fn open(&mut self, id: &FindingId, text: &str, cx: &mut App) -> FocusHandle {
+    pub fn open(
+        &mut self,
+        id: &FindingId,
+        text: &str,
+        send_hint: &'static str,
+        cx: &mut App,
+    ) -> FocusHandle {
         self.0
             .entry(id.clone())
             .or_insert_with(|| OpenQuestion {
                 text: text.to_owned(),
+                send_hint,
                 focus: cx.focus_handle(),
             })
             .focus
@@ -197,7 +206,11 @@ impl FindingQuestions {
                         .gap_3()
                         .text_xs()
                         .text_color(colors.muted_text)
-                        .child(key_hint(colors, &[KeyLabel::Icon(Icon::Enter)], "to ask"))
+                        .child(key_hint(
+                            colors,
+                            &[KeyLabel::Icon(Icon::Enter)],
+                            open.send_hint,
+                        ))
                         .child(key_hint(colors, &[KeyLabel::Text("esc")], "to close")),
                 )
                 .into_any_element(),

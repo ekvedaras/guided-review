@@ -867,7 +867,7 @@ impl OneStepLayout {
                 });
                 if let Ok(answered) = FindingId::try_from("a".to_owned()) {
                     self.finding_questions
-                        .open(&answered, "Is it on purpose?", cx);
+                        .open(&answered, "Is it on purpose?", "to ask", cx);
                 }
             }
             Scene::TourEndUnread => {

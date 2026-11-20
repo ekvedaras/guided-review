@@ -1,1 +1,1 @@
-Fix sends findings to the tour agent; each finding's thread then says which commit fixed it, or why not.
+Fix sends findings to the tour agent, which answers on each finding's thread, or asks you first.

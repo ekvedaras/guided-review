@@ -740,6 +740,7 @@ fn thread_row(view: ThreadView, place: ThreadRowPlace) -> PageRow {
 
 fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
     let can_fix = !view.fix.as_ref().is_some_and(FixState::is_in_progress);
+    let can_answer_fix = view.fix.as_ref() == Some(&FixState::Asked);
     let can_ask_why = !view
         .thread
         .as_ref()
@@ -751,6 +752,7 @@ fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
         place,
         fix: view.fix.map(|state| state.line().into()),
         can_fix,
+        can_answer_fix,
         asked: view
             .thread
             .as_ref()

@@ -104,6 +104,8 @@ pub struct FindingRow {
     pub fix: Option<Arc<str>>,
     /// False while a fix is asked for or under way.
     pub can_fix: bool,
+    /// The tour agent asked something before fixing and waits for the reviewer's answer.
+    pub can_answer_fix: bool,
     /// Ask why: the questions and the review agent's answers, oldest first.
     pub thread: Arc<[WhyMessage]>,
     /// Where the latest question is, once one was asked.

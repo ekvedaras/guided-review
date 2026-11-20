@@ -204,6 +204,25 @@ impl ReviewCore {
         Ok(())
     }
 
+    /// The reviewer's answer to what the tour agent asked before fixing: it goes to the agent as the next message.
+    pub fn answer_fix_question(
+        &mut self,
+        id: &FindingId,
+        answer: &str,
+    ) -> Result<(), FindingRefusal> {
+        if self.state.fix_requests().state_of(id) != Some(&FixState::Asked) {
+            return Err(FindingRefusal::NoFixQuestion);
+        }
+        let kept = self
+            .state
+            .record(|state| state.fix_question_answered(id, answer))
+            .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
+        kept.map_err(|_unanswerable| FindingRefusal::NoFixQuestion)?;
+        self.work.want(WorkKind::DeliverHandOff);
+        self.place_threads();
+        Ok(())
+    }
+
     /// The tour's own order: the screen that shows the finding, then its first line.
     fn reading_order_of(&self, finding: &Finding) -> ReadingOrder {
         let screen_at = self

@@ -21,6 +21,12 @@ pub enum FixState {
     Working,
     /// The tour agent said it started on this finding.
     Fixing,
+    /// The tour agent asked the reviewer something before fixing, and waits for the answer.
+    Asked,
+    /// The reviewer answered; the answer waits for the tour agent to be idle.
+    AnswerQueued {
+        answer: String,
+    },
     Fixed {
         commit: String,
     },
@@ -36,7 +42,12 @@ impl FixState {
     pub const fn is_in_progress(&self) -> bool {
         matches!(
             self,
-            Self::Queued | Self::Delivered | Self::Working | Self::Fixing
+            Self::Queued
+                | Self::Delivered
+                | Self::Working
+                | Self::Fixing
+                | Self::Asked
+                | Self::AnswerQueued { .. }
         )
     }
 
@@ -47,6 +58,8 @@ impl FixState {
             Self::Delivered => "Fix requested: sent to the tour agent".to_owned(),
             Self::Working => "Fix requested: the tour agent is working".to_owned(),
             Self::Fixing => "Fixing…".to_owned(),
+            Self::Asked => "The tour agent asks you something: answer it below".to_owned(),
+            Self::AnswerQueued { .. } => "Your answer waits for the tour agent".to_owned(),
             Self::Fixed { commit } => format!("Fixed in {commit}"),
             Self::NotFixed { reason } => format!("Not fixed: {reason}"),
             Self::Failed(reason) => format!("Fix request failed: {reason}"),
@@ -61,13 +74,25 @@ impl FixState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FixReply {
     Working,
-    Fixed { commit: String },
-    NotFixed { reason: String },
+    /// It needs a decision from the reviewer before it fixes.
+    Question {
+        text: String,
+    },
+    Fixed {
+        commit: String,
+    },
+    NotFixed {
+        reason: String,
+    },
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[error("{0} has no fix request to answer")]
 pub struct NoFixRequest(FindingId);
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("the tour agent asked nothing on {0} that waits for an answer")]
+pub struct NoFixQuestion(pub FindingId);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FixRequest {
@@ -151,7 +176,25 @@ impl FixRequests {
         }
     }
 
-    /// The oldest queued batch as one message, unless one went and its agent has not started on it.
+    /// Takes in the reviewer's answer to the tour agent's question, which then waits to be sent.
+    pub(super) fn answered(
+        &mut self,
+        id: &FindingId,
+        answer: &str,
+    ) -> Result<Finding, NoFixQuestion> {
+        let request = self
+            .0
+            .iter_mut()
+            .rfind(|request| request.finding.id == *id && request.state == FixState::Asked)
+            .ok_or_else(|| NoFixQuestion(id.clone()))?;
+        request.state = FixState::AnswerQueued {
+            answer: answer.to_owned(),
+        };
+        Ok(request.finding.clone())
+    }
+
+    /// An answer to the tour agent's question first, since the agent waits for it; else the oldest
+    /// queued batch as one message. Nothing goes while a message is not yet taken up.
     pub(super) fn delivery_request(
         &self,
         subject: &ReviewSubject,
@@ -163,6 +206,18 @@ impl FixRequests {
             .any(|request| request.state == FixState::Delivered)
         {
             return None;
+        }
+        if let Some(request) = self
+            .0
+            .iter()
+            .find(|request| matches!(request.state, FixState::AnswerQueued { .. }))
+        {
+            return Some(FixDeliveryRequest {
+                ids: vec![request.finding.id.clone()],
+                subject: subject.clone(),
+                text: answer_message(request, subject),
+                tour,
+            });
         }
         let batch = self
             .0
@@ -227,6 +282,7 @@ impl FixRequests {
             .ok_or_else(|| NoFixRequest(id.clone()))?;
         request.state = match reply {
             FixReply::Working => FixState::Fixing,
+            FixReply::Question { .. } => FixState::Asked,
             FixReply::Fixed { commit } => FixState::Fixed {
                 commit: commit.clone(),
             },
@@ -262,6 +318,12 @@ fn fixes_message(requests: &[&FixRequest], subject: &ReviewSubject) -> String {
         lines.push(format!("Place: {}", finding.anchor));
         lines.push(format!("Finding: {}", finding.body));
         lines.push(format!(
+            "Needs the reviewer's decision first? Ask through the app, not in your terminal, where they \
+             may not look: `guided-review fix-reply {key} {id} --question --body -` with the question on \
+             stdin, in a quoted heredoc. Then go on with the next finding, or stop if it was the last: \
+             the reviewer's answer is typed to you as a new message."
+        ));
+        lines.push(format!(
             "Answer: `guided-review fix-reply {key} {id} --working` when you start on it, then \
              `guided-review fix-reply {key} {id} --fixed <commit sha>` once it is committed, or \
              `guided-review fix-reply {key} {id} --not-fixed --body -` with the reason on stdin, in a \
@@ -274,6 +336,30 @@ fn fixes_message(requests: &[&FixRequest], subject: &ReviewSubject) -> String {
          `guided-review outline {key}` and `guided-review show {key} <piece ids> --around`."
     ));
     lines.join("\n")
+}
+
+/// What the tour agent is typed once the reviewer answered its question: the finding again, since its
+/// context may have moved on, and how to go on.
+fn answer_message(request: &FixRequest, subject: &ReviewSubject) -> String {
+    let key = shell_word(&subject.to_string());
+    let finding = &request.finding;
+    let id = &finding.id;
+    let answer = match &request.state {
+        FixState::AnswerQueued { answer } => answer.as_str(),
+        _ => "",
+    };
+    [
+        format!("The reviewer answered your question on finding {id} of {subject}"),
+        format!("Place: {}", finding.anchor),
+        format!("Finding: {}", finding.body),
+        format!("Answer: {answer}"),
+        format!(
+            "Go on: `guided-review fix-reply {key} {id} --working`, then `guided-review fix-reply {key} {id} --fixed <commit sha>` \
+             once it is committed, or `guided-review fix-reply {key} {id} --not-fixed --body -` with the reason on stdin, in a \
+             quoted heredoc (`<<'EOF'`). Ask again with `--question --body -` if you still need a decision."
+        ),
+    ]
+    .join("\n")
 }
 
 fn where_to_fix(subject: &ReviewSubject) -> String {
@@ -348,6 +434,7 @@ impl fmt::Display for FixReply {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Working => f.write_str("is being fixed"),
+            Self::Question { .. } => f.write_str("waits for your answer"),
             Self::Fixed { commit } => write!(f, "fixed in {commit}"),
             Self::NotFixed { .. } => f.write_str("not fixed"),
         }

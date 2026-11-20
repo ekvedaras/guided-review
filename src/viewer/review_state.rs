@@ -19,7 +19,7 @@ use super::ask::{Ask, AskStore};
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::finding_decisions::{Fate, FindingDecisions};
 use super::finding_threads::{FindingThreads, NoQuestion, WhyAuthor, WhyReply};
-use super::fix_requests::{FixReply, FixRequests, NoFixRequest};
+use super::fix_requests::{FixReply, FixRequests, NoFixQuestion, NoFixRequest};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
 use super::local_threads::LocalThreads;
 use super::move_to_pr::MovedReview;
@@ -533,6 +533,7 @@ impl ReviewState {
         let finding = self.viewer.fix_requests.replied(id, reply)?;
         let said = match reply {
             FixReply::Working => None,
+            FixReply::Question { text } => Some(text.clone()),
             FixReply::Fixed { commit } => Some(format!("Fixed in {commit}")),
             FixReply::NotFixed { reason } => Some(format!("Not fixed: {reason}")),
         };
@@ -544,6 +545,19 @@ impl ReviewState {
         if matches!(reply, FixReply::Fixed { .. }) {
             self.viewer.finding_decisions.record(finding, Fate::Fixed);
         }
+        Ok(())
+    }
+
+    /// The reviewer's answer to the tour agent's question: said on the finding's thread and queued for the agent.
+    pub fn fix_question_answered(
+        &mut self,
+        id: &FindingId,
+        answer: &str,
+    ) -> Result<(), NoFixQuestion> {
+        let finding = self.viewer.fix_requests.answered(id, answer)?;
+        self.viewer
+            .finding_threads
+            .say(finding, WhyAuthor::Reviewer, answer.to_owned());
         Ok(())
     }
 

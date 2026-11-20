@@ -127,8 +127,11 @@ enum Command {
         /// You did not fix it; give the reason with --body
         #[arg(long, group = "outcome", requires = "body")]
         not_fixed: bool,
-        /// The reason, in markdown; `-` reads it from stdin, which keeps its line breaks
-        #[arg(long, requires = "not_fixed")]
+        /// You need a decision from the reviewer before you fix it; give the question with --body
+        #[arg(long, group = "outcome", requires = "body")]
+        question: bool,
+        /// The reason or the question, in markdown; `-` reads it from stdin, which keeps its line breaks
+        #[arg(long, requires = "outcome", conflicts_with_all = ["working", "fixed"])]
         body: Option<String>,
     },
     /// Run the app itself; `open` starts it when none answers
@@ -219,6 +222,7 @@ fn main() -> anyhow::Result<()> {
             working: _,
             fixed,
             not_fixed: _,
+            question,
             body,
         } => {
             let reply = match (fixed, body) {
@@ -228,8 +232,11 @@ fn main() -> anyhow::Result<()> {
                         "-" => std::io::read_to_string(std::io::stdin())?,
                         _ => body,
                     };
-                    FixReply::NotFixed {
-                        reason: body.trim_end().to_owned(),
+                    let text = body.trim_end().to_owned();
+                    if question {
+                        FixReply::Question { text }
+                    } else {
+                        FixReply::NotFixed { reason: text }
                     }
                 }
                 (None, None) => FixReply::Working,

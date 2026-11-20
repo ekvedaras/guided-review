@@ -22,6 +22,8 @@ pub enum FindingRefusal {
     BeingFixed,
     /// A question on it waits for its answer: another would cross it.
     BeingAsked,
+    /// The tour agent asked nothing of the reviewer on this finding, or it was answered already.
+    NoFixQuestion,
     Comment(CommentRefusal),
 }
 
@@ -39,6 +41,9 @@ impl fmt::Display for FindingRefusal {
             Self::BeingFixed => f.write_str("A fix of this finding is asked for already"),
             Self::BeingAsked => {
                 f.write_str("A question on this finding waits for the review agent's answer")
+            }
+            Self::NoFixQuestion => {
+                f.write_str("The tour agent has no question on this finding to answer")
             }
             Self::Comment(refusal) => refusal.fmt(f),
         }

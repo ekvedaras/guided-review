@@ -75,6 +75,17 @@ fn a_finding_that_was_not_fixed_keeps_the_reason() {
 }
 
 #[test]
+fn a_question_waits_for_the_reviewer_in_the_state_file() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    with_a_fix_request(repo.home());
+
+    let run = fix_reply(&repo, &["--question", "--body", "Rename it to what?"]);
+
+    assert!(run.success, "{}", run.stderr);
+    assert_eq!(fix_state(repo.home()), Some(FixState::Asked));
+}
+
+#[test]
 fn a_finding_nobody_asked_to_fix_is_refused() {
     let repo = FixtureRepo::cloned_from("acme/shop");
 
