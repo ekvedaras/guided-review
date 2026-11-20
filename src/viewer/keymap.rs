@@ -1,20 +1,27 @@
 use std::collections::{BTreeMap, HashMap};
 
 use super::chord::Chord;
+use super::primary_comment_action::PrimaryCommentAction;
 use super::shortcuts::Command;
 
 /// The keys each command answers to: its defaults, unless the reviewer's `[keys]` name others.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Keymap {
     changed: HashMap<Command, Vec<Chord>>,
+    primary_comment_action: PrimaryCommentAction,
 }
 
 impl Keymap {
     /// Every way to press it; the first is the one a button shows.
     pub fn chords(&self, command: Command) -> &[Chord] {
-        self.changed
-            .get(&command)
-            .map_or_else(|| command.default_chords(), Vec::as_slice)
+        self.changed.get(&command).map_or_else(
+            || command.default_chords_for(self.primary_comment_action),
+            Vec::as_slice,
+        )
+    }
+
+    pub fn primary_comment_action(&self) -> PrimaryCommentAction {
+        self.primary_comment_action
     }
 
     pub fn first_chord(&self, command: Command) -> Option<Chord> {
@@ -59,13 +66,34 @@ pub enum WrittenKeys {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KeyChanges {
     entries: BTreeMap<String, WrittenKeys>,
+    /// Decides which of the comment commands holds Cmd+Enter while no entry says otherwise.
+    primary_comment_action: PrimaryCommentAction,
 }
 
 impl KeyChanges {
     pub fn new(entries: impl IntoIterator<Item = (String, WrittenKeys)>) -> Self {
         Self {
             entries: entries.into_iter().collect(),
+            primary_comment_action: PrimaryCommentAction::default(),
         }
+    }
+
+    pub fn with_primary_comment_action(mut self, action: PrimaryCommentAction) -> Self {
+        self.primary_comment_action = action;
+        self
+    }
+
+    pub fn primary_comment_action(&self) -> PrimaryCommentAction {
+        self.primary_comment_action
+    }
+
+    pub fn set_primary_comment_action(&mut self, action: PrimaryCommentAction) {
+        self.primary_comment_action = action;
+    }
+
+    /// The keys the command has while no entry names it.
+    pub fn default_chords(&self, command: Command) -> &'static [Chord] {
+        command.default_chords_for(self.primary_comment_action)
     }
 
     pub fn entries(&self) -> impl Iterator<Item = (&str, &WrittenKeys)> {
@@ -92,7 +120,7 @@ impl KeyChanges {
 
     /// The command's keys from now on; keys equal to its defaults leave no entry.
     pub fn set(&mut self, command: Command, chords: &[Chord]) {
-        if chords == command.default_chords() {
+        if chords == self.default_chords(command) {
             self.reset(command);
             return;
         }
@@ -130,7 +158,10 @@ impl KeyChanges {
             }
         }
         unreadable.sort_by_key(|(command, _)| Command::ALL.iter().position(|it| it == command));
-        let mut keymap = Keymap { changed };
+        let mut keymap = Keymap {
+            changed,
+            primary_comment_action: self.primary_comment_action,
+        };
         let mut clashes = Vec::new();
         loop {
             let found = keymap.clashes();

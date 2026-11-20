@@ -63,6 +63,7 @@ mod pr_status;
 mod pr_switcher;
 mod presence;
 mod press_again;
+mod primary_comment_action;
 mod problems;
 mod reactions;
 mod refresh;
@@ -214,6 +215,7 @@ pub use pr_switcher::{
 };
 pub use presence::{Closing, Motion, Presence, Shown, Stretch, Ticket};
 pub use press_again::{CONFIRM_WITHIN, PressStep};
+pub use primary_comment_action::PrimaryCommentAction;
 pub use problems::{Announcement, Problem, ProblemKind, Problems, Read, announcements};
 pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::{RefreshBrief, StaleStep, TourRefresher};

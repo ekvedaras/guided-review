@@ -66,6 +66,8 @@ enum Scene {
     SettingsKeys,
     FocusedChange,
     SettingsMoreLines,
+    SettingsComments,
+    CommentComposerNowPrimary,
     PieceLabelsShown,
     PieceLabelsHidden,
     BasicOverview,
@@ -108,7 +110,7 @@ enum Scene {
 }
 
 impl Scene {
-    const ALL: [Self; 67] = [
+    const ALL: [Self; 69] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -137,6 +139,8 @@ impl Scene {
         Self::SettingsKeys,
         Self::FocusedChange,
         Self::SettingsMoreLines,
+        Self::SettingsComments,
+        Self::CommentComposerNowPrimary,
         Self::PieceLabelsShown,
         Self::PieceLabelsHidden,
         Self::BasicOverview,
@@ -247,6 +251,8 @@ impl Scene {
             Self::AiReviewOutdated => "87-ai-review-outdated",
             Self::AiReviewThreadFromFinding => "88-ai-review-thread-from-finding",
             Self::BasicGuidedWriting => "89-basic-guided-writing",
+            Self::SettingsComments => "90-settings-comments",
+            Self::CommentComposerNowPrimary => "91-comment-composer-now-primary",
         }
     }
 
@@ -722,6 +728,15 @@ impl OneStepLayout {
                 cx.set_global(StagedFinishReview(true));
             }
             Scene::CommentComposer => self.compose_on_first_added_lines(window, cx),
+            Scene::CommentComposerNowPrimary => {
+                if let Ok(keymap) =
+                    crate::config::Config::from_text("primary_comment_action = \"comment_now\"\n")
+                        .map(|config| config.resolved_keymap().keymap)
+                {
+                    crate::app::keymap::set_keymap(keymap, cx);
+                }
+                self.compose_on_first_added_lines(window, cx);
+            }
             Scene::AskPanel => self.ask_about_screen(window, cx),
             Scene::SwitchingVeil => {
                 if let Some(other) = sample_pr(OTHER_PR).map(ReviewSubject::from) {
@@ -763,6 +778,11 @@ impl OneStepLayout {
                 settings.open(window, cx);
                 settings.stage_sample_edits(cx);
                 settings.scroll_to_more_lines();
+            }),
+            Scene::SettingsComments => self.settings.update(cx, |settings, cx| {
+                settings.open(window, cx);
+                settings.stage_comment_now_primary(cx);
+                settings.scroll_to_comments();
             }),
             Scene::Shortcuts => self
                 .shortcuts
@@ -1034,7 +1054,8 @@ impl OneStepLayout {
             | Scene::SettingsEdited
             | Scene::SettingsEditedEnd
             | Scene::SettingsKeys
-            | Scene::SettingsMoreLines => self
+            | Scene::SettingsMoreLines
+            | Scene::SettingsComments => self
                 .settings
                 .update(cx, |settings, cx| settings.close(window, cx)),
             Scene::JumpPalette | Scene::JumpActions => self
@@ -1049,7 +1070,13 @@ impl OneStepLayout {
                 });
                 cx.set_global(StagedFinishReview(false));
             }
-            Scene::CommentComposer => {
+            Scene::CommentComposer | Scene::CommentComposerNowPrimary => {
+                if scene == Scene::CommentComposerNowPrimary {
+                    crate::app::keymap::set_keymap(
+                        crate::app::keymap::configured_keymap().keymap,
+                        cx,
+                    );
+                }
                 self.session.update(cx, |session, cx| {
                     let drafts: Vec<_> = session
                         .review()

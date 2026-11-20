@@ -5,8 +5,8 @@ use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use guided_review::pull_request::RepoName;
 use guided_review::viewer::{
-    Chord, CloneRow, CloneRowProblem, Command, KeyProblem, MergeMethod, SaveOutcome,
-    SettingProblem, Settings,
+    Chord, CloneRow, CloneRowProblem, Command, KeyProblem, MergeMethod, PrimaryCommentAction,
+    SaveOutcome, SettingProblem, Settings,
 };
 use std::path::{Path, PathBuf};
 
@@ -1145,6 +1145,45 @@ fn a_chosen_merge_method_is_written_and_a_merge_commit_leaves_no_line() {
     settings.set_merge_method(MergeMethod::Merge);
     settings.save().unwrap();
     assert_eq!(config_text(home.path()), "ask_model = \"sonnet\" # quick\n");
+}
+
+#[test]
+fn a_chosen_primary_comment_action_is_written_and_the_default_leaves_no_line() {
+    let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
+    assert_eq!(
+        settings.primary_comment_action(),
+        PrimaryCommentAction::AddToReview
+    );
+
+    settings.set_primary_comment_action(PrimaryCommentAction::CommentNow);
+    assert_eq!(
+        settings.keymap().chords(Command::CommentNow),
+        Command::AddToReview.default_chords()
+    );
+    settings.save().unwrap();
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"sonnet\" # quick\nprimary_comment_action = \"comment_now\"\n"
+    );
+
+    settings.set_primary_comment_action(PrimaryCommentAction::AddToReview);
+    settings.save().unwrap();
+    assert_eq!(config_text(home.path()), "ask_model = \"sonnet\" # quick\n");
+}
+
+#[test]
+fn a_key_equal_to_what_the_primary_action_gives_leaves_no_keys_line() {
+    let (home, mut settings) = loaded_from("primary_comment_action = \"comment_now\"\n");
+
+    settings.set_key(Command::CommentNow, Chord::parse("primary-j").unwrap());
+    settings.set_key(Command::CommentNow, Chord::parse("primary-enter").unwrap());
+    settings.save().unwrap();
+
+    assert!(!settings.is_key_changed(Command::CommentNow));
+    assert_eq!(
+        config_text(home.path()),
+        "primary_comment_action = \"comment_now\"\n"
+    );
 }
 
 #[test]

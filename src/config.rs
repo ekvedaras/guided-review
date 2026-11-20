@@ -10,7 +10,8 @@ use crate::ide::IdeTemplate;
 use crate::instructions::{Agent, Instructions, InstructionsChoice, InstructionsKind};
 use crate::pull_request::RepoName;
 use crate::viewer::{
-    KeyChanges, KeyProblem, Keymap, MergeMethod, MoreLines, ResolvedKeymap, WrittenKeys,
+    KeyChanges, KeyProblem, Keymap, MergeMethod, MoreLines, PrimaryCommentAction, ResolvedKeymap,
+    WrittenKeys,
 };
 
 /// `config.toml` in the config folder.
@@ -42,6 +43,9 @@ pub struct Config {
     /// `"owner/repo" = "squash"`: a repo's own merge method, over `merge_method`.
     #[serde(default)]
     merge_methods: BTreeMap<String, String>,
+    /// `"add_to_review"` or `"comment_now"`: which send action gets Cmd+Enter and the accent colour.
+    #[serde(default)]
+    primary_comment_action: Option<String>,
 }
 
 /// Which model answers an Ask, and how hard it thinks.
@@ -233,6 +237,14 @@ impl Config {
         .unwrap_or_default()
     }
 
+    /// A value that names no action reads as the default, so a typo cannot stop the app opening.
+    pub fn primary_comment_action(&self) -> PrimaryCommentAction {
+        self.primary_comment_action
+            .as_deref()
+            .and_then(PrimaryCommentAction::of_config_text)
+            .unwrap_or_default()
+    }
+
     pub fn keymap(&self) -> Result<Keymap, Vec<KeyProblem>> {
         self.key_changes().keymap()
     }
@@ -247,6 +259,7 @@ impl Config {
                 .iter()
                 .map(|(name, value)| (name.clone(), written_keys(value))),
         )
+        .with_primary_comment_action(self.primary_comment_action())
     }
 
     /// Every clone Settings names, whatever its repo.

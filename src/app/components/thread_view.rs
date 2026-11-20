@@ -13,8 +13,9 @@ use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
 use crate::app::components::overlay::popover;
 use crate::viewer::{
-    Audience, CommentId, HandOffButton, Reaction, ReactionChange, ReactionCount, SendMode, Sending,
-    ThreadAction, ThreadActionResult, ThreadComment, ThreadId, ThreadView,
+    Audience, CommentId, HandOffButton, PrimaryCommentAction, Reaction, ReactionChange,
+    ReactionCount, SendMode, Sending, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
+    ThreadView,
 };
 
 use super::button::{
@@ -90,6 +91,7 @@ struct ReplyBox<'a> {
     can_reply_now: bool,
     can_ask_agent: bool,
     sending: Sending,
+    primary: PrimaryCommentAction,
     on_action: &'a OnThreadAction,
     on_reply_draft: &'a OnReplyDraft,
     ui: &'a Entity<ThreadUi>,
@@ -510,6 +512,7 @@ impl ThreadElement {
             can_reply_now,
             can_ask_agent,
             sending,
+            primary,
             on_action,
             on_reply_draft,
             ui,
@@ -519,6 +522,14 @@ impl ThreadElement {
         reply: &str,
     ) -> AnyElement {
         let thread_id = thread_id.clone();
+        let falls_back_to_adding = !can_reply_now && primary == PrimaryCommentAction::CommentNow;
+        let primary_kind = |action: PrimaryCommentAction| {
+            if primary.effective(can_reply_now) == action {
+                ButtonKind::Primary
+            } else {
+                ButtonKind::Secondary
+            }
+        };
         let send = {
             let (ui, on_action, thread_id) = (ui.clone(), Rc::clone(on_action), thread_id.clone());
             move |mode: SendMode, audience: Audience| {
@@ -565,21 +576,30 @@ impl ThreadElement {
                     cx,
                 );
             })
-            .on_submit_now(can_reply_now || sending.tasks().len() > 1, move |_, cx| {
-                let (mode, audience) = match sending.tasks().get(1) {
-                    Some(&task) => (task, Audience::Agent),
-                    None => (SendMode::CommentNow, Audience::Author),
-                };
-                send_reply(&now_ui, &now_action, &now_thread, mode, audience, cx);
-            })
-            .on_submit_to_agent_now(
-                can_ask_agent && can_reply_now && sending.on_github(),
+            .on_submit_now(
+                can_reply_now || falls_back_to_adding || sending.tasks().len() > 1,
                 move |_, cx| {
+                    let (mode, audience) = match sending.tasks().get(1) {
+                        Some(&task) => (task, Audience::Agent),
+                        None if can_reply_now => (SendMode::CommentNow, Audience::Author),
+                        None => (SendMode::AddToReview, Audience::Author),
+                    };
+                    send_reply(&now_ui, &now_action, &now_thread, mode, audience, cx);
+                },
+            )
+            .on_submit_to_agent_now(
+                can_ask_agent && (can_reply_now || falls_back_to_adding) && sending.on_github(),
+                move |_, cx| {
+                    let mode = if can_reply_now {
+                        SendMode::CommentNow
+                    } else {
+                        SendMode::AddToReview
+                    };
                     send_reply(
                         &ask_now_ui,
                         &ask_now_action,
                         &ask_now_thread,
-                        SendMode::CommentNow,
+                        mode,
                         Audience::Agent,
                         cx,
                     );
@@ -605,23 +625,27 @@ impl ThreadElement {
         });
         let task_buttons = (!is_busy && !sending.on_github()).then(|| {
             div().flex().flex_wrap().items_center().gap_2().children(
-                sending.tasks().iter().enumerate().map(|(index, &mode)| {
-                    let (icon, label) = task_button(mode);
-                    let kind = if index == 0 {
-                        ButtonKind::Primary
-                    } else {
-                        ButtonKind::Secondary
-                    };
-                    icon_label_button(
-                        &colors,
-                        SharedString::from(format!("reply-task-{index}-{id}")),
-                        kind,
-                        ButtonSize::Small,
-                        icon,
-                        label,
-                    )
-                    .on_click(send(mode, Audience::Agent))
-                }),
+                primary
+                    .ordered_tasks(sending)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, mode)| {
+                        let (icon, label) = task_button(mode);
+                        let kind = if index == 0 {
+                            ButtonKind::Primary
+                        } else {
+                            ButtonKind::Secondary
+                        };
+                        icon_label_button(
+                            &colors,
+                            SharedString::from(format!("reply-task-{index}-{id}")),
+                            kind,
+                            ButtonSize::Small,
+                            icon,
+                            label,
+                        )
+                        .on_click(send(mode, Audience::Agent))
+                    }),
             )
         });
         let buttons = (!is_busy && sending.on_github()).then(|| {
@@ -661,30 +685,42 @@ impl ThreadElement {
                 }
                 joined(&colors, parts)
             });
+            let add_button = button(
+                &colors,
+                SharedString::from(format!("reply-add-{id}")),
+                primary_kind(PrimaryCommentAction::AddToReview),
+                ButtonSize::Small,
+            )
+            .child("Add to review")
+            .on_click(send(SendMode::AddToReview, Audience::Author));
+            let now_button = can_reply_now.then(|| {
+                plain_button(
+                    &colors,
+                    SharedString::from(format!("reply-now-{id}")),
+                    primary_kind(PrimaryCommentAction::CommentNow),
+                    "Reply now",
+                )
+                .on_click(send(SendMode::CommentNow, Audience::Author))
+            });
+            let (first, second) =
+                if primary.effective(can_reply_now) == PrimaryCommentAction::CommentNow {
+                    (
+                        now_button.map(IntoElement::into_any_element),
+                        Some(add_button.into_any_element()),
+                    )
+                } else {
+                    (
+                        Some(add_button.into_any_element()),
+                        now_button.map(IntoElement::into_any_element),
+                    )
+                };
             div()
                 .flex()
                 .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(
-                    button(
-                        &colors,
-                        SharedString::from(format!("reply-add-{id}")),
-                        ButtonKind::Primary,
-                        ButtonSize::Small,
-                    )
-                    .child("Add to review")
-                    .on_click(send(SendMode::AddToReview, Audience::Author)),
-                )
-                .children(can_reply_now.then(|| {
-                    plain_button(
-                        &colors,
-                        SharedString::from(format!("reply-now-{id}")),
-                        ButtonKind::Secondary,
-                        "Reply now",
-                    )
-                    .on_click(send(SendMode::CommentNow, Audience::Author))
-                }))
+                .children(first)
+                .children(second)
                 .children(ask_agent)
         });
         slide_in(
@@ -1197,6 +1233,7 @@ impl RenderOnce for ThreadElement {
         });
         let reply = self.reply.clone();
         let on_reply_draft = Rc::clone(&self.on_reply_draft);
+        let primary = crate::app::keymap::keymap(cx).primary_comment_action();
         let (can_reply_now, can_ask_agent, sending, on_action) = (
             self.can_reply_now,
             self.can_ask_agent,
@@ -1262,6 +1299,7 @@ impl RenderOnce for ThreadElement {
                             can_reply_now,
                             can_ask_agent,
                             sending,
+                            primary,
                             on_action: &on_action,
                             on_reply_draft: &on_reply_draft,
                             ui: &ui,

@@ -2,7 +2,9 @@ use gpui::Keystroke;
 use guided_review::app::keymap::chord_on;
 use guided_review::config::Config;
 use guided_review::platform::{Os, TextEdit};
-use guided_review::viewer::{Chord, Command, KeyProblem, Keymap, Modifier};
+use guided_review::viewer::{
+    Chord, Command, KeyProblem, Keymap, Modifier, PrimaryCommentAction, SendMode, Sending,
+};
 
 fn chord(text: &str) -> Chord {
     Chord::parse(text).unwrap_or_else(|| panic!("{text} is not a chord"))
@@ -411,4 +413,130 @@ fn every_text_key_is_one_gpui_can_bind() {
             Keystroke::parse(keys).unwrap_or_else(|_| panic!("{keys} is not a key"));
         }
     }
+}
+
+fn comment_keys(keymap: &Keymap) -> [Vec<String>; 4] {
+    [
+        Command::AddToReview,
+        Command::CommentNow,
+        Command::AskAgent,
+        Command::AskAgentNow,
+    ]
+    .map(|command| keys(keymap, command))
+}
+
+#[test]
+fn with_no_primary_comment_action_add_to_review_has_the_main_key() {
+    let keymap = keymap_of("").unwrap();
+
+    assert_eq!(
+        keymap.primary_comment_action(),
+        PrimaryCommentAction::AddToReview
+    );
+    assert_eq!(
+        comment_keys(&keymap),
+        [
+            vec!["primary-enter"],
+            vec!["primary-alt-enter"],
+            vec!["primary-shift-enter"],
+            vec!["primary-alt-shift-enter"],
+        ]
+    );
+}
+
+#[test]
+fn comment_now_as_primary_takes_the_main_keys_and_gives_add_to_review_the_secondary_ones() {
+    let keymap = keymap_of("primary_comment_action = \"comment_now\"\n").unwrap();
+
+    assert_eq!(
+        keymap.primary_comment_action(),
+        PrimaryCommentAction::CommentNow
+    );
+    assert_eq!(
+        comment_keys(&keymap),
+        [
+            vec!["primary-alt-enter"],
+            vec!["primary-enter"],
+            vec!["primary-alt-shift-enter"],
+            vec!["primary-shift-enter"],
+        ]
+    );
+    assert!(!keymap.is_changed(Command::CommentNow));
+}
+
+#[test]
+fn a_key_written_in_keys_wins_over_the_primary_comment_action() {
+    let keymap = keymap_of(
+        "primary_comment_action = \"comment_now\"\n\n[keys]\nadd_to_review = \"primary-j\"\n",
+    )
+    .unwrap();
+
+    assert_eq!(keys(&keymap, Command::AddToReview), ["primary-j"]);
+    assert_eq!(keys(&keymap, Command::CommentNow), ["primary-enter"]);
+}
+
+#[test]
+fn a_key_written_in_keys_that_the_primary_action_takes_is_a_clash() {
+    let problems = keymap_of(
+        "primary_comment_action = \"comment_now\"\n\n[keys]\nadd_to_review = \"primary-enter\"\n",
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        problems.as_slice(),
+        [KeyProblem::Clash {
+            commands: [Command::AddToReview, Command::CommentNow],
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn a_primary_comment_action_that_names_no_action_reads_as_add_to_review() {
+    let config = Config::from_text("primary_comment_action = \"post\"\n").unwrap();
+
+    assert_eq!(
+        config.primary_comment_action(),
+        PrimaryCommentAction::AddToReview
+    );
+    assert_eq!(
+        Config::from_text("primary_comment_action = \"comment_now\"\n")
+            .unwrap()
+            .primary_comment_action(),
+        PrimaryCommentAction::CommentNow
+    );
+}
+
+#[test]
+fn a_box_with_one_send_action_makes_it_primary_whatever_is_chosen() {
+    assert_eq!(
+        PrimaryCommentAction::CommentNow.effective(false),
+        PrimaryCommentAction::AddToReview
+    );
+    assert_eq!(
+        PrimaryCommentAction::CommentNow.effective(true),
+        PrimaryCommentAction::CommentNow
+    );
+    assert_eq!(
+        PrimaryCommentAction::AddToReview.effective(true),
+        PrimaryCommentAction::AddToReview
+    );
+}
+
+#[test]
+fn a_local_review_puts_send_now_first_when_comment_now_is_primary() {
+    let local = Sending::Tasks(&SendMode::LOCAL);
+
+    assert_eq!(
+        PrimaryCommentAction::AddToReview.ordered_tasks(local),
+        [SendMode::AddToTasks, SendMode::SendNow]
+    );
+    assert_eq!(
+        PrimaryCommentAction::CommentNow.ordered_tasks(local),
+        [SendMode::SendNow, SendMode::AddToTasks]
+    );
+    assert_eq!(
+        PrimaryCommentAction::CommentNow.ordered_tasks(Sending::GitHub),
+        Vec::<SendMode>::new()
+    );
 }

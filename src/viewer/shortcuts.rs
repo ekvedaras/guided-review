@@ -3,6 +3,7 @@
 //! (`Keymap`); the app binds from the keymap and the sheet reads it, so the two cannot drift apart.
 
 use super::chord::{Chord, Key, Modifier};
+use super::primary_comment_action::PrimaryCommentAction;
 
 const fn key(face: char) -> Chord {
     Chord::key(Key::Printed(face))
@@ -150,6 +151,27 @@ pub enum Command {
 }
 
 impl Command {
+    /// The keys a command has with no `[keys]` entry: the primary comment action holds the main
+    /// key of its pair (Add to review and Comment now, Ask agent and Ask agent now), the other the
+    /// same key with Alt.
+    pub fn default_chords_for(self, primary: PrimaryCommentAction) -> &'static [Chord] {
+        match (primary, self) {
+            (PrimaryCommentAction::CommentNow, Self::AddToReview) => {
+                Self::CommentNow.default_chords()
+            }
+            (PrimaryCommentAction::CommentNow, Self::CommentNow) => {
+                Self::AddToReview.default_chords()
+            }
+            (PrimaryCommentAction::CommentNow, Self::AskAgent) => {
+                Self::AskAgentNow.default_chords()
+            }
+            (PrimaryCommentAction::CommentNow, Self::AskAgentNow) => {
+                Self::AskAgent.default_chords()
+            }
+            _ => self.default_chords(),
+        }
+    }
+
     pub const ALL: [Self; 34] = [
         Self::NextScreen,
         Self::PreviousScreen,

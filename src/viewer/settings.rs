@@ -15,6 +15,7 @@ use super::chord::Chord;
 use super::keymap::{KeyChanges, KeyProblem, Keymap, WrittenKeys};
 use super::merging::MergeMethod;
 use super::more_lines::{MoreLines, MoreLinesEntry};
+use super::primary_comment_action::PrimaryCommentAction;
 use super::shortcuts::Command;
 
 /// The reviewer's settings in `config.toml` in the config folder, as the Settings panel shows and edits them.
@@ -225,6 +226,7 @@ const CLONES: &str = "clones";
 const KEYS: &str = "keys";
 const MORE_LINES: &str = "more_lines";
 const MERGE_METHOD: &str = "merge_method";
+const PRIMARY_COMMENT_ACTION: &str = "primary_comment_action";
 const SKILLS_FOLDER: &str = ".claude/skills";
 
 /// A document `toml_edit` accepts and `toml` refuses holds something this config cannot read, so the setting says so.
@@ -501,7 +503,7 @@ impl Settings {
         self.edited
             .keys
             .chords(command)
-            .unwrap_or_else(|| command.default_chords().to_vec())
+            .unwrap_or_else(|| self.edited.keys.default_chords(command).to_vec())
     }
 
     /// What is wrong with the keys as edited, before any Save.
@@ -547,6 +549,14 @@ impl Settings {
 
     pub fn set_more_lines_text(&mut self, text: &str) {
         self.edited.more_lines = MoreLinesEntry::of_text(text);
+    }
+
+    pub fn primary_comment_action(&self) -> PrimaryCommentAction {
+        self.edited.keys.primary_comment_action()
+    }
+
+    pub fn set_primary_comment_action(&mut self, action: PrimaryCommentAction) {
+        self.edited.keys.set_primary_comment_action(action);
     }
 
     /// The global `merge_method`; `[merge_methods]` per repo is edited in the config only.
@@ -606,8 +616,16 @@ impl Settings {
         if saved.clones != edited.clones {
             write_clones(root, &saved.clones, &edited.clones)?;
         }
-        if saved.keys != edited.keys {
+        if saved.keys.entries().ne(edited.keys.entries()) {
             write_keys(root, &saved.keys, &edited.keys)?;
+        }
+        if saved.keys.primary_comment_action() != edited.keys.primary_comment_action() {
+            let action = edited.keys.primary_comment_action();
+            set_text(
+                root,
+                PRIMARY_COMMENT_ACTION,
+                (action != PrimaryCommentAction::default()).then(|| action.config_text()),
+            );
         }
         if saved.more_lines != edited.more_lines {
             set_value(root, MORE_LINES, more_lines_value(&edited.more_lines));
@@ -715,7 +733,12 @@ fn key_changes_in(document: &DocumentMut) -> KeyChanges {
         .into_iter()
         .flat_map(TableLike::iter)
         .map(|(name, item)| (name.to_owned(), written_keys(item)));
-    KeyChanges::new(entries)
+    let action = document
+        .get(PRIMARY_COMMENT_ACTION)
+        .and_then(Item::as_str)
+        .and_then(PrimaryCommentAction::of_config_text)
+        .unwrap_or_default();
+    KeyChanges::new(entries).with_primary_comment_action(action)
 }
 
 fn written_keys(item: &Item) -> WrittenKeys {
