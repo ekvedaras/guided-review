@@ -83,6 +83,7 @@ mod screen_fold;
 mod screen_travel;
 mod send_action;
 mod settings;
+mod settings_page;
 mod shortcuts;
 mod step_page;
 mod suggestion;
@@ -245,6 +246,7 @@ pub use screen_fold::ScreenFold;
 pub use screen_travel::{Arrival, ScreenTravel, Travel};
 pub use send_action::{SendAction, SendChoice, SendRole};
 pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
+pub use settings_page::SettingsPage;
 pub use shortcuts::{Command, KeyScope, ShortcutGroup, in_group};
 pub use step_page::{
     DiffLine, FilePage, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead,
