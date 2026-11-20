@@ -23,6 +23,7 @@ use super::button::{
 use super::card::card;
 use super::chip::chip;
 use super::comment_composer::task_button;
+use super::finding_view::{finding_chips, talk};
 use super::icon::{Icon, sized_icon};
 use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, shimmer_text, slide_in, turn_to};
@@ -193,22 +194,69 @@ impl ThreadElement {
         }
     }
 
-    /// What sets the thread apart, each in its state's tone: outdated, resolved, by a bot.
+    /// What sets the thread apart, each in its state's tone: the AI findings it was made from, outdated,
+    /// resolved, by a bot.
     fn marks(&self, colors: &Colors) -> Vec<gpui::Div> {
         let thread = &self.view.thread;
         let is_bot = thread
             .comments
             .first()
             .is_some_and(|comment| comment.is_bot);
-        [
-            (thread.is_outdated, Tone::Warning, "Outdated"),
-            (thread.is_resolved, Tone::Success, "Resolved"),
-            (is_bot, Tone::Neutral, "Bot"),
-        ]
-        .into_iter()
-        .filter(|(is_on, _, _)| *is_on)
-        .map(|(_, tone, label)| chip(colors, tone).child(label))
-        .collect()
+        let from_findings = self
+            .view
+            .from_findings
+            .iter()
+            .flat_map(|used| finding_chips(colors, used.severity));
+        from_findings
+            .chain(
+                [
+                    (thread.is_outdated, Tone::Warning, "Outdated"),
+                    (thread.is_resolved, Tone::Success, "Resolved"),
+                    (is_bot, Tone::Neutral, "Bot"),
+                ]
+                .into_iter()
+                .filter(|(is_on, _, _)| *is_on)
+                .map(|(_, tone, label)| chip(colors, tone).child(label)),
+            )
+            .collect()
+    }
+
+    /// What was said about each finding the thread was made from before it was used: the fix asked for
+    /// and the Ask why talk.
+    fn finding_history(&self, colors: &Colors) -> Option<gpui::Div> {
+        let told: Vec<_> = self
+            .view
+            .from_findings
+            .iter()
+            .filter(|used| used.fix.is_some() || !used.talk.is_empty())
+            .collect();
+        if self.view.is_folded || told.is_empty() {
+            return None;
+        }
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1p5()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child("Before it was used, on the AI finding:"),
+                )
+                .children(told.into_iter().flat_map(|used| {
+                    used.fix
+                        .as_ref()
+                        .map(|line| {
+                            div()
+                                .text_sm()
+                                .text_color(colors.muted_text)
+                                .child(line.to_string())
+                        })
+                        .into_iter()
+                        .chain(talk(colors, &used.id, &used.talk))
+                })),
+        )
     }
 
     fn where_it_is(&self) -> String {
@@ -959,6 +1007,7 @@ impl RenderOnce for ThreadElement {
             .first()
             .map_or_default(ThreadComment::shown_author);
         let marks = self.marks(&colors);
+        let finding_history = self.finding_history(&colors);
         let summary = format!(
             "{}{} · {first_author} · {comment_count} comment{}",
             if marks.is_empty() { "Thread · " } else { "" },
@@ -1230,6 +1279,7 @@ impl RenderOnce for ThreadElement {
                         before_block(&colors, "When commented, the lines were:", &followed.before)
                     }),
             )
+            .children(finding_history)
             .children(comments)
             .children(self.view.hand_off_line.as_ref().map(|line| {
                 let button = self.view.hand_off_button.map(|button| {

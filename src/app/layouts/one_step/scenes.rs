@@ -103,10 +103,11 @@ enum Scene {
     AiReviewFixRequests,
     AiReviewAskWhy,
     AiReviewOutdated,
+    AiReviewThreadFromFinding,
 }
 
 impl Scene {
-    const ALL: [Self; 65] = [
+    const ALL: [Self; 66] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -172,6 +173,7 @@ impl Scene {
         Self::AiReviewFixRequests,
         Self::AiReviewAskWhy,
         Self::AiReviewOutdated,
+        Self::AiReviewThreadFromFinding,
     ];
 
     fn file_name(self) -> &'static str {
@@ -241,6 +243,7 @@ impl Scene {
             Self::AiReviewFixRequests => "85-ai-review-fix-requests",
             Self::AiReviewAskWhy => "86-ai-review-ask-why",
             Self::AiReviewOutdated => "87-ai-review-outdated",
+            Self::AiReviewThreadFromFinding => "88-ai-review-thread-from-finding",
         }
     }
 
@@ -841,6 +844,18 @@ impl OneStepLayout {
                     review.stage_fix_requests();
                 }
             }),
+            Scene::AiReviewThreadFromFinding => self.change_review(cx, |review| {
+                review.go_forward();
+                let first_line = review
+                    .page()
+                    .lines()
+                    .next()
+                    .map(|line| line.location.clone());
+                if let Some(at) = first_line {
+                    review.ai_review_is(AiReview::staged_on(&at.path, at.line));
+                    review.stage_thread_from_finding();
+                }
+            }),
             Scene::AiReviewOutdated => self.change_review(cx, |review| {
                 review.go_forward();
                 let first_line = review
@@ -1098,6 +1113,11 @@ impl OneStepLayout {
                     review.go_to_summary();
                 });
             }
+            Scene::AiReviewThreadFromFinding => self.change_review(cx, |review| {
+                review.unstage_thread_from_finding();
+                review.ai_review_is(AiReview::NotRun);
+                review.go_to_summary();
+            }),
             Scene::AiReviewFixRequests => self.change_review(cx, |review| {
                 review.unstage_fix_requests();
                 review.ai_review_is(AiReview::NotRun);

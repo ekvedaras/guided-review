@@ -516,6 +516,15 @@ impl ReviewState {
         self.viewer.finding_decisions.record(finding, fate);
     }
 
+    pub(super) fn finding_used(&mut self, finding: Finding, thread: Option<ThreadId>) {
+        self.viewer.finding_decisions.record_used(finding, thread);
+    }
+
+    #[cfg(feature = "snapshots")]
+    pub(super) fn forget_findings_used_in(&mut self, thread: &ThreadId) {
+        self.viewer.finding_decisions.forget_used_in(thread);
+    }
+
     pub(super) fn restore_finding(&mut self, id: &FindingId) -> Option<Finding> {
         self.viewer.finding_decisions.restore(id)
     }
@@ -828,7 +837,23 @@ impl ReviewState {
                 place,
                 body: String::new(),
                 written_at: head.cloned(),
+                from_findings: Vec::new(),
             });
+        }
+    }
+
+    /// The draft at `place` carries the finding's text, so the finding goes once it is sent.
+    pub(super) fn draft_carries(&mut self, place: &CommentPlace, finding: Finding) {
+        if let Some(draft) = self
+            .typed
+            .comment_drafts
+            .iter_mut()
+            .find(|d| &d.place == place)
+        {
+            draft
+                .from_findings
+                .retain(|carried| carried.id != finding.id);
+            draft.from_findings.push(finding);
         }
     }
 

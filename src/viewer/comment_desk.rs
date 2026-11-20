@@ -20,6 +20,7 @@ use super::thread_actions::{
 };
 use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
+use crate::findings::Finding;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Everything the reviewer writes to GitHub: the drag that opens a comment box, every text box
@@ -229,7 +230,7 @@ impl CommentDesk {
         text: &str,
     ) -> Result<CommentPlace, CommentRefusal> {
         let place = CommentPlace::of(selected);
-        self.add_text_at(state, &place, head, text)?;
+        self.add_text_at(state, &place, head, text, &[])?;
         Ok(place)
     }
 
@@ -240,8 +241,9 @@ impl CommentDesk {
         place: &CommentPlace,
         head: &Sha,
         text: &str,
+        from_findings: &[Finding],
     ) -> Result<(), CommentRefusal> {
-        self.open_draft(state, place, head, Some(text))
+        self.open_draft(state, place, head, Some((text, from_findings)))
     }
 
     /// The box is open in memory even when its save fails; the reviewer learns its text is not
@@ -251,13 +253,16 @@ impl CommentDesk {
         state: &mut SavedState,
         place: &CommentPlace,
         head: &Sha,
-        appended: Option<&str>,
+        appended: Option<(&str, &[Finding])>,
     ) -> Result<(), CommentRefusal> {
         state
             .record(|state| {
                 state.open_draft(place.clone(), Some(head));
-                if let Some(text) = appended {
+                if let Some((text, from_findings)) = appended {
                     append_to_draft(state, place, text);
+                    for finding in from_findings {
+                        state.draft_carries(place, finding.clone());
+                    }
                 }
             })
             .map_err(|error| CommentRefusal::NoAccess(format!("{error:#}")))?;
@@ -802,6 +807,9 @@ fn keep_as_draft(state: &mut ReviewState, request: &CommentRequest) {
         state.drop_queued(place);
         state.open_draft(place.clone(), request.draft.written_at.as_ref());
         state.write_draft(place, &request.draft.body);
+        for finding in &request.draft.from_findings {
+            state.draft_carries(place, finding.clone());
+        }
     }
 }
 

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::file_path::FilePath;
-use crate::findings::Anchor;
+use crate::findings::{Anchor, Finding};
 use crate::line_number::{InvalidLineNumber, LineNumber};
 use crate::pull_request::{PullRequestUrl, Sha};
 
@@ -155,6 +155,9 @@ pub struct CommentDraft {
         deserialize_with = "head_or_none"
     )]
     pub written_at: Option<Sha>,
+    /// The findings of the AI review whose text Use or Use as is put in it: they go once it is sent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub from_findings: Vec<Finding>,
 }
 
 /// Files from before `written_at` was optional hold an empty text for "unknown".

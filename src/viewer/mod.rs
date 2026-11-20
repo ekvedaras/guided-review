@@ -92,6 +92,7 @@ mod toasts;
 mod tour_agent;
 mod tour_writing;
 mod typing_save;
+mod used_findings;
 mod viewed_sync;
 mod word_diff;
 mod work_agenda;
@@ -260,6 +261,7 @@ pub use tour_agent::{
 };
 pub use tour_writing::{TourWriting, WritingStage};
 pub use typing_save::TypingSave;
+pub use used_findings::UsedFinding;
 pub use viewed_sync::{SyncOutcome, SyncRequest};
 pub use work_agenda::{
     AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, PULL_OF_BRANCH_RETRY, PUSH_DEBOUNCE,

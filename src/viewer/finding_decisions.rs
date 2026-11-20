@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::findings::{Finding, FindingId};
 
+use super::threads::ThreadId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fate {
     Used,
@@ -19,6 +21,9 @@ pub enum Fate {
 pub struct FindingDecision {
     pub finding: Finding,
     pub fate: Fate,
+    /// The thread the comment that used it became, when GitHub or the local threads showed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<ThreadId>,
 }
 
 /// Kept whole, with the finding's text, so a later run's report of the same thing is known again.
@@ -56,7 +61,31 @@ impl FindingDecisions {
 
     pub fn record(&mut self, finding: Finding, fate: Fate) {
         self.0.retain(|decision| decision.finding.id != finding.id);
-        self.0.push(FindingDecision { finding, fate });
+        self.0.push(FindingDecision {
+            finding,
+            fate,
+            thread: None,
+        });
+    }
+
+    /// Used in a comment that became `thread`; `None` while it waits in the queue or when its thread was not read.
+    pub fn record_used(&mut self, finding: Finding, thread: Option<ThreadId>) {
+        self.0.retain(|decision| decision.finding.id != finding.id);
+        self.0.push(FindingDecision {
+            finding,
+            fate: Fate::Used,
+            thread,
+        });
+    }
+
+    /// The findings whose comment became `thread`, in the order they were used.
+    pub fn used_in<'a>(&'a self, thread: &'a ThreadId) -> impl Iterator<Item = &'a Finding> {
+        self.0
+            .iter()
+            .filter(move |decision| {
+                decision.fate == Fate::Used && decision.thread.as_ref() == Some(thread)
+            })
+            .map(|decision| &decision.finding)
     }
 
     /// The dismissed finding is taken back: it is no longer decided, so it is not told to a later run,
@@ -68,6 +97,13 @@ impl FindingDecisions {
             .find(|decision| decision.fate == Fate::Dismissed && decision.finding.id == *id)?;
         decision.fate = Fate::Reopened;
         Some(decision.finding.clone())
+    }
+
+    /// A snapshot scene's findings used in `thread`, taken back when the scene ends.
+    #[cfg(feature = "snapshots")]
+    pub(super) fn forget_used_in(&mut self, thread: &ThreadId) {
+        self.0
+            .retain(|decision| decision.thread.as_ref() != Some(thread));
     }
 
     pub fn dismissed(&self) -> impl Iterator<Item = &Finding> {

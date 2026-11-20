@@ -91,6 +91,7 @@ use super::thread_actions::{
 };
 use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement, ThreadWork};
 use super::typing_save::TypingSave;
+use super::used_findings::{FindingsOfThreads, thread_made_of};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
 use crate::app_folders::AppFolders;
@@ -332,14 +333,14 @@ pub struct ReviewCore {
     steps_in_reading_order: Vec<Screen>,
     has_uncovered_changes: bool,
     pulled_threads: Vec<ReviewThread>,
+    /// A snapshot scene's threads, kept over the threads GitHub answers with while the scene shows.
+    #[cfg(feature = "snapshots")]
+    staged_threads: Vec<ReviewThread>,
     followed_lines: BTreeMap<ThreadId, FollowedLines>,
     threads: ThreadPlacement,
     findings: FindingPlacement,
     /// The finding the reviewer was last taken to, so the next one comes after it.
     finding_cursor: Option<FindingId>,
-    /// Findings whose text sits in a comment box: each is decided when that comment is sent, not
-    /// when the box opens, so closing the box unsent loses nothing.
-    findings_in_boxes: Vec<(CommentPlace, Finding)>,
     /// Threads fold by default when resolved, outdated or started by a bot; these are the ones the reviewer flipped.
     thread_fold_flipped: BTreeSet<ThreadId>,
     screen: Screen,
@@ -677,11 +678,12 @@ impl ReviewCore {
             steps_in_reading_order,
             has_uncovered_changes,
             pulled_threads: Vec::new(),
+            #[cfg(feature = "snapshots")]
+            staged_threads: Vec::new(),
             followed_lines: BTreeMap::new(),
             threads: ThreadPlacement::default(),
             findings: FindingPlacement::default(),
             finding_cursor: None,
-            findings_in_boxes: Vec::new(),
             thread_fold_flipped: BTreeSet::new(),
             screen,
             state: SavedState::new(state, state_file),
@@ -1085,6 +1087,7 @@ impl ReviewCore {
             self.display_options.files_at_head(),
             &self.thread_work(),
             self.state.hand_offs(),
+            FindingsOfThreads::of(&self.state),
         );
         self.mark_repin_status(&mut page.pieces);
         if let Some((read_head, since_files)) = self.changes_since_file_read(path) {
@@ -1343,6 +1346,7 @@ impl ReviewCore {
             self.display_options.files_at_head(),
             &self.thread_work(),
             self.state.hand_offs(),
+            FindingsOfThreads::of(&self.state),
         );
         if let Some(record) = self.repin_record() {
             self.mark_repin_status(&mut page.pieces);
@@ -1715,6 +1719,7 @@ impl ReviewCore {
                 self.display_options.files_at_head(),
                 &self.thread_work(),
                 self.state.hand_offs(),
+                FindingsOfThreads::of(&self.state),
             );
             page
         })
@@ -1759,6 +1764,9 @@ impl ReviewCore {
         self.clear_problem(ProblemKind::ThreadsNotRead);
         self.github_answered(Affected::Comments);
         self.pulled_threads = threads.to_vec();
+        #[cfg(feature = "snapshots")]
+        self.pulled_threads
+            .extend(self.staged_threads.iter().cloned());
         self.place_threads();
     }
 
@@ -2005,9 +2013,7 @@ impl ReviewCore {
     }
 
     pub fn discard(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
-        let discarded = self.comment_desk.discard(&mut self.state, text_box);
-        self.forget_findings_of_gone_boxes();
-        discarded
+        self.comment_desk.discard(&mut self.state, text_box)
     }
 
     /// Whatever came of it, the next hand-off may go now.
@@ -2309,8 +2315,17 @@ impl ReviewCore {
     }
 
     fn land_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
-        let sent_from = outcome.request.draft.place.clone();
+        let from_findings = outcome.request.draft.from_findings.clone();
         let threads = outcome.threads.clone();
+        let made = if from_findings.is_empty() {
+            None
+        } else {
+            thread_made_of(
+                &outcome.request.draft,
+                threads.as_ref(),
+                &self.pulled_threads,
+            )
+        };
         let hand_offs_before = self.state.hand_offs().all().len();
         let code = self.code_commented_on(&outcome);
         let result = self.comment_desk.apply_comment(
@@ -2320,8 +2335,10 @@ impl ReviewCore {
         );
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
-        if matches!(result, Ok(CommentResult::Sent | CommentResult::Queued(_))) {
-            self.decide_findings_sent_from(&sent_from)?;
+        match result {
+            Ok(CommentResult::Sent) => self.decide_used(from_findings, made.as_ref())?,
+            Ok(CommentResult::Queued(_)) => self.decide_used(from_findings, None)?,
+            _ => {}
         }
         result
     }

@@ -5,16 +5,18 @@ use crate::support::fake_ports::GitHubFault;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
 use crate::support::{FixtureRepo, file_path, line};
 use guided_review::findings::FindingId;
+use guided_review::findings::Severity;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
 use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentDraft, CommentPlace, CommentRefusal, CommentResult, FindingRefusal, LineLocation, Page,
-    PageRow, Review, SendMode, Side,
+    CommentDraft, CommentId, CommentPlace, CommentRefusal, CommentResult, FindingRefusal,
+    LineLocation, Page, PageRow, Review, ReviewThread, SendMode, Side, ThreadComment, ThreadId,
 };
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -136,6 +138,128 @@ fn using_a_finding_puts_its_text_in_a_comment_box_on_its_lines_and_the_finding_g
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert_eq!(shown_findings(review.page()), ["b"]);
     assert_eq!(shown_findings(shop.open().page()), ["b"]);
+}
+
+#[test]
+fn a_finding_used_in_a_box_goes_when_its_comment_is_sent_after_the_review_opens_again() {
+    let shop = Shop::with_findings(&[on_line_2("a", "Say it twice."), on_line_2("b", "Two.")]);
+    let sent = SentLog::default();
+    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    let place = shop.open().use_finding(&id("a")).unwrap();
+    let mut reopened = shop.open();
+
+    let result = reopened.send_comment(&place, SendMode::AddToReview, &github);
+
+    assert_eq!(result.unwrap(), Some(CommentResult::Sent));
+    assert_eq!(shown_findings(reopened.page()), ["b"]);
+    assert_eq!(shown_findings(shop.open().page()), ["b"]);
+}
+
+fn thread_on_line_2(id: &str, body: &str) -> ReviewThread {
+    ReviewThread {
+        id: ThreadId::new(id),
+        is_resolved: false,
+        is_outdated: false,
+        path: file_path("README.md"),
+        line: Some(line(2)),
+        start_line: None,
+        side: Side::Head,
+        is_file_comment: false,
+        original_line: Some(line(2)),
+        original_start_line: None,
+        original_commit: None,
+        comments: vec![ThreadComment {
+            avatar_url: None,
+            id: CommentId::new(&format!("{id}-1")),
+            author: "me".into(),
+            is_bot: false,
+            by_agent: None,
+            body: body.into(),
+            url: String::new(),
+            reactions: Vec::new(),
+            by_viewer: true,
+        }],
+    }
+}
+
+/// The findings each thread of the page was made from: `["a"]` per thread.
+fn findings_of_threads(page: &Page) -> Vec<Vec<String>> {
+    page.rows()
+        .iter()
+        .filter_map(|row| match row {
+            PageRow::Thread { view, .. } => Some(
+                view.from_findings
+                    .iter()
+                    .map(|used| used.id.to_string())
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_thread_a_used_finding_became_names_the_finding_and_keeps_what_was_said_about_it() {
+    let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
+    let mut review = shop.open();
+    let sent = SentLog::default();
+    let mut github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    github.threads = vec![thread_on_line_2("T1", "Say it twice.")];
+    review.fix_findings(&[id("a")]);
+    let place = review.use_finding(&id("a")).unwrap();
+
+    review
+        .send_comment(&place, SendMode::AddToReview, &github)
+        .unwrap();
+
+    assert_eq!(findings_of_threads(review.page()), [["a"]]);
+    let mut reopened = shop.open();
+    reopened.set_threads(&github.threads);
+    let thread = reopened
+        .page()
+        .rows()
+        .iter()
+        .find_map(|row| match row {
+            PageRow::Thread { view, .. } => Some(Arc::clone(view)),
+            _ => None,
+        })
+        .unwrap();
+    let used = &thread.from_findings[0];
+    assert_eq!(used.severity, Severity::ShouldFix);
+    assert_eq!(used.talk[0].body, "Fix requested");
+    assert!(used.fix.is_some());
+}
+
+#[test]
+fn a_finding_used_as_is_whose_send_waits_in_the_queue_is_carried_by_the_queued_comment_into_its_thread()
+ {
+    let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
+    let mut review = shop.open();
+    let sent = SentLog::default();
+    let mut github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    github.threads = vec![thread_on_line_2("T1", "🤖 Say it twice.")];
+    github.inject(GitHubFault::ConnectionLost);
+
+    let request = review
+        .use_finding_as_is(&id("a"), SendMode::AddToReview)
+        .unwrap();
+    let queued = review.apply_comment(request.run(&github)).unwrap();
+
+    assert!(matches!(queued, CommentResult::Queued(_)));
+    let carried: Vec<String> = review.queued_comments()[0]
+        .draft
+        .from_findings
+        .iter()
+        .map(|finding| finding.id.to_string())
+        .collect();
+    assert_eq!(carried, ["a"]);
+    assert_eq!(shown_findings(review.page()), Vec::<String>::new());
+
+    github.heal(&GitHubFault::ConnectionLost);
+    let resent = review.queued_comment_request().unwrap().run(&github);
+    review.apply_comment(resent).unwrap();
+
+    assert_eq!(findings_of_threads(review.page()), [["a"]]);
 }
 
 #[test]
@@ -358,6 +482,8 @@ fn using_a_finding_as_is_in_a_local_review_adds_it_to_the_tasks() {
 
     assert_eq!(review.queued_tasks(), 1);
     assert_eq!(review.ai_review().counts().total(), 0);
+    review.go_forward();
+    assert_eq!(findings_of_threads(review.page()), [["a"]]);
 }
 
 #[test]

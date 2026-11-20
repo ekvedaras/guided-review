@@ -18,7 +18,7 @@ use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 use super::thread_view::before_block;
 use crate::findings::{FindingId, Severity};
-use crate::viewer::{FindingRow, WhyAuthor};
+use crate::viewer::{FindingRow, WhyAuthor, WhyMessage};
 
 pub fn tone_of(severity: Severity) -> Tone {
     match severity {
@@ -26,6 +26,44 @@ pub fn tone_of(severity: Severity) -> Tone {
         Severity::ShouldFix => Tone::Warning,
         Severity::Nit => Tone::Neutral,
     }
+}
+
+/// The marks of a finding, on its card and on the thread or queued comment made from it.
+pub fn finding_chips(colors: &Colors, severity: Severity) -> [Div; 2] {
+    [
+        chip(colors, Tone::Accent).child("AI"),
+        chip(colors, tone_of(severity)).child(severity.to_string()),
+    ]
+}
+
+/// Ask why and the fix requests on a finding, oldest first, each under who said it.
+pub fn talk<'a>(
+    colors: &'a Colors,
+    id: &'a FindingId,
+    said: &'a [WhyMessage],
+) -> impl Iterator<Item = Div> + 'a {
+    said.iter().enumerate().map(move |(at, said)| {
+        let who = match said.author {
+            WhyAuthor::Reviewer => "You",
+            WhyAuthor::ReviewAgent => "Review agent",
+            WhyAuthor::TourAgent => "Tour agent",
+        };
+        div()
+            .pl_3()
+            .border_l_2()
+            .border_color(colors.border)
+            .flex()
+            .flex_col()
+            .gap_0p5()
+            .child(div().text_xs().text_color(colors.muted_text).child(who))
+            .child(
+                MarkdownView::new(
+                    format!("finding-{id}-why-{at}"),
+                    parsed_markdown(&said.body),
+                )
+                .into_element(),
+            )
+    })
 }
 
 /// `actions` are the buttons that decide the finding, which the layout makes because their clicks are its.
@@ -48,8 +86,7 @@ pub fn finding_card(
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(chip(colors, Tone::Accent).child("AI"))
-                .child(chip(colors, tone_of(row.severity)).child(row.severity.to_string()))
+                .children(finding_chips(colors, row.severity))
                 .children(
                     row.outdated
                         .as_ref()
@@ -71,28 +108,7 @@ pub fn finding_card(
                 .text_color(colors.muted_text)
                 .child(line.to_string())
         }))
-        .children(row.thread.iter().enumerate().map(|(at, said)| {
-            let who = match said.author {
-                WhyAuthor::Reviewer => "You",
-                WhyAuthor::ReviewAgent => "Review agent",
-                WhyAuthor::TourAgent => "Tour agent",
-            };
-            div()
-                .pl_3()
-                .border_l_2()
-                .border_color(colors.border)
-                .flex()
-                .flex_col()
-                .gap_0p5()
-                .child(div().text_xs().text_color(colors.muted_text).child(who))
-                .child(
-                    MarkdownView::new(
-                        format!("finding-{}-why-{at}", row.id),
-                        parsed_markdown(&said.body),
-                    )
-                    .into_element(),
-                )
-        }))
+        .children(talk(colors, &row.id, &row.thread))
         .children(row.asked.as_ref().map(|line| {
             div()
                 .text_sm()

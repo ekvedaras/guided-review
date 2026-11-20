@@ -512,6 +512,7 @@ mod tests {
             agent_is_working: false,
             followed: None,
             hand_off_button: None,
+            from_findings: Vec::new(),
         }
     }
 

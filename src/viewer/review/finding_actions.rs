@@ -10,6 +10,7 @@ use crate::viewer::finding_threads::WhyAuthor;
 use crate::viewer::findings_list::{FindingLine, FindingsList};
 use crate::viewer::fix_requests::{FixReply, FixState};
 use crate::viewer::hand_offs::Audience;
+use crate::viewer::threads::ThreadId;
 use crate::viewer::work_agenda::WorkKind;
 
 /// Starts a comment made from a finding the reviewer did not edit.
@@ -72,32 +73,36 @@ impl ReviewCore {
         let finding = self.open_finding(id)?;
         let place = self.comment_place_of(&finding.anchor)?;
         self.comment_desk
-            .add_text_at(&mut self.state, &place, &self.head, &finding.body)
+            .add_text_at(
+                &mut self.state,
+                &place,
+                &self.head,
+                &finding.body,
+                std::slice::from_ref(&finding),
+            )
             .map_err(FindingRefusal::Comment)?;
-        self.findings_in_boxes
-            .retain(|(_, boxed)| boxed.id != finding.id);
-        self.findings_in_boxes.push((place.clone(), finding));
         Ok(place)
     }
 
-    /// The comment sent from `place` closes the findings whose text it carries.
-    pub(super) fn decide_findings_sent_from(&mut self, place: &CommentPlace) -> anyhow::Result<()> {
-        let (sent, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.findings_in_boxes)
-            .into_iter()
-            .partition(|(boxed_at, _)| boxed_at == place);
-        self.findings_in_boxes = waiting;
-        for (_, finding) in sent {
-            self.record_decision(finding, Fate::Used)
-                .map_err(|refusal| anyhow::anyhow!("{refusal}"))?;
+    /// A sent comment closes the findings whose text it carries, linked to the thread it became.
+    pub(super) fn decide_used(
+        &mut self,
+        findings: Vec<Finding>,
+        thread: Option<&ThreadId>,
+    ) -> anyhow::Result<()> {
+        let ids: Vec<FindingId> = findings.iter().map(|finding| finding.id.clone()).collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.state.record(|state| {
+            for finding in findings {
+                state.finding_used(finding, thread.cloned());
+            }
+        })?;
+        for id in &ids {
+            self.close_finding(id);
         }
         Ok(())
-    }
-
-    /// A box that was discarded carries no finding any more.
-    pub(super) fn forget_findings_of_gone_boxes(&mut self) {
-        let state = &self.state;
-        self.findings_in_boxes
-            .retain(|(place, _)| state.draft_at(place).is_some());
     }
 
     /// The finding, marked as AI, goes straight to the send action, with no box to edit it in. It
@@ -131,17 +136,10 @@ impl ReviewCore {
             .collect::<Vec<_>>()
             .join("\n\n");
         self.comment_desk
-            .add_text_at(&mut self.state, place, &self.head, &text)
+            .add_text_at(&mut self.state, place, &self.head, &text, findings)
             .map_err(FindingRefusal::Comment)?;
-        let request = self
-            .start_sending(place, mode, Audience::Author)
-            .ok_or(FindingRefusal::NotThere)?;
-        self.findings_in_boxes.extend(
-            findings
-                .iter()
-                .map(|finding| (place.clone(), finding.clone())),
-        );
-        Ok(request)
+        self.start_sending(place, mode, Audience::Author)
+            .ok_or(FindingRefusal::NotThere)
     }
 
     /// Sends each finding to the tour agent as one message to fix, in reading order.

@@ -15,6 +15,7 @@ use super::outdated_lines::FollowedLines;
 use super::reactions::{Reaction, ReactionCount};
 use super::review::StepId;
 use super::step_page::{LineLocation, PieceDiff, Side};
+use super::used_findings::{FindingsOfThreads, UsedFinding};
 use crate::line_number::LineNumber;
 
 /// GitHub's node id of a review thread.
@@ -196,6 +197,8 @@ pub struct ThreadView {
     pub hand_off_button: Option<HandOffButton>,
     /// An outdated thread's lines, followed to the head, and what they were.
     pub followed: Option<FollowedLines>,
+    /// The findings of the AI review its comment was made from.
+    pub from_findings: Vec<UsedFinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -349,6 +352,7 @@ pub(super) fn views(
     files_at_head: &FilesAtHead,
     work: &ThreadWork<'_>,
     hand_offs: &HandOffs,
+    findings: FindingsOfThreads<'_>,
 ) -> Vec<ThreadView> {
     let ThreadWork {
         reply_drafts,
@@ -381,6 +385,7 @@ pub(super) fn views(
             agent_is_working: hand_offs.is_working_on(&thread.id),
             hand_off_button: hand_offs.button_in(&thread.id),
             thread: without_working_on_it(thread, hand_offs),
+            from_findings: findings.of_thread(&thread.id),
         })
         .collect()
 }
