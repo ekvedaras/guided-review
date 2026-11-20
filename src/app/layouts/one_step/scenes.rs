@@ -978,7 +978,7 @@ impl OneStepLayout {
                 if let Some(path) = self.go_to_first_markdown_box(cx) {
                     self.fold_box(&path, cx);
                     if let Some(row) = self.row_of_box(&path, cx) {
-                        self.scroll_to_row(row);
+                        self.scroll_to_row(row.saturating_sub(2));
                     }
                 }
             }
