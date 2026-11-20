@@ -140,6 +140,15 @@ impl RenderOnce for CommentComposer {
             let (on_type, on_stop) = (Rc::clone(&actions.on_type), Rc::clone(&actions.on_stop));
             let on_ask = Rc::clone(&actions.on_ask_agent);
             let asks = self.capabilities.ask_agent;
+            let posts_now = self.capabilities.comment_now && sending.on_github();
+            let on_comment_now: OnCompose = match sending.tasks().get(1) {
+                Some(&mode) => {
+                    let on_send_task = Rc::clone(&actions.on_send_task);
+                    Rc::new(move |window, cx| on_send_task(mode, window, cx))
+                }
+                None => Rc::clone(&actions.on_comment_now),
+            };
+            let on_ask_now = Rc::clone(&actions.on_ask_agent_now);
             TextBox::new(
                 SharedString::from(format!("{id}-text")),
                 &self.focus,
@@ -151,6 +160,12 @@ impl RenderOnce for CommentComposer {
             .on_cancel(move |window, cx| on_stop(window, cx))
             .on_submit_to_agent(asks && sending.on_github(), move |window, cx| {
                 on_ask(window, cx);
+            })
+            .on_submit_now(posts_now || sending.tasks().len() > 1, move |window, cx| {
+                on_comment_now(window, cx);
+            })
+            .on_submit_to_agent_now(asks && posts_now, move |window, cx| {
+                on_ask_now(window, cx);
             })
             .into_any_element()
         } else {

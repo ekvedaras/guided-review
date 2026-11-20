@@ -536,6 +536,10 @@ impl ThreadElement {
                 (ui.clone(), Rc::clone(on_action), thread_id.clone());
             let (ask_ui, ask_action, asked_thread) =
                 (ui.clone(), Rc::clone(&on_action), thread_id.clone());
+            let (now_ui, now_action, now_thread) =
+                (ui.clone(), Rc::clone(&on_action), thread_id.clone());
+            let (ask_now_ui, ask_now_action, ask_now_thread) =
+                (ui.clone(), Rc::clone(&on_action), thread_id.clone());
             let (on_edit, on_cancel) = (Rc::clone(on_reply_draft), Rc::clone(on_reply_draft));
             TextBox::new(
                 SharedString::from(format!("reply-text-{thread_id}")),
@@ -561,6 +565,26 @@ impl ThreadElement {
                     cx,
                 );
             })
+            .on_submit_now(can_reply_now || sending.tasks().len() > 1, move |_, cx| {
+                let (mode, audience) = match sending.tasks().get(1) {
+                    Some(&task) => (task, Audience::Agent),
+                    None => (SendMode::CommentNow, Audience::Author),
+                };
+                send_reply(&now_ui, &now_action, &now_thread, mode, audience, cx);
+            })
+            .on_submit_to_agent_now(
+                can_ask_agent && can_reply_now && sending.on_github(),
+                move |_, cx| {
+                    send_reply(
+                        &ask_now_ui,
+                        &ask_now_action,
+                        &ask_now_thread,
+                        SendMode::CommentNow,
+                        Audience::Agent,
+                        cx,
+                    );
+                },
+            )
             .on_cancel(move |_, cx| on_cancel(ReplyDraftChange::Discard, cx))
             .into_any_element()
         };
