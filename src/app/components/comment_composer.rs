@@ -8,11 +8,12 @@ use gpui::{
 
 use crate::viewer::{
     BoxState, CommentDraft, CommentPlace, CommentProblem, PrimaryCommentAction, QueuedComment,
-    SendMode, Sending,
+    SendButton, SendMode, Sending,
 };
 
 use super::button::{
-    ButtonKind, ButtonSize, button as styled_button, button_icon, icon_label_button, joined,
+    ButtonKind, ButtonSize, button as styled_button, button_icon, chord_keys, icon_label_button,
+    joined,
 };
 use super::card::card;
 use super::chip::callout;
@@ -122,7 +123,8 @@ fn button(
 impl RenderOnce for CommentComposer {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
-        let chosen = crate::app::keymap::keymap(cx).primary_comment_action();
+        let keymap = crate::app::keymap::shared_keymap(cx);
+        let chosen = keymap.primary_comment_action();
         let place = &self.draft.place;
         let id = SharedString::from(match place {
             CommentPlace::File(path) => format!("composer-{path}-file"),
@@ -195,6 +197,10 @@ impl RenderOnce for CommentComposer {
                         } else {
                             ButtonKind::Secondary
                         };
+                        let position = sending.tasks().iter().position(|task| *task == mode);
+                        let keys = position.and_then(|position| {
+                            keymap.send_button_chord(SendButton::Task(position), true)
+                        });
                         icon_label_button(
                             &colors,
                             SharedString::from(format!("send-task-{index}")),
@@ -203,6 +209,7 @@ impl RenderOnce for CommentComposer {
                             icon,
                             label,
                         )
+                        .child(chord_keys(&colors, kind, keys))
                         .on_click(move |_, window, cx| on_send_task(mode, window, cx))
                     });
             div()
@@ -234,14 +241,24 @@ impl RenderOnce for CommentComposer {
         let buttons = (self.state != BoxState::Sending && sending.on_github()).then(|| {
             let capabilities = self.capabilities;
             let ask_agent = capabilities.ask_agent.then(|| {
-                let mut parts = vec![button(
-                    &colors,
-                    "ask-agent",
-                    Icon::Sparkles,
-                    "Ask agent",
-                    ButtonKind::Joined,
-                    actions.on_ask_agent,
-                )];
+                let keys_of = |button| {
+                    chord_keys(
+                        &colors,
+                        ButtonKind::Joined,
+                        keymap.send_button_chord(button, capabilities.comment_now),
+                    )
+                };
+                let mut parts = vec![
+                    button(
+                        &colors,
+                        "ask-agent",
+                        Icon::Sparkles,
+                        "Ask agent",
+                        ButtonKind::Joined,
+                        actions.on_ask_agent,
+                    )
+                    .child(keys_of(SendButton::AskAgent)),
+                ];
                 if capabilities.comment_now {
                     let on_ask_now = actions.on_ask_agent_now;
                     parts.push(
@@ -258,6 +275,7 @@ impl RenderOnce for CommentComposer {
                             Icon::Zap,
                         ))
                         .child("now")
+                        .child(keys_of(SendButton::AskAgentNow))
                         .tooltip(tooltip(|_| {
                             "Ask agent now: posts the comment at once".into()
                         }))
@@ -275,6 +293,13 @@ impl RenderOnce for CommentComposer {
                     ButtonKind::Secondary
                 }
             };
+            let send_keys = |button, action| {
+                chord_keys(
+                    &colors,
+                    kind_of(action),
+                    keymap.send_button_chord(button, capabilities.comment_now),
+                )
+            };
             let add_button = styled_button(
                 &colors,
                 "add-to-review",
@@ -282,6 +307,10 @@ impl RenderOnce for CommentComposer {
                 ButtonSize::Regular,
             )
             .child("Add to review")
+            .child(send_keys(
+                SendButton::AddToReview,
+                PrimaryCommentAction::AddToReview,
+            ))
             .on_click(move |_, window, cx| on_add(window, cx))
             .into_any_element();
             let now_button = capabilities.comment_now.then(|| {
@@ -293,6 +322,10 @@ impl RenderOnce for CommentComposer {
                     kind_of(PrimaryCommentAction::CommentNow),
                     actions.on_comment_now,
                 )
+                .child(send_keys(
+                    SendButton::CommentNow,
+                    PrimaryCommentAction::CommentNow,
+                ))
                 .into_any_element()
             });
             let (first, second) = if primary == PrimaryCommentAction::CommentNow {

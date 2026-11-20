@@ -24,6 +24,27 @@ impl Keymap {
         self.primary_comment_action
     }
 
+    /// The key a send button of a comment or reply box shows: the first of the command that the
+    /// button's action runs when typed. Where Comment now is not offered, Add to review (and Ask
+    /// agent) is the one send action left, so it shows the key the primary action would have taken.
+    pub fn send_button_chord(
+        &self,
+        button: SendButton,
+        comment_now_is_offered: bool,
+    ) -> Option<Chord> {
+        let falls_back = !comment_now_is_offered
+            && self.primary_comment_action == PrimaryCommentAction::CommentNow;
+        let command = match (button, falls_back) {
+            (SendButton::AddToReview, false) | (SendButton::Task(0), _) => Command::AddToReview,
+            (SendButton::AddToReview, true) | (SendButton::CommentNow | SendButton::Task(_), _) => {
+                Command::CommentNow
+            }
+            (SendButton::AskAgent, false) => Command::AskAgent,
+            (SendButton::AskAgent, true) | (SendButton::AskAgentNow, _) => Command::AskAgentNow,
+        };
+        self.first_chord(command)
+    }
+
     pub fn first_chord(&self, command: Command) -> Option<Chord> {
         self.chords(command).first().copied()
     }
@@ -51,6 +72,17 @@ impl Keymap {
         }
         clashes
     }
+}
+
+/// A send button of a comment or reply box. A local review's task buttons are numbered in the order
+/// of its `Sending::tasks`, which the first two commands (Add to review, Comment now) stand for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendButton {
+    AddToReview,
+    CommentNow,
+    AskAgent,
+    AskAgentNow,
+    Task(usize),
 }
 
 /// One entry of `[keys]` as it is written.

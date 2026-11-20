@@ -3,7 +3,8 @@ use guided_review::app::keymap::chord_on;
 use guided_review::config::Config;
 use guided_review::platform::{Os, TextEdit};
 use guided_review::viewer::{
-    Chord, Command, KeyProblem, Keymap, Modifier, PrimaryCommentAction, SendMode, Sending,
+    Chord, Command, KeyProblem, Keymap, Modifier, PrimaryCommentAction, SendButton, SendMode,
+    Sending,
 };
 
 fn chord(text: &str) -> Chord {
@@ -539,4 +540,71 @@ fn a_local_review_puts_send_now_first_when_comment_now_is_primary() {
         PrimaryCommentAction::CommentNow.ordered_tasks(Sending::GitHub),
         Vec::<SendMode>::new()
     );
+}
+
+fn button_keys(config: &str, comment_now_is_offered: bool) -> Vec<Option<String>> {
+    let keymap = keymap_of(config).unwrap();
+    [
+        SendButton::AddToReview,
+        SendButton::CommentNow,
+        SendButton::AskAgent,
+        SendButton::AskAgentNow,
+        SendButton::Task(0),
+        SendButton::Task(1),
+    ]
+    .map(|button| {
+        keymap
+            .send_button_chord(button, comment_now_is_offered)
+            .map(Chord::written)
+    })
+    .to_vec()
+}
+
+fn some(texts: [&str; 6]) -> Vec<Option<String>> {
+    texts.map(|text| Some(text.to_owned())).to_vec()
+}
+
+#[test]
+fn send_buttons_show_the_keys_the_primary_action_gave_them() {
+    assert_eq!(
+        button_keys("", true),
+        some([
+            "primary-enter",
+            "primary-alt-enter",
+            "primary-shift-enter",
+            "primary-alt-shift-enter",
+            "primary-enter",
+            "primary-alt-enter",
+        ])
+    );
+    assert_eq!(
+        button_keys("primary_comment_action = \"comment_now\"\n", true),
+        some([
+            "primary-alt-enter",
+            "primary-enter",
+            "primary-alt-shift-enter",
+            "primary-shift-enter",
+            "primary-alt-enter",
+            "primary-enter",
+        ])
+    );
+}
+
+#[test]
+fn the_only_send_action_left_shows_the_main_key_whatever_the_primary_action() {
+    let keys = button_keys("primary_comment_action = \"comment_now\"\n", false);
+
+    assert_eq!(keys[0].as_deref(), Some("primary-enter"));
+    assert_eq!(keys[2].as_deref(), Some("primary-shift-enter"));
+}
+
+#[test]
+fn send_buttons_show_keys_written_in_keys_and_none_for_an_emptied_command() {
+    let keys = button_keys(
+        "[keys]\ncomment_now = \"primary-j\"\nask_agent = []\n",
+        true,
+    );
+
+    assert_eq!(keys[1].as_deref(), Some("primary-j"));
+    assert_eq!(keys[2], None);
 }

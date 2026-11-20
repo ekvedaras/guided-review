@@ -13,13 +13,13 @@ use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
 use crate::app::components::overlay::popover;
 use crate::viewer::{
-    Audience, CommentId, HandOffButton, PrimaryCommentAction, Reaction, ReactionChange,
-    ReactionCount, SendMode, Sending, ThreadAction, ThreadActionResult, ThreadComment, ThreadId,
-    ThreadView,
+    Audience, CommentId, HandOffButton, Keymap, PrimaryCommentAction, Reaction, ReactionChange,
+    ReactionCount, SendButton, SendMode, Sending, ThreadAction, ThreadActionResult, ThreadComment,
+    ThreadId, ThreadView,
 };
 
 use super::button::{
-    ButtonKind, ButtonSize, button, button_icon, icon_button, icon_label_button, joined,
+    ButtonKind, ButtonSize, button, button_icon, chord_keys, icon_button, icon_label_button, joined,
 };
 use super::card::card;
 use super::chip::chip;
@@ -92,6 +92,7 @@ struct ReplyBox<'a> {
     can_ask_agent: bool,
     sending: Sending,
     primary: PrimaryCommentAction,
+    keymap: Arc<Keymap>,
     on_action: &'a OnThreadAction,
     on_reply_draft: &'a OnReplyDraft,
     ui: &'a Entity<ThreadUi>,
@@ -513,6 +514,7 @@ impl ThreadElement {
             can_ask_agent,
             sending,
             primary,
+            keymap,
             on_action,
             on_reply_draft,
             ui,
@@ -636,6 +638,13 @@ impl ThreadElement {
                         } else {
                             ButtonKind::Secondary
                         };
+                        let keys = sending
+                            .tasks()
+                            .iter()
+                            .position(|task| *task == mode)
+                            .and_then(|position| {
+                                keymap.send_button_chord(SendButton::Task(position), true)
+                            });
                         icon_label_button(
                             &colors,
                             SharedString::from(format!("reply-task-{index}-{id}")),
@@ -644,11 +653,19 @@ impl ThreadElement {
                             icon,
                             label,
                         )
+                        .child(chord_keys(&colors, kind, keys))
                         .on_click(send(mode, Audience::Agent))
                     }),
             )
         });
         let buttons = (!is_busy && sending.on_github()).then(|| {
+            let keys_of = |button, kind| {
+                chord_keys(
+                    &colors,
+                    kind,
+                    keymap.send_button_chord(button, can_reply_now),
+                )
+            };
             let ask_agent = can_ask_agent.then(|| {
                 let mut parts = vec![
                     icon_label_button(
@@ -659,6 +676,7 @@ impl ThreadElement {
                         Icon::Sparkles,
                         "Ask agent",
                     )
+                    .child(keys_of(SendButton::AskAgent, ButtonKind::Joined))
                     .tooltip(tooltip(|_| {
                         "Ask agent: adds the reply to the review for your agent".into()
                     }))
@@ -679,6 +697,7 @@ impl ThreadElement {
                             Icon::Zap,
                         ))
                         .child("now")
+                        .child(keys_of(SendButton::AskAgentNow, ButtonKind::Joined))
                         .tooltip(tooltip(|_| "Ask agent now: posts the reply at once".into()))
                         .on_click(send(SendMode::CommentNow, Audience::Agent)),
                     );
@@ -692,6 +711,10 @@ impl ThreadElement {
                 ButtonSize::Small,
             )
             .child("Add to review")
+            .child(keys_of(
+                SendButton::AddToReview,
+                primary_kind(PrimaryCommentAction::AddToReview),
+            ))
             .on_click(send(SendMode::AddToReview, Audience::Author));
             let now_button = can_reply_now.then(|| {
                 plain_button(
@@ -700,6 +723,10 @@ impl ThreadElement {
                     primary_kind(PrimaryCommentAction::CommentNow),
                     "Reply now",
                 )
+                .child(keys_of(
+                    SendButton::CommentNow,
+                    primary_kind(PrimaryCommentAction::CommentNow),
+                ))
                 .on_click(send(SendMode::CommentNow, Audience::Author))
             });
             let (first, second) =
@@ -1300,6 +1327,7 @@ impl RenderOnce for ThreadElement {
                             can_ask_agent,
                             sending,
                             primary,
+                            keymap: crate::app::keymap::shared_keymap(cx),
                             on_action: &on_action,
                             on_reply_draft: &on_reply_draft,
                             ui: &ui,
