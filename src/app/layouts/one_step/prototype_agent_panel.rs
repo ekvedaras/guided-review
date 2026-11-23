@@ -1466,9 +1466,45 @@ pub(super) fn variant_d(
     let count = pipeline.stops.len();
     let mut nodes: Vec<AnyElement> = Vec::new();
     let mut card: Option<Stop> = None;
+    let mut also_needs_you: Vec<AnyElement> = Vec::new();
     for (at, s) in pipeline.stops.into_iter().enumerate() {
         let key = s.key;
         let is_shown = key == shown_key;
+        if !is_shown && matches!(s.health, Health::Failed | Health::Waiting) {
+            also_needs_you.push(
+                div()
+                    .id(SharedString::from(format!("p-d-also-{key}")))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .hover(|row| row.bg(colors.hover))
+                    .text_xs()
+                    .child(sized_icon(s.icon, health_text(colors, s.health), px(12.)))
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(s.name),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(health_text(colors, s.health))
+                            .child(s.state.clone()),
+                    )
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        PICKED_STOP.store(key, Ordering::Relaxed);
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
+        }
         let tone = colors.tone(tone_of(s.health));
         let (ground, ink) = match (is_shown, s.health) {
             (true, Health::Off) => (colors.current, colors.accent),
@@ -1550,6 +1586,7 @@ pub(super) fn variant_d(
         .children(mac_box(colors, pipeline.mac_problems))
         .child(div().flex().items_start().children(nodes))
         .children(card.map(|s| stop_card(colors, s)))
+        .children(also_needs_you)
         .children(pipeline.clone_offer)
         .into_any_element()
 }
