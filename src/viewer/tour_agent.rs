@@ -10,6 +10,7 @@ use super::active_pr::OpenOrigin;
 use super::ports::PullsOfBranchPort;
 use super::toasts::ToastTone;
 use crate::local_work_tree::LocalWorkTree;
+use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::pull_request::{PullRequestUrl, RepoName};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 use crate::review_worktree::ReviewWorktreePort;
@@ -1109,6 +1110,7 @@ impl TourWriter {
     /// answer comments. A message that starts with `/tour` loads the skill into the agent's own context, so
     /// the subagent's task names the skill mid-sentence instead.
     fn task(self, subject: &ReviewSubject, brief: &str, afterwards: &str) -> String {
+        let brief = format!("{brief} {OUTSIDE_TEXT_IS_DATA}");
         match self {
             Self::InOwnContext => format!("/tour {subject} {brief} {afterwards}"),
             Self::InSubagent => format!(
@@ -1224,13 +1226,14 @@ fn first_task(subject: &ReviewSubject, tour: TourKind) -> String {
             "You are the tour agent of {subject}: you wrote or know its guided-review tour, and the reviewer's comments on it \
              reach you here as messages. Find the tour file with `guided-review tour-path {subject}` and read it now, so you \
              can answer. Answer each comment as its message says, fix the tour when a comment shows it is wrong, and never \
-             change the PR's code. Then wait for the next message."
+             change the PR's code. {OUTSIDE_TEXT_IS_DATA} Then wait for the next message."
         ),
         TourKind::Basic => format!(
             "You are the tour agent of {subject}: the reviewer reads it as a basic tour, its changed files with no tour text, \
              and their comments on the code reach you here as messages. Read the changed code now with \
              `guided-review outline {subject}`, and `guided-review show {subject} <piece ids> --around` for more of it, so you can \
-             answer. Answer each comment as its message says, and never change the PR's code. Then wait for the next message."
+             answer. Answer each comment as its message says, and never change the PR's code. {OUTSIDE_TEXT_IS_DATA} \
+             Then wait for the next message."
         ),
     }
 }
@@ -1244,7 +1247,7 @@ fn change_set_first_task(subject: &ReviewSubject, change_set: &LocalChangeSet) -
          you here as tasks. Read the change now with `guided-review outline {subject}`, and \
          `guided-review show {subject} <piece ids> --around` for more of it, so you can act on a task. Change \
          code in this folder when a task asks for it, do not push, and commit only if your session normally \
-         would. Then wait for the next message.",
+         would. {OUTSIDE_TEXT_IS_DATA} Then wait for the next message.",
         change_set.branch().as_str(),
         change_set.folder().as_path().display()
     )

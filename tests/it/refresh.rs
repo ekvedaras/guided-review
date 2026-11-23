@@ -5,6 +5,7 @@ use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, write_executable};
 use guided_review::app_folders::AppFolders;
 use guided_review::claude_cli::ClaudeRefreshWriter;
 use guided_review::local_git::LocalGit;
+use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
@@ -126,11 +127,12 @@ fn the_brief_lists_steps_with_old_text_and_new_pieces_no_step_holds() {
 
     assert!(run.success, "{}", run.stderr);
     assert!(
-        run.stdout.contains("stale steps:\n  total  Total\n"),
+        run.stdout.contains("stale steps:\n  total\n> Total\n"),
         "{}",
         run.stdout
     );
     assert!(!run.stdout.contains("  keep"), "{}", run.stdout);
+    assert!(run.stdout.contains(OUTSIDE_TEXT_IS_DATA), "{}", run.stdout);
     assert!(
         run.stdout
             .contains("new pieces no step holds:\n  app/Pricing.php#(top)\n  app/Pricing.php#Pricing\n  app/Pricing.php#Pricing::discount\n"),
@@ -431,6 +433,7 @@ fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_s
     assert!(args.contains("Bash(guided-review refresh:*)"), "{args}");
     assert!(args.contains("Bash(guided-review tour-path:*)"), "{args}");
     assert!(args.contains("as its own Bash call"), "{args}");
+    assert!(args.contains(OUTSIDE_TEXT_IS_DATA), "{args}");
     let reads_in_cwd = format!(
         "Read(//{}/**)",
         cwd.path().display().to_string().trim_start_matches('/')

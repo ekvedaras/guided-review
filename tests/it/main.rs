@@ -116,6 +116,7 @@ mod pr_switcher_local;
 mod pr_switcher_memory;
 mod presence;
 mod problems;
+mod prompt_safety;
 mod read_ticks;
 mod refresh;
 mod related_issues;

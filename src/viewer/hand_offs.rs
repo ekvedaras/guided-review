@@ -5,6 +5,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::file_path::FilePath;
+use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 
@@ -51,6 +52,7 @@ fn tasks_message(
         LOCAL_REVIEW_NOTE.to_owned(),
         "The reviewer finished reading and sends these tasks together, in reading order."
             .to_owned(),
+        OUTSIDE_TEXT_IS_DATA.to_owned(),
     ];
     for task in tasks {
         let id = task.id;
@@ -332,6 +334,7 @@ impl HandOff {
         let mut lines = vec![
             format!("Review task {id} on branch {branch} in {folder}"),
             LOCAL_REVIEW_NOTE.to_owned(),
+            OUTSIDE_TEXT_IS_DATA.to_owned(),
         ];
         lines.extend(self.task_lines());
         lines.push(format!(
@@ -352,14 +355,14 @@ impl HandOff {
         let mut lines = vec![format!("Place: {}", self.place)];
         lines.extend(self.file.iter().map(|file| format!("File: {file}")));
         if let Some(code) = &self.code {
-            lines.push(format!("Code:\n{}", code.trim_end()));
+            lines.push(format!("Code:\n{}", quoted(code.trim_end())));
         }
         if !self.thread_so_far.is_empty() {
             lines.push("Thread so far:".to_owned());
             lines.extend(
                 self.thread_so_far
                     .iter()
-                    .map(|said| format!("- {}: {}", said.author, said.body)),
+                    .map(|said| format!("- {}:\n{}", said.author, quoted(&said.body))),
             );
         }
         lines.push(format!("Task: {}", self.comment));
@@ -370,6 +373,7 @@ impl HandOff {
         let id = self.id;
         let mut lines = vec![
             format!("Reviewer comment {id} on {subject}"),
+            OUTSIDE_TEXT_IS_DATA.to_owned(),
             format!("Place: {}", self.place),
         ];
         lines.extend(self.step.iter().map(|step| format!("Step: {step}")));
@@ -388,7 +392,7 @@ impl HandOff {
             lines.extend(
                 self.thread_so_far
                     .iter()
-                    .map(|said| format!("- {}: {}", said.author, said.body)),
+                    .map(|said| format!("- {}:\n{}", said.author, quoted(&said.body))),
             );
         }
         lines.push(format!("Comment: {}", self.comment));

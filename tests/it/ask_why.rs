@@ -12,6 +12,7 @@ use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run, folders_in};
 use guided_review::config::AskSettings;
 use guided_review::findings::FindingId;
 use guided_review::open_review::open_review;
+use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
@@ -308,12 +309,14 @@ fn a_follow_up_after_the_answer_goes_to_the_review_agent_with_the_talk_so_far() 
         panic!("{calls:?}");
     };
     for part in [
-        "Reviewer said before: Why?",
-        "You said before: Because it shouts.",
-        "Question: Is it on purpose?",
+        "\nReviewer said before: Why?",
+        "\nYou said before:\n> Because it shouts.",
+        "\nQuestion: Is it on purpose?",
+        "\nFinding:\n> B is shouted.",
     ] {
         assert!(text.contains(part), "{part} missing from {text}");
     }
+    assert_eq!(text.matches(OUTSIDE_TEXT_IS_DATA).count(), 1, "{text}");
 }
 
 const BUILD: &str = "test-build";

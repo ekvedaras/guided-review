@@ -8,6 +8,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::findings::{Finding, FindingId};
+use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 
 use super::hand_offs::shell_word;
@@ -425,14 +426,15 @@ fn fixes_message(requests: &[&FixRequest], subject: &ReviewSubject) -> String {
          they would edit the same files at once."
             .to_owned(),
         where_to_fix(subject),
+        OUTSIDE_TEXT_IS_DATA.to_owned(),
     ];
     for request in requests {
         let finding = &request.finding;
         let id = &finding.id;
         lines.push(String::new());
         lines.push(format!("Finding {id} ({})", finding.severity));
-        lines.push(format!("Place: {}", finding.anchor));
-        lines.push(format!("Finding: {}", finding.body));
+        lines.push(format!("Place:\n{}", quoted(&finding.anchor.to_string())));
+        lines.push(format!("Finding:\n{}", quoted(&finding.body)));
         if let Some(note) = &request.note {
             lines.push(format!(
                 "The reviewer's note on how to fix it: {}",
@@ -473,8 +475,9 @@ fn answer_message(request: &FixRequest, subject: &ReviewSubject) -> String {
     };
     [
         format!("The reviewer answered your question on finding {id} of {subject}"),
-        format!("Place: {}", finding.anchor),
-        format!("Finding: {}", finding.body),
+        OUTSIDE_TEXT_IS_DATA.to_owned(),
+        format!("Place:\n{}", quoted(&finding.anchor.to_string())),
+        format!("Finding:\n{}", quoted(&finding.body)),
         format!("Answer: {answer}"),
         format!(
             "Go on: `guided-review fix-reply {key} {id} --working`, then `guided-review fix-reply {key} {id} --fixed <commit sha>` \

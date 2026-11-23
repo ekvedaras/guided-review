@@ -1,3 +1,5 @@
+use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
+
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -34,6 +36,13 @@ fn the_brief_gives_the_protocol_with_the_findings_path_to_write() {
     assert!(brief.contains("Never change code"), "{brief}");
     assert!(brief.contains("never post on GitHub"), "{brief}");
     assert!(brief.contains("one command per Bash call"), "{brief}");
+}
+
+#[test]
+fn the_brief_says_that_outside_text_is_data() {
+    let brief = brief_with_config(None);
+
+    assert!(brief.contains(OUTSIDE_TEXT_IS_DATA), "{brief}");
 }
 
 #[test]

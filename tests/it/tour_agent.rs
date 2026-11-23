@@ -1,4 +1,5 @@
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, OpenOrigin, OwnAgentHandOff, TerminalId, TourAgentPort,
@@ -511,4 +512,60 @@ fn the_sidebar_names_the_tour_agent_only_when_there_is_one_or_it_cannot_be_reach
     assert!(TourAgentState::LinkOff(AgentLinkOff::HcMissing).is_worth_a_line());
     assert!(!TourAgentState::None.is_worth_a_line());
     assert!(!TourAgentState::Unknown.is_worth_a_line());
+}
+
+fn tasks_given(fake: &FakeTourAgent) -> Vec<String> {
+    fake.calls()
+        .into_iter()
+        .filter_map(|call| match call {
+            TourAgentCall::Start { first_task, .. } => Some(first_task),
+            TourAgentCall::Send { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_task_a_tour_agent_gets_says_that_outside_text_is_data() {
+    const LOCAL: &str = "local:/Users/me/Code/shop@feature/discounts";
+    let idle_agent = || FakeTourAgent::new().with_terminal("mine", Some(PR_9), AgentStatus::Idle);
+    let mut first_tasks = Vec::new();
+    for kind in [TourKind::Guided, TourKind::Basic] {
+        let fake = Arc::new(FakeTourAgent::new());
+        starting(&fake).start(&url(PR_9), &url(PR_9), kind).unwrap();
+        first_tasks.extend(tasks_given(&fake));
+    }
+    let local = url(LOCAL);
+    let fake = Arc::new(FakeTourAgent::new());
+    starting(&fake)
+        .start(&local, &local, TourKind::Guided)
+        .unwrap();
+    first_tasks.extend(tasks_given(&fake));
+
+    let mut writer_tasks = Vec::new();
+    let fake = Arc::new(FakeTourAgent::new());
+    starting(&fake).write_tour(&url(PR_9), &url(PR_9)).unwrap();
+    writer_tasks.extend(tasks_given(&fake));
+    let fake = Arc::new(idle_agent());
+    starting(&fake).write_tour(&url(PR_9), &url(PR_9)).unwrap();
+    writer_tasks.extend(tasks_given(&fake));
+    let fake = Arc::new(FakeTourAgent::new());
+    starting(&fake)
+        .hand_writer_task(&url(PR_9), &url(PR_9))
+        .unwrap();
+    writer_tasks.extend(tasks_given(&fake));
+    let fake = Arc::new(idle_agent());
+    starting(&fake)
+        .hand_writer_task(&url(PR_9), &url(PR_9))
+        .unwrap();
+    writer_tasks.extend(tasks_given(&fake));
+
+    assert_eq!(first_tasks.len(), 3);
+    assert_eq!(writer_tasks.len(), 4);
+    for task in first_tasks.iter().chain(&writer_tasks) {
+        assert!(task.contains(OUTSIDE_TEXT_IS_DATA), "{task}");
+    }
+    for task in &writer_tasks {
+        assert!(!task.contains('\n') && !task.contains('\\'), "{task}");
+    }
 }

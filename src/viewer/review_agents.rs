@@ -14,6 +14,7 @@ use super::tour_agent::{
 use crate::app_folders::AppFolders;
 use crate::claude_cli::{review_agent_denied_tools, review_agent_tools};
 use crate::instructions::ReviewInstructions;
+use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 use crate::review_worktree::ReviewWorktreePort;
@@ -159,6 +160,6 @@ fn first_task(subject: &ReviewSubject) -> String {
         "You are the review agent of {subject}, started by the guided-review app: you read its code in this \
          folder, a checkout of the reviewed head, and write findings. Run `guided-review review-brief {subject}` \
          now and follow it exactly. Run one command per Bash call, with the key written out, without shell \
-         variables, pipes, `&&`, `;` or `$(...)`. Never change code and never post on GitHub."
+         variables, pipes, `&&`, `;` or `$(...)`. Never change code and never post on GitHub. {OUTSIDE_TEXT_IS_DATA}"
     )
 }

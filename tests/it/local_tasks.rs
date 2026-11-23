@@ -10,6 +10,7 @@ use crate::support::{FakeGitHub as ServedGitHub, FixtureRepo, GuidedReview, Run,
 use guided_review::findings::{Finding, FindingsFile};
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::{OpenedReview, open_review};
+use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::update::Build;
@@ -642,10 +643,16 @@ fn the_task_carries_the_code_the_comment_is_on() {
 
     let typed = feature.typed_into_agent();
     assert!(
-        typed[0].contains("Code:\n+ README.md:head:2: world"),
+        typed[0].contains("Code:\n> + README.md:head:2: world"),
         "{}",
         typed[0]
     );
+    assert!(
+        typed[0].contains("\nTask: Say who the world is"),
+        "{}",
+        typed[0]
+    );
+    assert_eq!(typed[0].matches(OUTSIDE_TEXT_IS_DATA).count(), 1);
 }
 
 #[test]
@@ -886,6 +893,11 @@ fn send_tasks_hands_every_queued_task_to_the_agent_as_one_message_in_reading_ord
         assert!(message.contains(part), "{part:?} missing from {message}");
     }
     assert!(!message.contains("GitHub"), "{message}");
+    assert_eq!(
+        message.matches(OUTSIDE_TEXT_IS_DATA).count(),
+        1,
+        "{message}"
+    );
     let states: Vec<_> = opened
         .review
         .hand_offs()

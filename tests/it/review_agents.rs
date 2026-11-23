@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::support::fake_review_worktrees::{FakeReviewWorktrees, WorktreeCall};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::folders_in;
+use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::review_worktree::ReviewWorktreePort;
@@ -118,6 +119,16 @@ fn a_review_agent_starts_in_a_worktree_of_the_reviewed_head() {
             .as_path()
     );
     assert_eq!(desk.fake.review_agents_of(PR), [terminal.to_string()]);
+}
+
+#[test]
+fn the_review_agent_is_told_that_outside_text_is_data() {
+    let desk = Desk::with(FakeTourAgent::new());
+
+    desk.start(&pr()).unwrap();
+
+    let (_, first_task, _, _) = started_review(&desk.fake);
+    assert!(first_task.contains(OUTSIDE_TEXT_IS_DATA), "{first_task}");
 }
 
 #[test]

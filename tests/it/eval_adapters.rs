@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
 use guided_review::config::Config;
 use guided_review::eval::{EvalWriter, JudgeInput, Rule, Score, TourJudge, WriterBrief};
+use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::pull_request::PullRequestUrl;
 use tempfile::TempDir;
 
@@ -57,6 +58,7 @@ fn the_writer_runs_with_narrow_tools_and_gets_the_skill_but_no_note() {
     assert_eq!(tours_dir.trim(), "/runs/one");
     let stdin = std::fs::read_to_string(dir.path().join("stdin")).unwrap();
     assert!(stdin.contains("https://github.com/acme/shop/pull/7"));
+    assert!(stdin.contains(OUTSIDE_TEXT_IS_DATA), "{stdin}");
 }
 
 #[test]
@@ -128,4 +130,5 @@ fn the_judge_runs_without_tools_and_its_answer_is_read_into_five_verdicts() {
     assert!(!args.contains("dangerously"), "{args}");
     let stdin = std::fs::read_to_string(dir.path().join("stdin")).unwrap();
     assert!(stdin.contains("THE NOTE") && stdin.contains("THE TOUR"));
+    assert!(stdin.contains(OUTSIDE_TEXT_IS_DATA), "{stdin}");
 }

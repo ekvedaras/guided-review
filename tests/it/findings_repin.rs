@@ -344,7 +344,10 @@ fn a_fix_request_waiting_for_the_tour_agent_follows_its_finding_to_the_new_lines
     shop.deliver_fixes(&mut review, &second, &agent);
 
     let text = sent_text(&agent);
-    assert!(text.contains("Place: app.txt line 3 of the head"), "{text}");
+    assert!(
+        text.contains("Place:\n> app.txt line 3 of the head"),
+        "{text}"
+    );
     assert!(finding_row(&review, "two").unwrap().fix.is_some());
 }
 
