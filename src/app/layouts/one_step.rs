@@ -42,7 +42,9 @@ use crate::app::components::finding_view::{
     FindingBox, FindingBoxKeys, FindingQuestions, finding_card,
 };
 use crate::app::components::findings_sheet::{FindingsEvent, FindingsSheet};
-use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish, OnMarkDone};
+use crate::app::components::finish_review::{
+    FinishReviewDialog, Finishing, OnBodyEdit, OnFinish, OnMarkDone,
+};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::guided_tour_banner::{GuidedTourReadyBanner, switch_button};
 use crate::app::components::hidden_text_notice::hidden_text_notice;
@@ -129,13 +131,6 @@ use issue_card::{CardSide, IssueHover, issue_card};
 mod gallery;
 mod issue_card;
 mod prototype_agent_panel;
-type PrototypeDraw = fn(
-    &Colors,
-    Option<&SidebarGuidedTour>,
-    &SidebarTourAgent,
-    &SidebarAiReview,
-    &Context<OneStepLayout>,
-) -> AnyElement;
 #[cfg(feature = "snapshots")]
 mod scenes;
 
@@ -2602,27 +2597,6 @@ impl OneStepLayout {
             .is_shown
             .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx).into_any_element());
         let ai_review = Self::ai_review_block(&colors, &sidebar.ai_review, cx).into_any_element();
-        let prototype_variant = prototype_agent_panel::variant();
-        let prototype_panel = match prototype_variant {
-            1 => Some(prototype_agent_panel::variant_a as PrototypeDraw),
-            2 => Some(prototype_agent_panel::variant_b as PrototypeDraw),
-            3 => Some(prototype_agent_panel::variant_c as PrototypeDraw),
-            _ => None,
-        }
-        .map(|draw| {
-            draw(
-                &colors,
-                sidebar.guided_tour.as_ref(),
-                &sidebar.tour_agent,
-                &sidebar.ai_review,
-                cx,
-            )
-        });
-        let (guided_tour, tour_agent, ai_review) = if prototype_panel.is_some() {
-            (None, None, None)
-        } else {
-            (guided_tour, tour_agent, Some(ai_review))
-        };
         let repin_progress = session.repin_progress();
         let disk_news = sidebar
             .disk_news
@@ -2711,8 +2685,44 @@ impl OneStepLayout {
             .children(count_badge(&colors, safety_net.thread_count))
             .children(finding_badge(&colors, safety_net.finding_count))
         });
-        let reviews_block =
-            (!sidebar.reviews.is_empty()).then(|| ReviewsBlock::new(Arc::clone(&sidebar.reviews)));
+        let reviews_block = (!sidebar.reviews.is_empty())
+            .then(|| ReviewsBlock::new(Arc::clone(&sidebar.reviews)).into_any_element());
+        let clone_offer = clone_offer.map(IntoElement::into_any_element);
+        let section_parts: Vec<AnyElement> = match prototype_agent_panel::drawing() {
+            Some(draw) => vec![draw(
+                &colors,
+                prototype_agent_panel::Inputs {
+                    guided_tour: sidebar.guided_tour.as_ref(),
+                    tour_agent: &sidebar.tour_agent,
+                    ai_review: &sidebar.ai_review,
+                    reviews: reviews_block,
+                    finish: finish_dialog.filter(|_| {
+                        sidebar.finishing != Finishing::NothingToFinish
+                            || session.review().finishes_with_send_tasks().is_some()
+                    }),
+                    clone_offer,
+                    problems: &sidebar.problems,
+                    changes_not_shown: sidebar.changes_not_shown.clone(),
+                    sync: prototype_agent_panel::SyncFacts::of(
+                        session.review().is_pull_request_prototype(),
+                        sidebar.sync_banner.clone(),
+                        session.review().unsent_viewed_count_prototype(),
+                    ),
+                },
+                cx,
+            )],
+            None => reviews_block
+                .into_iter()
+                .chain(finish_dialog)
+                .chain(guided_tour)
+                .chain(tour_agent)
+                .chain(Some(ai_review))
+                .chain(clone_offer)
+                .chain(changes_not_shown.map(IntoElement::into_any_element))
+                .chain(problems.map(IntoElement::into_any_element))
+                .chain(sync_notices.map(IntoElement::into_any_element))
+                .collect(),
+        };
         let header = div()
             .flex_none()
             .px_4()
@@ -2736,16 +2746,7 @@ impl OneStepLayout {
                     .into_any_element(),
                 None => progress_meter(&colors, progress, sidebar.progress_unit).into_any_element(),
             })
-            .children(reviews_block)
-            .children(finish_dialog)
-            .children(guided_tour)
-            .children(tour_agent)
-            .children(ai_review)
-            .children(prototype_panel)
-            .children(clone_offer)
-            .children(changes_not_shown)
-            .children(problems)
-            .children(sync_notices);
+            .children(section_parts);
         div()
             .w(px(SIDEBAR_WIDTH))
             .flex_none()

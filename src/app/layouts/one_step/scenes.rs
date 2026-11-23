@@ -112,10 +112,11 @@ enum Scene {
     BasicGuidedWriting,
     TitleBarMerging,
     FoldedMarkdownParts,
+    PrototypeBusy,
 }
 
 impl Scene {
-    const ALL: [Self; 72] = [
+    const ALL: [Self; 73] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -188,6 +189,7 @@ impl Scene {
         Self::BasicGuidedWriting,
         Self::TitleBarMerging,
         Self::FoldedMarkdownParts,
+        Self::PrototypeBusy,
     ];
 
     fn file_name(self) -> &'static str {
@@ -264,6 +266,7 @@ impl Scene {
             Self::CommentComposerNowPrimary => "91-comment-composer-now-primary",
             Self::TitleBarMerging => "92-title-bar-merging",
             Self::FoldedMarkdownParts => "93-folded-markdown-parts",
+            Self::PrototypeBusy => "95-prototype-busy",
         }
     }
 
@@ -1052,6 +1055,24 @@ impl OneStepLayout {
             }),
             Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
             Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
+            Scene::PrototypeBusy => {
+                self.session.update(cx, ReviewSession::stage_outage);
+                self.change_review(cx, |review| {
+                    review.go_forward();
+                    let first_line = review
+                        .page()
+                        .lines()
+                        .next()
+                        .map(|line| line.location.clone());
+                    if let Some(at) = first_line {
+                        review.ai_review_is(AiReview::staged_on(&at.path, at.line));
+                        review.stage_fix_requests();
+                    }
+                    review.ide_not_started(&"zed: command not found");
+                });
+                super::prototype_agent_panel::FAKE_SYNC_WAIT
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             Scene::RefreshRunning => {
                 self.scroll_to_row(0);
                 self.session
@@ -1171,6 +1192,16 @@ impl OneStepLayout {
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
                     toaster.0.update(cx, ToastShelf::clear);
                 }
+            }
+            Scene::PrototypeBusy => {
+                super::prototype_agent_panel::FAKE_SYNC_WAIT
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                self.session.update(cx, ReviewSession::unstage_outage);
+                self.change_review(cx, |review| {
+                    review.unstage_fix_requests();
+                    review.ai_review_is(AiReview::NotRun);
+                    review.go_to_summary();
+                });
             }
             Scene::GitHubOutage => {
                 self.session.update(cx, ReviewSession::unstage_outage);

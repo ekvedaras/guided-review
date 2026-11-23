@@ -2917,6 +2917,20 @@ impl ReviewCore {
         self.viewed_sync.banner()
     }
 
+    /// PROTOTYPE #174: how many files' viewed marks wait to reach GitHub.
+    pub fn unsent_viewed_count_prototype(&self) -> usize {
+        if self.not_synced() {
+            self.state.unsent_viewed().len()
+        } else {
+            0
+        }
+    }
+
+    /// PROTOTYPE #174.
+    pub fn is_pull_request_prototype(&self) -> bool {
+        self.subject.pull_request().is_some()
+    }
+
     /// Drives the "not synced" dot.
     pub fn not_synced(&self) -> bool {
         self.viewed_sync.not_synced(&self.state)

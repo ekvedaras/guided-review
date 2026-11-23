@@ -1,9 +1,11 @@
-//! PROTOTYPE (issue #174), throwaway: three designs of the agent section of the sidebar, under the
-//! progress bar and above the summary row. Start the app with GUIDED_REVIEW_PROTOTYPE=0|A|B|C and switch
-//! with the floating bar at the foot of the window. 0 is the current design. Not for main.
+//! PROTOTYPE (issues #174 and #157), throwaway: three designs of everything in the sidebar between the
+//! progress bar and the steps: your review and Finish, the agents, GitHub sync, problems and the clone offer.
+//! Start the app with GUIDED_REVIEW_PROTOTYPE=0|A|B|C and switch with the floating bar at the foot of the
+//! window. 0 is the current design. Not for main.
 
-use std::sync::LazyLock;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -16,17 +18,21 @@ use crate::app::components::button::{
     ButtonKind, ButtonSize, button_keys, icon_button, icon_label_button,
 };
 use crate::app::components::icon::{Icon, sized_icon};
+use crate::app::components::palette::Tone;
 use crate::app::components::palette::{CARD_RADIUS, Colors};
 use crate::app::components::tooltip::tooltip;
 use crate::app::review_session::ReviewSession;
-use crate::app::sidebar_rows::{SidebarAiReview, SidebarGuidedTour, SidebarTourAgent, WriteOffer};
+use crate::app::sidebar_rows::{
+    SidebarAiReview, SidebarGuidedTour, SidebarProblem, SidebarTourAgent, WriteOffer,
+};
+use crate::viewer::ProblemKind;
 use crate::viewer::{AiReviewAction, Command, Intent};
 
 const NAMES: [&str; 4] = [
     "Current",
-    "A · Agent rows",
-    "B · One next step",
-    "C · Pipeline",
+    "A · Grouped by who",
+    "B · Next step and status chips",
+    "C · One pipeline",
 ];
 
 static VARIANT: LazyLock<AtomicU8> = LazyLock::new(|| {
@@ -432,10 +438,867 @@ fn section_label(colors: &Colors, text: &'static str) -> Div {
         .child(text.to_uppercase())
 }
 
-// A · Agent rows: one row per agent, its health as a dot, Show agent as an icon at the row's end; what the
-// review found under its row; the actions in one line below.
+pub(super) type Draw = fn(&Colors, Inputs<'_>, &Context<OneStepLayout>) -> AnyElement;
+
+pub(super) fn drawing() -> Option<Draw> {
+    match variant() {
+        1 => Some(variant_a as Draw),
+        2 => Some(variant_b as Draw),
+        3 => Some(variant_c as Draw),
+        _ => None,
+    }
+}
+
+/// Everything the section draws, as the sidebar has it.
+pub(super) struct Inputs<'a> {
+    pub guided_tour: Option<&'a SidebarGuidedTour>,
+    pub tour_agent: &'a SidebarTourAgent,
+    pub ai_review: &'a SidebarAiReview,
+    pub reviews: Option<AnyElement>,
+    pub finish: Option<AnyElement>,
+    pub clone_offer: Option<AnyElement>,
+    pub problems: &'a [SidebarProblem],
+    pub changes_not_shown: Option<SharedString>,
+    pub sync: SyncFacts,
+}
+
+/// Staged by the prototype's snapshot scene: viewed marks that wait, as if GitHub had not taken them.
+pub(super) static FAKE_SYNC_WAIT: AtomicBool = AtomicBool::new(false);
+static WAITING_SINCE: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// GitHub's viewed marks, as the section says them: in sync, waiting since when, or off and why.
+pub(super) struct SyncFacts {
+    is_pull_request: bool,
+    off_because: Option<SharedString>,
+    waiting_files: usize,
+    waiting_for: Duration,
+}
+
+impl SyncFacts {
+    pub(super) fn of(
+        is_pull_request: bool,
+        off_because: Option<SharedString>,
+        waiting_files: usize,
+    ) -> Self {
+        if FAKE_SYNC_WAIT.load(Ordering::Relaxed) {
+            return Self {
+                is_pull_request,
+                off_because,
+                waiting_files: 3,
+                waiting_for: Duration::from_secs(4 * 60),
+            };
+        }
+        let mut since = WAITING_SINCE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let waiting_for = if waiting_files == 0 {
+            *since = None;
+            Duration::ZERO
+        } else {
+            since.get_or_insert_with(Instant::now).elapsed()
+        };
+        Self {
+            is_pull_request,
+            off_because,
+            waiting_files,
+            waiting_for,
+        }
+    }
+
+    fn health(&self) -> Health {
+        if self.off_because.is_some() {
+            Health::Off
+        } else if self.waiting_files > 0 {
+            Health::Waiting
+        } else {
+            Health::Idle
+        }
+    }
+
+    fn line(&self) -> String {
+        if self.off_because.is_some() {
+            return "viewed marks: sync off".to_owned();
+        }
+        match self.waiting_files {
+            0 => "viewed marks in sync".to_owned(),
+            files => format!(
+                "{} viewed mark{} waiting · {}",
+                files,
+                if files == 1 { "" } else { "s" },
+                how_long(self.waiting_for)
+            ),
+        }
+    }
+}
+
+fn how_long(time: Duration) -> String {
+    match time.as_secs() {
+        0..60 => "under a minute".to_owned(),
+        seconds @ 60..3600 => format!("{} min", seconds / 60),
+        seconds => format!("{} h", seconds / 3600),
+    }
+}
+
+/// Who a problem is about, so it sits with that part of the section.
+#[derive(Clone, Copy, PartialEq)]
+enum Owner {
+    GitHub,
+    Agents,
+    ThisMac,
+}
+
+fn owner_of(problem: &SidebarProblem) -> Owner {
+    match problem.problem.kind() {
+        ProblemKind::ThreadsNotRead
+        | ProblemKind::GitHubNotAnswering
+        | ProblemKind::NotRead(_)
+        | ProblemKind::ViewedNotSynced
+        | ProblemKind::HandOffNotSent
+        | ProblemKind::ReviewingMarkNotChanged
+        | ProblemKind::ReadinessNotChanged
+        | ProblemKind::MergingNotChanged
+        | ProblemKind::CodeOnGitHub => Owner::GitHub,
+        ProblemKind::TourNotRefreshed
+        | ProblemKind::TourNotReloaded
+        | ProblemKind::ShowAgentFailed
+        | ProblemKind::UseAgentFailed => Owner::Agents,
+        _ => Owner::ThisMac,
+    }
+}
+
+fn problem_row(colors: &Colors, problem: &SidebarProblem) -> AnyElement {
+    div()
+        .flex()
+        .gap_2()
+        .child(
+            sized_icon(Icon::CircleAlert, colors.danger, px(12.))
+                .mt(px(2.))
+                .flex_none(),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.danger)
+                        .child(problem.headline.clone()),
+                )
+                .children(problem.detail.clone().map(|detail| muted(colors, detail))),
+        )
+        .into_any_element()
+}
+
+fn problems_of<'a>(
+    colors: &'a Colors,
+    problems: &'a [SidebarProblem],
+    owner: Owner,
+) -> impl Iterator<Item = AnyElement> + 'a {
+    problems
+        .iter()
+        .filter(move |problem| owner_of(problem) == owner)
+        .map(move |problem| problem_row(colors, problem))
+}
+
+fn sync_row(colors: &Colors, sync: &SyncFacts) -> Div {
+    let health = sync.health();
+    div()
+        .flex()
+        .flex_col()
+        .gap_0p5()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(dot(colors, health))
+                .child(div().flex_none().text_xs().font_weight(FontWeight::MEDIUM).child("GitHub"))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_xs()
+                        .text_color(if health == Health::Waiting { colors.warning } else { colors.muted_text })
+                        .child(sync.line()),
+                ),
+        )
+        .children(sync.off_because.clone().map(|reason| muted(colors, reason).pl(px(15.))))
+        .when(sync.waiting_files > 0, |row| {
+            row.child(
+                muted(colors, "Files you ticked show as unviewed on GitHub until this goes through. It tries again on its own.")
+                    .pl(px(15.)),
+            )
+        })
+}
+
+fn changes_not_shown_row(colors: &Colors, notice: SharedString) -> AnyElement {
+    div()
+        .flex()
+        .gap_2()
+        .child(
+            sized_icon(Icon::CircleAlert, colors.warning, px(12.))
+                .mt(px(2.))
+                .flex_none(),
+        )
+        .child(
+            div()
+                .flex_1()
+                .text_xs()
+                .text_color(colors.warning)
+                .child(notice),
+        )
+        .into_any_element()
+}
+
+fn group(colors: &Colors, title: &'static str, parts: Vec<AnyElement>) -> Option<AnyElement> {
+    (!parts.is_empty()).then(|| {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1p5()
+            .child(section_label(colors, title))
+            .children(parts)
+            .into_any_element()
+    })
+}
+
+// A · Grouped by who: one group per party, each with a small heading and only when it has something:
+// You (your review and Finish), Agents, GitHub (sync and what GitHub refused), This Mac (the clone,
+// saving, the app). A problem sits in the group it is about.
 
 pub(super) fn variant_a(
+    colors: &Colors,
+    inputs: Inputs<'_>,
+    cx: &Context<OneStepLayout>,
+) -> AnyElement {
+    let you: Vec<AnyElement> = inputs
+        .reviews
+        .into_iter()
+        .chain(inputs.finish)
+        .chain(
+            inputs
+                .changes_not_shown
+                .map(|notice| changes_not_shown_row(colors, notice)),
+        )
+        .collect();
+    let agents: Vec<AnyElement> = std::iter::once(agent_rows(
+        colors,
+        inputs.guided_tour,
+        inputs.tour_agent,
+        inputs.ai_review,
+        cx,
+    ))
+    .chain(problems_of(colors, inputs.problems, Owner::Agents))
+    .collect();
+    let github: Vec<AnyElement> = inputs
+        .sync
+        .is_pull_request
+        .then(|| sync_row(colors, &inputs.sync).into_any_element())
+        .into_iter()
+        .chain(problems_of(colors, inputs.problems, Owner::GitHub))
+        .collect();
+    let this_mac: Vec<AnyElement> = problems_of(colors, inputs.problems, Owner::ThisMac)
+        .chain(inputs.clone_offer)
+        .collect();
+    div()
+        .flex()
+        .flex_col()
+        .gap_4()
+        .children(group(colors, "You", you))
+        .children(group(colors, "Agents", agents))
+        .children(group(colors, "GitHub", github))
+        .children(group(colors, "This Mac", this_mac))
+        .into_any_element()
+}
+
+// B · Next step and status chips: your review and Finish on top, then one card with the next thing to do,
+// then one line of chips, one per party, coloured by its health. A chip opens its details under the line;
+// a chip with a problem opens on its own.
+
+static OPEN_CHIP: AtomicU8 = AtomicU8::new(u8::MAX);
+
+pub(super) fn variant_b(
+    colors: &Colors,
+    inputs: Inputs<'_>,
+    cx: &Context<OneStepLayout>,
+) -> AnyElement {
+    let agent_problems = inputs
+        .problems
+        .iter()
+        .filter(|problem| owner_of(problem) == Owner::Agents)
+        .count();
+    let github_problems = inputs
+        .problems
+        .iter()
+        .filter(|problem| owner_of(problem) == Owner::GitHub)
+        .count();
+    let mac_problems = inputs
+        .problems
+        .iter()
+        .filter(|problem| owner_of(problem) == Owner::ThisMac)
+        .count();
+    let review_health = review_health(inputs.ai_review);
+    let (tour_line, tour_health) = tour_status(inputs.tour_agent);
+    let agents_health =
+        if agent_problems > 0 || review_health == Health::Failed || tour_health == Health::Failed {
+            Health::Failed
+        } else if review_health == Health::Waiting || tour_health == Health::Waiting {
+            Health::Waiting
+        } else if review_health == Health::Busy || tour_health == Health::Busy {
+            Health::Busy
+        } else {
+            Health::Idle
+        };
+    let github_health = if github_problems > 0 {
+        Health::Failed
+    } else {
+        inputs.sync.health()
+    };
+    let mac_health = if mac_problems > 0 {
+        Health::Failed
+    } else {
+        Health::Idle
+    };
+    let chips: Vec<(u8, &'static str, Health, Option<String>)> = vec![
+        (0, "Agents", agents_health, None),
+        (
+            1,
+            "GitHub",
+            github_health,
+            match (github_problems, inputs.sync.waiting_files) {
+                (0, 0) => None,
+                (0, files) => Some(format!("{files} waiting")),
+                (problems, _) => Some(problems.to_string()),
+            },
+        ),
+        (
+            2,
+            "This Mac",
+            mac_health,
+            (mac_problems > 0).then(|| mac_problems.to_string()),
+        ),
+    ];
+    let chosen = OPEN_CHIP.load(Ordering::Relaxed);
+    let open = if chosen == u8::MAX {
+        chips
+            .iter()
+            .find(|(_, _, health, _)| *health == Health::Failed)
+            .map(|(key, ..)| *key)
+    } else if chosen == u8::MAX - 1 {
+        None
+    } else {
+        Some(chosen)
+    };
+    let strip =
+        div()
+            .flex()
+            .flex_wrap()
+            .gap_1()
+            .children(chips.iter().map(|(key, name, health, note)| {
+                let key = *key;
+                let is_open = open == Some(key);
+                let tone = match health {
+                    Health::Failed => Tone::Danger,
+                    Health::Waiting => Tone::Warning,
+                    _ => Tone::Neutral,
+                };
+                div()
+                    .id(SharedString::from(format!("proto-chip-{key}")))
+                    .cursor_pointer()
+                    .child(
+                        crate::app::components::chip::chip(colors, tone)
+                            .py_0p5()
+                            .when(is_open, |chip| chip.border_color(colors.accent))
+                            .child(dot(colors, *health))
+                            .child(*name)
+                            .children(note.clone()),
+                    )
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        OPEN_CHIP.store(if is_open { u8::MAX - 1 } else { key }, Ordering::Relaxed);
+                        cx.notify();
+                    }))
+            }));
+    let detail: Option<AnyElement> =
+        match open {
+            Some(0) => Some(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .when(inputs.tour_agent.is_shown, |detail| {
+                        detail.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(dot(colors, tour_health))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_xs()
+                                        .child(format!("Tour agent: {tour_line}")),
+                                )
+                                .children(inputs.tour_agent.can_show.then(|| {
+                                    show_tour_agent(colors, "p-b-tour-detail", false, cx)
+                                })),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(dot(colors, review_health))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .child(format!("Review agent: {}", inputs.ai_review.line)),
+                            )
+                            .children(inputs.ai_review.can_show_agent.then(|| {
+                                show_review_agent(colors, "p-b-review-detail", false, cx)
+                            })),
+                    )
+                    .children(problems_of(colors, inputs.problems, Owner::Agents))
+                    .into_any_element(),
+            ),
+            Some(1) => Some(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(sync_row(colors, &inputs.sync))
+                    .children(problems_of(colors, inputs.problems, Owner::GitHub))
+                    .into_any_element(),
+            ),
+            Some(2) => Some(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .children(problems_of(colors, inputs.problems, Owner::ThisMac))
+                    .when(mac_problems == 0, |detail| {
+                        detail.child(muted(colors, "Nothing wrong on this Mac"))
+                    })
+                    .into_any_element(),
+            ),
+            _ => None,
+        };
+    div()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .children(inputs.reviews)
+        .children(inputs.finish)
+        .children(
+            inputs
+                .changes_not_shown
+                .map(|notice| changes_not_shown_row(colors, notice)),
+        )
+        .child(next_step_card(
+            colors,
+            inputs.guided_tour,
+            inputs.tour_agent,
+            inputs.ai_review,
+            cx,
+        ))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(strip)
+                .children(detail.map(|detail| {
+                    div()
+                        .p_2()
+                        .rounded(px(CARD_RADIUS))
+                        .bg(colors.inset)
+                        .child(detail)
+                })),
+        )
+        .children(inputs.clone_offer)
+        .into_any_element()
+}
+
+// C · One pipeline: the review as stops on one line, from the tour to GitHub: Tour, AI review, Fixes,
+// Your review, GitHub. Each stop says its state in one line; a stop that needs you is open and holds
+// its buttons and its problems. Problems about this Mac sit in a red box above the line.
+
+#[allow(clippy::too_many_arguments)]
+fn stop(
+    colors: &Colors,
+    name: &'static str,
+    health: Health,
+    state: String,
+    is_open: bool,
+    body: Vec<AnyElement>,
+    show: Option<AnyElement>,
+    is_last: bool,
+) -> Div {
+    div()
+        .flex()
+        .gap_2()
+        .child(
+            div()
+                .flex_none()
+                .w(px(12.))
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(
+                    div()
+                        .mt(px(5.))
+                        .size(px(if is_open { 10. } else { 8. }))
+                        .rounded_full()
+                        .when(is_open, |node| node.bg(health.color(colors)))
+                        .when(!is_open, |node| {
+                            node.border_2().border_color(health.color(colors))
+                        }),
+                )
+                .when(!is_last, |rail| {
+                    rail.child(div().flex_1().w(px(1.)).mt_1().bg(colors.border))
+                }),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .pb_2()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_xs()
+                                .font_weight(if is_open {
+                                    FontWeight::SEMIBOLD
+                                } else {
+                                    FontWeight::NORMAL
+                                })
+                                .text_color(if is_open {
+                                    colors.text
+                                } else {
+                                    colors.muted_text
+                                })
+                                .child(name),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .text_color(match health {
+                                    Health::Failed => colors.danger,
+                                    Health::Waiting => colors.warning,
+                                    _ => colors.muted_text,
+                                })
+                                .child(state),
+                        )
+                        .children(show),
+                )
+                .when(is_open, |stop| stop.children(body)),
+        )
+}
+
+pub(super) fn variant_c(
+    colors: &Colors,
+    inputs: Inputs<'_>,
+    cx: &Context<OneStepLayout>,
+) -> AnyElement {
+    let review = inputs.ai_review;
+    let tour_agent = inputs.tour_agent;
+    let guided_tour = inputs.guided_tour;
+    let facts = ReviewFacts::of(&review.line);
+    let writing = guided_tour.and_then(|tour| tour.stage.as_ref());
+    let tour_open = writing.is_some() || guided_tour.and_then(|tour| tour.write).is_some();
+    let (tour_state, tour_health) = if let Some(stage) = writing {
+        (
+            stage_line(&stage.line),
+            if stage.can_try_again {
+                Health::Failed
+            } else {
+                Health::Busy
+            },
+        )
+    } else if guided_tour.and_then(|tour| tour.write).is_some() {
+        ("not written".to_owned(), Health::Off)
+    } else {
+        let (status, health) = tour_status(tour_agent);
+        (
+            if health == Health::Off {
+                "written".to_owned()
+            } else {
+                format!("written · agent {status}")
+            },
+            health,
+        )
+    };
+    let mut tour_body: Vec<AnyElement> = Vec::new();
+    if let Some(activity) = writing.and_then(|stage| stage.activity.clone()) {
+        tour_body.push(
+            muted(colors, activity)
+                .truncate()
+                .font_family(*crate::app::components::palette::CODE_FONT)
+                .into_any_element(),
+        );
+    }
+    if writing.is_some_and(|stage| stage.can_try_again) {
+        tour_body.push(
+            div()
+                .flex()
+                .child(write_tour(colors, "Try again", ButtonKind::Secondary, cx))
+                .into_any_element(),
+        );
+    }
+    match guided_tour.and_then(|tour| tour.write) {
+        Some(WriteOffer::Available) => tour_body.push(
+            div()
+                .flex()
+                .child(write_tour(
+                    colors,
+                    "Write guided tour",
+                    ButtonKind::Secondary,
+                    cx,
+                ))
+                .into_any_element(),
+        ),
+        Some(WriteOffer::Refused(refusal)) => {
+            tour_body.push(muted(colors, refusal.reason()).into_any_element())
+        }
+        None => {}
+    }
+    if tour_agent.line.contains(" is off") {
+        tour_body.push(muted(colors, tour_agent.line.to_string()).into_any_element());
+    }
+    let agent_problems: Vec<AnyElement> =
+        problems_of(colors, inputs.problems, Owner::Agents).collect();
+    let tour_open = tour_open
+        || !agent_problems.is_empty()
+        || tour_health == Health::Off && tour_agent.line.contains(" is off");
+    tour_body.extend(agent_problems);
+    let review_health = review_health(review);
+    let review_open = review.fixes_to_send == 0 && review_health != Health::Off
+        || review.action == Some(AiReviewAction::Run);
+    let review_state = if review.is_failure {
+        "failed".to_owned()
+    } else if review_health == Health::Busy || review_health == Health::Waiting {
+        review.line.to_lowercase()
+    } else {
+        facts.headline.to_lowercase()
+    };
+    let mut review_body: Vec<AnyElement> = Vec::new();
+    if review.is_failure {
+        review_body.push(
+            muted(colors, review.line.clone())
+                .text_color(colors.danger)
+                .into_any_element(),
+        );
+    }
+    if let Some(by_severity) = facts.by_severity.clone() {
+        let line = match &facts.dismissed {
+            Some(dismissed) => format!("{by_severity} · {dismissed}"),
+            None => by_severity,
+        };
+        review_body.push(muted(colors, line).into_any_element());
+    }
+    let mut buttons: Vec<AnyElement> = Vec::new();
+    if review.has_findings {
+        buttons.push(next_finding(colors, ButtonKind::Secondary, cx));
+    }
+    if review.has_findings || review.has_dismissed_findings {
+        buttons.push(findings_list(colors, ButtonKind::Ghost, false, cx));
+    }
+    if let Some(action) = review.action {
+        let label = action != AiReviewAction::RunAgain;
+        let kind = if action == AiReviewAction::RunAgain {
+            ButtonKind::Ghost
+        } else {
+            ButtonKind::Secondary
+        };
+        buttons.push(review_action(colors, action, kind, label, cx));
+    }
+    if !buttons.is_empty() {
+        review_body.push(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_1()
+                .children(buttons)
+                .into_any_element(),
+        );
+    }
+    let fixes_open = review.fixes_to_send > 0;
+    let (fixes_state, fixes_health) = match (review.fixes_to_send, facts.fix_count) {
+        (0, 0) => ("none asked".to_owned(), Health::Off),
+        (0, done) => (
+            format!(
+                "{done} pushed · {}",
+                facts.fix_commits.first().cloned().unwrap_or_default()
+            ),
+            Health::Idle,
+        ),
+        (waiting, _) => (format!("{waiting} to send"), Health::Waiting),
+    };
+    let fixes_body: Vec<AnyElement> = (review.fixes_to_send > 0)
+        .then(|| {
+            div()
+                .flex()
+                .child(send_fixes(
+                    colors,
+                    review.fixes_to_send,
+                    ButtonKind::Primary,
+                    cx,
+                ))
+                .into_any_element()
+        })
+        .into_iter()
+        .collect();
+    let yours: Vec<AnyElement> = inputs
+        .changes_not_shown
+        .map(|notice| changes_not_shown_row(colors, notice))
+        .into_iter()
+        .chain(inputs.reviews)
+        .chain(inputs.finish)
+        .collect();
+    let github_problems: Vec<AnyElement> =
+        problems_of(colors, inputs.problems, Owner::GitHub).collect();
+    let github_health = if github_problems.is_empty() {
+        inputs.sync.health()
+    } else {
+        Health::Failed
+    };
+    let github_state = if github_problems.is_empty() {
+        inputs.sync.line()
+    } else {
+        format!(
+            "{} problem{}",
+            github_problems.len(),
+            if github_problems.len() == 1 { "" } else { "s" }
+        )
+    };
+    let github_open = github_health != Health::Idle;
+    let mut github_body: Vec<AnyElement> = Vec::new();
+    if !github_problems.is_empty()
+        && (inputs.sync.waiting_files > 0 || inputs.sync.off_because.is_some())
+    {
+        github_body.push(muted(colors, inputs.sync.line()).into_any_element());
+    }
+    if let Some(reason) = inputs.sync.off_because.clone() {
+        github_body.push(muted(colors, reason).into_any_element());
+    }
+    if inputs.sync.waiting_files > 0 {
+        github_body.push(muted(colors, "Files you ticked show as unviewed on GitHub until this goes through. It tries again on its own.").into_any_element());
+    }
+    github_body.extend(github_problems);
+    let mac_problems: Vec<AnyElement> =
+        problems_of(colors, inputs.problems, Owner::ThisMac).collect();
+    let tour_show = (guided_tour.is_some_and(|tour| tour.can_show_agent) || tour_agent.can_show)
+        .then(|| show_tour_agent(colors, "p-c-show-tour", false, cx));
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .when(!mac_problems.is_empty(), |section| {
+            section.child(
+                div()
+                    .p_2()
+                    .rounded(px(CARD_RADIUS))
+                    .border_1()
+                    .border_color(colors.danger_border)
+                    .bg(colors.danger_background)
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .children(mac_problems),
+            )
+        })
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .child(stop(
+                    colors,
+                    "Tour",
+                    tour_health,
+                    tour_state,
+                    tour_open,
+                    tour_body,
+                    tour_show,
+                    false,
+                ))
+                .child(stop(
+                    colors,
+                    "AI review",
+                    review_health,
+                    review_state,
+                    review_open,
+                    review_body,
+                    review
+                        .can_show_agent
+                        .then(|| show_review_agent(colors, "p-c-show-review", false, cx)),
+                    false,
+                ))
+                .child(stop(
+                    colors,
+                    "Fixes",
+                    fixes_health,
+                    fixes_state,
+                    fixes_open,
+                    fixes_body,
+                    None,
+                    false,
+                ))
+                .child({
+                    let (state, health) = if yours.is_empty() {
+                        ("nothing to send".to_owned(), Health::Off)
+                    } else {
+                        (String::new(), Health::Idle)
+                    };
+                    stop(
+                        colors,
+                        "Your review",
+                        health,
+                        state,
+                        !yours.is_empty(),
+                        yours,
+                        None,
+                        !inputs.sync.is_pull_request,
+                    )
+                })
+                .when(inputs.sync.is_pull_request, |line| {
+                    line.child(stop(
+                        colors,
+                        "GitHub",
+                        github_health,
+                        github_state,
+                        github_open,
+                        github_body,
+                        None,
+                        true,
+                    ))
+                }),
+        )
+        .children(inputs.clone_offer)
+        .into_any_element()
+}
+
+fn agent_rows(
     colors: &Colors,
     guided_tour: Option<&SidebarGuidedTour>,
     tour_agent: &SidebarTourAgent,
@@ -574,7 +1437,6 @@ pub(super) fn variant_a(
         .flex()
         .flex_col()
         .gap_1()
-        .child(section_label(colors, "Agents"))
         .children(tour_row)
         .children(
             writing
@@ -602,10 +1464,7 @@ pub(super) fn variant_a(
         .into_any_element()
 }
 
-// B · One next step: a card that says in one sentence where the work stands, one button for what to do
-// next, and every other action as a quiet icon in a row under it.
-
-pub(super) fn variant_b(
+fn next_step_card(
     colors: &Colors,
     guided_tour: Option<&SidebarGuidedTour>,
     tour_agent: &SidebarTourAgent,
@@ -794,266 +1653,5 @@ pub(super) fn variant_b(
                 )
                 .children(quiet),
         )
-        .into_any_element()
-}
-
-// C · Pipeline: the work as three stops on a line, tour, review and fixes, each with its state; the stop the
-// work is at is open and holds its actions, the others are one quiet line.
-
-pub(super) fn variant_c(
-    colors: &Colors,
-    guided_tour: Option<&SidebarGuidedTour>,
-    tour_agent: &SidebarTourAgent,
-    review: &SidebarAiReview,
-    cx: &Context<OneStepLayout>,
-) -> AnyElement {
-    let facts = ReviewFacts::of(&review.line);
-    let writing = guided_tour.and_then(|tour| tour.stage.as_ref());
-    let stop = |name: &'static str,
-                health: Health,
-                state: String,
-                is_open: bool,
-                body: Vec<AnyElement>,
-                show: Option<AnyElement>,
-                is_last: bool| {
-        div()
-            .flex()
-            .gap_2()
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(12.))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .child(
-                        div()
-                            .mt(px(5.))
-                            .size(px(if is_open { 10. } else { 8. }))
-                            .rounded_full()
-                            .when(is_open, |node| node.bg(health.color(colors)))
-                            .when(!is_open, |node| {
-                                node.border_2().border_color(health.color(colors))
-                            }),
-                    )
-                    .when(!is_last, |rail| {
-                        rail.child(div().flex_1().w(px(1.)).mt_1().bg(colors.border))
-                    }),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .pb_2()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(if is_open {
-                                        FontWeight::SEMIBOLD
-                                    } else {
-                                        FontWeight::NORMAL
-                                    })
-                                    .text_color(if is_open {
-                                        colors.text
-                                    } else {
-                                        colors.muted_text
-                                    })
-                                    .child(name),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_xs()
-                                    .text_color(if health == Health::Failed {
-                                        colors.danger
-                                    } else {
-                                        colors.muted_text
-                                    })
-                                    .child(state),
-                            )
-                            .children(show),
-                    )
-                    .when(is_open, |stop| stop.children(body)),
-            )
-    };
-    let tour_open = writing.is_some() || guided_tour.and_then(|tour| tour.write).is_some();
-    let (tour_state, tour_health) = if let Some(stage) = writing {
-        (
-            stage_line(&stage.line),
-            if stage.can_try_again {
-                Health::Failed
-            } else {
-                Health::Busy
-            },
-        )
-    } else if guided_tour.and_then(|tour| tour.write).is_some() {
-        ("not written".to_owned(), Health::Off)
-    } else {
-        let (status, health) = tour_status(tour_agent);
-        (
-            if health == Health::Off {
-                "written".to_owned()
-            } else {
-                format!("written · agent {status}")
-            },
-            health,
-        )
-    };
-    let mut tour_body: Vec<AnyElement> = Vec::new();
-    if let Some(activity) = writing.and_then(|stage| stage.activity.clone()) {
-        tour_body.push(
-            muted(colors, activity)
-                .truncate()
-                .font_family(*crate::app::components::palette::CODE_FONT)
-                .into_any_element(),
-        );
-    }
-    if writing.is_some_and(|stage| stage.can_try_again) {
-        tour_body.push(
-            div()
-                .flex()
-                .child(write_tour(colors, "Try again", ButtonKind::Secondary, cx))
-                .into_any_element(),
-        );
-    }
-    match guided_tour.and_then(|tour| tour.write) {
-        Some(WriteOffer::Available) => tour_body.push(
-            div()
-                .flex()
-                .child(write_tour(
-                    colors,
-                    "Write guided tour",
-                    ButtonKind::Secondary,
-                    cx,
-                ))
-                .into_any_element(),
-        ),
-        Some(WriteOffer::Refused(refusal)) => {
-            tour_body.push(muted(colors, refusal.reason()).into_any_element())
-        }
-        None => {}
-    }
-    let review_health = review_health(review);
-    let review_open = review.fixes_to_send == 0;
-    let review_state = if review.is_failure {
-        "failed".to_owned()
-    } else if review_health == Health::Busy || review_health == Health::Waiting {
-        review.line.to_lowercase()
-    } else {
-        facts.headline.to_lowercase()
-    };
-    let mut review_body: Vec<AnyElement> = Vec::new();
-    if review.is_failure {
-        review_body.push(
-            muted(colors, review.line.clone())
-                .text_color(colors.danger)
-                .into_any_element(),
-        );
-    }
-    if let Some(by_severity) = facts.by_severity.clone() {
-        let line = match &facts.dismissed {
-            Some(dismissed) => format!("{by_severity} · {dismissed}"),
-            None => by_severity,
-        };
-        review_body.push(muted(colors, line).into_any_element());
-    }
-    let mut buttons: Vec<AnyElement> = Vec::new();
-    if review.has_findings {
-        buttons.push(next_finding(colors, ButtonKind::Secondary, cx));
-    }
-    if review.has_findings || review.has_dismissed_findings {
-        buttons.push(findings_list(colors, ButtonKind::Ghost, false, cx));
-    }
-    if let Some(action) = review.action {
-        let label = action != AiReviewAction::RunAgain;
-        let kind = if action == AiReviewAction::RunAgain {
-            ButtonKind::Ghost
-        } else {
-            ButtonKind::Secondary
-        };
-        buttons.push(review_action(colors, action, kind, label, cx));
-    }
-    if !buttons.is_empty() {
-        review_body.push(
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_1()
-                .children(buttons)
-                .into_any_element(),
-        );
-    }
-    let fixes_open = !tour_open && review.fixes_to_send > 0;
-    let (fixes_state, fixes_health) = match (review.fixes_to_send, facts.fix_count) {
-        (0, 0) => ("none asked".to_owned(), Health::Off),
-        (0, done) => (
-            format!(
-                "{done} pushed · {}",
-                facts.fix_commits.first().cloned().unwrap_or_default()
-            ),
-            Health::Idle,
-        ),
-        (waiting, _) => (format!("{waiting} to send"), Health::Waiting),
-    };
-    let mut fixes_body: Vec<AnyElement> = Vec::new();
-    if review.fixes_to_send > 0 {
-        fixes_body.push(
-            div()
-                .flex()
-                .child(send_fixes(
-                    colors,
-                    review.fixes_to_send,
-                    ButtonKind::Primary,
-                    cx,
-                ))
-                .into_any_element(),
-        );
-    }
-    let tour_show = (guided_tour.is_some_and(|tour| tour.can_show_agent) || tour_agent.can_show)
-        .then(|| show_tour_agent(colors, "p-c-show-tour", false, cx));
-    div()
-        .flex()
-        .flex_col()
-        .child(section_label(colors, "Agent work").mb_2())
-        .child(stop(
-            "Tour",
-            tour_health,
-            tour_state,
-            tour_open,
-            tour_body,
-            tour_show,
-            false,
-        ))
-        .child(stop(
-            "AI review",
-            review_health,
-            review_state,
-            review_open,
-            review_body,
-            review
-                .can_show_agent
-                .then(|| show_review_agent(colors, "p-c-show-review", false, cx)),
-            false,
-        ))
-        .child(stop(
-            "Fixes",
-            fixes_health,
-            fixes_state,
-            fixes_open,
-            fixes_body,
-            None,
-            true,
-        ))
         .into_any_element()
 }
