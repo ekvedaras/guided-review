@@ -154,10 +154,13 @@ fn a_review_agent_that_makes_its_own_worktree_may_enter_and_leave_it_and_check_o
         "EnterWorktree",
         "ExitWorktree",
         "Bash(git checkout --detach:*)",
-        "Read",
     ] {
         assert!(tools.contains(&wanted), "{wanted} is not in {tools:?}");
     }
+    assert!(
+        !tools.contains(&"Read"),
+        "reads outside the session's folder stay closed: {tools:?}"
+    );
 }
 
 #[test]

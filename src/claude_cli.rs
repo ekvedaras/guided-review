@@ -65,17 +65,20 @@ pub fn review_agent_tools(
         "//{}",
         findings_file.display().to_string().trim_start_matches('/')
     );
-    let mut tools = vec![
-        match place {
-            ReviewPlace::TourAgentFolder(folder) => format!("Read({})", under(folder)),
-            ReviewPlace::OwnWorktree { .. } => "Read".to_owned(),
-        },
+    // A worktree the project's hook made has a path the app cannot know; the session reads its own
+    // working folder without a rule, and EnterWorktree moves it there.
+    let folder_read = match place {
+        ReviewPlace::TourAgentFolder(folder) => Some(format!("Read({})", under(folder))),
+        ReviewPlace::OwnWorktree { .. } => None,
+    };
+    let mut tools: Vec<String> = folder_read.into_iter().collect();
+    tools.extend([
         format!("Read({findings})"),
         "Grep".to_owned(),
         "Glob".to_owned(),
         "Task".to_owned(),
         "Agent".to_owned(),
-    ];
+    ]);
     tools.extend(
         REVIEW_COMMANDS
             .iter()
