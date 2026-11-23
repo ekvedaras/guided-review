@@ -130,8 +130,8 @@ enum Command {
         /// You need a decision from the reviewer before you fix it; give the question with --body
         #[arg(long, group = "outcome", requires = "body")]
         question: bool,
-        /// The reason or the question, in markdown; `-` reads it from stdin, which keeps its line breaks
-        #[arg(long, requires = "outcome", conflicts_with_all = ["working", "fixed"])]
+        /// What you did, the reason or the question, in markdown; `-` reads it from stdin, which keeps its line breaks
+        #[arg(long, requires = "outcome", conflicts_with = "working")]
         body: Option<String>,
     },
     /// Run the app itself; `open` starts it when none answers
@@ -226,13 +226,12 @@ fn main() -> anyhow::Result<()> {
             body,
         } => {
             let reply = match (fixed, body) {
-                (Some(commit), _) => FixReply::Fixed { commit },
+                (Some(commit), body) => FixReply::Fixed {
+                    commit,
+                    summary: body.map(read_body).transpose()?,
+                },
                 (None, Some(body)) => {
-                    let body = match body.as_str() {
-                        "-" => std::io::read_to_string(std::io::stdin())?,
-                        _ => body,
-                    };
-                    let text = body.trim_end().to_owned();
+                    let text = read_body(body)?;
                     if question {
                         FixReply::Question { text }
                     } else {
@@ -281,6 +280,15 @@ impl std::str::FromStr for OpenTarget {
             )
         })
     }
+}
+
+/// A `--body` value: `-` reads stdin, which keeps its line breaks.
+fn read_body(body: String) -> anyhow::Result<String> {
+    let body = match body.as_str() {
+        "-" => std::io::read_to_string(std::io::stdin())?,
+        _ => body,
+    };
+    Ok(body.trim_end().to_owned())
 }
 
 fn tour_path(subject: &ReviewSubject) -> anyhow::Result<()> {

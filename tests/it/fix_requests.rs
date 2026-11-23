@@ -211,7 +211,7 @@ fn a_finding_being_fixed_is_not_sent_again() {
 }
 
 #[test]
-fn the_tour_agents_answers_move_each_finding_and_a_fixed_one_closes() {
+fn the_tour_agents_answers_move_each_finding_and_a_fixed_one_stays_open() {
     let shop = Shop::with_findings(&[
         on_line("a", 1, "First."),
         on_line("b", 2, "Second."),
@@ -229,6 +229,7 @@ fn the_tour_agents_answers_move_each_finding_and_a_fixed_one_closes() {
             &id("a"),
             &FixReply::Fixed {
                 commit: "abc1234".to_owned(),
+                summary: None,
             },
         )
         .unwrap();
@@ -244,7 +245,8 @@ fn the_tour_agents_answers_move_each_finding_and_a_fixed_one_closes() {
     assert_eq!(
         review.fix_state_of(&id("a")),
         Some(&FixState::Fixed {
-            commit: "abc1234".to_owned()
+            commit: "abc1234".to_owned(),
+            summary: None,
         })
     );
     assert_eq!(
@@ -253,8 +255,8 @@ fn the_tour_agents_answers_move_each_finding_and_a_fixed_one_closes() {
             reason: "It is on purpose.".to_owned()
         })
     );
-    assert_eq!(review.ai_review().counts().total(), 2);
-    assert_eq!(shop.open().ai_review().counts().total(), 2);
+    assert_eq!(review.ai_review().counts().total(), 3);
+    assert_eq!(shop.open().ai_review().counts().total(), 3);
 }
 
 #[test]
@@ -333,6 +335,7 @@ fn the_fix_request_and_the_tour_agents_answer_are_said_on_the_findings_thread() 
             &id("b"),
             &FixReply::Fixed {
                 commit: "abc1234".to_owned(),
+                summary: None,
             },
         )
         .unwrap();
@@ -377,7 +380,7 @@ fn fix_lines(review: &Review) -> Vec<(String, Option<String>)> {
 }
 
 #[test]
-fn the_finding_on_the_page_says_where_its_fix_is_and_a_fixed_one_leaves() {
+fn the_finding_on_the_page_says_where_its_fix_is_and_a_fixed_one_stays() {
     let shop = Shop::with_findings(&[on_line("a", 1, "First."), on_line("b", 2, "Second.")]);
     let mut review = shop.open();
     assert_eq!(
@@ -410,12 +413,16 @@ fn the_finding_on_the_page_says_where_its_fix_is_and_a_fixed_one_leaves() {
             &id("b"),
             &FixReply::Fixed {
                 commit: "abc1234".to_owned(),
+                summary: None,
             },
         )
         .unwrap();
     assert_eq!(
         fix_lines(&review),
-        [("a".to_owned(), Some("Not fixed: On purpose.".to_owned()))]
+        [
+            ("a".to_owned(), Some("Not fixed: On purpose.".to_owned())),
+            ("b".to_owned(), Some("Fixed in abc1234".to_owned())),
+        ]
     );
 }
 
@@ -453,6 +460,7 @@ fn the_sidebar_names_the_commits_of_the_fixes_made() {
             &id("a"),
             &FixReply::Fixed {
                 commit: "abc1234".to_owned(),
+                summary: None,
             },
         )
         .unwrap();
@@ -887,4 +895,103 @@ fn a_note_given_with_add_to_fixes_shows_on_the_finding_and_goes_with_send_fixes(
 #[test]
 fn a_blank_note_is_no_note() {
     assert_eq!(FixNote::new("  \n "), None);
+}
+
+fn fixed_by_the_tour_agent(shop: &Shop, review: &mut Review, summary: Option<&str>) {
+    review.fix_findings(&[id("a")]);
+    shop.deliver(review, &agents_of(&idle_agent()));
+    review
+        .fix_replied(
+            &id("a"),
+            &FixReply::Fixed {
+                commit: "abc1234".to_owned(),
+                summary: summary.map(str::to_owned),
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_fixed_finding_stays_open_with_what_the_tour_agent_did_until_it_is_marked_fixed() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    fixed_by_the_tour_agent(&shop, &mut review, Some("Priced on the loading date."));
+
+    assert_eq!(
+        said_on_thread(&review, "a").last().unwrap(),
+        &(
+            WhyAuthor::TourAgent,
+            "Fixed in abc1234: Priced on the loading date.".to_owned()
+        )
+    );
+    assert!(can_mark_fixed(&review, "a"));
+
+    review.mark_fixed(&id("a")).unwrap();
+
+    assert_eq!(review.ai_review().counts().total(), 0);
+    assert_eq!(shop.open().ai_review().counts().total(), 0);
+}
+
+#[test]
+fn only_a_finding_the_tour_agent_fixed_can_be_marked_fixed() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    assert!(!can_mark_fixed(&review, "a"));
+
+    assert_eq!(
+        review.mark_fixed(&id("a")),
+        Err(FindingRefusal::NotFixedYet)
+    );
+}
+
+#[test]
+fn a_fixed_finding_can_be_sent_back_with_a_note_for_more() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    let fake = idle_agent();
+    fixed_by_the_tour_agent(&shop, &mut review, Some("Priced on the loading date."));
+
+    review
+        .fix_with_note(
+            &id("a"),
+            note("Also cover the sorting date."),
+            FixTiming::Now,
+        )
+        .unwrap();
+    shop.deliver(&mut review, &agents_of(&fake));
+
+    assert!(!can_mark_fixed(&review, "a"));
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(text.contains("Also cover the sorting date."), "{text}");
+}
+
+#[test]
+fn the_fix_request_asks_the_tour_agent_to_say_what_it_did() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    let fake = idle_agent();
+
+    review.fix_findings(&[id("a")]);
+    shop.deliver(&mut review, &agents_of(&fake));
+
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(text.contains("--fixed <commit sha> --body -"), "{text}");
+}
+
+fn can_mark_fixed(review: &Review, finding: &str) -> bool {
+    review
+        .page()
+        .rows()
+        .iter()
+        .find_map(|row| match row {
+            PageRow::Finding(row) if row.id.to_string() == finding => Some(row.can_mark_fixed),
+            _ => None,
+        })
+        .unwrap()
 }

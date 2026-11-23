@@ -540,22 +540,22 @@ impl ReviewState {
         &mut self.viewer.fix_requests
     }
 
-    /// The tour agent's word on one finding; a finding it fixed is closed like one the reviewer decided.
+    /// The tour agent's word on one finding, said on its thread. A fixed one stays open until the reviewer marks it fixed.
     pub fn fix_replied(&mut self, id: &FindingId, reply: &FixReply) -> Result<(), NoFixRequest> {
         let finding = self.viewer.fix_requests.replied(id, reply)?;
         let said = match reply {
             FixReply::Working => None,
             FixReply::Question { text } => Some(text.clone()),
-            FixReply::Fixed { commit } => Some(format!("Fixed in {commit}")),
+            FixReply::Fixed { commit, summary } => Some(match summary {
+                Some(summary) => format!("Fixed in {commit}: {summary}"),
+                None => format!("Fixed in {commit}"),
+            }),
             FixReply::NotFixed { reason } => Some(format!("Not fixed: {reason}")),
         };
         if let Some(said) = said {
             self.viewer
                 .finding_threads
-                .say(finding.clone(), WhyAuthor::TourAgent, said);
-        }
-        if matches!(reply, FixReply::Fixed { .. }) {
-            self.viewer.finding_decisions.record(finding, Fate::Fixed);
+                .say(finding, WhyAuthor::TourAgent, said);
         }
         Ok(())
     }

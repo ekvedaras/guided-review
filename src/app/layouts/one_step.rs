@@ -75,8 +75,8 @@ use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
 use crate::app::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
 use crate::app::components::shortcuts_sheet::ShortcutsSheet;
 use crate::app::components::sidebar_row::{
-    RowMark, RowPlace, check_flag, count_badge, row_label, row_note, row_places, sidebar_row,
-    skim_chip,
+    RowMark, RowPlace, check_flag, count_badge, finding_badge, row_label, row_note, row_places,
+    sidebar_row, skim_chip,
 };
 use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
@@ -1187,7 +1187,8 @@ impl OneStepLayout {
                 label,
             )
         };
-        let (use_id, as_is_id, dismiss_id, fix_id, why_id, answer_id, fixes_id, note_id) = (
+        let (use_id, as_is_id, dismiss_id, fix_id, why_id, answer_id, fixes_id, note_id, fixed_id) = (
+            finding.id.clone(),
             finding.id.clone(),
             finding.id.clone(),
             finding.id.clone(),
@@ -1199,8 +1200,20 @@ impl OneStepLayout {
         );
         div()
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_2()
+            .when(finding.can_mark_fixed, |actions| {
+                actions.child(
+                    small_button("mark-fixed", ButtonKind::Primary, Icon::Check, "Mark fixed")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let marked = this
+                                .session
+                                .update(cx, |session, cx| session.mark_fixed(&fixed_id, cx));
+                            this.finding_refused(marked, cx);
+                        })),
+                )
+            })
             .when(finding.can_decide, |actions| {
                 actions
                     .child(
@@ -2631,6 +2644,7 @@ impl OneStepLayout {
                 .children(step.has_check.then(|| check_flag(&colors)))
                 .children(step.is_skim.then(|| skim_chip(&colors)))
                 .children(count_badge(&colors, step.thread_count))
+                .children(finding_badge(&colors, step.finding_count))
             });
         let safety_net_row = sidebar.safety_net.as_ref().map(|safety_net| {
             self.touching_hover(
@@ -2658,6 +2672,7 @@ impl OneStepLayout {
                 },
             ))
             .children(count_badge(&colors, safety_net.thread_count))
+            .children(finding_badge(&colors, safety_net.finding_count))
         });
         let reviews_block =
             (!sidebar.reviews.is_empty()).then(|| ReviewsBlock::new(Arc::clone(&sidebar.reviews)));

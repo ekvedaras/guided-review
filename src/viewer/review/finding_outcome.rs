@@ -20,6 +20,8 @@ pub enum FindingRefusal {
     DraftInTheWay(CommentPlace),
     /// A fix is asked for already, or under way: asking again would send it twice.
     BeingFixed,
+    /// Mark fixed is for a finding the tour agent said it fixed.
+    NotFixedYet,
     /// It was not added to fixes, or it was sent already.
     NotInFixes,
     /// A question on it waits for its answer: another would cross it.
@@ -41,6 +43,7 @@ impl fmt::Display for FindingRefusal {
                 "A comment box is open on these lines: Use adds the finding to it, or send that comment first",
             ),
             Self::BeingFixed => f.write_str("A fix of this finding is asked for already"),
+            Self::NotFixedYet => f.write_str("The tour agent has not fixed this finding"),
             Self::NotInFixes => f.write_str("This finding is not among the fixes to send"),
             Self::BeingAsked => {
                 f.write_str("A question on this finding waits for the review agent's answer")

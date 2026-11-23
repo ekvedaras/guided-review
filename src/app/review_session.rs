@@ -535,6 +535,14 @@ impl ReviewSession {
         self.change(cx, |review| review.fix_with_note(id, note, timing))
     }
 
+    pub fn mark_fixed(
+        &mut self,
+        id: &FindingId,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FindingRefusal> {
+        self.change(cx, |review| review.mark_fixed(id))
+    }
+
     pub fn send_fixes(&mut self, cx: &mut Context<Self>) -> Vec<(FindingId, FindingRefusal)> {
         self.change(cx, |review| review.send_fixes()).refused
     }

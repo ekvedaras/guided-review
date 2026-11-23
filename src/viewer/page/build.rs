@@ -808,6 +808,7 @@ fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
         can_fix,
         can_decide,
         fixes_offer,
+        can_mark_fixed: matches!(view.fix, Some(FixState::Fixed { .. })),
         can_answer_fix,
         asked: view
             .thread

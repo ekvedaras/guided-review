@@ -205,6 +205,7 @@ fn the_safety_net_size_counts_what_its_page_shows() {
         Some(SafetyNetSize {
             pieces: net.pieces.len(),
             threads: 1,
+            findings: 0,
         })
     );
 }

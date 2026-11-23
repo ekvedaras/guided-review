@@ -316,12 +316,20 @@ impl ReviewCore {
     /// The tour agent's word on one finding. A finding it fixed is closed.
     pub fn fix_replied(&mut self, id: &FindingId, reply: &FixReply) -> anyhow::Result<()> {
         self.state.record(|state| state.fix_replied(id, reply))??;
-        if matches!(reply, FixReply::Fixed { .. }) {
-            self.close_finding(id);
-        } else {
-            self.place_threads();
-        }
+        self.place_threads();
         Ok(())
+    }
+
+    /// The reviewer accepts the tour agent's fix: the finding closes, and a later run is told it was fixed.
+    pub fn mark_fixed(&mut self, id: &FindingId) -> Result<(), FindingRefusal> {
+        let finding = self.open_finding(id)?;
+        if !matches!(
+            self.state.fix_requests().state_of(id),
+            Some(FixState::Fixed { .. })
+        ) {
+            return Err(FindingRefusal::NotFixedYet);
+        }
+        self.record_decision(finding, Fate::Fixed)
     }
 
     /// The reviewer's answer to what the tour agent asked before fixing: it goes to the agent as the next message.

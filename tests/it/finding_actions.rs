@@ -513,3 +513,14 @@ fn the_brief_of_a_second_run_lists_the_dismissed_findings_and_not_the_used_ones(
     assert!(!brief.contains("Say it twice."), "{brief}");
     assert!(!brief.contains("Still open."), "{brief}");
 }
+
+#[test]
+fn a_step_in_the_sidebar_counts_its_open_findings() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One."), on_line_2("b", "Two.")]);
+    let mut review = shop.open();
+    assert_eq!(review.sidebar()[0].finding_count, 2);
+
+    review.dismiss_finding(&id("a")).unwrap();
+
+    assert_eq!(review.sidebar()[0].finding_count, 1);
+}

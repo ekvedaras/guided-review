@@ -107,6 +107,8 @@ pub struct FindingRow {
     /// Use, Use as is and Dismiss: false while a fix is asked for or under way.
     pub can_decide: bool,
     pub fixes_offer: FixesOffer,
+    /// The tour agent fixed it: the reviewer accepts the fix, or asks for more.
+    pub can_mark_fixed: bool,
     /// The tour agent asked something before fixing and waits for the reviewer's answer.
     pub can_answer_fix: bool,
     /// Ask why: the questions and the review agent's answers, oldest first.

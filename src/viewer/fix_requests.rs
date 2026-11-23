@@ -31,6 +31,9 @@ pub enum FixState {
     },
     Fixed {
         commit: String,
+        /// What the tour agent says it did, when it said.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
     },
     NotFixed {
         reason: String,
@@ -69,7 +72,7 @@ impl FixState {
             Self::Fixing => "Fixing…".to_owned(),
             Self::Asked => "The tour agent asks you something: answer it below".to_owned(),
             Self::AnswerQueued { .. } => "Your answer waits for the tour agent".to_owned(),
-            Self::Fixed { commit } => format!("Fixed in {commit}"),
+            Self::Fixed { commit, .. } => format!("Fixed in {commit}"),
             Self::NotFixed { reason } => format!("Not fixed: {reason}"),
             Self::Failed(reason) => format!("Fix request failed: {reason}"),
             Self::EndedWithoutAnswer => {
@@ -112,6 +115,9 @@ pub enum FixReply {
     },
     Fixed {
         commit: String,
+        /// What the tour agent says it did, when it said.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
     },
     NotFixed {
         reason: String,
@@ -188,7 +194,7 @@ impl FixRequests {
     /// The commits of the fixes made, oldest first.
     pub fn fixed_commits(&self) -> impl Iterator<Item = &str> {
         self.0.iter().filter_map(|request| match &request.state {
-            FixState::Fixed { commit } => Some(commit.as_str()),
+            FixState::Fixed { commit, .. } => Some(commit.as_str()),
             _ => None,
         })
     }
@@ -362,8 +368,9 @@ impl FixRequests {
         request.state = match reply {
             FixReply::Working => FixState::Fixing,
             FixReply::Question { .. } => FixState::Asked,
-            FixReply::Fixed { commit } => FixState::Fixed {
+            FixReply::Fixed { commit, summary } => FixState::Fixed {
                 commit: commit.clone(),
+                summary: summary.clone(),
             },
             FixReply::NotFixed { reason } => FixState::NotFixed {
                 reason: reason.clone(),
@@ -410,7 +417,8 @@ fn fixes_message(requests: &[&FixRequest], subject: &ReviewSubject) -> String {
         ));
         lines.push(format!(
             "Answer: `guided-review fix-reply {key} {id} --working` when you start on it, then \
-             `guided-review fix-reply {key} {id} --fixed <commit sha>` once it is committed, or \
+             `guided-review fix-reply {key} {id} --fixed <commit sha> --body -` once it is committed, with \
+             what you changed and why on stdin, in a quoted heredoc, for the reviewer to judge, or \
              `guided-review fix-reply {key} {id} --not-fixed --body -` with the reason on stdin, in a \
              quoted heredoc (`<<'EOF'`), when the finding is wrong or cannot be fixed."
         ));
@@ -520,7 +528,7 @@ impl fmt::Display for FixReply {
         match self {
             Self::Working => f.write_str("is being fixed"),
             Self::Question { .. } => f.write_str("waits for your answer"),
-            Self::Fixed { commit } => write!(f, "fixed in {commit}"),
+            Self::Fixed { commit, .. } => write!(f, "fixed in {commit}"),
             Self::NotFixed { .. } => f.write_str("not fixed"),
         }
     }
