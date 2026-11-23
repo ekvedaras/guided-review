@@ -8,10 +8,13 @@ use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, Send
 use crate::viewer::finding_decisions::Fate;
 use crate::viewer::finding_threads::WhyAuthor;
 use crate::viewer::findings_list::{FindingLine, FindingsList};
-use crate::viewer::fix_requests::{FixReply, FixState};
+use crate::viewer::fix_requests::{FixNote, FixReply, FixState, FixTiming};
 use crate::viewer::hand_offs::Audience;
 use crate::viewer::threads::ThreadId;
 use crate::viewer::work_agenda::WorkKind;
+
+/// A finding to fix, with what the reviewer wants of the fix when they said.
+type NotedFinding = (Finding, Option<FixNote>);
 
 /// Starts a comment made from a finding the reviewer did not edit.
 const AI_MARK: &str = "🤖";
@@ -46,7 +49,12 @@ impl ReviewCore {
     /// An open finding the reviewer may still use or dismiss: not one the tour agent is fixing.
     fn decidable_finding(&self, id: &FindingId) -> Result<Finding, FindingRefusal> {
         let finding = self.open_finding(id)?;
-        if self.state.fix_requests().is_in_progress(id) {
+        if self
+            .state
+            .fix_requests()
+            .state_of(id)
+            .is_some_and(FixState::blocks_decisions)
+        {
             return Err(FindingRefusal::BeingFixed);
         }
         Ok(finding)
@@ -153,32 +161,76 @@ impl ReviewCore {
 
     /// Sends each finding to the tour agent as one message to fix, in reading order.
     pub fn fix_findings(&mut self, ids: &[FindingId]) -> FindingsBatch<FindingId> {
-        let mut batch = FindingsBatch {
-            done: Vec::new(),
-            refused: Vec::new(),
+        self.request_fixes(ids.iter().map(|id| (id.clone(), None)).collect())
+    }
+
+    /// One finding goes to the tour agent, now or with Send fixes, with what the reviewer wants of the fix.
+    pub fn fix_with_note(
+        &mut self,
+        id: &FindingId,
+        note: FixNote,
+        timing: FixTiming,
+    ) -> Result<(), FindingRefusal> {
+        let order = vec![(id.clone(), Some(note))];
+        let batch = match timing {
+            FixTiming::Now => self.request_fixes(order),
+            FixTiming::WithSendFixes => self.hold_fixes(order),
         };
-        let mut to_fix = Vec::new();
-        for id in ids {
-            match self.open_finding(id) {
-                Ok(_) if self.state.fix_requests().is_in_progress(id) => {
-                    batch.refused.push((id.clone(), FindingRefusal::BeingFixed));
+        batch
+            .refused
+            .into_iter()
+            .next()
+            .map_or(Ok(()), |(_, refusal)| Err(refusal))
+    }
+
+    /// The open findings not being fixed, each with its note.
+    fn fixable(
+        &self,
+        orders: Vec<(FindingId, Option<FixNote>)>,
+    ) -> (Vec<NotedFinding>, Vec<(FindingId, FindingRefusal)>) {
+        let mut fixable = Vec::new();
+        let mut refused = Vec::new();
+        for (id, note) in orders {
+            match self.open_finding(&id) {
+                Ok(_) if self.state.fix_requests().is_in_progress(&id) => {
+                    refused.push((id, FindingRefusal::BeingFixed));
                 }
-                Ok(finding) => to_fix.push(finding),
-                Err(refusal) => batch.refused.push((id.clone(), refusal)),
+                Ok(finding) => fixable.push((finding, note)),
+                Err(refusal) => refused.push((id, refusal)),
             }
         }
-        to_fix.sort_by_key(|finding| self.reading_order_of(finding));
-        batch.done = to_fix.iter().map(|finding| finding.id.clone()).collect();
+        (fixable, refused)
+    }
+
+    fn request_fixes(
+        &mut self,
+        orders: Vec<(FindingId, Option<FixNote>)>,
+    ) -> FindingsBatch<FindingId> {
+        let (mut to_fix, refused) = self.fixable(orders);
+        let mut batch = FindingsBatch {
+            done: Vec::new(),
+            refused,
+        };
+        to_fix.sort_by_key(|(finding, _)| self.reading_order_of(finding));
+        batch.done = to_fix
+            .iter()
+            .map(|(finding, _)| finding.id.clone())
+            .collect();
         if to_fix.is_empty() {
             return batch;
         }
         match self.state.record(|state| {
-            for finding in &to_fix {
-                state.finding_threads_mut().say(
-                    finding.clone(),
-                    WhyAuthor::Reviewer,
-                    "Fix requested".to_owned(),
+            for (finding, note) in &to_fix {
+                let note = note
+                    .as_ref()
+                    .or_else(|| state.fix_requests().note_to_send(&finding.id));
+                let said = note.map_or_else(
+                    || "Fix requested".to_owned(),
+                    |note| format!("Fix requested: {}", note.as_str()),
                 );
+                state
+                    .finding_threads_mut()
+                    .say(finding.clone(), WhyAuthor::Reviewer, said);
             }
             state.fix_requests_mut().request(to_fix);
         }) {
@@ -200,24 +252,25 @@ impl ReviewCore {
 
     /// Each finding waits for Send fixes, so the reviewer goes on reading and sends them together.
     pub fn add_to_fixes(&mut self, ids: &[FindingId]) -> FindingsBatch<FindingId> {
+        self.hold_fixes(ids.iter().map(|id| (id.clone(), None)).collect())
+    }
+
+    fn hold_fixes(
+        &mut self,
+        orders: Vec<(FindingId, Option<FixNote>)>,
+    ) -> FindingsBatch<FindingId> {
+        let (to_add, refused) = self.fixable(orders);
         let mut batch = FindingsBatch {
             done: Vec::new(),
-            refused: Vec::new(),
+            refused,
         };
-        let mut to_add = Vec::new();
-        for id in ids {
-            match self.open_finding(id) {
-                Ok(_) if self.state.fix_requests().is_in_progress(id) => {
-                    batch.refused.push((id.clone(), FindingRefusal::BeingFixed));
-                }
-                Ok(finding) => to_add.push(finding),
-                Err(refusal) => batch.refused.push((id.clone(), refusal)),
-            }
-        }
         if to_add.is_empty() {
             return batch;
         }
-        let added: Vec<FindingId> = to_add.iter().map(|finding| finding.id.clone()).collect();
+        let added: Vec<FindingId> = to_add
+            .iter()
+            .map(|(finding, _)| finding.id.clone())
+            .collect();
         match self
             .state
             .record(|state| state.fix_requests_mut().add_to_send(to_add))

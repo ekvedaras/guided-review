@@ -5,8 +5,10 @@ use std::collections::HashMap;
 
 use gpui::{
     AnyElement, App, Context, Div, FocusHandle, IntoElement, ParentElement, SharedString, Styled,
-    Window, div, px,
+    Window, div, prelude::FluentBuilder as _, px,
 };
+
+use crate::viewer::{KeyCap, Modifier};
 
 use super::card::card;
 use super::chip::chip;
@@ -126,9 +128,44 @@ pub struct FindingQuestions(HashMap<FindingId, OpenQuestion>);
 
 struct OpenQuestion {
     text: String,
-    /// What Enter does in this box: "to ask" or "to answer".
-    send_hint: &'static str,
+    purpose: FindingBox,
     focus: FocusHandle,
+}
+
+/// What the owner of the boxes does on each key.
+pub struct FindingBoxKeys<T> {
+    pub on_type: fn(&mut T, &FindingId, String),
+    pub on_send: fn(&mut T, &FindingId, &mut Window, &mut Context<T>),
+    /// Only a fix note's box has it.
+    pub on_send_now: fn(&mut T, &FindingId, &mut Window, &mut Context<T>),
+    pub on_cancel: fn(&mut T, &FindingId, &mut Window, &mut Context<T>),
+}
+
+impl<T> Clone for FindingBoxKeys<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for FindingBoxKeys<T> {}
+
+/// What a box under a finding is for, which says what its keys do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FindingBox {
+    WhyQuestion,
+    FixAnswer,
+    /// Enter adds the finding to fixes with the note; the fix-now key sends it at once.
+    FixNote,
+}
+
+impl FindingBox {
+    const fn send_hint(self) -> &'static str {
+        match self {
+            Self::WhyQuestion => "to ask",
+            Self::FixAnswer => "to answer",
+            Self::FixNote => "to add to fixes",
+        }
+    }
 }
 
 impl FindingQuestions {
@@ -137,18 +174,22 @@ impl FindingQuestions {
         &mut self,
         id: &FindingId,
         text: &str,
-        send_hint: &'static str,
+        purpose: FindingBox,
         cx: &mut App,
     ) -> FocusHandle {
         self.0
             .entry(id.clone())
             .or_insert_with(|| OpenQuestion {
                 text: text.to_owned(),
-                send_hint,
+                purpose,
                 focus: cx.focus_handle(),
             })
             .focus
             .clone()
+    }
+
+    pub fn purpose_of(&self, id: &FindingId) -> Option<FindingBox> {
+        self.0.get(id).map(|open| open.purpose)
     }
 
     pub fn type_in(&mut self, id: &FindingId, text: String) {
@@ -171,12 +212,18 @@ impl FindingQuestions {
         colors: &Colors,
         id: &FindingId,
         layout: gpui::Entity<T>,
-        on_type: fn(&mut T, &FindingId, String),
-        on_send: fn(&mut T, &FindingId, &mut Window, &mut Context<T>),
-        on_cancel: fn(&mut T, &FindingId, &mut Window, &mut Context<T>),
+        keys: FindingBoxKeys<T>,
     ) -> Option<AnyElement> {
+        let FindingBoxKeys {
+            on_type,
+            on_send,
+            on_send_now,
+            on_cancel,
+        } = keys;
         let open = self.0.get(id)?;
-        let (typed, sent, given_up) = (
+        let has_send_now = open.purpose == FindingBox::FixNote;
+        let (typed, sent, sent_now, given_up) = (
+            (layout.clone(), id.clone()),
             (layout.clone(), id.clone()),
             (layout.clone(), id.clone()),
             (layout, id.clone()),
@@ -197,6 +244,10 @@ impl FindingQuestions {
         .on_submit(move |window, cx| {
             let (layout, id) = &sent;
             layout.update(cx, |this, cx| on_send(this, id, window, cx));
+        })
+        .on_submit_now(has_send_now, move |window, cx| {
+            let (layout, id) = &sent_now;
+            layout.update(cx, |this, cx| on_send_now(this, id, window, cx));
         })
         .on_cancel(move |window, cx| {
             let (layout, id) = &given_up;
@@ -225,8 +276,19 @@ impl FindingQuestions {
                         .child(key_hint(
                             colors,
                             &[KeyLabel::Icon(Icon::Enter)],
-                            open.send_hint,
+                            open.purpose.send_hint(),
                         ))
+                        .when(has_send_now, |hints| {
+                            hints.child(key_hint(
+                                colors,
+                                &[
+                                    KeyLabel::of(KeyCap::Modifier(Modifier::Primary)),
+                                    KeyLabel::of(KeyCap::Modifier(Modifier::Alt)),
+                                    KeyLabel::Icon(Icon::Enter),
+                                ],
+                                "to fix now",
+                            ))
+                        })
                         .child(key_hint(colors, &[KeyLabel::Text("esc")], "to close")),
                 )
                 .into_any_element(),

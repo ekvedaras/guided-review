@@ -3,7 +3,7 @@
 
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
-use crate::viewer::{FixReply, WhyReply, catch_up_findings};
+use crate::viewer::{FixNote, FixReply, FixTiming, WhyReply, catch_up_findings};
 use std::collections::{HashMap, HashSet};
 use std::ops::{ControlFlow, Range};
 use std::path::PathBuf;
@@ -523,6 +523,16 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) -> Result<(), FindingRefusal> {
         self.change(cx, |review| review.remove_from_fixes(id))
+    }
+
+    pub fn fix_with_note(
+        &mut self,
+        id: &FindingId,
+        note: FixNote,
+        timing: FixTiming,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FindingRefusal> {
+        self.change(cx, |review| review.fix_with_note(id, note, timing))
     }
 
     pub fn send_fixes(&mut self, cx: &mut Context<Self>) -> Vec<(FindingId, FindingRefusal)> {

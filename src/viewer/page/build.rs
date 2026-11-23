@@ -784,6 +784,11 @@ fn thread_row(view: ThreadView, place: ThreadRowPlace) -> PageRow {
 
 fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
     let can_fix = !view.fix.as_ref().is_some_and(FixState::is_in_progress);
+    let can_decide = !view.fix.as_ref().is_some_and(FixState::blocks_decisions);
+    let fix_line = view.fix.as_ref().map(|state| match &view.fix_note {
+        Some(note) => format!("{}. Your note: {}", state.line(), note.as_str()),
+        None => state.line(),
+    });
     let fixes_offer = match &view.fix {
         Some(FixState::ToSend) => FixesOffer::Remove,
         Some(state) if state.is_in_progress() => FixesOffer::None,
@@ -799,9 +804,9 @@ fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
         severity: view.finding.severity,
         body: view.finding.body.into(),
         place,
-        fix: view.fix.map(|state| state.line().into()),
+        fix: fix_line.map(Into::into),
         can_fix,
-        can_decide: can_fix,
+        can_decide,
         fixes_offer,
         can_answer_fix,
         asked: view

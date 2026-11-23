@@ -150,7 +150,9 @@ pub use finish_review::{
     ApproveWarning, CLAMPED_BODY_LINES, FinishAction, FinishOutcome, FinishRefusal, FinishRequest,
     FinishResult, ReviewOutcome, ReviewVerdict, SubmittedReview,
 };
-pub use fix_requests::{FixReply, FixRequest, FixRequests, FixState, NoFixRequest};
+pub use fix_requests::{
+    FixNote, FixReply, FixRequest, FixRequests, FixState, FixTiming, NoFixRequest,
+};
 pub use focused_change::{ChangeInView, Focus, PageChange, ReadStep};
 pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};

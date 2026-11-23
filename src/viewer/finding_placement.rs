@@ -9,7 +9,7 @@ use crate::tour::Tour;
 
 use super::diff_display::DiffDisplay;
 use super::finding_threads::{FindingThread, FindingThreads};
-use super::fix_requests::{FixRequests, FixState};
+use super::fix_requests::{FixNote, FixRequests, FixState};
 use super::review::StepId;
 use super::step_page::{LineLocation, Side};
 use super::threads::{hangs_under_a_row, step_pieces};
@@ -23,6 +23,8 @@ pub struct FindingView {
     pub anchor: Option<LineLocation>,
     /// The fix the reviewer asked for, when one was.
     pub fix: Option<FixState>,
+    /// The note the reviewer gave with a fix that waits for Send fixes.
+    pub fix_note: Option<FixNote>,
     /// Ask why on it, once the reviewer asked.
     pub thread: Option<FindingThread>,
 }
@@ -87,6 +89,7 @@ impl FindingPlacement {
                 finding: finding.clone(),
                 anchor,
                 fix: fixes.state_of(&finding.id).cloned(),
+                fix_note: fixes.note_to_send(&finding.id).cloned(),
                 thread: threads.thread_of(&finding.id).cloned(),
             });
         }

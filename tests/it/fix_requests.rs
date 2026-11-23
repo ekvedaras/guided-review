@@ -14,8 +14,8 @@ use guided_review::pull_request::RepoName;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentStatus, FindingRefusal, FixReply, FixState, FixesOffer, PageRow, Review, TerminalId,
-    TourAgentPort, TourAgents, WhyAuthor, WorkPorts,
+    AgentStatus, FindingRefusal, FixNote, FixReply, FixState, FixTiming, FixesOffer, PageRow,
+    Review, TerminalId, TourAgentPort, TourAgents, WhyAuthor, WorkPorts,
 };
 use serde_json::{Value, json};
 
@@ -807,4 +807,84 @@ fn can_decide(review: &Review, finding: &str) -> bool {
             _ => None,
         })
         .unwrap()
+}
+
+#[test]
+fn a_finding_the_tour_agent_asked_about_can_still_be_dismissed() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First."), on_line("b", 2, "Second.")]);
+    let mut review = shop.open();
+    asked_by_the_tour_agent(&shop, &mut review, &idle_agent(), "Which date?");
+    assert!(can_decide(&review, "a"));
+
+    review.dismiss_finding(&id("a")).unwrap();
+
+    assert_eq!(review.fix_state_of(&id("a")), None);
+}
+
+#[test]
+fn a_finding_the_tour_agent_asked_about_can_still_be_used() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First."), on_line("b", 2, "Second.")]);
+    let mut review = shop.open();
+    asked_by_the_tour_agent(&shop, &mut review, &idle_agent(), "Which date?");
+
+    assert!(review.use_finding(&id("a")).is_ok());
+}
+
+fn note(text: &str) -> FixNote {
+    FixNote::new(text).unwrap()
+}
+
+#[test]
+fn fix_now_with_a_note_tells_the_tour_agent_the_note_and_says_it_on_the_thread() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    let fake = idle_agent();
+
+    review
+        .fix_with_note(&id("a"), note("Use the loading date."), FixTiming::Now)
+        .unwrap();
+    shop.deliver(&mut review, &agents_of(&fake));
+
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(text.contains("Use the loading date."), "{text}");
+    let thread = review.finding_thread(&id("a")).unwrap();
+    assert_eq!(
+        thread.messages().last().unwrap().body,
+        "Fix requested: Use the loading date."
+    );
+}
+
+#[test]
+fn a_note_given_with_add_to_fixes_shows_on_the_finding_and_goes_with_send_fixes() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    let fake = idle_agent();
+
+    review
+        .fix_with_note(
+            &id("a"),
+            note("Use the loading date."),
+            FixTiming::WithSendFixes,
+        )
+        .unwrap();
+    assert_eq!(
+        fix_lines(&review)[0].1.as_deref(),
+        Some("To fix: goes with Send fixes. Your note: Use the loading date.")
+    );
+    review.send_fixes();
+    shop.deliver(&mut review, &agents_of(&fake));
+
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(text.contains("Use the loading date."), "{text}");
+}
+
+#[test]
+fn a_blank_note_is_no_note() {
+    assert_eq!(FixNote::new("  \n "), None);
 }

@@ -53,6 +53,12 @@ impl FixState {
         )
     }
 
+    /// Use, Use as is and Dismiss wait while the tour agent works on the fix; a question it asked
+    /// leaves the reviewer free to drop the finding instead of answering.
+    pub const fn blocks_decisions(&self) -> bool {
+        self.is_in_progress() && !matches!(self, Self::Asked)
+    }
+
     /// What the reviewer reads under the finding.
     pub fn line(&self) -> String {
         match self {
@@ -71,6 +77,29 @@ impl FixState {
             }
         }
     }
+}
+
+/// What the reviewer tells the tour agent about how to fix a finding: never blank.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FixNote(String);
+
+impl FixNote {
+    pub fn new(text: &str) -> Option<Self> {
+        let text = text.trim();
+        (!text.is_empty()).then(|| Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// When a fix with a note goes to the tour agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixTiming {
+    Now,
+    WithSendFixes,
 }
 
 /// What the tour agent says about one finding of a fix request.
@@ -102,6 +131,8 @@ pub struct FixRequest {
     finding: Finding,
     batch: u32,
     state: FixState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<FixNote>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -144,6 +175,7 @@ impl FixRequests {
                     finding: finding.clone(),
                     batch: 0,
                     state: state(position),
+                    note: None,
                 })
                 .collect(),
         )
@@ -161,29 +193,48 @@ impl FixRequests {
         })
     }
 
-    /// One batch, in the order given. An earlier answer for a finding is replaced.
-    pub(super) fn request(&mut self, findings: Vec<Finding>) {
+    /// One batch, in the order given. An earlier answer for a finding is replaced; a note given when
+    /// it was added to fixes goes with it.
+    pub(super) fn request(&mut self, findings: Vec<(Finding, Option<FixNote>)>) {
         self.put(findings, &FixState::Queued);
     }
 
     /// Added to fixes: each waits for Send fixes. An earlier answer for a finding is replaced.
-    pub(super) fn add_to_send(&mut self, findings: Vec<Finding>) {
+    pub(super) fn add_to_send(&mut self, findings: Vec<(Finding, Option<FixNote>)>) {
         self.put(findings, &FixState::ToSend);
     }
 
-    fn put(&mut self, findings: Vec<Finding>, state: &FixState) {
+    /// The note the reviewer gave with a finding that waits for Send fixes.
+    pub fn note_to_send(&self, id: &FindingId) -> Option<&FixNote> {
+        self.0
+            .iter()
+            .find(|request| request.finding.id == *id && request.state == FixState::ToSend)
+            .and_then(|request| request.note.as_ref())
+    }
+
+    /// Nothing went to the tour agent yet, or it waits for the reviewer: a decided finding drops it.
+    pub(super) fn forget_decided(&mut self, id: &FindingId) {
+        self.0.retain(|request| {
+            request.finding.id != *id
+                || !matches!(request.state, FixState::ToSend | FixState::Asked)
+        });
+    }
+
+    fn put(&mut self, findings: Vec<(Finding, Option<FixNote>)>, state: &FixState) {
         let batch = self
             .0
             .iter()
             .map(|request| request.batch)
             .max()
             .map_or(0, |last| last + 1);
-        for finding in findings {
+        for (finding, note) in findings {
+            let note = note.or_else(|| self.note_to_send(&finding.id).cloned());
             self.0.retain(|request| request.finding.id != finding.id);
             self.0.push(FixRequest {
                 finding,
                 batch,
                 state: state.clone(),
+                note,
             });
         }
     }
@@ -345,6 +396,12 @@ fn fixes_message(requests: &[&FixRequest], subject: &ReviewSubject) -> String {
         lines.push(format!("Finding {id} ({})", finding.severity));
         lines.push(format!("Place: {}", finding.anchor));
         lines.push(format!("Finding: {}", finding.body));
+        if let Some(note) = &request.note {
+            lines.push(format!(
+                "The reviewer's note on how to fix it: {}",
+                note.as_str()
+            ));
+        }
         lines.push(format!(
             "Needs the reviewer's decision first? Ask through the app, not in your terminal, where they \
              may not look: `guided-review fix-reply {key} {id} --question --body -` with the question on \

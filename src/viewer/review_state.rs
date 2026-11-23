@@ -512,14 +512,14 @@ impl ReviewState {
         &self.viewer.finding_decisions
     }
 
-    /// A decided finding is not fixed any more: it leaves the fixes to send.
+    /// A decided finding is not fixed any more: it leaves the fixes to send, and a question on it is dropped.
     pub(super) fn decide_finding(&mut self, finding: Finding, fate: Fate) {
-        self.viewer.fix_requests.remove_to_send(&finding.id);
+        self.viewer.fix_requests.forget_decided(&finding.id);
         self.viewer.finding_decisions.record(finding, fate);
     }
 
     pub(super) fn finding_used(&mut self, finding: Finding, thread: Option<ThreadId>) {
-        self.viewer.fix_requests.remove_to_send(&finding.id);
+        self.viewer.fix_requests.forget_decided(&finding.id);
         self.viewer.finding_decisions.record_used(finding, thread);
     }
 

@@ -13,6 +13,7 @@ use gpui::{
 use super::OneStepLayout;
 use super::issue_card::IssueHover;
 use crate::app::components::diff_view::RowGesture;
+use crate::app::components::finding_view::FindingBox;
 use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::{ToastShelf, Toaster};
 use crate::app::review_session::{ReviewSession, StagedReReview};
@@ -929,8 +930,12 @@ impl OneStepLayout {
                     }
                 });
                 if let Ok(answered) = FindingId::try_from("a".to_owned()) {
-                    self.finding_questions
-                        .open(&answered, "Is it on purpose?", "to ask", cx);
+                    self.finding_questions.open(
+                        &answered,
+                        "Is it on purpose?",
+                        FindingBox::WhyQuestion,
+                        cx,
+                    );
                 }
             }
             Scene::TourEndUnread => {
