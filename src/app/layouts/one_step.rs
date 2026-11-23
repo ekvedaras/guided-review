@@ -2703,6 +2703,7 @@ impl OneStepLayout {
                     clone_offer,
                     problems: &sidebar.problems,
                     changes_not_shown: sidebar.changes_not_shown.clone(),
+                    your_review: sidebar.reviews.yours.clone(),
                     sync: prototype_agent_panel::SyncFacts::of(
                         session.review().is_pull_request_prototype(),
                         sidebar.sync_banner.clone(),

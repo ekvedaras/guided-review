@@ -469,6 +469,7 @@ pub(super) struct Inputs<'a> {
     pub problems: &'a [SidebarProblem],
     pub changes_not_shown: Option<SharedString>,
     pub sync: SyncFacts,
+    pub your_review: Option<crate::app::sidebar_rows::SidebarYourReview>,
 }
 
 /// Staged by the prototype's snapshot scene: viewed marks that wait, as if GitHub had not taken them.
@@ -1215,10 +1216,16 @@ fn pipeline_of(colors: &Colors, inputs: Inputs<'_>, cx: &Context<OneStepLayout>)
         problems_of(colors, inputs.problems, Owner::ThisMac).collect();
     let tour_show = (guided_tour.is_some_and(|tour| tour.can_show_agent) || tour_agent.can_show)
         .then(|| show_tour_agent(colors, "p-c-show-tour", false, cx));
-    let (yours_state, yours_health) = if yours.is_empty() {
-        ("nothing to send".to_owned(), Health::Off)
-    } else {
-        ("ready when you are".to_owned(), Health::Idle)
+    let (yours_state, yours_health) = match &inputs.your_review {
+        Some(stance) if stance.is_marked_done => {
+            (format!("{} · marked done", stance.title), Health::Idle)
+        }
+        Some(stance) if stance.age == crate::viewer::StanceAge::BeforeNewCommits => {
+            ("new commits since".to_owned(), Health::Waiting)
+        }
+        Some(stance) => (stance.title.to_string(), Health::Idle),
+        None if yours.is_empty() => ("nothing to send".to_owned(), Health::Off),
+        None => ("not sent yet".to_owned(), Health::Off),
     };
     let yours_open = !yours.is_empty();
     let mut stops = vec![
@@ -1367,10 +1374,87 @@ pub(super) fn variant_c(
         .into_any_element()
 }
 
-// D · Stepper: the five stops as icons in one row across the sidebar, joined by a line, each in the colour
-// of its health. Under the row, one panel for one stop: the one that needs you, or the one clicked.
+// D · Stepper: the stops as round icons in one row, tinted by their health, no edges. Under the row, one
+// card for one stop: the one that needs you, or the one clicked. The card is F's raised card.
 
 static PICKED_STOP: AtomicU8 = AtomicU8::new(u8::MAX);
+
+fn tone_of(health: Health) -> Tone {
+    match health {
+        Health::Failed => Tone::Danger,
+        Health::Waiting => Tone::Warning,
+        Health::Idle => Tone::Success,
+        Health::Busy => Tone::Accent,
+        Health::Off => Tone::Neutral,
+    }
+}
+
+fn health_text(colors: &Colors, health: Health) -> Rgba {
+    match health {
+        Health::Off => colors.muted_text,
+        health => health.color(colors),
+    }
+}
+
+/// F's card: an icon tile, the stop's name, its state in the colour of its health, then its buttons.
+fn stop_card(colors: &Colors, s: Stop) -> Div {
+    div()
+        .p_2()
+        .rounded(px(CARD_RADIUS))
+        .bg(colors.surface)
+        .shadow(colors.card_shadow())
+        .flex()
+        .flex_col()
+        .gap_1p5()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .min_h(px(24.))
+                .child(
+                    div()
+                        .flex_none()
+                        .size(px(20.))
+                        .rounded(px(6.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(colors.tone(tone_of(s.health)).background)
+                        .child(sized_icon(s.icon, health_text(colors, s.health), px(12.))),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(s.name),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(health_text(colors, s.health))
+                        .child(s.state),
+                )
+                .children(s.show),
+        )
+        .children(s.body)
+}
+
+fn pick_shown(stops: &[Stop]) -> u8 {
+    let picked = PICKED_STOP.load(Ordering::Relaxed);
+    if stops.iter().any(|s| s.key == picked) {
+        return picked;
+    }
+    stops
+        .iter()
+        .find(|s| s.health == Health::Failed)
+        .or_else(|| stops.iter().find(|s| s.health == Health::Waiting))
+        .or_else(|| stops.iter().find(|s| s.open && !s.body.is_empty()))
+        .map_or(1, |s| s.key)
+}
 
 pub(super) fn variant_d(
     colors: &Colors,
@@ -1378,36 +1462,25 @@ pub(super) fn variant_d(
     cx: &Context<OneStepLayout>,
 ) -> AnyElement {
     let pipeline = pipeline_of(colors, inputs, cx);
-    let picked = PICKED_STOP.load(Ordering::Relaxed);
-    let shown_key = if pipeline.stops.iter().any(|s| s.key == picked) {
-        picked
-    } else {
-        pipeline
-            .stops
-            .iter()
-            .find(|s| matches!(s.health, Health::Failed))
-            .or_else(|| {
-                pipeline
-                    .stops
-                    .iter()
-                    .find(|s| matches!(s.health, Health::Waiting))
-            })
-            .or_else(|| pipeline.stops.iter().find(|s| s.open && !s.body.is_empty()))
-            .map_or(1, |s| s.key)
-    };
+    let shown_key = pick_shown(&pipeline.stops);
     let count = pipeline.stops.len();
     let mut nodes: Vec<AnyElement> = Vec::new();
-    let mut panel: Option<Stop> = None;
+    let mut card: Option<Stop> = None;
     for (at, s) in pipeline.stops.into_iter().enumerate() {
         let key = s.key;
         let is_shown = key == shown_key;
-        let tint = match s.health {
-            Health::Off => colors.muted_text,
-            health => health.color(colors),
+        let tone = colors.tone(tone_of(s.health));
+        let (ground, ink) = match (is_shown, s.health) {
+            (true, Health::Off) => (colors.current, colors.accent),
+            (true, _) => (tone.background, tone.text),
+            (false, Health::Off) => (gpui::transparent_black().into(), colors.muted_text),
+            (false, _) => (gpui::transparent_black().into(), tone.text),
         };
         nodes.push(
             div()
                 .id(SharedString::from(format!("p-d-node-{key}")))
+                .flex_none()
+                .w(px(44.))
                 .flex()
                 .flex_col()
                 .items_center()
@@ -1415,23 +1488,24 @@ pub(super) fn variant_d(
                 .cursor_pointer()
                 .child(
                     div()
-                        .size(px(28.))
+                        .size(px(if is_shown { 32. } else { 28. }))
+                        .mt(px(if is_shown { 0. } else { 2. }))
                         .rounded_full()
                         .flex()
                         .items_center()
                         .justify_center()
-                        .border_1()
-                        .border_color(if is_shown { tint } else { colors.border })
-                        .bg(if is_shown {
-                            colors.current
-                        } else {
-                            colors.surface
-                        })
-                        .child(sized_icon(s.icon, tint, px(14.))),
+                        .bg(ground)
+                        .hover(|node| node.opacity(0.85))
+                        .child(sized_icon(s.icon, ink, px(14.))),
                 )
                 .child(
                     div()
                         .text_xs()
+                        .font_weight(if is_shown {
+                            FontWeight::SEMIBOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
                         .text_color(if is_shown {
                             colors.text
                         } else {
@@ -1458,59 +1532,24 @@ pub(super) fn variant_d(
             nodes.push(
                 div()
                     .flex_1()
-                    .h(px(1.))
+                    .h(px(2.))
                     .mt(px(14.))
-                    .bg(colors.border)
+                    .rounded_full()
+                    .bg(colors.hover)
                     .into_any_element(),
             );
         }
         if is_shown {
-            panel = Some(s);
+            card = Some(s);
         }
     }
-    let panel = panel.map(|s| {
-        div()
-            .p_2()
-            .rounded(px(CARD_RADIUS))
-            .border_1()
-            .border_color(colors.subtle_border)
-            .bg(colors.surface)
-            .flex()
-            .flex_col()
-            .gap_1p5()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(dot(colors, s.health))
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(s.name),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .text_color(state_color(colors, s.health))
-                            .child(s.state),
-                    )
-                    .children(s.show),
-            )
-            .children(s.body)
-    });
     div()
         .flex()
         .flex_col()
         .gap_2()
         .children(mac_box(colors, pipeline.mac_problems))
         .child(div().flex().items_start().children(nodes))
-        .children(panel)
+        .children(card.map(|s| stop_card(colors, s)))
         .children(pipeline.clone_offer)
         .into_any_element()
 }
@@ -1663,11 +1702,18 @@ pub(super) fn variant_f(
                     .child(s.name),
             )
             .children(s.show)
-            .child(
+            .child(if is_raised {
+                div()
+                    .text_xs()
+                    .text_color(health_text(colors, s.health))
+                    .child(s.state)
+                    .into_any_element()
+            } else {
                 crate::app::components::chip::chip(colors, tone)
                     .max_w(px(150.))
-                    .child(div().truncate().child(s.state)),
-            );
+                    .child(div().truncate().child(s.state))
+                    .into_any_element()
+            });
         div()
             .when(is_raised, |row| {
                 row.p_2()
