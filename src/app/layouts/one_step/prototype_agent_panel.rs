@@ -28,11 +28,14 @@ use crate::app::sidebar_rows::{
 use crate::viewer::ProblemKind;
 use crate::viewer::{AiReviewAction, Command, Intent};
 
-const NAMES: [&str; 4] = [
+const NAMES: [&str; 7] = [
     "Current",
     "A · Grouped by who",
     "B · Next step and status chips",
-    "C · One pipeline",
+    "C · Pipeline: dots on a rail",
+    "D · Pipeline: stepper and one panel",
+    "E · Pipeline: quiet when fine",
+    "F · Pipeline: icon rows",
 ];
 
 static VARIANT: LazyLock<AtomicU8> = LazyLock::new(|| {
@@ -40,6 +43,9 @@ static VARIANT: LazyLock<AtomicU8> = LazyLock::new(|| {
         Some("A" | "a") => 1,
         Some("B" | "b") => 2,
         Some("C" | "c") => 3,
+        Some("D" | "d") => 4,
+        Some("E" | "e") => 5,
+        Some("F" | "f") => 6,
         _ => 0,
     };
     AtomicU8::new(start)
@@ -65,7 +71,7 @@ pub(super) fn switcher(colors: &Colors, cx: &Context<OneStepLayout>) -> Option<A
     let current = variant();
     let step = |by: u8| {
         cx.listener(move |_, _, _, cx| {
-            VARIANT.store((variant() + by) % 4, Ordering::Relaxed);
+            VARIANT.store((variant() + by) % 7, Ordering::Relaxed);
             cx.notify();
         })
     };
@@ -101,7 +107,7 @@ pub(super) fn switcher(colors: &Colors, cx: &Context<OneStepLayout>) -> Option<A
                     .text_color(gpui::rgb(0xffffff))
                     .text_sm()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(arrow("proto-prev", Icon::ArrowLeft, 3))
+                    .child(arrow("proto-prev", Icon::ArrowLeft, 6))
                     .child(format!("PROTOTYPE  {}", NAMES[current as usize]))
                     .child(arrow("proto-next", Icon::ArrowRight, 1)),
             )
@@ -445,6 +451,9 @@ pub(super) fn drawing() -> Option<Draw> {
         1 => Some(variant_a as Draw),
         2 => Some(variant_b as Draw),
         3 => Some(variant_c as Draw),
+        4 => Some(variant_d as Draw),
+        5 => Some(variant_e as Draw),
+        6 => Some(variant_f as Draw),
         _ => None,
     }
 }
@@ -1015,11 +1024,7 @@ fn stop(
         )
 }
 
-pub(super) fn variant_c(
-    colors: &Colors,
-    inputs: Inputs<'_>,
-    cx: &Context<OneStepLayout>,
-) -> AnyElement {
+fn pipeline_of(colors: &Colors, inputs: Inputs<'_>, cx: &Context<OneStepLayout>) -> Pipeline {
     let review = inputs.ai_review;
     let tour_agent = inputs.tour_agent;
     let guided_tour = inputs.guided_tour;
@@ -1210,91 +1215,481 @@ pub(super) fn variant_c(
         problems_of(colors, inputs.problems, Owner::ThisMac).collect();
     let tour_show = (guided_tour.is_some_and(|tour| tour.can_show_agent) || tour_agent.can_show)
         .then(|| show_tour_agent(colors, "p-c-show-tour", false, cx));
+    let (yours_state, yours_health) = if yours.is_empty() {
+        ("nothing to send".to_owned(), Health::Off)
+    } else {
+        ("ready when you are".to_owned(), Health::Idle)
+    };
+    let yours_open = !yours.is_empty();
+    let mut stops = vec![
+        Stop {
+            key: 0,
+            name: "Tour",
+            icon: Icon::Sparkles,
+            health: tour_health,
+            state: tour_state,
+            open: tour_open,
+            body: tour_body,
+            show: tour_show,
+        },
+        Stop {
+            key: 1,
+            name: "AI review",
+            icon: Icon::ListChecks,
+            health: review_health,
+            state: review_state,
+            open: review_open,
+            body: review_body,
+            show: review
+                .can_show_agent
+                .then(|| show_review_agent(colors, "p-c-show-review", false, cx)),
+        },
+        Stop {
+            key: 2,
+            name: "Fixes",
+            icon: Icon::Zap,
+            health: fixes_health,
+            state: fixes_state,
+            open: fixes_open,
+            body: fixes_body,
+            show: None,
+        },
+        Stop {
+            key: 3,
+            name: "Your review",
+            icon: Icon::Send,
+            health: yours_health,
+            state: yours_state,
+            open: yours_open,
+            body: yours,
+            show: None,
+        },
+    ];
+    if inputs.sync.is_pull_request {
+        stops.push(Stop {
+            key: 4,
+            name: "GitHub",
+            icon: Icon::Globe,
+            health: github_health,
+            state: github_state,
+            open: github_open,
+            body: github_body,
+            show: None,
+        });
+    }
+    Pipeline {
+        stops,
+        mac_problems,
+        clone_offer: inputs.clone_offer,
+    }
+}
+
+struct Stop {
+    key: u8,
+    name: &'static str,
+    icon: Icon,
+    health: Health,
+    state: String,
+    open: bool,
+    body: Vec<AnyElement>,
+    show: Option<AnyElement>,
+}
+
+impl Stop {
+    fn needs_you(&self) -> bool {
+        matches!(self.health, Health::Failed | Health::Waiting)
+            || self.open && !self.body.is_empty()
+    }
+}
+
+struct Pipeline {
+    stops: Vec<Stop>,
+    mac_problems: Vec<AnyElement>,
+    clone_offer: Option<AnyElement>,
+}
+
+fn mac_box(colors: &Colors, problems: Vec<AnyElement>) -> Option<AnyElement> {
+    (!problems.is_empty()).then(|| {
+        div()
+            .p_2()
+            .rounded(px(CARD_RADIUS))
+            .border_1()
+            .border_color(colors.danger_border)
+            .bg(colors.danger_background)
+            .flex()
+            .flex_col()
+            .gap_1()
+            .children(problems)
+            .into_any_element()
+    })
+}
+
+fn state_color(colors: &Colors, health: Health) -> Rgba {
+    match health {
+        Health::Failed => colors.danger,
+        Health::Waiting => colors.warning,
+        _ => colors.muted_text,
+    }
+}
+
+// C · One pipeline, as first drawn: dots on a rail.
+
+pub(super) fn variant_c(
+    colors: &Colors,
+    inputs: Inputs<'_>,
+    cx: &Context<OneStepLayout>,
+) -> AnyElement {
+    let pipeline = pipeline_of(colors, inputs, cx);
+    let last = pipeline.stops.len().saturating_sub(1);
     div()
         .flex()
         .flex_col()
         .gap_2()
-        .when(!mac_problems.is_empty(), |section| {
-            section.child(
-                div()
-                    .p_2()
-                    .rounded(px(CARD_RADIUS))
-                    .border_1()
-                    .border_color(colors.danger_border)
-                    .bg(colors.danger_background)
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .children(mac_problems),
-            )
-        })
+        .children(mac_box(colors, pipeline.mac_problems))
         .child(
             div()
                 .flex()
                 .flex_col()
-                .child(stop(
-                    colors,
-                    "Tour",
-                    tour_health,
-                    tour_state,
-                    tour_open,
-                    tour_body,
-                    tour_show,
-                    false,
-                ))
-                .child(stop(
-                    colors,
-                    "AI review",
-                    review_health,
-                    review_state,
-                    review_open,
-                    review_body,
-                    review
-                        .can_show_agent
-                        .then(|| show_review_agent(colors, "p-c-show-review", false, cx)),
-                    false,
-                ))
-                .child(stop(
-                    colors,
-                    "Fixes",
-                    fixes_health,
-                    fixes_state,
-                    fixes_open,
-                    fixes_body,
-                    None,
-                    false,
-                ))
-                .child({
-                    let (state, health) = if yours.is_empty() {
-                        ("nothing to send".to_owned(), Health::Off)
-                    } else {
-                        (String::new(), Health::Idle)
-                    };
+                .children(pipeline.stops.into_iter().enumerate().map(|(at, s)| {
                     stop(
                         colors,
-                        "Your review",
-                        health,
-                        state,
-                        !yours.is_empty(),
-                        yours,
-                        None,
-                        !inputs.sync.is_pull_request,
+                        s.name,
+                        s.health,
+                        s.state,
+                        s.open,
+                        s.body,
+                        s.show,
+                        at == last,
                     )
-                })
-                .when(inputs.sync.is_pull_request, |line| {
-                    line.child(stop(
-                        colors,
-                        "GitHub",
-                        github_health,
-                        github_state,
-                        github_open,
-                        github_body,
-                        None,
-                        true,
-                    ))
-                }),
+                })),
         )
-        .children(inputs.clone_offer)
+        .children(pipeline.clone_offer)
+        .into_any_element()
+}
+
+// D · Stepper: the five stops as icons in one row across the sidebar, joined by a line, each in the colour
+// of its health. Under the row, one panel for one stop: the one that needs you, or the one clicked.
+
+static PICKED_STOP: AtomicU8 = AtomicU8::new(u8::MAX);
+
+pub(super) fn variant_d(
+    colors: &Colors,
+    inputs: Inputs<'_>,
+    cx: &Context<OneStepLayout>,
+) -> AnyElement {
+    let pipeline = pipeline_of(colors, inputs, cx);
+    let picked = PICKED_STOP.load(Ordering::Relaxed);
+    let shown_key = if pipeline.stops.iter().any(|s| s.key == picked) {
+        picked
+    } else {
+        pipeline
+            .stops
+            .iter()
+            .find(|s| matches!(s.health, Health::Failed))
+            .or_else(|| {
+                pipeline
+                    .stops
+                    .iter()
+                    .find(|s| matches!(s.health, Health::Waiting))
+            })
+            .or_else(|| pipeline.stops.iter().find(|s| s.open && !s.body.is_empty()))
+            .map_or(1, |s| s.key)
+    };
+    let count = pipeline.stops.len();
+    let mut nodes: Vec<AnyElement> = Vec::new();
+    let mut panel: Option<Stop> = None;
+    for (at, s) in pipeline.stops.into_iter().enumerate() {
+        let key = s.key;
+        let is_shown = key == shown_key;
+        let tint = match s.health {
+            Health::Off => colors.muted_text,
+            health => health.color(colors),
+        };
+        nodes.push(
+            div()
+                .id(SharedString::from(format!("p-d-node-{key}")))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap_1()
+                .cursor_pointer()
+                .child(
+                    div()
+                        .size(px(28.))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .border_1()
+                        .border_color(if is_shown { tint } else { colors.border })
+                        .bg(if is_shown {
+                            colors.current
+                        } else {
+                            colors.surface
+                        })
+                        .child(sized_icon(s.icon, tint, px(14.))),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(if is_shown {
+                            colors.text
+                        } else {
+                            colors.muted_text
+                        })
+                        .whitespace_nowrap()
+                        .child(match s.name {
+                            "AI review" => "Review",
+                            "Your review" => "You",
+                            name => name,
+                        }),
+                )
+                .tooltip({
+                    let tip = format!("{}: {}", s.name, s.state);
+                    tooltip(move |_| tip.clone().into())
+                })
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    PICKED_STOP.store(key, Ordering::Relaxed);
+                    cx.notify();
+                }))
+                .into_any_element(),
+        );
+        if at + 1 < count {
+            nodes.push(
+                div()
+                    .flex_1()
+                    .h(px(1.))
+                    .mt(px(14.))
+                    .bg(colors.border)
+                    .into_any_element(),
+            );
+        }
+        if is_shown {
+            panel = Some(s);
+        }
+    }
+    let panel = panel.map(|s| {
+        div()
+            .p_2()
+            .rounded(px(CARD_RADIUS))
+            .border_1()
+            .border_color(colors.subtle_border)
+            .bg(colors.surface)
+            .flex()
+            .flex_col()
+            .gap_1p5()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(dot(colors, s.health))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(s.name),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(state_color(colors, s.health))
+                            .child(s.state),
+                    )
+                    .children(s.show),
+            )
+            .children(s.body)
+    });
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(mac_box(colors, pipeline.mac_problems))
+        .child(div().flex().items_start().children(nodes))
+        .children(panel)
+        .children(pipeline.clone_offer)
+        .into_any_element()
+}
+
+// E · Quiet when fine: the stops that need nothing fold into one line of small ticks ("Tour ✓ · Fixes ·
+// GitHub ✓"); only the stops that need you are drawn, each as a card with its buttons.
+
+pub(super) fn variant_e(
+    colors: &Colors,
+    inputs: Inputs<'_>,
+    cx: &Context<OneStepLayout>,
+) -> AnyElement {
+    let pipeline = pipeline_of(colors, inputs, cx);
+    let (loud, quiet): (Vec<Stop>, Vec<Stop>) =
+        pipeline.stops.into_iter().partition(Stop::needs_you);
+    let quiet_line = (!quiet.is_empty()).then(|| {
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap_x_3()
+            .gap_y_1()
+            .children(quiet.into_iter().map(|s| {
+                let tip = format!("{}: {}", s.name, s.state);
+                div()
+                    .id(SharedString::from(format!("p-e-quiet-{}", s.key)))
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .text_xs()
+                    .text_color(colors.muted_text)
+                    .child(match s.health {
+                        Health::Idle => {
+                            sized_icon(Icon::Check, colors.success, px(12.)).into_any_element()
+                        }
+                        Health::Busy => dot(colors, Health::Busy).into_any_element(),
+                        _ => sized_icon(Icon::Minus, colors.muted_text, px(12.)).into_any_element(),
+                    })
+                    .child(s.name)
+                    .children(s.show)
+                    .tooltip(tooltip(move |_| tip.clone().into()))
+            }))
+    });
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(mac_box(colors, pipeline.mac_problems))
+        .children(loud.into_iter().map(|s| {
+            div()
+                .p_2()
+                .rounded(px(CARD_RADIUS))
+                .border_1()
+                .border_color(match s.health {
+                    Health::Failed => colors.danger_border,
+                    Health::Waiting => colors.warning_border,
+                    _ => colors.subtle_border,
+                })
+                .bg(colors.surface)
+                .flex()
+                .flex_col()
+                .gap_1p5()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(sized_icon(s.icon, s.health.color(colors), px(13.)))
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(s.name),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .text_color(state_color(colors, s.health))
+                                .child(s.state),
+                        )
+                        .children(s.show),
+                )
+                .children(s.body)
+        }))
+        .children(quiet_line)
+        .children(pipeline.clone_offer)
+        .into_any_element()
+}
+
+// F · Icon rows: every stop is one row with its own icon on the rail in place of a dot, the state as a
+// small chip at the row's end. The stop that needs you is raised as a card around its row and buttons.
+
+pub(super) fn variant_f(
+    colors: &Colors,
+    inputs: Inputs<'_>,
+    cx: &Context<OneStepLayout>,
+) -> AnyElement {
+    let pipeline = pipeline_of(colors, inputs, cx);
+    let rows = pipeline.stops.into_iter().map(|s| {
+        let is_raised = s.needs_you();
+        let tone = match s.health {
+            Health::Failed => Tone::Danger,
+            Health::Waiting => Tone::Warning,
+            Health::Idle => Tone::Success,
+            Health::Busy => Tone::Accent,
+            Health::Off => Tone::Neutral,
+        };
+        let head = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .h(px(26.))
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(20.))
+                    .rounded(px(6.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(colors.inset)
+                    .child(sized_icon(
+                        s.icon,
+                        if s.health == Health::Off {
+                            colors.muted_text
+                        } else {
+                            s.health.color(colors)
+                        },
+                        px(12.),
+                    )),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .text_xs()
+                    .font_weight(if is_raised {
+                        FontWeight::SEMIBOLD
+                    } else {
+                        FontWeight::NORMAL
+                    })
+                    .text_color(if is_raised {
+                        colors.text
+                    } else {
+                        colors.muted_text
+                    })
+                    .child(s.name),
+            )
+            .children(s.show)
+            .child(
+                crate::app::components::chip::chip(colors, tone)
+                    .max_w(px(150.))
+                    .child(div().truncate().child(s.state)),
+            );
+        div()
+            .when(is_raised, |row| {
+                row.p_2()
+                    .rounded(px(CARD_RADIUS))
+                    .border_1()
+                    .border_color(colors.subtle_border)
+                    .bg(colors.surface)
+            })
+            .when(!is_raised, |row| row.px_2())
+            .flex()
+            .flex_col()
+            .gap_1p5()
+            .child(head)
+            .when(is_raised, |row| row.children(s.body))
+    });
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .children(mac_box(colors, pipeline.mac_problems))
+        .children(rows)
+        .children(pipeline.clone_offer)
         .into_any_element()
 }
 
