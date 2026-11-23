@@ -43,6 +43,15 @@ impl ReviewCore {
             .ok_or(FindingRefusal::NotThere)
     }
 
+    /// An open finding the reviewer may still use or dismiss: not one the tour agent is fixing.
+    fn decidable_finding(&self, id: &FindingId) -> Result<Finding, FindingRefusal> {
+        let finding = self.open_finding(id)?;
+        if self.state.fix_requests().is_in_progress(id) {
+            return Err(FindingRefusal::BeingFixed);
+        }
+        Ok(finding)
+    }
+
     /// Kept in the state file, then taken off the screens.
     fn record_decision(&mut self, finding: Finding, fate: Fate) -> Result<(), FindingRefusal> {
         let id = finding.id.clone();
@@ -63,14 +72,14 @@ impl ReviewCore {
 
     /// The finding goes, and a later run is told it was dismissed.
     pub fn dismiss_finding(&mut self, id: &FindingId) -> Result<(), FindingRefusal> {
-        let finding = self.open_finding(id)?;
+        let finding = self.decidable_finding(id)?;
         self.record_decision(finding, Fate::Dismissed)
     }
 
     /// The finding's text goes into a comment box on its lines, after any text there. The finding
     /// stays open until that comment is sent.
     pub fn use_finding(&mut self, id: &FindingId) -> Result<CommentPlace, FindingRefusal> {
-        let finding = self.open_finding(id)?;
+        let finding = self.decidable_finding(id)?;
         let place = self.comment_place_of(&finding.anchor)?;
         self.comment_desk
             .add_text_at(
@@ -112,7 +121,7 @@ impl ReviewCore {
         id: &FindingId,
         mode: SendMode,
     ) -> Result<CommentRequest, FindingRefusal> {
-        let finding = self.open_finding(id)?;
+        let finding = self.decidable_finding(id)?;
         let place = self.comment_place_of(&finding.anchor)?;
         self.send_findings_as_is(&place, &[finding], mode)
     }
@@ -392,7 +401,7 @@ impl ReviewCore {
         };
         let mut by_place: Vec<(CommentPlace, Vec<Finding>)> = Vec::new();
         for id in ids {
-            let placed = self.open_finding(id).and_then(|finding| {
+            let placed = self.decidable_finding(id).and_then(|finding| {
                 let place = self.comment_place_of(&finding.anchor)?;
                 Ok((place, finding))
             });

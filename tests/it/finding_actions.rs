@@ -12,7 +12,7 @@ use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentDraft, CommentId, CommentPlace, CommentRefusal, CommentResult, FindingRefusal,
+    CommentDraft, CommentId, CommentPlace, CommentRefusal, CommentResult, FindingRefusal, FixReply,
     LineLocation, Page, PageRow, Review, ReviewThread, SendMode, Side, ThreadComment, ThreadId,
 };
 use serde_json::{Value, json};
@@ -206,6 +206,14 @@ fn the_thread_a_used_finding_became_names_the_finding_and_keeps_what_was_said_ab
     let mut github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
     github.threads = vec![thread_on_line_2("T1", "Say it twice.")];
     review.fix_findings(&[id("a")]);
+    review
+        .fix_replied(
+            &id("a"),
+            &FixReply::NotFixed {
+                reason: "Needs the reviewer's words.".to_owned(),
+            },
+        )
+        .unwrap();
     let place = review.use_finding(&id("a")).unwrap();
 
     review

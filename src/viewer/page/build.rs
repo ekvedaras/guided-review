@@ -801,6 +801,7 @@ fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
         place,
         fix: view.fix.map(|state| state.line().into()),
         can_fix,
+        can_decide: can_fix,
         fixes_offer,
         can_answer_fix,
         asked: view

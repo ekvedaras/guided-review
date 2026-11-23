@@ -1199,20 +1199,22 @@ impl OneStepLayout {
             .flex()
             .items_center()
             .gap_2()
-            .child(
-                small_button("use", ButtonKind::Secondary, Icon::Pencil, "Use").on_click(
-                    cx.listener(move |this, _, window, cx| {
-                        this.use_finding(&use_id, window, cx);
-                    }),
-                ),
-            )
-            .child(
-                small_button("use-as-is", ButtonKind::Ghost, Icon::Send, "Use as is").on_click(
-                    cx.listener(move |this, _, window, cx| {
-                        this.use_finding_as_is(&as_is_id, window, cx);
-                    }),
-                ),
-            )
+            .when(finding.can_decide, |actions| {
+                actions
+                    .child(
+                        small_button("use", ButtonKind::Secondary, Icon::Pencil, "Use").on_click(
+                            cx.listener(move |this, _, window, cx| {
+                                this.use_finding(&use_id, window, cx);
+                            }),
+                        ),
+                    )
+                    .child(
+                        small_button("use-as-is", ButtonKind::Ghost, Icon::Send, "Use as is")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.use_finding_as_is(&as_is_id, window, cx);
+                            })),
+                    )
+            })
             .when(finding.can_fix, |actions| {
                 actions.child(
                     small_button("fix", ButtonKind::Ghost, Icon::Zap, "Fix now").on_click(
@@ -1261,16 +1263,18 @@ impl OneStepLayout {
                     ),
                 )
             })
-            .child(
-                small_button("dismiss", ButtonKind::Ghost, Icon::Close, "Dismiss").on_click(
-                    cx.listener(move |this, _, _, cx| {
-                        let dismissed = this
-                            .session
-                            .update(cx, |session, cx| session.dismiss_finding(&dismiss_id, cx));
-                        this.finding_refused(dismissed, cx);
-                    }),
-                ),
-            )
+            .when(finding.can_decide, |actions| {
+                actions.child(
+                    small_button("dismiss", ButtonKind::Ghost, Icon::Close, "Dismiss").on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            let dismissed = this
+                                .session
+                                .update(cx, |session, cx| session.dismiss_finding(&dismiss_id, cx));
+                            this.finding_refused(dismissed, cx);
+                        }),
+                    ),
+                )
+            })
     }
 
     fn fixes_offer_button(offer: FixesOffer) -> Option<(ButtonKind, Icon, &'static str)> {

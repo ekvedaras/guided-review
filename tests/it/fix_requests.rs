@@ -763,3 +763,48 @@ fn a_finding_offers_add_to_fixes_then_remove_and_neither_while_it_is_being_fixed
     review.send_fixes();
     assert_eq!(fixes_offer_of(&review, "a"), FixesOffer::None);
 }
+
+#[test]
+fn a_finding_being_fixed_cannot_be_dismissed_or_used() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    review.fix_findings(&[id("a")]);
+
+    assert_eq!(
+        review.dismiss_finding(&id("a")),
+        Err(FindingRefusal::BeingFixed)
+    );
+    assert_eq!(
+        review.use_finding(&id("a")).err(),
+        Some(FindingRefusal::BeingFixed)
+    );
+    let mode = review.add_mode();
+    assert_eq!(
+        review.use_finding_as_is(&id("a"), mode).err(),
+        Some(FindingRefusal::BeingFixed)
+    );
+    let commented = review.comment_findings(&[id("a")], mode);
+    assert_eq!(commented.refused, [(id("a"), FindingRefusal::BeingFixed)]);
+    assert!(!can_decide(&review, "a"));
+}
+
+#[test]
+fn a_finding_added_to_fixes_can_still_be_decided() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First.")]);
+    let mut review = shop.open();
+    review.add_to_fixes(&[id("a")]);
+
+    assert!(can_decide(&review, "a"));
+}
+
+fn can_decide(review: &Review, finding: &str) -> bool {
+    review
+        .page()
+        .rows()
+        .iter()
+        .find_map(|row| match row {
+            PageRow::Finding(row) if row.id.to_string() == finding => Some(row.can_decide),
+            _ => None,
+        })
+        .unwrap()
+}

@@ -104,6 +104,8 @@ pub struct FindingRow {
     pub fix: Option<Arc<str>>,
     /// False while a fix is asked for or under way.
     pub can_fix: bool,
+    /// Use, Use as is and Dismiss: false while a fix is asked for or under way.
+    pub can_decide: bool,
     pub fixes_offer: FixesOffer,
     /// The tour agent asked something before fixing and waits for the reviewer's answer.
     pub can_answer_fix: bool,
