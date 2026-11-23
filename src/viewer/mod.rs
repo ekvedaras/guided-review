@@ -40,6 +40,7 @@ mod highlight;
 mod image_preview;
 mod intent;
 mod jump;
+mod kept_values;
 mod keymap;
 mod local_row;
 mod local_threads;

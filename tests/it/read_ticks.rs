@@ -552,3 +552,58 @@ fn going_forward_still_walks_every_screen_in_order() {
     assert!(review.go_forward());
     assert_eq!(review.screen(), &Screen::Step("greeting".into()));
 }
+
+/// A file a newer build wrote: a fix request of a kind this build does not know, and a `done_at` of
+/// another shape, beside a tick this build reads.
+fn write_newer_state(shop: &Shop) {
+    write_broken_state(
+        shop,
+        &json!({
+            "read_ticks": {"readme": {"head": shop.head}},
+            "fix_requests": [{
+                "finding": {"id": "f1", "severity": "nit", "body": "Rename.", "anchor": {"kind": "change"}},
+                "batch": 0,
+                "state": "FromTheFuture",
+            }],
+            "done_at": "a shape from the future",
+        })
+        .to_string(),
+    );
+}
+
+#[test]
+fn a_value_this_build_does_not_know_leaves_the_rest_of_the_saved_review_read() {
+    let shop = Shop::with_pull();
+    write_newer_state(&shop);
+
+    let review = shop.open();
+
+    assert_eq!(ticked_in_sidebar(&review), ["readme"]);
+    assert_eq!(backups_in_state_folder(&shop), Vec::<String>::new());
+    let problems = review.problems();
+    let [Problem::SavedReviewPartsNotRead(parts)] = problems.as_slice() else {
+        panic!("{problems:?}");
+    };
+    let shown = problems[0].to_string();
+    for part in ["fix_requests", "done_at"] {
+        assert!(parts.contains(part), "{part} missing from {parts}");
+        assert!(shown.contains(part), "{part} missing from {shown}");
+    }
+}
+
+#[test]
+fn a_value_this_build_does_not_know_is_written_back_as_it_was() {
+    let shop = Shop::with_pull();
+    write_newer_state(&shop);
+    let mut review = shop.open();
+
+    review.tick(&"emails".into()).unwrap();
+
+    let on_disk = shop.state_on_disk();
+    assert_eq!(on_disk["fix_requests"][0]["state"], "FromTheFuture");
+    assert_eq!(on_disk["done_at"], "a shape from the future");
+    assert_eq!(
+        on_disk["read_ticks"],
+        json!({"readme": {"head": shop.head}, "emails": {"head": shop.head}})
+    );
+}

@@ -2,6 +2,7 @@
 //! fixed in a commit, or not fixed with the reason. A fixed finding is closed: it is decided like a
 //! used or dismissed one, and this keeps the commit.
 
+use crate::viewer::kept_values::KeptEntries;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -143,16 +144,21 @@ pub struct FixRequest {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct FixRequests(Vec<FixRequest>);
+pub struct FixRequests(KeptEntries<FixRequest>);
 
 impl FixRequests {
+    /// Entries a newer build wrote in a shape this build does not read; kept in the file as written.
+    pub fn unread_entries(&self) -> usize {
+        self.0.unread_count()
+    }
+
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
     /// A re-pin moved the findings: a request not delivered yet tells the tour agent their new place.
     pub(super) fn follow(&mut self, moved: &[Finding]) {
-        for request in &mut self.0 {
+        for request in self.0.iter_mut() {
             request.finding.follow(moved);
         }
     }
@@ -367,7 +373,7 @@ impl FixRequests {
     /// A delivered batch is working once the agent is seen working; when the agent then goes idle,
     /// each finding it did not answer ended without an answer.
     pub(super) fn agent_status_is(&mut self, status: AgentStatus) {
-        for request in &mut self.0 {
+        for request in self.0.iter_mut() {
             request.state = match (&request.state, status) {
                 (FixState::Delivered, AgentStatus::Working) => FixState::Working,
                 (FixState::Working | FixState::Fixing, AgentStatus::Idle) => {

@@ -32,6 +32,8 @@ pub enum Problem {
     CodeOnGitHub(String),
     /// The saved review could not be read, so this one starts empty; the old file is kept at the path.
     SavedReviewNotRead(PathBuf),
+    /// Parts of the saved review a newer build wrote, which this build leaves in the file as they are.
+    SavedReviewPartsNotRead(String),
     /// Ticks wait in the queue to reach GitHub's viewed marks, and GitHub may show them as unviewed.
     ViewedNotSynced(String),
     /// The AI Refresh ended and the steps marked as old are still as they were.
@@ -99,6 +101,8 @@ pub enum ProblemKind {
     FolderNotLookedAt,
     /// Raised when the review opens; the old file is kept, so nothing clears it.
     SavedReviewNotRead,
+    /// Raised when the review opens; the parts stay in the file, so nothing clears it.
+    SavedReviewPartsNotRead,
     /// Cleared by the next Not now or Keep local review that is written.
     MoveNotDeclined,
     /// Replaced by the next hand-off, which clears it when that one is sent.
@@ -134,6 +138,7 @@ impl Problem {
             Self::IdeNotStarted(_) => ProblemKind::IdeNotStarted,
             Self::CodeOnGitHub(_) => ProblemKind::CodeOnGitHub,
             Self::SavedReviewNotRead(_) => ProblemKind::SavedReviewNotRead,
+            Self::SavedReviewPartsNotRead(_) => ProblemKind::SavedReviewPartsNotRead,
             Self::ViewedNotSynced(_) => ProblemKind::ViewedNotSynced,
             Self::TourNotRefreshed(_) => ProblemKind::TourNotRefreshed,
             Self::TourNotReloaded(_) => ProblemKind::TourNotReloaded,
@@ -310,6 +315,10 @@ impl fmt::Display for Problem {
             Self::CodeOnGitHub(reason) => write!(
                 formatter,
                 "Code opens on GitHub, not in the IDE, as the local clone could not give the commits: {reason}"
+            ),
+            Self::SavedReviewPartsNotRead(parts) => write!(
+                formatter,
+                "Parts of the saved review are in a shape this build does not read, likely from a newer build: {parts}. This build does not show them and keeps them in the file as they are"
             ),
             Self::SavedReviewNotRead(backup) => write!(
                 formatter,

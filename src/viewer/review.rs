@@ -592,6 +592,7 @@ impl ReviewCore {
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
         let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
+        let parts_not_read = state.parts_not_read();
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let subject = tour.pin().subject()?;
@@ -700,6 +701,9 @@ impl ReviewCore {
                 }
                 if let Some(backup) = saved_review_kept_as {
                     problems.raise(Problem::SavedReviewNotRead(backup));
+                }
+                if !parts_not_read.is_empty() {
+                    problems.raise(Problem::SavedReviewPartsNotRead(parts_not_read.join(", ")));
                 }
                 problems
             },

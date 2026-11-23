@@ -1,6 +1,7 @@
 //! What the reviewer decided about the findings of an AI review: used in a comment, or dismissed.
 //! A decided finding is not shown again; a dismissed one is told to the review agent on a second run.
 
+use crate::viewer::kept_values::KeptEntries;
 use serde::{Deserialize, Serialize};
 
 use crate::findings::{Finding, FindingId};
@@ -29,9 +30,14 @@ pub struct FindingDecision {
 /// Kept whole, with the finding's text, so a later run's report of the same thing is known again.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct FindingDecisions(Vec<FindingDecision>);
+pub struct FindingDecisions(KeptEntries<FindingDecision>);
 
 impl FindingDecisions {
+    /// Entries a newer build wrote in a shape this build does not read; kept in the file as written.
+    pub fn unread_entries(&self) -> usize {
+        self.0.unread_count()
+    }
+
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -54,7 +60,7 @@ impl FindingDecisions {
 
     /// A re-pin moved the findings: the decided ones keep their new place, for the brief of a later run.
     pub(super) fn follow(&mut self, moved: &[Finding]) {
-        for decision in &mut self.0 {
+        for decision in self.0.iter_mut() {
             decision.finding.follow(moved);
         }
     }
