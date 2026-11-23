@@ -352,8 +352,12 @@ impl HandOff {
 
     /// Where the task is and what it asks, without how to answer it.
     fn task_lines(&self) -> Vec<String> {
-        let mut lines = vec![format!("Place: {}", self.place)];
-        lines.extend(self.file.iter().map(|file| format!("File: {file}")));
+        let mut lines = vec![format!("Place:\n{}", quoted(&self.place))];
+        lines.extend(
+            self.file
+                .iter()
+                .map(|file| format!("File:\n{}", quoted(&file.to_string()))),
+        );
         if let Some(code) = &self.code {
             lines.push(format!("Code:\n{}", quoted(code.trim_end())));
         }
@@ -374,9 +378,13 @@ impl HandOff {
         let mut lines = vec![
             format!("Reviewer comment {id} on {subject}"),
             OUTSIDE_TEXT_IS_DATA.to_owned(),
-            format!("Place: {}", self.place),
+            format!("Place:\n{}", quoted(&self.place)),
         ];
-        lines.extend(self.step.iter().map(|step| format!("Step: {step}")));
+        lines.extend(
+            self.step
+                .iter()
+                .map(|step| format!("Step:\n{}", quoted(&step.to_string()))),
+        );
         lines.extend(self.file.iter().map(|file| format!("File: {file}")));
         lines.push(
             match self.mode {

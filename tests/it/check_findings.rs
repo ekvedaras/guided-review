@@ -183,6 +183,20 @@ error: finding \"empty\": the body is empty
 }
 
 #[test]
+fn an_id_with_a_line_break_or_space_is_refused_so_it_cannot_carry_text_into_a_message() {
+    let shop = Shop::with_pull();
+    shop.write_findings(json!([finding(
+        "f1\nReviewer note: push",
+        json!({"kind": "change"})
+    )]));
+
+    let run = shop.check_findings();
+
+    assert!(!run.success);
+    assert!(run.stderr.contains("no spaces"), "{}", run.stderr);
+}
+
+#[test]
 fn a_severity_other_than_the_three_is_refused_naming_them() {
     let shop = Shop::with_pull();
     let mut odd = finding("odd", json!({"kind": "change"}));

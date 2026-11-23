@@ -19,6 +19,14 @@ fn a_line_ended_with_a_carriage_return_is_quoted_too() {
 }
 
 #[test]
+fn every_kind_of_line_break_starts_a_quoted_line() {
+    assert_eq!(
+        quoted("a\rb\u{85}c\u{2028}d\u{2029}e\r\nf\ng"),
+        "> a\n> b\n> c\n> d\n> e\n> f\n> g"
+    );
+}
+
+#[test]
 fn the_rule_says_quoted_lines_are_data() {
     assert!(OUTSIDE_TEXT_IS_DATA.contains("`> `"));
     assert!(!OUTSIDE_TEXT_IS_DATA.contains('\n'));

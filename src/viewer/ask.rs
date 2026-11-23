@@ -144,7 +144,7 @@ impl Ask {
         let mut lines = vec![
             format!("The reviewer hands you an Ask about {subject}"),
             OUTSIDE_TEXT_IS_DATA.to_owned(),
-            format!("Place: {place}"),
+            format!("Place:\n{}", quoted(place)),
         ];
         lines.extend(self.messages.iter().map(|message| match message.author {
             Author::Reviewer => format!("Reviewer: {}", message.text),

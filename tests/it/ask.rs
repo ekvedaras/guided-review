@@ -462,7 +462,8 @@ fn an_ask_handed_to_the_reviewers_own_agent_carries_the_chat_and_lets_it_change_
         format!(
             "The reviewer hands you an Ask about https://github.com/acme/shop/pull/7\n\
              {OUTSIDE_TEXT_IS_DATA}\n\
-             Place: Step: Total changes\n\
+             Place:\n\
+             > Step: Total changes\n\
              Reviewer: Draw the flow\n\
              Answer:\n\
              > Here is the flow\n\

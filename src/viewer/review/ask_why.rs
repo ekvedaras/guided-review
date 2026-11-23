@@ -8,6 +8,7 @@ use super::finding_outcome::FindingRefusal;
 use super::{Review, ReviewCore};
 use crate::config::AskSettings;
 use crate::findings::{Anchor, Finding, FindingId};
+use crate::prompt_safety::quoted;
 use crate::viewer::ai_review_run::ReviewAgentLife;
 use crate::viewer::ask::{Place, ShownOn};
 use crate::viewer::ask_desk::AskProcesses;
@@ -79,7 +80,8 @@ impl Review {
                 context,
                 "\n\nAn AI review of this change reported this finding here ({}):\n{}\n\
                  The reviewer asks about it. Check it against the code: the AI review may be wrong.",
-                finding.severity, finding.body
+                finding.severity,
+                quoted(&finding.body)
             )
             .ok();
         }
