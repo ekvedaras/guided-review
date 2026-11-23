@@ -16,10 +16,10 @@ use guided_review::tour::Tour;
 use guided_review::update::Build;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, Audience, CommentGesture, CommentPlace, CommentProblem,
-    CommentRefusal, CommentResult, Effect, FinishRefusal, HandOffButton, HandOffState, Intent,
-    LineLocation, PieceDiff, ReviewStateFile, ReviewVerdict, SendMode, Side, TerminalId, TextBox,
-    ThreadAction, ThreadActionResult, ThreadHome, ThreadMessage, ThreadView, TourAgentPort,
-    TourAgentState, TourAgents, WindowMoment, WorkPorts,
+    CommentRefusal, CommentResult, Effect, FinishRefusal, HandOffButton, HandOffState,
+    HandToAgentRefused, Intent, LineLocation, PieceDiff, ReviewStateFile, ReviewVerdict, SendMode,
+    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadHome, ThreadMessage,
+    ThreadView, TourAgentPort, TourAgentState, TourAgents, WindowMoment, WorkPorts,
 };
 
 /// `feature` one commit past `main` that adds the cart, with the README's second line written and not
@@ -1071,4 +1071,19 @@ fn a_local_review_gives_no_verdict_or_approve_warning_and_finishes_with_send_tas
         "read progress still shows"
     );
     assert_eq!(opened.review.approve_warning(), None);
+}
+
+#[test]
+fn a_local_reviews_agent_answer_is_not_offered_to_hand_to_the_agent() {
+    let feature = Feature::with_work_in_progress();
+    drop(task_sent(&feature));
+    feature.agent_reply(&["--body", "It is the cart's world now."]);
+    let mut reopened = feature.reopened();
+    let thread = threads(&reopened).remove(0);
+    let answer = thread.thread.comments[1].id.clone();
+
+    let refused = reopened.review.hand_to_agent(&answer);
+
+    assert_eq!(thread.can_hand_to_agent, std::collections::BTreeSet::new());
+    assert_eq!(refused, Err(HandToAgentRefused::NotAPullRequest));
 }

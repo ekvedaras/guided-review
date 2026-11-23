@@ -16,6 +16,7 @@ impl Render for Tooltip {
         let colors = Colors::active(cx);
         fade_in(
             div()
+                .max_w(px(480.))
                 .px_2()
                 .py_1()
                 .rounded(px(CONTROL_RADIUS))

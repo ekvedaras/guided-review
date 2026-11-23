@@ -23,6 +23,7 @@ use super::card::card;
 use super::chip::chip;
 use super::comment_composer::task_button;
 use super::finding_view::{finding_chips, talk};
+use super::hidden_text_notice::hidden_text_notice;
 use super::icon::{Icon, sized_icon};
 use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, shimmer_text, slide_in, turn_to};
@@ -48,6 +49,9 @@ pub type OnReplyDraft = Rc<dyn Fn(ReplyDraftChange, &mut App)>;
 
 /// Queues a failed hand-off again.
 pub type OnHandOffButton = Rc<dyn Fn(HandOffButton, &mut App)>;
+
+/// Hands one comment of someone else to the tour agent.
+pub type OnHandToAgent = Rc<dyn Fn(&CommentId, &mut App)>;
 
 /// What happened to the edit of one comment; the core keeps its text, so it survives scrolling away.
 pub type OnCommentEdit = Rc<dyn Fn(&CommentId, ReplyDraftChange, &mut App)>;
@@ -116,6 +120,7 @@ pub struct ThreadElement {
     on_toggle: OnToggle,
     on_action: OnThreadAction,
     on_hand_off_button: OnHandOffButton,
+    on_hand_to_agent: OnHandToAgent,
 }
 
 /// What the review holds about one thread: what the reviewer may do and what they have typed.
@@ -137,6 +142,7 @@ pub struct ThreadChanges {
     pub on_toggle: OnToggle,
     pub on_action: OnThreadAction,
     pub on_hand_off_button: OnHandOffButton,
+    pub on_hand_to_agent: OnHandToAgent,
 }
 
 /// What outdated lines were when they were written about, since the code under them shows what they are now.
@@ -179,6 +185,7 @@ impl ThreadElement {
             on_toggle,
             on_action,
             on_hand_off_button,
+            on_hand_to_agent,
         } = changes;
         Self {
             view,
@@ -193,6 +200,7 @@ impl ThreadElement {
             on_toggle,
             on_action,
             on_hand_off_button,
+            on_hand_to_agent,
         }
     }
 
@@ -1112,6 +1120,26 @@ impl RenderOnce for ThreadElement {
                                     })
                                     .flatten(),
                             )
+                            .children(
+                                (self.can_ask_agent
+                                    && self.view.can_hand_to_agent.contains(&comment.id))
+                                .then(|| {
+                                    let (on_hand_to_agent, comment_id) =
+                                        (Rc::clone(&self.on_hand_to_agent), comment.id.clone());
+                                    small_button(
+                                        &colors,
+                                        SharedString::from(format!("hand-to-agent-{}", comment.id)),
+                                        ButtonKind::Ghost,
+                                        Icon::Sparkles,
+                                        "Hand to agent",
+                                    )
+                                    .tooltip(tooltip(|_| {
+                                        "Your agent handles this comment: it makes the change or answers on the thread. Text GitHub hides is left out."
+                                            .into()
+                                    }))
+                                    .on_click(move |_, _, cx| on_hand_to_agent(&comment_id, cx))
+                                }),
+                            )
                             .when(on_github, |row| {
                                 row.child(Self::reactions(
                                     &colors,
@@ -1151,11 +1179,19 @@ impl RenderOnce for ThreadElement {
                             .on_lines(Arc::clone(&self.view.commented_lines))
                             .into_any_element(),
                         };
+                        let hidden_notice = self.view.hidden_text.get(&comment.id).and_then(|hidden| {
+                            hidden_text_notice(
+                                &colors,
+                                SharedString::from(format!("hidden-text-{}", comment.id)),
+                                hidden,
+                            )
+                        });
                         div()
                             .flex()
                             .flex_col()
                             .gap_1()
                             .child(header)
+                            .children(hidden_notice.map(|notice| div().pl_4().child(notice)))
                             .child(div().pl_4().child(content))
                     }),
             )

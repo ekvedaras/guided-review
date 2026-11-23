@@ -36,6 +36,7 @@ mod focused_change;
 mod github_outage;
 mod guided_tour;
 mod hand_offs;
+mod hidden_text;
 mod highlight;
 mod image_preview;
 mod intent;
@@ -159,9 +160,10 @@ pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
-    HandOffButton, HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, Reviewed,
-    SeenMark, ThreadMessage,
+    HandOffButton, HandOffId, HandOffState, HandOffs, HandToAgentRefused, NotAHandOffId,
+    ReplyPlacement, Reviewed, SeenMark, ThreadMessage,
 };
+pub use hidden_text::{HiddenPart, HiddenText};
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,

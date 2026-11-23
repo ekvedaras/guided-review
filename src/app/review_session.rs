@@ -30,7 +30,7 @@ use crate::code_source::CodeSource;
 use crate::github::{GhCloner, GitHub};
 use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
-    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer,
+    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CommentId,
     CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal, FinishResult,
     GitHubPort, HandOffButton, HandOffId, ImageCache, JobOutcome, JobProgress, LineLocation,
     NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, ReplacingJob,
@@ -1780,6 +1780,14 @@ impl ReviewSession {
     pub fn press_hand_off_button(&mut self, button: HandOffButton, cx: &mut Context<Self>) {
         if let Err(error) = self.change(cx, |review| review.press_hand_off_button(button)) {
             eprintln!("could not {} for {button:?}: {error:#}", button.label());
+        }
+    }
+
+    /// Someone else's comment goes to the tour agent; a refusal says why in a toast.
+    pub fn hand_to_agent(&mut self, comment: &CommentId, cx: &mut Context<Self>) {
+        match self.change(cx, |review| review.hand_to_agent(comment)) {
+            Ok(()) => post_toast(cx, ToastTone::Success, "Handed to your agent"),
+            Err(refused) => post_toast(cx, ToastTone::Danger, refused.to_string()),
         }
     }
 

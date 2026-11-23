@@ -58,8 +58,10 @@ use super::finish_review::{
 use super::github_outage::{Affected, OutageCause};
 use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{
-    AgentReplied, Audience, HandOff, HandOffId, HandOffState, HandOffs, SentFrom,
+    AgentReplied, Audience, HandOff, HandOffId, HandOffState, HandOffs, HandToAgentRefused,
+    SentFrom,
 };
+use super::hidden_text::HiddenText;
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
@@ -89,7 +91,9 @@ use super::switch_to_guided::ReadCarrier;
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-use super::threads::{self, CommentId, ReviewThread, ThreadId, ThreadPlacement, ThreadWork};
+use super::threads::{
+    self, AgentOfThreads, CommentId, ReviewThread, ThreadId, ThreadPlacement, ThreadWork,
+};
 use super::typing_save::TypingSave;
 use super::used_findings::{FindingsOfThreads, thread_made_of};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
@@ -1093,7 +1097,7 @@ impl ReviewCore {
             &self.thread_fold_flipped,
             self.display_options.files_at_head(),
             &self.thread_work(),
-            self.state.hand_offs(),
+            &self.agent_of_threads(),
             FindingsOfThreads::of(&self.state),
         );
         self.mark_repin_status(&mut page.pieces);
@@ -1266,6 +1270,12 @@ impl ReviewCore {
         (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
     }
 
+    /// What the PR's description hides from its reader; `None` when it hides nothing.
+    pub fn pr_description_hidden_text(&self) -> Option<HiddenText> {
+        Some(HiddenText::of(self.state.pr_description()))
+            .filter(|hidden| !hidden.parts().is_empty())
+    }
+
     /// `None` when the tour has no such diagram, picture or summary, or the review has no PR.
     pub fn notes_button(&self, subject: &NoteSubject) -> Option<NotesButton> {
         self.subject.pull_request()?;
@@ -1352,7 +1362,7 @@ impl ReviewCore {
             &self.thread_fold_flipped,
             self.display_options.files_at_head(),
             &self.thread_work(),
-            self.state.hand_offs(),
+            &self.agent_of_threads(),
             FindingsOfThreads::of(&self.state),
         );
         if let Some(record) = self.repin_record() {
@@ -1729,7 +1739,7 @@ impl ReviewCore {
                 &self.thread_fold_flipped,
                 self.display_options.files_at_head(),
                 &self.thread_work(),
-                self.state.hand_offs(),
+                &self.agent_of_threads(),
                 FindingsOfThreads::of(&self.state),
             );
             page
@@ -2260,6 +2270,27 @@ impl ReviewCore {
         let home = self.thread_home();
         self.comment_desk
             .start_sending(&self.state, place, mode, audience, (&self.head, home))
+    }
+
+    /// The reviewer hands someone else's comment to the tour agent, to handle as the reviewer would ask.
+    pub fn hand_to_agent(&mut self, comment: &CommentId) -> Result<(), HandToAgentRefused> {
+        if !self.subject().has_pending_review() {
+            return Err(HandToAgentRefused::NotAPullRequest);
+        }
+        let threads = &self.pulled_threads;
+        let from = self.screen.sent_from();
+        self.state
+            .record(|state| state.hand_offs_mut().hand_over(threads, comment, from))
+            .map_err(|error| HandToAgentRefused::NotSaved(format!("{error:#}")))??;
+        self.work.want(WorkKind::DeliverHandOff);
+        Ok(())
+    }
+
+    fn agent_of_threads(&self) -> AgentOfThreads<'_> {
+        AgentOfThreads {
+            hand_offs: self.state.hand_offs(),
+            takes_others_comments: self.subject().has_pending_review(),
+        }
     }
 
     pub fn hand_offs(&self) -> &HandOffs {

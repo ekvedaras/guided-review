@@ -19,8 +19,8 @@ use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
 use crate::findings::FindingId;
 use crate::viewer::CommentPlace;
 use crate::viewer::{
-    AskAt, BoxEdges, JumpTarget, LineKind, Page, PageRow, PinnedHeader, Review, RowSelection,
-    SelectedRows, ShownLine, StepHeading, line_count,
+    AskAt, BoxEdges, HiddenText, JumpTarget, LineKind, Page, PageRow, PinnedHeader, Review,
+    RowSelection, SelectedRows, ShownLine, StepHeading, line_count,
 };
 
 /// What the PR description's `MarkdownView` is keyed by, so its folds can be told apart.
@@ -72,6 +72,7 @@ pub struct PageRows {
     page: Option<Arc<Page>>,
     keys: Vec<RowKey>,
     summary: PreparedSummary,
+    description_hidden: Option<HiddenText>,
 }
 
 /// What the list must do to show new rows in place of old ones.
@@ -94,15 +95,18 @@ impl PageRows {
             page: None,
             keys: Vec::new(),
             summary: PreparedSummary::default(),
+            description_hidden: None,
         }
     }
 
     /// `open_details` are the `<details>` of comments the reader opened, which make their thread taller.
     pub fn of(review: &Review, open_details: &OpenDetails) -> Self {
         let page = Arc::clone(review.page());
+        let description_hidden = review.pr_description_hidden_text();
         Self {
-            keys: keys_of(&page, open_details),
+            keys: keys_of(&page, open_details, description_hidden.as_ref()),
             summary: PreparedSummary::of(&page),
+            description_hidden,
             page: Some(page),
         }
     }
@@ -154,6 +158,11 @@ impl PageRows {
 
     pub fn prepared_reviewer_summary(&self) -> Option<Rc<PreparedMarkdown>> {
         self.summary.reviewer_summary.clone()
+    }
+
+    /// What the PR description hides from its reader; the line about it is part of the description's rows.
+    pub fn description_hidden_text(&self) -> Option<&HiddenText> {
+        self.description_hidden.as_ref()
     }
 
     pub fn prepared_description(&self) -> Option<Rc<PreparedMarkdown>> {
@@ -252,7 +261,7 @@ impl PageRows {
         };
         let mut staged = Page::clone(page);
         staged.stage_unread_end(lead, unread_left);
-        self.keys = keys_of(&staged, open_details);
+        self.keys = keys_of(&staged, open_details, self.description_hidden.as_ref());
         self.page = Some(Arc::new(staged));
     }
 
@@ -264,7 +273,7 @@ impl PageRows {
         };
         let mut staged = Page::clone(page);
         staged.stage_all_read(steps);
-        self.keys = keys_of(&staged, open_details);
+        self.keys = keys_of(&staged, open_details, self.description_hidden.as_ref());
         self.page = Some(Arc::new(staged));
     }
 
@@ -278,7 +287,13 @@ impl PageRows {
 }
 
 /// A row's edges are a part of its key: a row that comes to close its box is drawn and measured anew.
-fn keys_of(page: &Page, open_details: &OpenDetails) -> Vec<RowKey> {
+/// The line about hidden text in the PR description makes its rows taller, so it is part of their keys.
+fn keys_of(
+    page: &Page,
+    open_details: &OpenDetails,
+    description_hidden: Option<&HiddenText>,
+) -> Vec<RowKey> {
+    let hidden_summary = description_hidden.and_then(HiddenText::summary);
     page.rows()
         .iter()
         .enumerate()
@@ -286,6 +301,9 @@ fn keys_of(page: &Page, open_details: &OpenDetails) -> Vec<RowKey> {
             let mut hasher = DefaultHasher::new();
             key(row, open_details).0.hash(&mut hasher);
             page.edges(index).hash(&mut hasher);
+            if matches!(row, PageRow::SummaryColumns(_) | PageRow::Overview(_)) {
+                hidden_summary.hash(&mut hasher);
+            }
             RowKey(hasher.finish())
         })
         .collect()
@@ -396,6 +414,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             view.commented_lines.hash(&mut hasher);
             view.hand_off_line.hash(&mut hasher);
             view.hand_off_button.hash(&mut hasher);
+            view.can_hand_to_agent.hash(&mut hasher);
             view.delete_asked.hash(&mut hasher);
             reply_lines.hash(&mut hasher);
             for (id, text) in &view.edit_drafts {
@@ -514,6 +533,8 @@ mod tests {
             agent_is_working: false,
             followed: None,
             hand_off_button: None,
+            can_hand_to_agent: std::collections::BTreeSet::new(),
+            hidden_text: BTreeMap::new(),
             from_findings: Vec::new(),
         }
     }

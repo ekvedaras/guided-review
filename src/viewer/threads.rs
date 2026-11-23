@@ -11,6 +11,7 @@ use crate::tour::{GuidedTour, Tour};
 
 use super::diff_display::{DiffDisplay, FilesAtHead};
 use super::hand_offs::{HandOffButton, HandOffs};
+use super::hidden_text::HiddenText;
 use super::outdated_lines::FollowedLines;
 use super::reactions::{Reaction, ReactionCount};
 use super::review::StepId;
@@ -195,6 +196,10 @@ pub struct ThreadView {
     pub agent_is_working: bool,
     /// What the reviewer can do about the thread's latest hand-off.
     pub hand_off_button: Option<HandOffButton>,
+    /// The comments by others the reviewer can hand to the tour agent now.
+    pub can_hand_to_agent: BTreeSet<CommentId>,
+    /// What each comment that hides text from its reader hides.
+    pub hidden_text: BTreeMap<CommentId, HiddenText>,
     /// An outdated thread's lines, followed to the head, and what they were.
     pub followed: Option<FollowedLines>,
     /// The findings of the AI review its comment was made from.
@@ -351,9 +356,10 @@ pub(super) fn views(
     flipped: &BTreeSet<ThreadId>,
     files_at_head: &FilesAtHead,
     work: &ThreadWork<'_>,
-    hand_offs: &HandOffs,
+    agent: &AgentOfThreads<'_>,
     findings: FindingsOfThreads<'_>,
 ) -> Vec<ThreadView> {
+    let hand_offs = agent.hand_offs;
     let ThreadWork {
         reply_drafts,
         comment_edits,
@@ -384,10 +390,37 @@ pub(super) fn views(
             hand_off_line: hand_offs.line_for(&thread.id),
             agent_is_working: hand_offs.is_working_on(&thread.id),
             hand_off_button: hand_offs.button_in(&thread.id),
+            can_hand_to_agent: thread
+                .comments
+                .iter()
+                .filter(|comment| agent.can_take(comment))
+                .map(|comment| comment.id.clone())
+                .collect(),
+            hidden_text: thread
+                .comments
+                .iter()
+                .filter_map(|comment| {
+                    let hidden = HiddenText::of(&comment.body);
+                    (!hidden.parts().is_empty()).then(|| (comment.id.clone(), hidden))
+                })
+                .collect(),
             thread: without_working_on_it(thread, hand_offs),
             from_findings: findings.of_thread(&thread.id),
         })
         .collect()
+}
+
+/// What the tour agent has of the threads, and whether it takes comments by others.
+pub(super) struct AgentOfThreads<'a> {
+    pub hand_offs: &'a HandOffs,
+    /// A PR's threads hold comments by others; a local review's hold only the reviewer's and the agent's.
+    pub takes_others_comments: bool,
+}
+
+impl AgentOfThreads<'_> {
+    fn can_take(&self, comment: &ThreadComment) -> bool {
+        self.takes_others_comments && !comment.by_viewer && !self.hand_offs.has_at_work(&comment.id)
+    }
 }
 
 /// The line under the thread already says the agent is working on it, so its reply saying so is left out.

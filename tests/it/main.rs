@@ -73,6 +73,7 @@ mod guided_tour_banner;
 mod guided_writing;
 mod hand_offs;
 mod hc_tour_agent;
+mod hidden_text;
 mod highlighting;
 mod icons;
 mod ide;
