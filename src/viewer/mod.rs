@@ -77,6 +77,7 @@ mod replacing_jobs;
 mod review;
 mod review_agents;
 mod review_builder;
+mod review_place;
 mod review_state;
 mod reviewing_mark;
 mod row_selection;
@@ -244,6 +245,7 @@ pub use review::{
 };
 pub use review_agents::ReviewAgents;
 pub use review_builder::ReviewBuilder;
+pub use review_place::{CheckoutPort, ReviewPlace};
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use reviewing_mark::ReviewingMarkRemoval;
 pub use row_selection::{RowSelection, SelectedLines};

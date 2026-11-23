@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::support::fake_review_worktrees::FakeReviewWorktrees;
+use crate::support::fake_checkouts::FakeCheckouts;
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::{FixtureRepo, folders_in};
 use guided_review::open_review::open_review;
@@ -28,7 +28,6 @@ struct Desk {
     head: String,
     review: Review,
     fake: Arc<FakeTourAgent>,
-    worktrees: FakeReviewWorktrees,
     home: TempDir,
 }
 
@@ -55,7 +54,6 @@ impl Desk {
             head,
             review,
             fake: Arc::new(FakeTourAgent::new()),
-            worktrees: FakeReviewWorktrees::default(),
             home: TempDir::new().unwrap(),
         }
     }
@@ -63,7 +61,7 @@ impl Desk {
     fn agents(&self) -> ReviewAgents {
         ReviewAgents::new(
             Arc::clone(&self.fake) as Arc<dyn TourAgentPort>,
-            Arc::new(self.worktrees.clone()),
+            Arc::new(FakeCheckouts::default().clean_at("/clones/shop", "abc")),
             folders_in(self.home.path()),
         )
     }
@@ -71,9 +69,13 @@ impl Desk {
     /// What the app does for Run AI review and Try again.
     fn run(&mut self) {
         self.review.ask_to_run_ai_review().unwrap();
-        let started =
-            self.agents()
-                .start(&pr(), Path::new("/clones/shop"), self.review.head(), &pr());
+        let started = self.agents().start(
+            &pr(),
+            None,
+            Path::new("/clones/shop"),
+            self.review.head(),
+            &pr(),
+        );
         self.review.ai_review_agent_started(started);
     }
 
@@ -100,7 +102,7 @@ fn a_nit() -> serde_json::Value {
 }
 
 #[test]
-fn a_run_starts_the_review_agent_in_a_worktree_and_follows_it() {
+fn a_run_starts_the_review_agent_and_follows_it() {
     let mut desk = Desk::new();
 
     desk.run();
@@ -110,7 +112,6 @@ fn a_run_starts_the_review_agent_in_a_worktree_and_follows_it() {
         AiReviewRun::Running(_)
     ));
     assert_eq!(desk.fake.review_agents_of(PR).len(), 1);
-    assert_eq!(desk.worktrees.standing(), [PR]);
 }
 
 #[test]
@@ -126,7 +127,6 @@ fn an_agent_that_goes_idle_without_findings_fails_the_run_and_keeps_its_terminal
         AiReviewRun::Failed { .. }
     ));
     assert_eq!(desk.fake.review_agents_of(PR).len(), 1);
-    assert_eq!(desk.worktrees.standing(), [PR]);
 }
 
 #[test]
@@ -140,7 +140,6 @@ fn findings_done_clears_the_run_and_leaves_the_agent_idle_to_talk_to() {
     assert_eq!(desk.review.ai_review_run(), &AiReviewRun::NotRun);
     assert_eq!(desk.review.ai_review().counts().nit, 1);
     assert_eq!(desk.fake.review_agents_of(PR).len(), 1);
-    assert_eq!(desk.worktrees.standing(), [PR]);
 }
 
 #[test]
@@ -189,7 +188,7 @@ fn a_run_whose_terminal_is_gone_does_not_offer_show_agent_but_a_stopped_agent_do
 }
 
 #[test]
-fn trying_again_after_a_failure_replaces_the_agent_and_its_worktree() {
+fn trying_again_after_a_failure_replaces_the_agent() {
     let mut desk = Desk::new();
     desk.run();
     desk.review.ai_review_agent_status(AgentStatus::Working);
@@ -202,7 +201,6 @@ fn trying_again_after_a_failure_replaces_the_agent_and_its_worktree() {
         AiReviewRun::Running(_)
     ));
     assert_eq!(desk.fake.review_agents_of(PR).len(), 1);
-    assert_eq!(desk.worktrees.standing(), [PR]);
     assert!(
         desk.fake
             .calls()
@@ -212,7 +210,7 @@ fn trying_again_after_a_failure_replaces_the_agent_and_its_worktree() {
 }
 
 #[test]
-fn an_agent_that_could_not_start_fails_the_run_and_leaves_no_worktree() {
+fn an_agent_that_could_not_start_fails_the_run() {
     let mut desk = Desk::new();
     desk.fake = Arc::new(FakeTourAgent::new().failing_to_start("herdr refused"));
 
@@ -222,7 +220,6 @@ fn an_agent_that_could_not_start_fails_the_run_and_leaves_no_worktree() {
         panic!("failed, got {:?}", desk.review.ai_review_run());
     };
     assert!(reason.contains("herdr refused"), "{reason}");
-    assert_eq!(desk.worktrees.standing(), Vec::<String>::new());
 }
 
 #[test]

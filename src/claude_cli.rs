@@ -12,6 +12,7 @@ use crate::json::at;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
+use crate::viewer::ReviewPlace;
 use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnStopper};
 
 const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
@@ -50,16 +51,25 @@ pub fn tour_agent_tools(clone: &Path, tours: &Path, summary_skill: Option<&str>)
     }
 }
 
-/// What the review agent may do without the auto mode classifier: read and search its worktree, run git's
+/// What the review agent may do without the auto mode classifier: read and search its code, run git's
 /// read commands and test runners, start subagents, call the findings commands, and write its one findings
-/// file. Nothing else is written, so it cannot change code.
-pub fn review_agent_tools(worktree: &Path, findings_file: &Path, skill: Option<&str>) -> String {
+/// file. Nothing else is written, so it cannot change code. An agent that makes its own worktree may also
+/// enter and leave it and check out the reviewed head there. Its worktree is where the project's hook puts
+/// it, which the app cannot know, so it may read anywhere.
+pub fn review_agent_tools(
+    place: &ReviewPlace,
+    findings_file: &Path,
+    skill: Option<&str>,
+) -> String {
     let findings = format!(
         "//{}",
         findings_file.display().to_string().trim_start_matches('/')
     );
     let mut tools = vec![
-        format!("Read({})", under(worktree)),
+        match place {
+            ReviewPlace::TourAgentFolder(folder) => format!("Read({})", under(folder)),
+            ReviewPlace::OwnWorktree { .. } => "Read".to_owned(),
+        },
         format!("Read({findings})"),
         "Grep".to_owned(),
         "Glob".to_owned(),
@@ -71,6 +81,16 @@ pub fn review_agent_tools(worktree: &Path, findings_file: &Path, skill: Option<&
             .iter()
             .map(|command| format!("Bash({command}:*)")),
     );
+    if matches!(place, ReviewPlace::OwnWorktree { .. }) {
+        tools.extend(
+            [
+                "EnterWorktree",
+                "ExitWorktree",
+                "Bash(git checkout --detach:*)",
+            ]
+            .map(str::to_owned),
+        );
+    }
     tools.push(format!("Write({findings})"));
     tools.push(format!("Edit({findings})"));
     if let Some(skill) = skill {

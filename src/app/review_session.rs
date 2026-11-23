@@ -1584,21 +1584,29 @@ impl ReviewSession {
         self.run_due_work(cx);
     }
 
-    /// Run AI review, Run again and Try again: the review takes the asking, and the review agent starts in
-    /// a worktree of the reviewed head, off the UI thread as it runs `git` and `hc`.
+    /// Run AI review, Run again and Try again: the review takes the asking, and the review agent starts where
+    /// `ReviewPlace` says, off the UI thread as it runs `git` and `hc`.
     pub fn run_ai_review(&mut self, cx: &mut Context<Self>) -> Result<(), AiReviewRefusal> {
         self.change(cx, |review| review.ask_to_run_ai_review())?;
         // The agent of an earlier run ends when the new one starts, which its follow must not take for
         // the end of the new run.
         self.ai_review_follow = None;
         let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let tour_agents = self.tour_work.tour_agents.clone();
         let folders = cx.global::<PrSwitching>().folders.clone();
         let (subject, head) = (self.review.subject().clone(), self.review.head().clone());
         self.ai_review_start = Some(self.run_off_thread(
             cx,
             move || {
                 let repo = writer_folder(&subject, &folders);
-                agents.start(&subject, &repo, &head, &subject)
+                let tour_agent_folder = tour_agents.working_folder_of(&subject);
+                agents.start(
+                    &subject,
+                    tour_agent_folder.as_deref(),
+                    &repo,
+                    &head,
+                    &subject,
+                )
             },
             |this, started, cx| {
                 let has_started = started.is_ok();
@@ -1630,7 +1638,7 @@ impl ReviewSession {
         ));
     }
 
-    /// Keeps the review agent's status in the run until its terminal ends, then removes its worktree. A
+    /// Keeps the review agent's status in the run until its terminal ends. A
     /// thread of its own blocks on herdr's events, like the tour agent's follow.
     fn follow_ai_review(&mut self, cx: &mut Context<Self>) {
         let (changes, mut arrived) = futures::channel::mpsc::unbounded();

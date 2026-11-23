@@ -12,7 +12,6 @@ use crate::ide::{Ide, NoIde};
 use crate::instructions::SummaryInstructions;
 use crate::opened_subject::OpenedSubject;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
-use crate::review_worktree::GitReviewWorktrees;
 use crate::tour::Tour;
 use crate::viewer::{
     GitHubPort, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher, TourReloader,
@@ -85,9 +84,6 @@ pub fn open_review(
     let tour_agents = TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
         .finding_head_branches_with(Arc::clone(&github) as Arc<dyn PullsOfBranchPort>)
         .starting_in(agent_folder)
-        .removing_review_worktrees_with(Arc::new(GitReviewWorktrees::under(
-            folders.review_worktrees(),
-        )))
         .with_summary_skill(SummaryInstructions::skill_for_launch(folders));
     Ok(OpenedReview {
         review,

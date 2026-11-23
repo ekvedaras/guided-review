@@ -74,7 +74,7 @@ impl ReviewAgentLife {
 pub enum AiReviewRun {
     #[default]
     NotRun,
-    /// The worktree is being made and the agent started.
+    /// The agent is being started.
     Starting,
     Running(RunningReview),
     /// The run ended without findings, for this reason. `agent` is the review agent's terminal when it is
@@ -120,7 +120,7 @@ impl AiReviewRun {
         }
     }
 
-    /// A run that has not ended: it holds the review agent and its worktree.
+    /// A run that has not ended: it holds the review agent.
     pub const fn is_on(&self) -> bool {
         matches!(self, Self::Starting | Self::Running(_))
     }

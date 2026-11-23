@@ -139,7 +139,7 @@ pub enum Effect {
     SwitchToGuidedTour,
     /// Goes to the next finding and scrolls to it; the window does the scrolling.
     NextFinding,
-    /// Starts the AI review's run: the review took it and the app makes the worktree and starts the agent.
+    /// Starts the AI review's run: the review took it and the app starts the agent.
     RunAiReview,
     OpenFinishForm,
     /// Hands a local review's queued tasks to its agent.

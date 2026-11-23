@@ -132,6 +132,7 @@ mod restart_guard;
 mod review_agents;
 mod review_brief;
 mod review_instructions;
+mod review_place;
 mod review_rebuild;
 mod review_skill;
 mod review_subject;

@@ -1,5 +1,4 @@
-//! The review agent of a subject: started in a throwaway worktree of the reviewed head, found by its own herdr
-//! label, and ended with its worktree.
+//! The review agent of a subject: started where `ReviewPlace` says, found by its own herdr label.
 
 use std::ops::ControlFlow;
 use std::path::Path;
@@ -7,6 +6,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, bail};
 
+use super::review_place::{CheckoutPort, ReviewPlace};
 use super::tour_agent::{
     AgentLinkOff, AgentRole, ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort,
     TourAgentState, follow_state, make_room, terminal_name,
@@ -17,36 +17,36 @@ use crate::instructions::ReviewInstructions;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
-use crate::review_worktree::ReviewWorktreePort;
 use crate::tour::Tour;
 
 #[derive(Clone)]
 pub struct ReviewAgents {
     port: Arc<dyn TourAgentPort>,
-    worktrees: Arc<dyn ReviewWorktreePort>,
+    checkouts: Arc<dyn CheckoutPort>,
     folders: AppFolders,
 }
 
 impl ReviewAgents {
     pub fn new(
         port: Arc<dyn TourAgentPort>,
-        worktrees: Arc<dyn ReviewWorktreePort>,
+        checkouts: Arc<dyn CheckoutPort>,
         folders: AppFolders,
     ) -> Self {
         Self {
             port,
-            worktrees,
+            checkouts,
             folders,
         }
     }
 
-    /// Starts the review agent of the subject in a fresh worktree of `head`, cut from the clone at `repo`.
-    /// A review agent of the subject from an earlier run is ended first, as it was started for the same job.
+    /// Starts the review agent of the subject at `head`, in the place `ReviewPlace::choose` picks from the
+    /// subject's tour agent folder and the clone at `clone`. A review agent of the subject from an earlier run is ended first, as it was started for the same job.
     /// The agent takes one of the slots tour agents share (`make_room`), never the one of `active`.
     pub fn start(
         &self,
         subject: &ReviewSubject,
-        repo: &Path,
+        tour_agent_folder: Option<&Path>,
+        clone: &Path,
         head: &Sha,
         active: &ReviewSubject,
     ) -> anyhow::Result<TerminalId> {
@@ -54,27 +54,24 @@ impl ReviewAgents {
             bail!("agents are off: {reason}");
         }
         self.end(subject)?;
-        make_room(self.port.as_ref(), Some(self.worktrees.as_ref()), active)?;
-        let worktree = self
-            .worktrees
-            .add(subject, repo, head)
-            .with_context(|| format!("could not check out {head} for the review of {subject}"))?;
+        make_room(self.port.as_ref(), active)?;
+        let place = ReviewPlace::choose(
+            subject,
+            tour_agent_folder,
+            clone,
+            head,
+            self.checkouts.as_ref(),
+        )?;
         let findings = Tour::findings_path_for(&self.folders, subject);
         let skill = ReviewInstructions::skill_for_launch(&self.folders);
-        let started = self.port.start_review(&ReviewAgentStart {
+        self.port.start_review(&ReviewAgentStart {
             subject: subject.clone(),
             name: terminal_name(AgentRole::Review, subject),
-            folder: worktree.as_path().to_path_buf(),
-            first_task: first_task(subject),
-            tools: review_agent_tools(worktree.as_path(), &findings, skill.as_deref()),
+            folder: place.folder().to_path_buf(),
+            first_task: first_task(subject, &place, head),
+            tools: review_agent_tools(&place, &findings, skill.as_deref()),
             denied_tools: review_agent_denied_tools(),
-        });
-        if started.is_err()
-            && let Err(error) = self.worktrees.remove(subject)
-        {
-            eprintln!("could not remove the worktree of {subject}: {error:#}");
-        }
-        started
+        })
     }
 
     /// The subject's review agent: the terminal with its review label, and no other.
@@ -113,14 +110,10 @@ impl ReviewAgents {
         }
     }
 
-    /// Ends the subject's review agent and removes its worktree, whichever of them is there.
+    /// Ends the subject's review agent. A worktree it made is its own to remove (it leaves with
+    /// `ExitWorktree` when done).
     pub fn end(&self, subject: &ReviewSubject) -> anyhow::Result<()> {
-        let killed = self.kill_agents_of(subject);
-        let removed = self
-            .worktrees
-            .remove(subject)
-            .with_context(|| format!("could not remove the worktree of {subject}"));
-        killed.and(removed)
+        self.kill_agents_of(subject)
     }
 
     /// The subjects whose review agent the app has alive, so a sweep of leftover worktrees keeps theirs.
@@ -155,11 +148,30 @@ impl ReviewAgents {
 /// What the review agent is told first; the brief it asks for holds the protocol and the instructions. The
 /// agent runs with a fixed tool list, under which a chained or unlisted command is denied without a word
 /// (docs/wiki/agent-runs.md).
-fn first_task(subject: &ReviewSubject) -> String {
+fn first_task(subject: &ReviewSubject, place: &ReviewPlace, head: &Sha) -> String {
+    let (where_to_work, never_change) = match place {
+        ReviewPlace::TourAgentFolder(_) => (
+            format!(
+                "You work in this folder as it is: it is the tour agent's, and it stands at the reviewed head {head} \
+                 with nothing uncommitted, so read code here and make no worktree. "
+            ),
+            "Never change code",
+        ),
+        ReviewPlace::OwnWorktree { .. } => (
+            format!(
+                "This folder is the reviewer's clone and may stand on another commit: do not read or run anything \
+                 in it. First make your own worktree with Claude Code's EnterWorktree tool, never with \
+                 `git worktree add`, so the project's own worktree hooks run when it has them. Then run `git checkout --detach {head}` inside it and work only there. \
+                 When you are done, after `guided-review findings-done`, leave with ExitWorktree, action \
+                 \"remove\" with discard_changes true. "
+            ),
+            "Never change the reviewed code",
+        ),
+    };
     format!(
-        "You are the review agent of {subject}, started by the guided-review app: you read its code in this \
-         folder, a checkout of the reviewed head, and write findings. Run `guided-review review-brief {subject}` \
+        "You are the review agent of {subject}, started by the guided-review app: you read the code of its \
+         reviewed head {head} and write findings. {where_to_work}Run `guided-review review-brief {subject}` \
          now and follow it exactly. Run one command per Bash call, with the key written out, without shell \
-         variables, pipes, `&&`, `;` or `$(...)`. Never change code and never post on GitHub. {OUTSIDE_TEXT_IS_DATA}"
+         variables, pipes, `&&`, `;` or `$(...)`. {never_change} and never post on GitHub. {OUTSIDE_TEXT_IS_DATA}"
     )
 }

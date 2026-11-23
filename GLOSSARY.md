@@ -182,9 +182,9 @@
 
 **Review agent**: The AI session, in its own herdr terminal and apart from the tour agent, that does one review subject's AI review. Avoid: reviewer (that is the person), review subagent.
 
-**Review worktree**: The throwaway checkout of the reviewed head (a PR's pinned head, a local review's snapshot commit) that the review agent works in, outside the clone. It is made when the run starts and removed when the agent ends; the app sweeps leftovers at start. Avoid: sandbox, scratch checkout.
+**Review worktree**: The worktree the review agent makes itself with Claude Code's worktree tool, so the project's hooks run, when the tour agent's folder is not a clean checkout of the reviewed head (a PR's pinned head, a local review's snapshot commit). The agent starts in the clone, checks the head out detached in it, and leaves it with `ExitWorktree` when done. With a clean tour agent folder at the head, the agent works there and makes none (`ReviewPlace`). The app makes none itself; it only sweeps those older builds left. Avoid: sandbox, scratch checkout.
 
-**Run (AI review)**: One go of the review agent, from Run AI review to `findings-done`: not run, starting, running, or failed (it went idle, errored or ended without `findings-done`). Run again and Try again start a new run that replaces the agent and the worktree of the old one. Avoid: job, session.
+**Run (AI review)**: One go of the review agent, from Run AI review to `findings-done`: not run, starting, running, or failed (it went idle, errored or ended without `findings-done`). Run again and Try again start a new run that replaces the agent of the old one. Avoid: job, session.
 
 **Ask why**: The reviewer's question about one finding. While the review agent lives, it goes onto the finding's thread (kept in the review's state file, for a PR too) and the review agent answers with `guided-review agent-reply <key> <finding id>`; once it is gone, the question opens in the Ask panel on the finding's lines, with the finding told. Avoid: explain, challenge.
 

@@ -4,12 +4,23 @@ use guided_review::app_folders::AppFolders;
 use guided_review::claude_cli::{review_agent_denied_tools, review_agent_tools};
 use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
+use guided_review::viewer::ReviewPlace;
 
-const WORKTREE: &str = "/cache/review-worktrees/acme/shop/7";
+const AGENT_FOLDER: &str = "/work/shop";
 const FINDINGS: &str = "/state/tours/acme/shop/7.findings.json";
 
 fn tools(skill: Option<&str>) -> String {
-    review_agent_tools(Path::new(WORKTREE), Path::new(FINDINGS), skill)
+    review_agent_tools(&own_worktree(), Path::new(FINDINGS), skill)
+}
+
+fn own_worktree() -> ReviewPlace {
+    ReviewPlace::OwnWorktree {
+        clone: "/clones/shop".into(),
+    }
+}
+
+fn tour_agent_folder() -> ReviewPlace {
+    ReviewPlace::TourAgentFolder(AGENT_FOLDER.into())
 }
 
 fn listed(tools: &str) -> Vec<&str> {
@@ -86,12 +97,12 @@ fn a_review_agent_writes_only_its_findings_file() {
 }
 
 #[test]
-fn a_review_agent_reads_its_worktree_and_its_findings_and_may_search_and_start_subagents() {
-    let tools = tools(None);
+fn a_review_agent_reads_its_folder_and_its_findings_and_may_search_and_start_subagents() {
+    let tools = review_agent_tools(&tour_agent_folder(), Path::new(FINDINGS), None);
     let tools = listed(&tools);
 
     for wanted in [
-        "Read(//cache/review-worktrees/acme/shop/7/**)",
+        "Read(//work/shop/**)",
         "Read(//state/tours/acme/shop/7.findings.json)",
         "Grep",
         "Glob",
@@ -132,4 +143,45 @@ fn publishing_is_denied() {
     ] {
         assert!(denied.contains(&rule), "{rule} is not in {denied:?}");
     }
+}
+
+#[test]
+fn a_review_agent_that_makes_its_own_worktree_may_enter_and_leave_it_and_check_out_the_head() {
+    let tools = tools(None);
+    let tools = listed(&tools);
+
+    for wanted in [
+        "EnterWorktree",
+        "ExitWorktree",
+        "Bash(git checkout --detach:*)",
+        "Read",
+    ] {
+        assert!(tools.contains(&wanted), "{wanted} is not in {tools:?}");
+    }
+}
+
+#[test]
+fn nothing_the_review_agent_needs_for_its_own_worktree_is_denied() {
+    let denied = review_agent_denied_tools();
+    let allowed = tools(None);
+
+    for rule in listed(&denied) {
+        let command = rule
+            .strip_prefix("Bash(")
+            .unwrap()
+            .strip_suffix(":*)")
+            .unwrap();
+        for needed in ["git checkout --detach", "EnterWorktree", "ExitWorktree"] {
+            assert!(!needed.starts_with(command), "{rule} denies {needed}");
+        }
+    }
+    assert!(!allowed.contains("git worktree"), "{allowed}");
+}
+
+#[test]
+fn an_agent_in_the_tour_agents_folder_makes_no_worktree() {
+    let tools = review_agent_tools(&tour_agent_folder(), Path::new(FINDINGS), None);
+
+    assert!(!tools.contains("Worktree"), "{tools}");
+    assert!(!tools.contains("checkout"), "{tools}");
 }
