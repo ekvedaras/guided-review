@@ -14,6 +14,8 @@ use super::tour_agent::{AgentStatus, SendOutcome, TourAgents, TourKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FixState {
+    /// Added to fixes: it goes to the tour agent with the others at Send fixes.
+    ToSend,
     /// Waits for the tour agent to be idle: the batch goes as one message.
     Queued,
     Delivered,
@@ -54,6 +56,7 @@ impl FixState {
     /// What the reviewer reads under the finding.
     pub fn line(&self) -> String {
         match self {
+            Self::ToSend => "To fix: goes with Send fixes".to_owned(),
             Self::Queued => "Fix requested: waits for the tour agent".to_owned(),
             Self::Delivered => "Fix requested: sent to the tour agent".to_owned(),
             Self::Working => "Fix requested: the tour agent is working".to_owned(),
@@ -160,6 +163,15 @@ impl FixRequests {
 
     /// One batch, in the order given. An earlier answer for a finding is replaced.
     pub(super) fn request(&mut self, findings: Vec<Finding>) {
+        self.put(findings, &FixState::Queued);
+    }
+
+    /// Added to fixes: each waits for Send fixes. An earlier answer for a finding is replaced.
+    pub(super) fn add_to_send(&mut self, findings: Vec<Finding>) {
+        self.put(findings, &FixState::ToSend);
+    }
+
+    fn put(&mut self, findings: Vec<Finding>, state: &FixState) {
         let batch = self
             .0
             .iter()
@@ -171,9 +183,25 @@ impl FixRequests {
             self.0.push(FixRequest {
                 finding,
                 batch,
-                state: FixState::Queued,
+                state: state.clone(),
             });
         }
+    }
+
+    /// Takes the finding out of the fixes to send; false when it was not among them.
+    pub(super) fn remove_to_send(&mut self, id: &FindingId) -> bool {
+        let before = self.0.len();
+        self.0
+            .retain(|request| !(request.finding.id == *id && request.state == FixState::ToSend));
+        self.0.len() != before
+    }
+
+    /// What waits for Send fixes, in the order it was added.
+    pub fn to_send(&self) -> impl Iterator<Item = &FindingId> {
+        self.0
+            .iter()
+            .filter(|request| request.state == FixState::ToSend)
+            .map(|request| &request.finding.id)
     }
 
     /// Takes in the reviewer's answer to the tour agent's question, which then waits to be sent.

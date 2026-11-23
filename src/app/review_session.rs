@@ -509,6 +509,26 @@ impl ReviewSession {
         self.change(cx, |review| review.fix_findings(ids)).refused
     }
 
+    pub fn add_to_fixes(
+        &mut self,
+        ids: &[FindingId],
+        cx: &mut Context<Self>,
+    ) -> Vec<(FindingId, FindingRefusal)> {
+        self.change(cx, |review| review.add_to_fixes(ids)).refused
+    }
+
+    pub fn remove_from_fixes(
+        &mut self,
+        id: &FindingId,
+        cx: &mut Context<Self>,
+    ) -> Result<(), FindingRefusal> {
+        self.change(cx, |review| review.remove_from_fixes(id))
+    }
+
+    pub fn send_fixes(&mut self, cx: &mut Context<Self>) -> Vec<(FindingId, FindingRefusal)> {
+        self.change(cx, |review| review.send_fixes()).refused
+    }
+
     /// Comment in the findings list: each selected finding goes in as is, as Use as is does.
     pub fn comment_findings(
         &mut self,

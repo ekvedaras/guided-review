@@ -104,6 +104,7 @@ pub struct FindingRow {
     pub fix: Option<Arc<str>>,
     /// False while a fix is asked for or under way.
     pub can_fix: bool,
+    pub fixes_offer: FixesOffer,
     /// The tour agent asked something before fixing and waits for the reviewer's answer.
     pub can_answer_fix: bool,
     /// Ask why: the questions and the review agent's answers, oldest first.
@@ -114,6 +115,14 @@ pub struct FindingRow {
     pub can_ask_why: bool,
     /// Set when new commits changed its lines: what they said when the review agent wrote it.
     pub outdated: Option<Arc<[String]>>,
+}
+
+/// Add to fixes or Remove from fixes on a finding; neither once its fix was sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FixesOffer {
+    Add,
+    Remove,
+    None,
 }
 
 /// An ask button and what it asks about.

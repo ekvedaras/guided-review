@@ -113,6 +113,8 @@ pub struct SidebarAiReview {
     pub has_findings: bool,
     pub has_dismissed_findings: bool,
     pub action: Option<AiReviewAction>,
+    /// The findings added to fixes, which Send fixes hands to the tour agent.
+    pub fixes_to_send: usize,
 }
 
 /// The guided tour of a basic review's PR as the sidebar says it: the stage of its writing, Write
@@ -228,6 +230,7 @@ impl SidebarRows {
                     has_findings: stage.has_findings,
                     has_dismissed_findings: stage.has_dismissed_findings,
                     action: stage.action,
+                    fixes_to_send: review.fixes_to_send(),
                 }
             },
             tour_agent: SidebarTourAgent {

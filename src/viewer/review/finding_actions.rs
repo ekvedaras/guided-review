@@ -189,6 +189,68 @@ impl ReviewCore {
         batch
     }
 
+    /// Each finding waits for Send fixes, so the reviewer goes on reading and sends them together.
+    pub fn add_to_fixes(&mut self, ids: &[FindingId]) -> FindingsBatch<FindingId> {
+        let mut batch = FindingsBatch {
+            done: Vec::new(),
+            refused: Vec::new(),
+        };
+        let mut to_add = Vec::new();
+        for id in ids {
+            match self.open_finding(id) {
+                Ok(_) if self.state.fix_requests().is_in_progress(id) => {
+                    batch.refused.push((id.clone(), FindingRefusal::BeingFixed));
+                }
+                Ok(finding) => to_add.push(finding),
+                Err(refusal) => batch.refused.push((id.clone(), refusal)),
+            }
+        }
+        if to_add.is_empty() {
+            return batch;
+        }
+        let added: Vec<FindingId> = to_add.iter().map(|finding| finding.id.clone()).collect();
+        match self
+            .state
+            .record(|state| state.fix_requests_mut().add_to_send(to_add))
+        {
+            Ok(()) => {
+                batch.done = added;
+                self.place_threads();
+            }
+            Err(error) => {
+                let reason = format!("{error:#}");
+                batch.refused.extend(
+                    added
+                        .into_iter()
+                        .map(|id| (id, FindingRefusal::NotKept(reason.clone()))),
+                );
+            }
+        }
+        batch
+    }
+
+    pub fn remove_from_fixes(&mut self, id: &FindingId) -> Result<(), FindingRefusal> {
+        if self.state.fix_requests().state_of(id) != Some(&FixState::ToSend) {
+            return Err(FindingRefusal::NotInFixes);
+        }
+        self.state
+            .record(|state| state.fix_requests_mut().remove_to_send(id))
+            .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
+        self.place_threads();
+        Ok(())
+    }
+
+    /// How many findings wait for Send fixes.
+    pub fn fixes_to_send(&self) -> usize {
+        self.state.fix_requests().to_send().count()
+    }
+
+    /// Every finding added to fixes goes to the tour agent as one batch, in reading order.
+    pub fn send_fixes(&mut self) -> FindingsBatch<FindingId> {
+        let ids: Vec<FindingId> = self.state.fix_requests().to_send().cloned().collect();
+        self.fix_findings(&ids)
+    }
+
     /// The tour agent's word on one finding. A finding it fixed is closed.
     pub fn fix_replied(&mut self, id: &FindingId, reply: &FixReply) -> anyhow::Result<()> {
         self.state.record(|state| state.fix_replied(id, reply))??;

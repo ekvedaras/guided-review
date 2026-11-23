@@ -118,8 +118,8 @@ use crate::viewer::{
     WindowMoment, pluralised,
 };
 use crate::viewer::{
-    DEFAULT_WHY_QUESTION, FindingRefusal, FindingRow, FixReply, IssueDetails, RelatedIssue,
-    WhyAsked, WhyReply,
+    DEFAULT_WHY_QUESTION, FindingRefusal, FindingRow, FixReply, FixesOffer, IssueDetails,
+    RelatedIssue, WhyAsked, WhyReply,
 };
 use issue_card::{CardSide, IssueHover, issue_card};
 
@@ -1169,7 +1169,7 @@ impl OneStepLayout {
         }
     }
 
-    /// Use, Use as is and Dismiss, which decide one finding.
+    /// Use, Use as is and Dismiss, which decide one finding; Fix now and Add to fixes, which hand it to the tour agent.
     fn finding_actions(
         &self,
         colors: &Colors,
@@ -1186,7 +1186,8 @@ impl OneStepLayout {
                 label,
             )
         };
-        let (use_id, as_is_id, dismiss_id, fix_id, why_id, answer_id) = (
+        let (use_id, as_is_id, dismiss_id, fix_id, why_id, answer_id, fixes_id) = (
+            finding.id.clone(),
             finding.id.clone(),
             finding.id.clone(),
             finding.id.clone(),
@@ -1214,7 +1215,7 @@ impl OneStepLayout {
             )
             .when(finding.can_fix, |actions| {
                 actions.child(
-                    small_button("fix", ButtonKind::Secondary, Icon::Zap, "Fix").on_click(
+                    small_button("fix", ButtonKind::Ghost, Icon::Zap, "Fix now").on_click(
                         cx.listener(move |this, _, _, cx| {
                             let refused = this
                                 .session
@@ -1231,6 +1232,17 @@ impl OneStepLayout {
                     ),
                 )
             })
+            .when_some(
+                Self::fixes_offer_button(finding.fixes_offer),
+                |actions, (kind, icon, label)| {
+                    let offer = finding.fixes_offer;
+                    actions.child(
+                        small_button("fixes", kind, icon, label).on_click(cx.listener(
+                            move |this, _, _, cx| this.answer_fixes_offer(offer, &fixes_id, cx),
+                        )),
+                    )
+                },
+            )
             .when(finding.can_answer_fix, |actions| {
                 actions.child(
                     small_button("answer-fix", ButtonKind::Primary, Icon::Send, "Answer").on_click(
@@ -1259,6 +1271,32 @@ impl OneStepLayout {
                     }),
                 ),
             )
+    }
+
+    fn fixes_offer_button(offer: FixesOffer) -> Option<(ButtonKind, Icon, &'static str)> {
+        match offer {
+            FixesOffer::Add => Some((ButtonKind::Secondary, Icon::Plus, "Add to fixes")),
+            FixesOffer::Remove => Some((ButtonKind::Ghost, Icon::Minus, "Remove from fixes")),
+            FixesOffer::None => None,
+        }
+    }
+
+    fn answer_fixes_offer(&mut self, offer: FixesOffer, id: &FindingId, cx: &mut Context<Self>) {
+        let refused = match offer {
+            FixesOffer::Add => self
+                .session
+                .update(cx, |session, cx| {
+                    session.add_to_fixes(std::slice::from_ref(id), cx)
+                })
+                .into_iter()
+                .next()
+                .map_or(Ok(()), |(_, refusal)| Err(refusal)),
+            FixesOffer::Remove => self
+                .session
+                .update(cx, |session, cx| session.remove_from_fixes(id, cx)),
+            FixesOffer::None => Ok(()),
+        };
+        self.finding_refused(refused, cx);
     }
 
     /// What the findings list asked: a batch is done by the session, and the list shows what is left.
@@ -1777,6 +1815,22 @@ impl OneStepLayout {
                 this.act(Intent::NextFinding, window, cx);
             }))
         });
+        let send_fixes = (ai_review.fixes_to_send > 0).then(|| {
+            icon_label_button(
+                colors,
+                "send-fixes",
+                ButtonKind::Primary,
+                ButtonSize::Small,
+                Icon::Zap,
+                format!("Send fixes ({})", ai_review.fixes_to_send),
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                let refused = this.session.update(cx, ReviewSession::send_fixes);
+                if let Some((_, refusal)) = refused.first() {
+                    post_toast(cx, ToastTone::Neutral, refusal.to_string());
+                }
+            }))
+        });
         let action = ai_review.action.map(|action| {
             icon_label_button(
                 colors,
@@ -1828,6 +1882,7 @@ impl OneStepLayout {
                     .flex_wrap()
                     .gap_x_2()
                     .gap_y_1()
+                    .children(send_fixes)
                     .children(show)
                     .children(list)
                     .children(next)
