@@ -4,7 +4,7 @@ use super::ReviewCore;
 use crate::findings::{Anchor, Finding};
 use crate::viewer::ai_review::AiReview;
 use crate::viewer::finding_decisions::Fate;
-use crate::viewer::finding_threads::FindingThreads;
+use crate::viewer::finding_threads::{FindingThreads, WhyAuthor};
 use crate::viewer::fix_requests::FixRequests;
 use crate::viewer::step_page::Side;
 use crate::viewer::threads::{CommentId, ReviewThread, ThreadComment, ThreadId};
@@ -19,6 +19,32 @@ impl ReviewCore {
             _ => Vec::new(),
         };
         self.show_staged_fix_requests(&findings);
+    }
+
+    /// The first open finding, fixed by the tour agent, waiting for Mark fixed or a request for more.
+    pub fn stage_fixed_finding(&mut self) {
+        let Some(finding) = (match &self.ai_review {
+            AiReview::Findings(file) => file.findings.first().cloned(),
+            _ => None,
+        }) else {
+            return;
+        };
+        let fixed = std::slice::from_ref(&finding);
+        self.record_reporting("the staged fixed finding", |state| {
+            *state.fix_requests_mut() = FixRequests::staged_fixed(fixed);
+            state.finding_threads_mut().say(
+                finding.clone(),
+                WhyAuthor::Reviewer,
+                "Fix requested".to_owned(),
+            );
+            state.finding_threads_mut().say(
+                finding.clone(),
+                WhyAuthor::TourAgent,
+                "Fixed in abc1234: Returns early when the list is empty, with a test for it."
+                    .to_owned(),
+            );
+        });
+        self.place_threads();
     }
 
     pub fn unstage_fix_requests(&mut self) {

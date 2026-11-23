@@ -169,9 +169,12 @@ impl FixRequests {
     pub(super) fn staged(findings: &[Finding]) -> Self {
         let state = |position: usize| match position {
             0 => FixState::Fixing,
-            _ => FixState::NotFixed {
-                reason: "The caller checks the list first, on purpose.".to_owned(),
-            },
+            _ => FixState::ToSend,
+        };
+        let note = |position: usize| {
+            (position > 0)
+                .then(|| FixNote::new("Keep the old name in the docs."))
+                .flatten()
         };
         Self(
             findings
@@ -181,6 +184,27 @@ impl FixRequests {
                     finding: finding.clone(),
                     batch: 0,
                     state: state(position),
+                    note: note(position),
+                })
+                .collect(),
+        )
+    }
+
+    /// What a snapshot scene shows of findings the tour agent fixed.
+    #[cfg(feature = "snapshots")]
+    pub(super) fn staged_fixed(findings: &[Finding]) -> Self {
+        Self(
+            findings
+                .iter()
+                .map(|finding| FixRequest {
+                    finding: finding.clone(),
+                    batch: 0,
+                    state: FixState::Fixed {
+                        commit: "abc1234".to_owned(),
+                        summary: Some(
+                            "Returns early when the list is empty, with a test for it.".to_owned(),
+                        ),
+                    },
                     note: None,
                 })
                 .collect(),
