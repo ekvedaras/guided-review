@@ -508,7 +508,7 @@ fn the_brief_of_a_second_run_lists_the_dismissed_findings_and_not_the_used_ones(
     let brief = ReviewBrief::of(&shop.repo.folders(), &pr()).to_string();
 
     assert!(brief.contains("dismissed findings:"), "{brief}");
-    assert!(brief.contains("Rename it."), "{brief}");
+    assert!(brief.contains("\n> Rename it.\n"), "{brief}");
     assert!(!brief.contains("dismissed findings: none"), "{brief}");
     assert!(!brief.contains("Say it twice."), "{brief}");
     assert!(!brief.contains("Still open."), "{brief}");

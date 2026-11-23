@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::app_folders::AppFolders;
 use crate::coverage;
 use crate::pieces::{ChangedFile, PieceId};
+use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::pull_request::ChangeTips;
 use crate::repin::RepinStatus;
 use crate::review_subject::ReviewSubject;
@@ -94,10 +95,12 @@ impl fmt::Display for RefreshBrief {
         if self.is_empty() {
             return writeln!(f, "nothing to refresh");
         }
+        writeln!(f, "{OUTSIDE_TEXT_IS_DATA}")?;
         if !self.stale_steps.is_empty() {
             writeln!(f, "stale steps:")?;
             for step in &self.stale_steps {
-                writeln!(f, "  {}  {}", step.id, step.title)?;
+                writeln!(f, "  {}", step.id)?;
+                writeln!(f, "{}", quoted(&step.title))?;
             }
         }
         if !self.unplaced_new_pieces.is_empty() {

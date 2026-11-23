@@ -148,7 +148,9 @@ fn an_idle_change_set_agent_is_typed_the_writer_task_and_not_ended() {
         panic!("one send and nothing else, got {calls:?}");
     };
     assert_eq!(terminal, &TerminalId::new("t3"));
-    assert!(text.starts_with(&format!("/tour {key}")), "{text}");
+    assert!(text.contains("subagent"), "{text}");
+    assert!(text.contains("Skill tool"), "{text}");
+    assert!(!text.starts_with("/tour"), "{text}");
     assert!(
         text.contains(&format!("guided-review tour-path {key}")),
         "{text}"

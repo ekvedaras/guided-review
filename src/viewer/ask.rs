@@ -1,5 +1,6 @@
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
+use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 use std::sync::Arc;
@@ -142,14 +143,12 @@ impl Ask {
     pub fn hand_off_text(&self, subject: &ReviewSubject, place: &str) -> String {
         let mut lines = vec![
             format!("The reviewer hands you an Ask about {subject}"),
-            format!("Place: {place}"),
+            OUTSIDE_TEXT_IS_DATA.to_owned(),
+            format!("Place:\n{}", quoted(place)),
         ];
-        lines.extend(self.messages.iter().map(|message| {
-            let who = match message.author {
-                Author::Reviewer => "Reviewer",
-                Author::Ai => "Answer",
-            };
-            format!("{who}: {}", message.text)
+        lines.extend(self.messages.iter().map(|message| match message.author {
+            Author::Reviewer => format!("Reviewer: {}", message.text),
+            Author::Ai => format!("Answer:\n{}", quoted(&message.text)),
         }));
         lines.push(
             "Do what the reviewer's last message asks. You may change files in your working folder. \

@@ -40,6 +40,7 @@ pub mod pick_code_source;
 pub mod piece_id;
 pub mod pieces;
 pub mod platform;
+pub mod prompt_safety;
 pub mod pull_request;
 pub mod repin;
 pub mod review_brief;

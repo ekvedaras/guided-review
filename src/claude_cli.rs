@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use crate::config::Config;
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::json::at;
+use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnStopper};
@@ -280,7 +281,7 @@ impl RefreshWriter for ClaudeRefreshWriter {
             "Run the tour skill as `/tour {subject}` on a {kind} that already has a tour, which makes it a Refresh. \
              Only the listed tools are allowed and a command outside them is denied, never asked: \
              run each `guided-review` and `gh` command as its own Bash call with the {key_name} written out, \
-             without shell variables, `&&`, `;` or `$(...)`.",
+             without shell variables, `&&`, `;` or `$(...)`. {OUTSIDE_TEXT_IS_DATA}",
             kind = subject.kind(),
             key_name = subject.key_name(),
         );
@@ -371,7 +372,7 @@ impl EvalWriter for ClaudeEvalWriter {
         run_headless(
             command,
             &format!(
-                "Write the tour of {} by following the /tour instructions in your system prompt.",
+                "Write the tour of {} by following the /tour instructions in your system prompt. {OUTSIDE_TEXT_IS_DATA}",
                 brief.pr
             ),
         )
@@ -423,7 +424,7 @@ impl TourJudge for ClaudeTourJudge {
         let answer = run_headless(
             command,
             &format!(
-                "{JUDGE_RUBRIC}\nReviewer note:\n{}\n\nTour:\n{}",
+                "{JUDGE_RUBRIC}\n{OUTSIDE_TEXT_IS_DATA}\n\nReviewer note:\n{}\n\nTour:\n{}",
                 input.note, input.tour_json
             ),
         )?;

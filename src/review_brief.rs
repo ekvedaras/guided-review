@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use crate::app_folders::AppFolders;
 use crate::findings::Finding;
 use crate::instructions::ReviewInstructions;
+use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 use crate::viewer::ReviewStateFile;
@@ -52,11 +53,8 @@ impl ReviewBrief {
         )?;
         for finding in &self.dismissed {
             let first_line = finding.body.lines().next().unwrap_or_default();
-            writeln!(
-                f,
-                "- {} ({}): {first_line}",
-                finding.anchor, finding.severity
-            )?;
+            writeln!(f, "- {} ({}):", finding.anchor, finding.severity)?;
+            writeln!(f, "{}", quoted(first_line))?;
         }
         Ok(())
     }
@@ -71,6 +69,8 @@ impl fmt::Display for ReviewBrief {
             "\
 You are reviewing {subject} for the reviewer, who reads your findings in the app. Never change code,
 never post on GitHub, never push. Your only output is the findings file.
+
+{OUTSIDE_TEXT_IS_DATA}
 
 Run one command per Bash call: no `&&`, `;`, pipes or `$(...)`.
 

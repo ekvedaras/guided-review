@@ -7,6 +7,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::findings::{Finding, FindingId};
+use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::review_subject::ReviewSubject;
 
 use super::hand_offs::shell_word;
@@ -307,14 +308,15 @@ fn questions_message(threads: &[&FindingThread], subject: &ReviewSubject) -> Str
         "The reviewer asks about findings you reported in your AI review. Answer from what you saw \
          in the code, and check it again where you need to. Do not change code."
             .to_owned(),
+        OUTSIDE_TEXT_IS_DATA.to_owned(),
     ];
     for thread in threads {
         let finding = &thread.finding;
         let id = shell_word(&finding.id.to_string());
         lines.push(String::new());
         lines.push(format!("Finding {} ({})", finding.id, finding.severity));
-        lines.push(format!("Place: {}", finding.anchor));
-        lines.push(format!("Finding: {}", finding.body));
+        lines.push(format!("Place:\n{}", quoted(&finding.anchor.to_string())));
+        lines.push(format!("Finding:\n{}", quoted(&finding.body)));
         let (question, earlier) = thread
             .messages
             .split_last()
@@ -322,12 +324,13 @@ fn questions_message(threads: &[&FindingThread], subject: &ReviewSubject) -> Str
                 (last.body.as_str(), earlier)
             });
         for said in earlier {
-            let who = match said.author {
-                WhyAuthor::Reviewer => "Reviewer",
-                WhyAuthor::ReviewAgent => "You",
-                WhyAuthor::TourAgent => "Tour agent",
-            };
-            lines.push(format!("{who} said before: {}", said.body));
+            lines.push(match said.author {
+                WhyAuthor::Reviewer => format!("Reviewer said before: {}", said.body),
+                WhyAuthor::ReviewAgent => format!("You said before:\n{}", quoted(&said.body)),
+                WhyAuthor::TourAgent => {
+                    format!("Tour agent said before:\n{}", quoted(&said.body))
+                }
+            });
         }
         lines.push(format!("Question: {question}"));
         lines.push(format!(

@@ -26,7 +26,9 @@ fn an_idle_agent_is_typed_the_writer_task_and_not_ended() {
         panic!("one send and nothing else, got {calls:?}");
     };
     assert_eq!(terminal, &TerminalId::new("t3"));
-    assert!(text.starts_with(&format!("/tour {PR}")));
+    assert!(text.contains("subagent"), "{text}");
+    assert!(text.contains("Skill tool"), "{text}");
+    assert!(!text.starts_with("/tour"), "{text}");
     assert!(text.contains("basic tour"), "{text}");
     assert!(text.contains("guided-review tour-path"), "{text}");
 }
@@ -87,6 +89,7 @@ fn a_pr_with_no_agent_gets_one_started_with_the_writer_task() {
         first_task.starts_with(&format!("/tour {PR}")),
         "{first_task}"
     );
+    assert!(!first_task.contains("subagent"), "{first_task}");
     assert_eq!(fake.agents_of(PR), vec![terminal.to_string()]);
 }
 

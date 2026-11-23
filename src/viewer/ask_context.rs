@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 use crate::pieces::{ChangedFile, PieceId};
+use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::tour::{BasicTour, GuidedTour, Tour};
 
 use std::collections::HashMap;
@@ -21,7 +22,7 @@ pub(super) fn system_prompt(pr: &str) -> String {
          Each question starts with pointers and the diff lines the reviewer is looking at. \
          To read more of the changed code, run `guided-review show {pr} <piece ids> --around`; \
          piece ids look like `<file>#<symbol>` or `<file>`. \
-         Answer briefly and concretely, and name files and lines."
+         Answer briefly and concretely, and name files and lines. {OUTSIDE_TEXT_IS_DATA}"
     )
 }
 
@@ -55,10 +56,10 @@ fn basic_context(
     let display = plain.display(links);
     match place {
         Place::Tour => {
-            writeln!(text, "Place: the whole PR \"{}\"", tour.pr_title).ok()?;
+            writeln!(text, "Place: the whole PR\n{}", quoted(&tour.pr_title)).ok()?;
             writeln!(text, "Changed files:").ok()?;
             for file in files {
-                writeln!(text, "- {}", file.path).ok()?;
+                writeln!(text, "{}", quoted(&format!("- {}", file.path))).ok()?;
             }
         }
         Place::File { path } => {
@@ -100,13 +101,18 @@ fn guided_context(
     let display = plain.display(links);
     match place {
         Place::Tour => {
-            writeln!(text, "Place: the whole tour \"{}\"", tour.title).ok()?;
+            writeln!(text, "Place: the whole tour\n{}", quoted(&tour.title)).ok()?;
             for bullet in &tour.summary {
-                writeln!(text, "- {bullet}").ok()?;
+                writeln!(text, "{}", quoted(&format!("- {bullet}"))).ok()?;
             }
             writeln!(text, "Steps:").ok()?;
             for step in tour.steps() {
-                writeln!(text, "- {}: {}", step.id, step.title).ok()?;
+                writeln!(
+                    text,
+                    "{}",
+                    quoted(&format!("- {}: {}", step.id, step.title))
+                )
+                .ok()?;
             }
         }
         Place::Step { step: id } => {
@@ -210,7 +216,9 @@ fn pointers(tour: &GuidedTour) -> String {
 fn step_heading(text: &mut String, title: &str, why: &str, kind: &str) -> Option<()> {
     writeln!(
         text,
-        "Place: a {kind} of the tour\nStep title: {title}\nWhy: {why}"
+        "Place: a {kind} of the tour\nStep title:\n{}\nWhy:\n{}",
+        quoted(title),
+        quoted(why)
     )
     .ok()
 }
@@ -219,7 +227,7 @@ fn step_heading(text: &mut String, title: &str, why: &str, kind: &str) -> Option
 pub(super) fn code_lines(lines: &[DiffLine]) -> String {
     let mut text = String::new();
     for line in lines {
-        diff_line(&mut text, line);
+        writeln!(text, "{}", plain_diff_line(line)).ok();
     }
     text
 }
@@ -233,14 +241,16 @@ fn piece_lines(text: &mut String, piece: &PieceDiff) -> Option<()> {
 }
 
 fn diff_line(text: &mut String, line: &DiffLine) -> Option<()> {
+    writeln!(text, "{}", quoted(&plain_diff_line(line))).ok()
+}
+
+fn plain_diff_line(line: &DiffLine) -> String {
     let (sign, side) = match line.location.side {
         Side::Base => ('-', "base"),
         Side::Head => ('+', "head"),
     };
-    writeln!(
-        text,
+    format!(
         "{sign} {}:{side}:{}: {}",
         line.location.path, line.location.line, line.text
     )
-    .ok()
 }

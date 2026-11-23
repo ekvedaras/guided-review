@@ -46,6 +46,11 @@ impl TryFrom<String> for FindingId {
         if id.trim().is_empty() {
             return Err("a finding needs an id".to_owned());
         }
+        if id.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(format!(
+                "finding id {id:?}: an id is one word, with no spaces, line breaks or control characters"
+            ));
+        }
         Ok(Self(id))
     }
 }
