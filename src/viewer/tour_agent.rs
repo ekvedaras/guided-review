@@ -1115,7 +1115,7 @@ impl TourWriter {
             Self::InOwnContext => format!("/tour {subject} {brief} {afterwards}"),
             Self::InSubagent => format!(
                 "Write the guided-review tour of {subject} in one subagent, so your own context stays free for the \
-                 reviewer's comments. Tell the subagent to run the tour skill with the Skill tool, and give it as the \
+                 reviewer's comments. Run the subagent in this folder, with no worktree of its own. Tell it to run the tour skill with the Skill tool, and give it as the \
                  skill's arguments \"{subject}\" followed by this brief: {brief} Wait until the subagent is done. \
                  Before you answer the first comment, read the tour at the path `guided-review tour-path {subject}` \
                  prints. {afterwards}"

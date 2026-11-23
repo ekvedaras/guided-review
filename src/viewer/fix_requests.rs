@@ -421,8 +421,8 @@ fn fixes_message(requests: &[&FixRequest], subject: &ReviewSubject) -> String {
     let mut lines = vec![
         format!("Fix requests {} on {subject}", ids.join(", ")),
         "These findings come from an AI review of the change. The reviewer wants them fixed, and \
-         sends them together, in reading order. Start one subagent for all of them, and have it fix \
-         them one after another, with one commit per finding. Do not start one subagent per finding: \
+         sends them together, in reading order. Start one subagent for all of them, in this folder, with no worktree \
+         of its own, and have it fix them one after another, with one commit per finding. Do not start one subagent per finding: \
          they would edit the same files at once."
             .to_owned(),
         where_to_fix(subject),

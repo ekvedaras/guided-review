@@ -114,6 +114,7 @@ fn a_batch_of_fix_requests_goes_to_the_tour_agent_as_one_message_in_reading_orde
     assert!(first < third, "{text}");
     for part in [
         "one subagent",
+        "in this folder, with no worktree",
         "one commit per finding",
         "guided-review fix-reply",
         "README.md",

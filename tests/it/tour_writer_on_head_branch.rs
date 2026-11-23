@@ -77,6 +77,7 @@ fn the_reviewers_idle_claude_on_the_prs_head_branch_writes_the_tour_and_becomes_
     };
     assert_eq!(terminal, &TerminalId::new("t5"));
     assert!(task.contains("subagent"), "{task}");
+    assert!(task.contains("in this folder, with no worktree"), "{task}");
     assert!(!task.starts_with("/tour"), "{task}");
     assert!(task.contains("Skill tool"), "{task}");
     assert!(!task.contains("whole message"), "{task}");
@@ -109,6 +110,7 @@ fn the_guided_tour_of_a_basic_tour_goes_to_the_reviewers_idle_claude_on_the_head
     };
     assert!(task.contains("basic tour"), "{task}");
     assert!(task.contains("subagent"), "{task}");
+    assert!(task.contains("in this folder, with no worktree"), "{task}");
     assert!(!task.starts_with("/tour"), "{task}");
 }
 
