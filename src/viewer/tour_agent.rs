@@ -616,13 +616,19 @@ impl TourAgents {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
-        let task = basic_writer_task(subject);
         match self.lookup(subject) {
-            TourAgentState::Agent { terminal, .. } => self.hand_task(terminal, &task),
+            TourAgentState::Agent { terminal, .. } => self.hand_task(
+                terminal,
+                &basic_writer_task(subject, TourWriter::InSubagent),
+            ),
             TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
             TourAgentState::Choose(_) => bail!(SEVERAL_AGENTS),
             TourAgentState::None | TourAgentState::Unknown => self
-                .launch(subject, active, task)
+                .launch(
+                    subject,
+                    active,
+                    basic_writer_task(subject, TourWriter::InOwnContext),
+                )
                 .map(WriterHandOver::Started),
         }
     }
@@ -1090,28 +1096,63 @@ fn refuse_replacing_the_agent_of_local(subject: &ReviewSubject) -> anyhow::Resul
     Ok(())
 }
 
+/// Who runs the tour skill. An agent the app finds already holds a conversation the reviewer's comments
+/// need later, so a subagent writes the tour; one the app starts has nothing else in its context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TourWriter {
+    InOwnContext,
+    InSubagent,
+}
+
+impl TourWriter {
+    /// The writer task: `brief` is for whoever writes the tour, `afterwards` for the agent that stays to
+    /// answer comments. A message that starts with `/tour` loads the skill into the agent's own context, so
+    /// the subagent's task names the skill mid-sentence instead.
+    fn task(self, subject: &ReviewSubject, brief: &str, afterwards: &str) -> String {
+        match self {
+            Self::InOwnContext => format!("/tour {subject} {brief} {afterwards}"),
+            Self::InSubagent => format!(
+                "Write the guided-review tour of {subject} in one subagent, so your own context stays free for the \
+                 reviewer's comments. Tell the subagent to run the tour skill with the Skill tool, and give it as the \
+                 skill's arguments \"{subject}\" followed by this brief: {brief} Wait until the subagent is done. \
+                 Before you answer the first comment, read the tour at the path `guided-review tour-path {subject}` \
+                 prints. {afterwards}"
+            ),
+        }
+    }
+}
+
 /// The first task of an agent that writes a tour. It starts with the skill, so Claude runs it; the rest
 /// reaches the skill as its arguments. The agent runs with a fixed tool list, under which a chained or
 /// unlisted command is denied without a word (docs/wiki/agent-runs.md).
-/// The writer task typed into the reviewer's own agent of the PR, which runs with their tools and context.
-fn reviewers_agent_writer_task(subject: &ReviewSubject) -> String {
-    format!(
-        "/tour {subject} (the reviewer picked this PR in the guided-review app and it has no tour; you work \
-         on its branch, so the app asks you to write it). When `guided-review check {subject}` is clean, run \
-         `guided-review open {subject}`, which shows the tour to the reviewer. Afterwards the reviewer's \
-         comments reach you here as messages: answer each as its message says."
+fn writer_task(subject: &ReviewSubject) -> String {
+    TourWriter::InOwnContext.task(
+        subject,
+        &format!(
+            "(you are the tour agent of this PR, started by the guided-review app because the reviewer picked it \
+             and it has no tour). Only the listed tools are allowed and anything else is denied, never asked: run \
+             one command per Bash call, with the PR url written out, without shell variables, pipes, `&&`, `;` or \
+             `$(...)`. The Write tool makes the tour's folder. When `guided-review check {subject}` is clean, run \
+             `guided-review open {subject}`, which shows the tour to the reviewer."
+        ),
+        PR_AGENT_AFTERWARDS,
     )
 }
 
-fn writer_task(subject: &ReviewSubject) -> String {
-    format!(
-        "/tour {subject} (you are the tour agent of this PR, started by the guided-review app because the reviewer \
-         picked it and it has no tour). Only the listed tools are allowed and anything else is denied, never \
-         asked: run one command per Bash call, with the PR url written out, without shell variables, pipes, \
-         `&&`, `;` or `$(...)`. The Write tool makes the tour's folder. When `guided-review check {subject}` is clean, \
-         run `guided-review open {subject}`, which shows the tour to the reviewer. Afterwards the reviewer's comments \
-         reach you here as messages: answer each as its message says, fix the tour when a comment shows it is \
-         wrong, and never change the PR's code."
+/// What the agent that stays with a PR's tour does once it is written.
+const PR_AGENT_AFTERWARDS: &str = "Afterwards the reviewer's comments reach you here as messages: answer each as its \
+     message says, fix the tour when a comment shows it is wrong, and never change the PR's code.";
+
+/// The writer task typed into the reviewer's own agent of the PR, which runs with their tools and context.
+fn reviewers_agent_writer_task(subject: &ReviewSubject) -> String {
+    TourWriter::InSubagent.task(
+        subject,
+        &format!(
+            "(the reviewer picked this PR in the guided-review app and it has no tour; the reviewer's agent on \
+             its branch was asked to write it). When `guided-review check {subject}` is clean, run \
+             `guided-review open {subject}`, which shows the tour to the reviewer."
+        ),
+        "Afterwards the reviewer's comments reach you here as messages: answer each as its message says.",
     )
 }
 
@@ -1138,33 +1179,38 @@ impl WriterHandOver {
 
 /// The writer task for a PR the reviewer reads as a basic tour. The basic tour is not a tour file, and the
 /// guided tour never replaces it on disk, so the agent writes a whole tour at the guided path.
-fn basic_writer_task(subject: &ReviewSubject) -> String {
+fn basic_writer_task(subject: &ReviewSubject, writer: TourWriter) -> String {
     if subject.agent_changes_code() {
-        return change_set_writer_task(subject);
+        return change_set_writer_task(subject, writer);
     }
-    format!(
-        "/tour {subject} (you are the tour agent of this PR. The reviewer reads it as a basic tour in the app, with no \
-         tour text, and asked for a guided tour, which they keep reading the basic tour meanwhile. Write a full new \
-         tour at the path `guided-review tour-path {subject}` prints: the basic tour is not a tour file and needs no \
-         edit.) Run one command per Bash call, with the PR url written out, without shell variables, pipes, `&&`, \
-         `;` or `$(...)`. When `guided-review check {subject}` is clean, run `guided-review open {subject}`, which tells the \
-         app the guided tour is ready and does not move the reviewer's screen. Afterwards the reviewer's comments \
-         reach you here as messages: answer each as its message says, fix the tour when a comment shows it is \
-         wrong, and never change the PR's code."
+    writer.task(
+        subject,
+        &format!(
+            "(the reviewer reads this PR as a basic tour in the app, with no tour text, and asked for a guided \
+             tour, which they keep reading the basic tour meanwhile. Write a full new tour at the path \
+             `guided-review tour-path {subject}` prints: the basic tour is not a tour file and needs no edit.) Run \
+             one command per Bash call, with the PR url written out, without shell variables, pipes, `&&`, `;` or \
+             `$(...)`. When `guided-review check {subject}` is clean, run `guided-review open {subject}`, which tells \
+             the app the guided tour is ready and does not move the reviewer's screen."
+        ),
+        PR_AGENT_AFTERWARDS,
     )
 }
 
 /// The writer task for a local change set's agent, which wrote the code and is not on a fixed tool list.
-fn change_set_writer_task(subject: &ReviewSubject) -> String {
-    format!(
-        "/tour {subject} (you are the agent of this local change set. The reviewer reads it as a basic tour in the \
-         app, with no tour text, and asked for a guided tour, which they keep reading the basic tour meanwhile. Write a \
-         full new tour at the path `guided-review tour-path {subject}` prints: the basic tour is not a tour file and \
-         needs no edit.) Run one command per Bash call, with the key written out, without shell variables, pipes, \
-         `&&`, `;` or `$(...)`. When `guided-review check {subject}` is clean, run `guided-review open {subject}`, \
-         which tells the app the guided tour is ready and does not move the reviewer's screen. Do not change the \
-         code while you write the tour. Afterwards the reviewer's comments reach you here as tasks: act on each as \
-         its message says."
+fn change_set_writer_task(subject: &ReviewSubject, writer: TourWriter) -> String {
+    writer.task(
+        subject,
+        &format!(
+            "(the reviewer reads this local change set as a basic tour in the app, with no tour text, and asked \
+             for a guided tour, which they keep reading the basic tour meanwhile. Write a full new tour at the path \
+             `guided-review tour-path {subject}` prints: the basic tour is not a tour file and needs no edit.) Run \
+             one command per Bash call, with the key written out, without shell variables, pipes, `&&`, `;` or \
+             `$(...)`. When `guided-review check {subject}` is clean, run `guided-review open {subject}`, which \
+             tells the app the guided tour is ready and does not move the reviewer's screen. Do not change the code \
+             while you write the tour."
+        ),
+        "Afterwards the reviewer's comments reach you here as tasks: act on each as its message says.",
     )
 }
 
