@@ -128,6 +128,14 @@ use issue_card::{CardSide, IssueHover, issue_card};
 #[cfg(feature = "snapshots")]
 mod gallery;
 mod issue_card;
+mod prototype_agent_panel;
+type PrototypeDraw = fn(
+    &Colors,
+    Option<&SidebarGuidedTour>,
+    &SidebarTourAgent,
+    &SidebarAiReview,
+    &Context<OneStepLayout>,
+) -> AnyElement;
 #[cfg(feature = "snapshots")]
 mod scenes;
 
@@ -2586,15 +2594,35 @@ impl OneStepLayout {
             .changes_not_shown
             .clone()
             .map(|notice| div().text_xs().text_color(colors.danger).child(notice));
-        let guided_tour = sidebar
-            .guided_tour
-            .as_ref()
-            .map(|guided_tour| Self::guided_tour_block(&colors, guided_tour, cx));
+        let guided_tour = sidebar.guided_tour.as_ref().map(|guided_tour| {
+            Self::guided_tour_block(&colors, guided_tour, cx).into_any_element()
+        });
         let tour_agent = sidebar
             .tour_agent
             .is_shown
-            .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
-        let ai_review = Self::ai_review_block(&colors, &sidebar.ai_review, cx);
+            .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx).into_any_element());
+        let ai_review = Self::ai_review_block(&colors, &sidebar.ai_review, cx).into_any_element();
+        let prototype_variant = prototype_agent_panel::variant();
+        let prototype_panel = match prototype_variant {
+            1 => Some(prototype_agent_panel::variant_a as PrototypeDraw),
+            2 => Some(prototype_agent_panel::variant_b as PrototypeDraw),
+            3 => Some(prototype_agent_panel::variant_c as PrototypeDraw),
+            _ => None,
+        }
+        .map(|draw| {
+            draw(
+                &colors,
+                sidebar.guided_tour.as_ref(),
+                &sidebar.tour_agent,
+                &sidebar.ai_review,
+                cx,
+            )
+        });
+        let (guided_tour, tour_agent, ai_review) = if prototype_panel.is_some() {
+            (None, None, None)
+        } else {
+            (guided_tour, tour_agent, Some(ai_review))
+        };
         let repin_progress = session.repin_progress();
         let disk_news = sidebar
             .disk_news
@@ -2712,7 +2740,8 @@ impl OneStepLayout {
             .children(finish_dialog)
             .children(guided_tour)
             .children(tour_agent)
-            .child(ai_review)
+            .children(ai_review)
+            .children(prototype_panel)
             .children(clone_offer)
             .children(changes_not_shown)
             .children(problems)
@@ -6028,6 +6057,7 @@ impl Render for OneStepLayout {
             .child(self.picture_zoom.clone())
             .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))
             .children(frame_painted_marker)
+            .children(prototype_agent_panel::switcher(&colors, cx))
     }
 }
 
