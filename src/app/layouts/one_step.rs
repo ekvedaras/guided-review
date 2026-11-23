@@ -69,7 +69,6 @@ use crate::app::components::pr_switcher::{
     DropShownReview, PrSwitcherView, PrSwitching, SwitcherPlace,
 };
 use crate::app::components::refresh_banner::RefreshBanner;
-use crate::app::components::reviews_block::ReviewsBlock;
 use crate::app::components::safety_net_view::SafetyNetIntro;
 use crate::app::components::scrollbar::{ScrollbarDrag, drag_listener, scrollbar};
 use crate::app::components::segmented::{Segment, SegmentLayout, Segmented};
@@ -121,7 +120,7 @@ use crate::viewer::{
 };
 use crate::viewer::{
     DEFAULT_WHY_QUESTION, FindingRefusal, FindingRow, FixNote, FixReply, FixTiming, FixesOffer,
-    IssueDetails, RelatedIssue, WhyAsked, WhyReply,
+    IssueDetails, RelatedIssue, StationKind, WhyAsked, WhyReply,
 };
 use issue_card::{CardSide, IssueHover, issue_card};
 
@@ -130,6 +129,7 @@ mod gallery;
 mod issue_card;
 #[cfg(feature = "snapshots")]
 mod scenes;
+mod stations_view;
 
 actions!(
     one_step,
@@ -197,6 +197,8 @@ pub struct OneStepLayout {
     code_selection: Option<CodeSelection>,
     /// The sidebar row touching the current one that the mouse is on, so the current row squares the corners they share.
     hovered_touching_row: Option<(usize, RowPlace)>,
+    /// The station of the sidebar's stepper the reviewer clicked, whose card shows over the one picked for them.
+    picked_station: Option<StationKind>,
     /// The mouse is on the title bar's status chip or on the list of checks it opens.
     checks_hover: ChecksHover,
     /// The title bar lists the review's issues, as `I` does when there are several.
@@ -436,6 +438,7 @@ impl OneStepLayout {
             ask,
             code_selection: None,
             hovered_touching_row: None,
+            picked_station: None,
             checks_hover: ChecksHover::default(),
             issue_list_open: false,
             issue_card_scroll: gpui::ScrollHandle::new(),
@@ -1590,6 +1593,7 @@ impl OneStepLayout {
     /// Opens the finish-review form in the sidebar with its body box taking the keys.
     fn open_finish_form(&mut self, cx: &mut Context<Self>) {
         self.finish_form_request = self.finish_form_request.wrapping_add(1);
+        self.picked_station = Some(StationKind::YourReview);
         cx.notify();
     }
 
@@ -1855,24 +1859,12 @@ impl OneStepLayout {
     }
 
     /// What the review agent left: its findings by severity, or why its file was not read.
+    /// The AI review's card: what it found or why it failed, then the findings and the run.
     fn ai_review_block(
         colors: &Colors,
         ai_review: &SidebarAiReview,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let show = ai_review.can_show_agent.then(|| {
-            icon_label_button(
-                colors,
-                "show-review-agent",
-                ButtonKind::Ghost,
-                ButtonSize::Small,
-                Icon::Terminal,
-                "Show agent",
-            )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.session.update(cx, ReviewSession::show_review_agent);
-            }))
-        });
         let list = (ai_review.has_findings || ai_review.has_dismissed_findings).then(|| {
             icon_label_button(
                 colors,
@@ -1896,7 +1888,7 @@ impl OneStepLayout {
             icon_label_button(
                 colors,
                 "next-finding",
-                ButtonKind::Ghost,
+                ButtonKind::Secondary,
                 ButtonSize::Small,
                 Icon::ArrowRight,
                 "Next finding",
@@ -1905,27 +1897,15 @@ impl OneStepLayout {
                 this.act(Intent::NextFinding, window, cx);
             }))
         });
-        let send_fixes = (ai_review.fixes_to_send > 0).then(|| {
-            icon_label_button(
-                colors,
-                "send-fixes",
-                ButtonKind::Primary,
-                ButtonSize::Small,
-                Icon::Zap,
-                format!("Send fixes ({})", ai_review.fixes_to_send),
-            )
-            .on_click(cx.listener(|this, _, _, cx| {
-                let refused = this.session.update(cx, ReviewSession::send_fixes);
-                if let Some((_, refusal)) = refused.first() {
-                    post_toast(cx, ToastTone::Neutral, refusal.to_string());
-                }
-            }))
-        });
         let action = ai_review.action.map(|action| {
             icon_label_button(
                 colors,
                 "sidebar-run-ai-review",
-                ButtonKind::Secondary,
+                if action == AiReviewAction::RunAgain {
+                    ButtonKind::Ghost
+                } else {
+                    ButtonKind::Secondary
+                },
                 ButtonSize::Small,
                 ai_review_icon(action),
                 action.label(),
@@ -1938,72 +1918,83 @@ impl OneStepLayout {
             .id("ai-review")
             .flex()
             .flex_col()
-            .gap_1()
+            .gap_2()
             .text_xs()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child("AI review"))
-                    .child(
+            // The card's head says the run's state; the line adds the findings by severity or why it failed.
+            .when(
+                ai_review.is_failure || ai_review.has_findings || ai_review.has_dismissed_findings,
+                |block| {
+                    block.child(
                         div()
-                            .flex()
-                            .flex_wrap()
-                            .gap_x_1()
-                            .min_w_0()
                             .text_color(if ai_review.is_failure {
                                 colors.danger
                             } else {
                                 colors.muted_text
                             })
-                            .children(ai_review.line.split(" · ").enumerate().map(|(at, part)| {
-                                let text = if at == 0 {
-                                    part.to_owned()
-                                } else {
-                                    format!("· {part}")
-                                };
-                                div().whitespace_nowrap().child(text)
-                            })),
-                    ),
+                            .child(ai_review.line.clone()),
+                    )
+                },
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_x_2()
-                    .gap_y_1()
-                    .children(send_fixes)
-                    .children(show)
-                    .children(list)
-                    .children(next)
-                    .children(action),
+            .when(
+                next.is_some() || list.is_some() || action.is_some(),
+                |block| {
+                    block.child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_1()
+                            .children(next)
+                            .children(list)
+                            .children(action),
+                    )
+                },
             )
     }
 
-    /// Names the PR's tour agent and its status, or why tour agents are off, with Show agent.
+    /// The fixes' card: Send fixes, while findings wait to go to the tour agent.
+    fn send_fixes_button(
+        colors: &Colors,
+        fixes_to_send: usize,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
+        (fixes_to_send > 0).then(|| {
+            div()
+                .flex()
+                .child(
+                    icon_label_button(
+                        colors,
+                        "send-fixes",
+                        ButtonKind::Primary,
+                        ButtonSize::Small,
+                        Icon::Zap,
+                        format!("Send fixes ({fixes_to_send})"),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let refused = this.session.update(cx, ReviewSession::send_fixes);
+                        if let Some((_, refusal)) = refused.first() {
+                            post_toast(cx, ToastTone::Neutral, refusal.to_string());
+                        }
+                    })),
+                )
+                .into_any_element()
+        })
+    }
+
+    /// The tour's card when the tour agent cannot be used as it is: why it is off, with Retry, or the
+    /// agents to pick from. An agent that is there says its state in the card's head.
     fn tour_agent_block(
         colors: &Colors,
         agent: &SidebarTourAgent,
         cx: &Context<Self>,
-    ) -> impl IntoElement {
-        let show = agent.can_show.then(|| {
-            icon_label_button(
-                colors,
-                "show-tour-agent",
-                ButtonKind::Ghost,
-                ButtonSize::Small,
-                Icon::Terminal,
-                "Show agent",
-            )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.session.update(cx, ReviewSession::show_tour_agent);
-            }))
-        });
+    ) -> Option<impl IntoElement> {
+        if agent.can_show || !agent.is_shown {
+            return None;
+        }
         let retry = agent.can_retry.then(|| {
             icon_label_button(
                 colors,
                 "retry-tour-agent-link",
-                ButtonKind::Ghost,
+                ButtonKind::Secondary,
                 ButtonSize::Small,
                 Icon::Refresh,
                 "Retry",
@@ -2017,7 +2008,7 @@ impl OneStepLayout {
             icon_label_button(
                 colors,
                 SharedString::from(format!("use-agent-{terminal}")),
-                ButtonKind::Ghost,
+                ButtonKind::Secondary,
                 ButtonSize::Small,
                 Icon::Terminal,
                 format!("Use this agent: {terminal}"),
@@ -2028,27 +2019,21 @@ impl OneStepLayout {
                     .update(cx, |session, cx| session.use_tour_agent(chosen, cx));
             }))
         });
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_xs()
-                            .text_color(colors.muted_text)
-                            .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
-                    )
-                    .children(show)
-                    .children(retry),
-            )
-            .children(choices)
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
+                )
+                .children(retry)
+                .children(choices),
+        )
     }
 
     /// A basic review's guided tour in the sidebar: Write guided tour while nothing is asked, the stage
@@ -2088,24 +2073,11 @@ impl OneStepLayout {
             }
         });
         let stage = guided_tour.stage.as_ref().map(|stage| {
-            let show = guided_tour.can_show_agent.then(|| {
-                icon_label_button(
-                    colors,
-                    "show-writing-agent",
-                    ButtonKind::Ghost,
-                    ButtonSize::Small,
-                    Icon::Terminal,
-                    "Show agent",
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.session.update(cx, ReviewSession::show_tour_agent);
-                }))
-            });
             let try_again = stage.can_try_again.then(|| {
                 icon_label_button(
                     colors,
                     "try-guided-tour-again",
-                    ButtonKind::Ghost,
+                    ButtonKind::Secondary,
                     ButtonSize::Small,
                     Icon::Refresh,
                     "Try again",
@@ -2114,16 +2086,20 @@ impl OneStepLayout {
                     this.act(Intent::WriteGuidedTour, window, cx);
                 }))
             });
+            // The card's head says how a writing goes; only a failure has more to say, its reason.
             div()
                 .flex()
                 .flex_col()
-                .gap_1()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(colors.muted_text)
-                        .child(SharedString::from(stage.line.clone())),
-                )
+                .items_start()
+                .gap_2()
+                .when(stage.can_try_again, |block| {
+                    block.child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.danger)
+                            .child(SharedString::from(stage.line.clone())),
+                    )
+                })
                 .children(stage.activity.clone().map(|activity| {
                     div()
                         .text_xs()
@@ -2132,7 +2108,7 @@ impl OneStepLayout {
                         .truncate()
                         .child(SharedString::from(activity))
                 }))
-                .child(div().flex().gap_2().children(show).children(try_again))
+                .children(try_again)
         });
         let banner = guided_tour.banner.as_ref().map(|banner| {
             div()
@@ -2554,47 +2530,6 @@ impl OneStepLayout {
                         }
                     }
                 });
-        let sync_notices = sidebar
-            .sync_banner
-            .clone()
-            .into_iter()
-            .chain(
-                sidebar
-                    .not_synced
-                    .then(|| SharedString::from("Not synced with GitHub yet")),
-            )
-            .map(|notice| div().text_xs().text_color(colors.warning).child(notice));
-        let problems = sidebar.problems.iter().map(|shown| {
-            div()
-                .flex()
-                .flex_col()
-                .gap_0p5()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(colors.danger)
-                        .child(shown.headline.clone()),
-                )
-                .children(
-                    shown
-                        .detail
-                        .clone()
-                        .map(|detail| div().text_xs().text_color(colors.muted_text).child(detail)),
-                )
-        });
-        let changes_not_shown = sidebar
-            .changes_not_shown
-            .clone()
-            .map(|notice| div().text_xs().text_color(colors.danger).child(notice));
-        let guided_tour = sidebar
-            .guided_tour
-            .as_ref()
-            .map(|guided_tour| Self::guided_tour_block(&colors, guided_tour, cx));
-        let tour_agent = sidebar
-            .tour_agent
-            .is_shown
-            .then(|| Self::tour_agent_block(&colors, &sidebar.tour_agent, cx));
-        let ai_review = Self::ai_review_block(&colors, &sidebar.ai_review, cx);
         let repin_progress = session.repin_progress();
         let disk_news = sidebar
             .disk_news
@@ -2608,12 +2543,6 @@ impl OneStepLayout {
             .clone_offer()
             .map(|offer| Self::clone_offer_block(&colors, offer, cx));
         let is_everything_read = progress.total > 0 && progress.read == progress.total;
-        let finish_dialog = match session.review().finishes_with_send_tasks() {
-            Some(queued) => (queued > 0)
-                .then(|| Self::send_tasks_button(&colors, queued, is_everything_read, cx))
-                .map(IntoElement::into_any_element),
-            None => Some(self.finish_review_dialog(sidebar, is_everything_read, cx)),
-        };
         let step_rows = sidebar
             .steps
             .iter()
@@ -2683,8 +2612,6 @@ impl OneStepLayout {
             .children(count_badge(&colors, safety_net.thread_count))
             .children(finding_badge(&colors, safety_net.finding_count))
         });
-        let reviews_block =
-            (!sidebar.reviews.is_empty()).then(|| ReviewsBlock::new(Arc::clone(&sidebar.reviews)));
         let header = div()
             .flex_none()
             .px_4()
@@ -2708,15 +2635,8 @@ impl OneStepLayout {
                     .into_any_element(),
                 None => progress_meter(&colors, progress, sidebar.progress_unit).into_any_element(),
             })
-            .children(reviews_block)
-            .children(finish_dialog)
-            .children(guided_tour)
-            .children(tour_agent)
-            .child(ai_review)
-            .children(clone_offer)
-            .children(changes_not_shown)
-            .children(problems)
-            .children(sync_notices);
+            .child(self.stations_section(&colors, sidebar, is_everything_read, cx))
+            .children(clone_offer);
         div()
             .w(px(SIDEBAR_WIDTH))
             .flex_none()

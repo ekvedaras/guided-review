@@ -88,6 +88,7 @@ mod send_action;
 mod settings;
 mod settings_page;
 mod shortcuts;
+mod stations;
 mod step_page;
 mod suggestion;
 mod switch_to_guided;
@@ -256,6 +257,7 @@ pub use send_action::{SendAction, SendChoice, SendRole};
 pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
 pub use settings_page::SettingsPage;
 pub use shortcuts::{Command, KeyScope, ShortcutGroup, in_group};
+pub use stations::{Station, StationHealth, StationKind, Stations, waited};
 pub use step_page::{
     DiffLine, FilePage, LineKind, LineLocation, PieceDiff, RowView, SafetyNetPage, Side, SinceRead,
     StepPage,

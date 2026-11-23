@@ -124,6 +124,9 @@ struct ViewerSections {
     /// Viewed changes GitHub has not taken yet, newest wish per file.
     #[serde(default)]
     unsent_viewed: KeptSection<BTreeMap<FilePath, Viewed>>,
+    /// When viewed marks started to wait for GitHub, in seconds since the epoch, so a restart keeps it.
+    #[serde(default)]
+    viewed_waiting_since: KeptSection<Option<u64>>,
     /// Ticks a re-pin took away; the step was read at that head, so it can show what changed since.
     #[serde(default)]
     read_before: KeptSection<BTreeMap<StepId, ReadTick>>,
@@ -562,6 +565,14 @@ impl ReviewState {
 
     pub(super) fn unsent_viewed(&self) -> &BTreeMap<FilePath, Viewed> {
         &self.viewer.unsent_viewed
+    }
+
+    pub(super) fn viewed_waiting_since(&self) -> Option<u64> {
+        *self.viewer.viewed_waiting_since
+    }
+
+    pub(super) fn set_viewed_waiting_since(&mut self, since: Option<u64>) {
+        *self.viewer.viewed_waiting_since = since;
     }
 
     pub(super) fn sent_viewed(&mut self, path: &FilePath, viewed: Viewed) {

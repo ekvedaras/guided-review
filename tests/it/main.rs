@@ -145,6 +145,7 @@ mod settings;
 mod settings_pages;
 mod shortcuts;
 mod show;
+mod stations;
 mod step_details;
 mod summary_instructions;
 mod switch_to_guided;

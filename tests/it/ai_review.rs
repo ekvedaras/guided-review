@@ -70,14 +70,11 @@ fn the_findings_beside_the_tour_are_loaded_when_the_review_opens() {
     let opened = open_review(&pr(), repo.path(), &repo.folders()).unwrap();
 
     assert_eq!(opened.review.ai_review().counts().total(), 3);
-    assert_eq!(
-        opened.review.ai_review().line(),
-        "3 findings: 1 must fix, 2 nit"
-    );
+    assert_eq!(opened.review.ai_review().line(), "1 must fix, 2 nit");
 }
 
 #[test]
-fn one_finding_reads_in_the_singular() {
+fn one_finding_is_named_by_its_severity() {
     let (repo, base, head) = shop_with_a_tour();
     write_findings(
         &repo,
@@ -86,7 +83,7 @@ fn one_finding_reads_in_the_singular() {
 
     let opened = open_review(&pr(), repo.path(), &repo.folders()).unwrap();
 
-    assert_eq!(opened.review.ai_review().line(), "1 finding: 1 should fix");
+    assert_eq!(opened.review.ai_review().line(), "1 should fix");
 }
 
 #[test]

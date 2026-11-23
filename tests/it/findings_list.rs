@@ -609,10 +609,7 @@ fn the_sidebar_line_counts_the_dismissed_findings() {
     let mut review = shop.open();
     review.dismiss_finding(&id("a")).unwrap();
 
-    assert_eq!(
-        review.ai_review_stage().line,
-        "1 finding: 1 should fix · 1 dismissed"
-    );
+    assert_eq!(review.ai_review_stage().line, "1 should fix · 1 dismissed");
 }
 
 fn with_dismissed(open: &[Finding], dismissed: &[Finding]) -> FindingsList {
