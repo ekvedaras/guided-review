@@ -53,7 +53,25 @@ fn with_no_app_running_the_answers_are_kept_in_the_state_file() {
     assert_eq!(
         fix_state(repo.home()),
         Some(FixState::Fixed {
-            commit: "abc1234".to_owned()
+            commit: "abc1234".to_owned(),
+            summary: None,
+        })
+    );
+}
+
+#[test]
+fn a_fix_keeps_what_the_tour_agent_says_it_did() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    with_a_fix_request(repo.home());
+
+    let run = fix_reply(&repo, &["--fixed", "abc1234", "--body", "Renamed it."]);
+
+    assert!(run.success, "{}", run.stderr);
+    assert_eq!(
+        fix_state(repo.home()),
+        Some(FixState::Fixed {
+            commit: "abc1234".to_owned(),
+            summary: Some("Renamed it.".to_owned()),
         })
     );
 }

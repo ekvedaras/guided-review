@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::rows::{
-    AskAt, BinaryFileRow, BoxFold, DiagramRow, FindingRow, FoldControl, FullDiffControl,
-    HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter,
-    ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace,
-    Toolbar, line_count,
+    AskAt, BinaryFileRow, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
+    FullDiffControl, HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow,
+    RouteStopRow, ScreenFooter, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
+    SummaryStatsRow, ThreadRowPlace, Toolbar, line_count,
 };
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
@@ -784,6 +784,16 @@ fn thread_row(view: ThreadView, place: ThreadRowPlace) -> PageRow {
 
 fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
     let can_fix = !view.fix.as_ref().is_some_and(FixState::is_in_progress);
+    let can_decide = !view.fix.as_ref().is_some_and(FixState::blocks_decisions);
+    let fix_line = view.fix.as_ref().map(|state| match &view.fix_note {
+        Some(note) => format!("{}. Your note: {}", state.line(), note.as_str()),
+        None => state.line(),
+    });
+    let fixes_offer = match &view.fix {
+        Some(FixState::ToSend) => FixesOffer::Remove,
+        Some(state) if state.is_in_progress() => FixesOffer::None,
+        Some(_) | None => FixesOffer::Add,
+    };
     let can_answer_fix = view.fix.as_ref() == Some(&FixState::Asked);
     let can_ask_why = !view
         .thread
@@ -794,8 +804,11 @@ fn finding_row(view: FindingView, place: ThreadRowPlace) -> PageRow {
         severity: view.finding.severity,
         body: view.finding.body.into(),
         place,
-        fix: view.fix.map(|state| state.line().into()),
+        fix: fix_line.map(Into::into),
         can_fix,
+        can_decide,
+        fixes_offer,
+        can_mark_fixed: matches!(view.fix, Some(FixState::Fixed { .. })),
         can_answer_fix,
         asked: view
             .thread

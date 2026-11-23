@@ -1,6 +1,7 @@
 //! Ask why: the reviewer's questions about a finding and the review agent's answers, on a thread of the
 //! finding's own. It lives in the review's state file for a PR too, since a PR's threads are GitHub's.
 
+use crate::viewer::kept_values::KeptEntries;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -99,16 +100,21 @@ impl FindingThread {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct FindingThreads(Vec<FindingThread>);
+pub struct FindingThreads(KeptEntries<FindingThread>);
 
 impl FindingThreads {
+    /// Entries a newer build wrote in a shape this build does not read; kept in the file as written.
+    pub fn unread_entries(&self) -> usize {
+        self.0.unread_count()
+    }
+
     pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
     /// A re-pin moved the findings: a question not delivered yet tells the review agent their new place.
     pub(super) fn follow(&mut self, moved: &[Finding]) {
-        for thread in &mut self.0 {
+        for thread in self.0.iter_mut() {
             thread.finding.follow(moved);
         }
     }
@@ -244,7 +250,7 @@ impl FindingThreads {
     /// idle, a question it did not answer ended without an answer. Says whether any question moved.
     pub(super) fn agent_status_is(&mut self, status: AgentStatus) -> bool {
         let mut moved = false;
-        for thread in &mut self.0 {
+        for thread in self.0.iter_mut() {
             thread.state = match (&thread.state, status) {
                 (WhyState::Delivered, AgentStatus::Working) => WhyState::Working,
                 (WhyState::Working, AgentStatus::Idle) => WhyState::EndedWithoutAnswer,

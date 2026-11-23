@@ -12,10 +12,10 @@ use std::sync::Arc;
 use crate::findings::FindingId;
 
 pub use rows::{
-    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FoldControl, FullDiffControl,
-    HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter,
-    ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace,
-    Toolbar, line_count, pluralised,
+    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
+    FullDiffControl, HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow,
+    RouteStopRow, ScreenFooter, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
+    SummaryStatsRow, ThreadRowPlace, Toolbar, line_count, pluralised,
 };
 
 use super::ask::{Place, ShownOn};

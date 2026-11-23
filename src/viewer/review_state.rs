@@ -21,12 +21,33 @@ use super::finding_decisions::{Fate, FindingDecisions};
 use super::finding_threads::{FindingThreads, NoQuestion, WhyAuthor, WhyReply};
 use super::fix_requests::{FixReply, FixRequests, NoFixQuestion, NoFixRequest};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
+use super::kept_values::{KeptEntries, KeptSection};
 use super::local_threads::LocalThreads;
 use super::move_to_pr::MovedReview;
 use super::ports::Viewed;
 use super::review::{ReadSubject, StepId};
 use super::switch_to_guided::CarriedReads;
 use super::threads::ThreadId;
+
+fn no_finding_decisions(section: &KeptSection<FindingDecisions>) -> bool {
+    section.skips_when(FindingDecisions::is_empty)
+}
+
+fn no_fix_requests(section: &KeptSection<FixRequests>) -> bool {
+    section.skips_when(FixRequests::is_empty)
+}
+
+fn no_finding_threads(section: &KeptSection<FindingThreads>) -> bool {
+    section.skips_when(FindingThreads::is_empty)
+}
+
+fn not_done(section: &KeptSection<Option<ReadTick>>) -> bool {
+    section.skips_when(Option::is_none)
+}
+
+fn no_local_threads(section: &KeptSection<LocalThreads>) -> bool {
+    section.skips_when(LocalThreads::is_empty)
+}
 
 /// PR links in the state file stay the strings an earlier build wrote.
 mod pull_request_links {
@@ -61,13 +82,13 @@ pub struct ReviewState {
     #[serde(flatten)]
     typed: TypedText,
     #[serde(default)]
-    asks: Vec<Ask>,
+    asks: KeptSection<KeptEntries<Ask>>,
     /// The key of the local review the file belongs to. Its path holds only a short hash of the folder, so
     /// the key is what tells a file of another review that landed on the same path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     subject: Option<String>,
     #[serde(default)]
-    last_repin: Option<RepinRecord>,
+    last_repin: KeptSection<Option<RepinRecord>>,
     /// The folder the PR was last opened from, so a switch back to it finds the same clone.
     #[serde(default)]
     opened_from: Option<PathBuf>,
@@ -79,8 +100,8 @@ pub struct ReviewState {
     )]
     declined_moves: Vec<PullRequestUrl>,
     /// A local review's threads, written only through `LocalThreadStore`, never with the viewer's sections.
-    #[serde(default, skip_serializing_if = "LocalThreads::is_empty")]
-    local_threads: LocalThreads,
+    #[serde(default, skip_serializing_if = "no_local_threads")]
+    local_threads: KeptSection<LocalThreads>,
     /// The clone whose refs keep the snapshots a moved local review was read at, while this review
     /// still reads a file or step at one of them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,52 +117,52 @@ pub struct ReviewState {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct ViewerSections {
     #[serde(default)]
-    read_ticks: BTreeMap<StepId, ReadTick>,
+    read_ticks: KeptSection<BTreeMap<StepId, ReadTick>>,
     /// Per file, whether GitHub said viewed at the last sync. A pull reacts to changes against it.
     #[serde(default)]
-    viewed_on_github: BTreeMap<FilePath, Viewed>,
+    viewed_on_github: KeptSection<BTreeMap<FilePath, Viewed>>,
     /// Viewed changes GitHub has not taken yet, newest wish per file.
     #[serde(default)]
-    unsent_viewed: BTreeMap<FilePath, Viewed>,
+    unsent_viewed: KeptSection<BTreeMap<FilePath, Viewed>>,
     /// Ticks a re-pin took away; the step was read at that head, so it can show what changed since.
     #[serde(default)]
-    read_before: BTreeMap<StepId, ReadTick>,
+    read_before: KeptSection<BTreeMap<StepId, ReadTick>>,
     /// A basic tour's read ticks, per file, apart from the steps' so one never reads as the other.
     #[serde(default)]
-    file_read_ticks: BTreeMap<FilePath, ReadTick>,
+    file_read_ticks: KeptSection<BTreeMap<FilePath, ReadTick>>,
     /// What a re-pin took from the file ticks, as `read_before` does for steps.
     #[serde(default)]
-    file_read_before: BTreeMap<FilePath, ReadTick>,
+    file_read_before: KeptSection<BTreeMap<FilePath, ReadTick>>,
     /// After a re-pin GitHub's viewed state is taken as it is, so its "not viewed" for files
     /// the new commits touched is not read as the reviewer unticking.
     #[serde(default)]
-    github_baseline_due: bool,
+    github_baseline_due: KeptSection<bool>,
     /// A review agent was started and has not said findings-done since, so an idle one found
     /// again later has stopped without its findings, whatever an earlier run left in the file.
     #[serde(default)]
-    ai_run_open: bool,
+    ai_run_open: KeptSection<bool>,
     /// What the reviewer did with the findings of an AI review.
-    #[serde(default, skip_serializing_if = "FindingDecisions::is_empty")]
-    finding_decisions: FindingDecisions,
+    #[serde(default, skip_serializing_if = "no_finding_decisions")]
+    finding_decisions: KeptSection<FindingDecisions>,
     /// The findings sent to the tour agent to fix, and where each fix is.
-    #[serde(default, skip_serializing_if = "FixRequests::is_empty")]
-    fix_requests: FixRequests,
+    #[serde(default, skip_serializing_if = "no_fix_requests")]
+    fix_requests: KeptSection<FixRequests>,
     /// Ask why: the threads under findings, with the review agent's answers.
-    #[serde(default, skip_serializing_if = "FindingThreads::is_empty")]
-    finding_threads: FindingThreads,
+    #[serde(default, skip_serializing_if = "no_finding_threads")]
+    finding_threads: KeptSection<FindingThreads>,
     /// Comments GitHub did not take, oldest first.
     #[serde(default)]
-    comment_queue: Vec<QueuedComment>,
+    comment_queue: KeptSection<KeptEntries<QueuedComment>>,
     /// The PR's body at the last pull, so the summary shows it before GitHub answers.
     #[serde(default)]
-    pr_description: String,
+    pr_description: KeptSection<String>,
     /// The comments sent with Ask agent and where each is with the tour agent.
     #[serde(default)]
-    hand_offs: HandOffs,
+    hand_offs: KeptSection<HandOffs>,
     /// The head the reviewer marked the review done at, with no new review sent. New commits move
     /// the head on, so the mark then says nothing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    done_at: Option<ReadTick>,
+    #[serde(default, skip_serializing_if = "not_done")]
+    done_at: KeptSection<Option<ReadTick>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -297,6 +318,64 @@ fn readable_gone_ids<'de, D: serde::Deserializer<'de>>(
 }
 
 impl ReviewState {
+    /// What this build could not read and keeps as written: whole sections by name, and lists with
+    /// how many of their entries.
+    pub fn parts_not_read(&self) -> Vec<String> {
+        let viewer = &self.viewer;
+        let typed = &self.typed;
+        let sections = [
+            ("read_ticks", viewer.read_ticks.is_unread()),
+            ("viewed_on_github", viewer.viewed_on_github.is_unread()),
+            ("unsent_viewed", viewer.unsent_viewed.is_unread()),
+            ("read_before", viewer.read_before.is_unread()),
+            ("file_read_ticks", viewer.file_read_ticks.is_unread()),
+            ("file_read_before", viewer.file_read_before.is_unread()),
+            (
+                "github_baseline_due",
+                viewer.github_baseline_due.is_unread(),
+            ),
+            ("ai_run_open", viewer.ai_run_open.is_unread()),
+            ("finding_decisions", viewer.finding_decisions.is_unread()),
+            ("fix_requests", viewer.fix_requests.is_unread()),
+            ("finding_threads", viewer.finding_threads.is_unread()),
+            ("comment_queue", viewer.comment_queue.is_unread()),
+            ("pr_description", viewer.pr_description.is_unread()),
+            ("hand_offs", viewer.hand_offs.is_unread()),
+            ("done_at", viewer.done_at.is_unread()),
+            ("comment_drafts", typed.comment_drafts.is_unread()),
+            ("reply_drafts", typed.reply_drafts.is_unread()),
+            ("finish_body", typed.finish_body.is_unread()),
+            ("asks", self.asks.is_unread()),
+            ("last_repin", self.last_repin.is_unread()),
+            ("local_threads", self.local_threads.is_unread()),
+        ];
+        let entries = [
+            (
+                "finding_decisions",
+                viewer.finding_decisions.unread_entries(),
+            ),
+            ("fix_requests", viewer.fix_requests.unread_entries()),
+            ("finding_threads", viewer.finding_threads.unread_entries()),
+            ("comment_queue", viewer.comment_queue.unread_count()),
+            ("hand_offs", viewer.hand_offs.unread_entries()),
+            ("comment_drafts", typed.comment_drafts.unread_count()),
+            ("asks", self.asks.unread_count()),
+        ];
+        sections
+            .into_iter()
+            .filter(|(_, is_unread)| *is_unread)
+            .map(|(name, _)| name.to_owned())
+            .chain(
+                entries.into_iter().filter(|(_, count)| *count > 0).map(
+                    |(name, count)| match count {
+                        1 => format!("1 entry of {name}"),
+                        count => format!("{count} entries of {name}"),
+                    },
+                ),
+            )
+            .collect()
+    }
+
     /// Steps whose pieces changed or gained new ones lose their tick; it is kept as `read_before`.
     pub fn record_repin(&mut self, record: RepinRecord, repin: &Repin) {
         for step in repin
@@ -320,11 +399,11 @@ impl ReviewState {
                 self.viewer.file_read_before.insert(path.clone(), tick);
             }
         }
-        self.last_repin = Some(match self.last_repin.take() {
+        *self.last_repin = Some(match self.last_repin.take() {
             Some(earlier) if earlier.to_head == record.from_head => record.following(&earlier),
             _ => record,
         });
-        self.viewer.github_baseline_due = true;
+        *self.viewer.github_baseline_due = true;
     }
 
     /// The head each file of a basic tour was last read at: its tick, or the tick a re-pin took away.
@@ -332,7 +411,7 @@ impl ReviewState {
         self.viewer
             .file_read_before
             .iter()
-            .chain(&self.viewer.file_read_ticks)
+            .chain(self.viewer.file_read_ticks.iter())
             .map(|(path, tick)| (path.clone(), tick.head.clone()))
             .collect()
     }
@@ -362,13 +441,13 @@ impl ReviewState {
         }
         self.viewer.file_read_ticks.clear();
         self.viewer.file_read_before.clear();
-        self.last_repin = None;
-        self.viewer.github_baseline_due = true;
+        *self.last_repin = None;
+        *self.viewer.github_baseline_due = true;
     }
 
     /// A Refresh answered what the re-pin left open, so its marks go.
     pub fn finish_refresh(&mut self) {
-        self.last_repin = None;
+        *self.last_repin = None;
     }
 
     pub fn last_repin(&self) -> Option<&RepinRecord> {
@@ -380,7 +459,7 @@ impl ReviewState {
     }
 
     pub fn github_baseline_due(&self) -> bool {
-        self.viewer.github_baseline_due
+        *self.viewer.github_baseline_due
     }
 
     /// GitHub's state replaces what was seen before; only wishes it does not match yet stay queued.
@@ -389,13 +468,13 @@ impl ReviewState {
         on_github: &BTreeMap<FilePath, Viewed>,
         wishes: &BTreeMap<FilePath, Viewed>,
     ) {
-        self.viewer.viewed_on_github = on_github.clone();
-        self.viewer.unsent_viewed = wishes
+        *self.viewer.viewed_on_github = on_github.clone();
+        *self.viewer.unsent_viewed = wishes
             .iter()
             .filter(|(path, viewed)| self.was_viewed_on_github(path) != **viewed)
             .map(|(path, viewed)| (path.clone(), *viewed))
             .collect();
-        self.viewer.github_baseline_due = false;
+        *self.viewer.github_baseline_due = false;
     }
 
     pub fn tick(&mut self, step: &StepId, head: &Sha) {
@@ -410,7 +489,7 @@ impl ReviewState {
     }
 
     pub fn mark_done(&mut self, head: &Sha) {
-        self.viewer.done_at = Some(ReadTick { head: head.clone() });
+        *self.viewer.done_at = Some(ReadTick { head: head.clone() });
     }
 
     pub fn is_done_at(&self, head: &Sha) -> bool {
@@ -500,23 +579,26 @@ impl ReviewState {
         self.viewer.finding_threads.follow(moved);
     }
 
-    pub const fn ai_run_is_open(&self) -> bool {
-        self.viewer.ai_run_open
+    pub fn ai_run_is_open(&self) -> bool {
+        *self.viewer.ai_run_open
     }
 
-    pub(super) const fn ai_run_is(&mut self, open: bool) {
-        self.viewer.ai_run_open = open;
+    pub(super) fn ai_run_is(&mut self, open: bool) {
+        *self.viewer.ai_run_open = open;
     }
 
-    pub const fn finding_decisions(&self) -> &FindingDecisions {
+    pub fn finding_decisions(&self) -> &FindingDecisions {
         &self.viewer.finding_decisions
     }
 
+    /// A decided finding is not fixed any more: it leaves the fixes to send, and a question on it is dropped.
     pub(super) fn decide_finding(&mut self, finding: Finding, fate: Fate) {
+        self.viewer.fix_requests.forget_decided(&finding.id);
         self.viewer.finding_decisions.record(finding, fate);
     }
 
     pub(super) fn finding_used(&mut self, finding: Finding, thread: Option<ThreadId>) {
+        self.viewer.fix_requests.forget_decided(&finding.id);
         self.viewer.finding_decisions.record_used(finding, thread);
     }
 
@@ -529,7 +611,7 @@ impl ReviewState {
         self.viewer.finding_decisions.restore(id)
     }
 
-    pub const fn fix_requests(&self) -> &FixRequests {
+    pub fn fix_requests(&self) -> &FixRequests {
         &self.viewer.fix_requests
     }
 
@@ -537,22 +619,22 @@ impl ReviewState {
         &mut self.viewer.fix_requests
     }
 
-    /// The tour agent's word on one finding; a finding it fixed is closed like one the reviewer decided.
+    /// The tour agent's word on one finding, said on its thread. A fixed one stays open until the reviewer marks it fixed.
     pub fn fix_replied(&mut self, id: &FindingId, reply: &FixReply) -> Result<(), NoFixRequest> {
         let finding = self.viewer.fix_requests.replied(id, reply)?;
         let said = match reply {
             FixReply::Working => None,
             FixReply::Question { text } => Some(text.clone()),
-            FixReply::Fixed { commit } => Some(format!("Fixed in {commit}")),
+            FixReply::Fixed { commit, summary } => Some(match summary {
+                Some(summary) => format!("Fixed in {commit}: {summary}"),
+                None => format!("Fixed in {commit}"),
+            }),
             FixReply::NotFixed { reason } => Some(format!("Not fixed: {reason}")),
         };
         if let Some(said) = said {
             self.viewer
                 .finding_threads
-                .say(finding.clone(), WhyAuthor::TourAgent, said);
-        }
-        if matches!(reply, FixReply::Fixed { .. }) {
-            self.viewer.finding_decisions.record(finding, Fate::Fixed);
+                .say(finding, WhyAuthor::TourAgent, said);
         }
         Ok(())
     }
@@ -570,7 +652,7 @@ impl ReviewState {
         Ok(())
     }
 
-    pub const fn finding_threads(&self) -> &FindingThreads {
+    pub fn finding_threads(&self) -> &FindingThreads {
         &self.viewer.finding_threads
     }
 
@@ -907,13 +989,13 @@ impl ReviewState {
 pub struct TypedText {
     /// Comment text not sent yet; each one is an open comment box.
     #[serde(default)]
-    comment_drafts: Vec<CommentDraft>,
+    comment_drafts: KeptSection<KeptEntries<CommentDraft>>,
     /// Reply text not sent yet, by thread id; each one is an open reply box.
     #[serde(default)]
-    reply_drafts: BTreeMap<ThreadId, String>,
+    reply_drafts: KeptSection<BTreeMap<ThreadId, String>>,
     /// The body of the review being finished, not sent yet.
     #[serde(default)]
-    finish_body: String,
+    finish_body: KeptSection<String>,
 }
 
 /// `<owner>/<repo>/<pr>.json` in the state files folder
@@ -1210,11 +1292,11 @@ impl ReviewStateFile {
 
 impl AskStore for ReviewStateFile {
     fn load(&self) -> anyhow::Result<Vec<Ask>> {
-        Ok(Self::load(self)?.asks)
+        Ok(Self::load(self)?.asks.to_vec())
     }
 
     fn save(&self, asks: &[Ask]) -> anyhow::Result<()> {
-        self.update(|state| state.asks = asks.to_vec())
+        self.update(|state| **state.asks = asks.to_vec())
     }
 }
 

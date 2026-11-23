@@ -1,3 +1,4 @@
+use crate::viewer::kept_values::KeptEntries;
 use std::fmt;
 use std::sync::Arc;
 
@@ -516,9 +517,14 @@ pub(super) struct SentComment<'a> {
 
 /// The hand-offs of one PR, oldest first. Kept in the review state.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HandOffs(Vec<HandOff>);
+pub struct HandOffs(KeptEntries<HandOff>);
 
 impl HandOffs {
+    /// Entries a newer build wrote in a shape this build does not read; kept in the file as written.
+    pub fn unread_entries(&self) -> usize {
+        self.0.unread_count()
+    }
+
     pub fn all(&self) -> &[HandOff] {
         &self.0
     }
@@ -545,10 +551,10 @@ impl HandOffs {
                 .max()
                 .unwrap_or(0),
         );
-        let (queued, others): (Vec<HandOff>, Vec<HandOff>) = std::mem::take(&mut self.0)
+        let (queued, others): (Vec<HandOff>, Vec<HandOff>) = std::mem::take(&mut *self.0)
             .into_iter()
             .partition(|hand_off| hand_off.state == HandOffState::WaitingForSendTasks);
-        self.0 = others;
+        *self.0 = others;
         let mut sent = Vec::new();
         for mut task in queued {
             match task.as_in(threads) {
@@ -742,7 +748,7 @@ impl HandOffs {
     /// answer, it ended without one. One held back from an agent that did not report its state goes
     /// once the agent says it is idle.
     pub(super) fn agent_status_is(&mut self, status: AgentStatus) {
-        for hand_off in &mut self.0 {
+        for hand_off in self.0.iter_mut() {
             hand_off.state = match (&hand_off.state, status) {
                 (HandOffState::Delivered, AgentStatus::Working) => HandOffState::Working,
                 (HandOffState::AgentUnreported, AgentStatus::Idle) => HandOffState::Queued,
@@ -828,7 +834,7 @@ impl HandOffs {
             return Ok(());
         }
         let batch = held.batch;
-        for hand_off in &mut self.0 {
+        for hand_off in self.0.iter_mut() {
             let sent_with_it = hand_off.id == id || (batch.is_some() && hand_off.batch == batch);
             if sent_with_it && hand_off.state == HandOffState::AgentUnreported {
                 hand_off.state = HandOffState::SendAnyway;

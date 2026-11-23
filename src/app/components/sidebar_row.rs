@@ -239,6 +239,33 @@ pub fn count_badge(colors: &Colors, count: usize) -> Option<impl IntoElement> {
     })
 }
 
+/// The open AI review findings of a row, beside its comment count and told apart by the AI spark.
+pub fn finding_badge(colors: &Colors, count: usize) -> Option<impl IntoElement> {
+    (count > 0).then(|| {
+        div()
+            .flex_none()
+            .h(px(LINE_HEIGHT))
+            .flex()
+            .items_center()
+            .child(
+                div()
+                    .px_1p5()
+                    .rounded_full()
+                    .bg(colors.surface)
+                    .border_1()
+                    .border_color(colors.subtle_border)
+                    .flex()
+                    .items_center()
+                    .gap_0p5()
+                    .text_xs()
+                    .line_height(phi())
+                    .text_color(colors.accent)
+                    .child(sized_icon(Icon::Sparkles, colors.accent, px(10.)))
+                    .child(count.to_string()),
+            )
+    })
+}
+
 fn indent(depth: usize) -> Pixels {
     px(FLAT_INDENT + INDENT_PER_DEPTH * depth as f32)
 }

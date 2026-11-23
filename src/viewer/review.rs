@@ -152,6 +152,8 @@ pub struct SidebarEntry<'a> {
     pub is_current: bool,
     pub is_ticked: bool,
     pub thread_count: usize,
+    /// The open findings of the AI review on the step.
+    pub finding_count: usize,
     /// Shown greyed: every piece of the step is gone since the last version.
     pub is_gone: bool,
     /// The step carries a check hint.
@@ -287,6 +289,7 @@ pub enum NextScreen {
 pub struct SafetyNetSize {
     pub pieces: usize,
     pub threads: usize,
+    pub findings: usize,
 }
 
 /// The tour was written for an older head than the PR has now, so it may be stale.
@@ -589,6 +592,7 @@ impl ReviewCore {
         state_file: ReviewStateFile,
     ) -> anyhow::Result<Self> {
         let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
+        let parts_not_read = state.parts_not_read();
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let subject = tour.pin().subject()?;
@@ -697,6 +701,9 @@ impl ReviewCore {
                 }
                 if let Some(backup) = saved_review_kept_as {
                     problems.raise(Problem::SavedReviewNotRead(backup));
+                }
+                if !parts_not_read.is_empty() {
+                    problems.raise(Problem::SavedReviewPartsNotRead(parts_not_read.join(", ")));
                 }
                 problems
             },
@@ -1660,6 +1667,10 @@ impl ReviewCore {
                     is_current: current == Some(&id),
                     is_ticked: review.is_ticked(&id),
                     thread_count: review.threads.in_step(&id).len(),
+                    finding_count: review
+                        .findings
+                        .in_home(&FindingHome::Step(id.clone()))
+                        .len(),
                     is_gone: review.is_gone(step),
                     has_check: step.check.is_some(),
                     is_skim: step.skim,
@@ -1733,6 +1744,7 @@ impl ReviewCore {
             .then(|| SafetyNetSize {
                 pieces: coverage::safety_net(guided, &self.files).len(),
                 threads: self.threads.in_safety_net().len(),
+                findings: self.findings.in_home(&FindingHome::SafetyNet).len(),
             })
     }
 

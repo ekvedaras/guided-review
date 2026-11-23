@@ -13,6 +13,7 @@ use gpui::{
 use super::OneStepLayout;
 use super::issue_card::IssueHover;
 use crate::app::components::diff_view::RowGesture;
+use crate::app::components::finding_view::FindingBox;
 use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::{ToastShelf, Toaster};
 use crate::app::review_session::{ReviewSession, StagedReReview};
@@ -104,6 +105,7 @@ enum Scene {
     AiReviewOnLines,
     AiReviewFindingsList,
     AiReviewFixRequests,
+    AiReviewFixed,
     AiReviewAskWhy,
     AiReviewOutdated,
     AiReviewThreadFromFinding,
@@ -113,7 +115,7 @@ enum Scene {
 }
 
 impl Scene {
-    const ALL: [Self; 71] = [
+    const ALL: [Self; 72] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -179,6 +181,7 @@ impl Scene {
         Self::AiReviewOnLines,
         Self::AiReviewFindingsList,
         Self::AiReviewFixRequests,
+        Self::AiReviewFixed,
         Self::AiReviewAskWhy,
         Self::AiReviewOutdated,
         Self::AiReviewThreadFromFinding,
@@ -252,6 +255,7 @@ impl Scene {
             Self::AiReviewOnLines => "83-ai-review-on-lines",
             Self::AiReviewFindingsList => "84-ai-review-findings-list",
             Self::AiReviewFixRequests => "85-ai-review-fix-requests",
+            Self::AiReviewFixed => "94-ai-review-fixed",
             Self::AiReviewAskWhy => "86-ai-review-ask-why",
             Self::AiReviewOutdated => "87-ai-review-outdated",
             Self::AiReviewThreadFromFinding => "88-ai-review-thread-from-finding",
@@ -892,6 +896,18 @@ impl OneStepLayout {
                     review.stage_fix_requests();
                 }
             }),
+            Scene::AiReviewFixed => self.change_review(cx, |review| {
+                review.go_forward();
+                let first_line = review
+                    .page()
+                    .lines()
+                    .next()
+                    .map(|line| line.location.clone());
+                if let Some(at) = first_line {
+                    review.ai_review_is(AiReview::staged_on(&at.path, at.line));
+                    review.stage_fixed_finding();
+                }
+            }),
             Scene::AiReviewThreadFromFinding => self.change_review(cx, |review| {
                 review.go_forward();
                 let first_line = review
@@ -929,8 +945,12 @@ impl OneStepLayout {
                     }
                 });
                 if let Ok(answered) = FindingId::try_from("a".to_owned()) {
-                    self.finding_questions
-                        .open(&answered, "Is it on purpose?", "to ask", cx);
+                    self.finding_questions.open(
+                        &answered,
+                        "Is it on purpose?",
+                        FindingBox::WhyQuestion,
+                        cx,
+                    );
                 }
             }
             Scene::TourEndUnread => {
@@ -1189,6 +1209,12 @@ impl OneStepLayout {
             }
             Scene::AiReviewThreadFromFinding => self.change_review(cx, |review| {
                 review.unstage_thread_from_finding();
+                review.ai_review_is(AiReview::NotRun);
+                review.go_to_summary();
+            }),
+            Scene::AiReviewFixed => self.change_review(cx, |review| {
+                review.unstage_fix_requests();
+                review.unstage_finding_threads();
                 review.ai_review_is(AiReview::NotRun);
                 review.go_to_summary();
             }),

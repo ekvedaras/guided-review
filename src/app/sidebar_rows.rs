@@ -16,6 +16,7 @@ pub struct SidebarStep {
     pub id: StepId,
     pub label: SharedString,
     pub thread_count: usize,
+    pub finding_count: usize,
     pub depth: usize,
     pub is_current: bool,
     pub is_ticked: bool,
@@ -34,6 +35,7 @@ pub struct SidebarTree {
 pub struct SidebarSafetyNet {
     pub pieces: usize,
     pub thread_count: usize,
+    pub finding_count: usize,
     pub is_current: bool,
 }
 
@@ -113,6 +115,8 @@ pub struct SidebarAiReview {
     pub has_findings: bool,
     pub has_dismissed_findings: bool,
     pub action: Option<AiReviewAction>,
+    /// The findings added to fixes, which Send fixes hands to the tour agent.
+    pub fixes_to_send: usize,
 }
 
 /// The guided tour of a basic review's PR as the sidebar says it: the stage of its writing, Write
@@ -204,6 +208,7 @@ impl SidebarRows {
             .map(|entry| SidebarStep {
                 label: entry.title.to_owned().into(),
                 thread_count: entry.thread_count,
+                finding_count: entry.finding_count,
                 id: entry.id,
                 depth: entry.depth,
                 is_current: entry.is_current,
@@ -216,6 +221,7 @@ impl SidebarRows {
         let safety_net = review.safety_net_size().map(|size| SidebarSafetyNet {
             pieces: size.pieces,
             thread_count: size.threads,
+            finding_count: size.findings,
             is_current: review.screen() == &Screen::SafetyNet,
         });
         Self {
@@ -228,6 +234,7 @@ impl SidebarRows {
                     has_findings: stage.has_findings,
                     has_dismissed_findings: stage.has_dismissed_findings,
                     action: stage.action,
+                    fixes_to_send: review.fixes_to_send(),
                 }
             },
             tour_agent: SidebarTourAgent {

@@ -8,10 +8,13 @@ use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, Send
 use crate::viewer::finding_decisions::Fate;
 use crate::viewer::finding_threads::WhyAuthor;
 use crate::viewer::findings_list::{FindingLine, FindingsList};
-use crate::viewer::fix_requests::{FixReply, FixState};
+use crate::viewer::fix_requests::{FixNote, FixReply, FixState, FixTiming};
 use crate::viewer::hand_offs::Audience;
 use crate::viewer::threads::ThreadId;
 use crate::viewer::work_agenda::WorkKind;
+
+/// A finding to fix, with what the reviewer wants of the fix when they said.
+type NotedFinding = (Finding, Option<FixNote>);
 
 /// Starts a comment made from a finding the reviewer did not edit.
 const AI_MARK: &str = "🤖";
@@ -43,6 +46,20 @@ impl ReviewCore {
             .ok_or(FindingRefusal::NotThere)
     }
 
+    /// An open finding the reviewer may still use or dismiss: not one the tour agent is fixing.
+    fn decidable_finding(&self, id: &FindingId) -> Result<Finding, FindingRefusal> {
+        let finding = self.open_finding(id)?;
+        if self
+            .state
+            .fix_requests()
+            .state_of(id)
+            .is_some_and(FixState::blocks_decisions)
+        {
+            return Err(FindingRefusal::BeingFixed);
+        }
+        Ok(finding)
+    }
+
     /// Kept in the state file, then taken off the screens.
     fn record_decision(&mut self, finding: Finding, fate: Fate) -> Result<(), FindingRefusal> {
         let id = finding.id.clone();
@@ -63,14 +80,14 @@ impl ReviewCore {
 
     /// The finding goes, and a later run is told it was dismissed.
     pub fn dismiss_finding(&mut self, id: &FindingId) -> Result<(), FindingRefusal> {
-        let finding = self.open_finding(id)?;
+        let finding = self.decidable_finding(id)?;
         self.record_decision(finding, Fate::Dismissed)
     }
 
     /// The finding's text goes into a comment box on its lines, after any text there. The finding
     /// stays open until that comment is sent.
     pub fn use_finding(&mut self, id: &FindingId) -> Result<CommentPlace, FindingRefusal> {
-        let finding = self.open_finding(id)?;
+        let finding = self.decidable_finding(id)?;
         let place = self.comment_place_of(&finding.anchor)?;
         self.comment_desk
             .add_text_at(
@@ -112,7 +129,7 @@ impl ReviewCore {
         id: &FindingId,
         mode: SendMode,
     ) -> Result<CommentRequest, FindingRefusal> {
-        let finding = self.open_finding(id)?;
+        let finding = self.decidable_finding(id)?;
         let place = self.comment_place_of(&finding.anchor)?;
         self.send_findings_as_is(&place, &[finding], mode)
     }
@@ -144,32 +161,76 @@ impl ReviewCore {
 
     /// Sends each finding to the tour agent as one message to fix, in reading order.
     pub fn fix_findings(&mut self, ids: &[FindingId]) -> FindingsBatch<FindingId> {
-        let mut batch = FindingsBatch {
-            done: Vec::new(),
-            refused: Vec::new(),
+        self.request_fixes(ids.iter().map(|id| (id.clone(), None)).collect())
+    }
+
+    /// One finding goes to the tour agent, now or with Send fixes, with what the reviewer wants of the fix.
+    pub fn fix_with_note(
+        &mut self,
+        id: &FindingId,
+        note: FixNote,
+        timing: FixTiming,
+    ) -> Result<(), FindingRefusal> {
+        let order = vec![(id.clone(), Some(note))];
+        let batch = match timing {
+            FixTiming::Now => self.request_fixes(order),
+            FixTiming::WithSendFixes => self.hold_fixes(order),
         };
-        let mut to_fix = Vec::new();
-        for id in ids {
-            match self.open_finding(id) {
-                Ok(_) if self.state.fix_requests().is_in_progress(id) => {
-                    batch.refused.push((id.clone(), FindingRefusal::BeingFixed));
+        batch
+            .refused
+            .into_iter()
+            .next()
+            .map_or(Ok(()), |(_, refusal)| Err(refusal))
+    }
+
+    /// The open findings not being fixed, each with its note.
+    fn fixable(
+        &self,
+        orders: Vec<(FindingId, Option<FixNote>)>,
+    ) -> (Vec<NotedFinding>, Vec<(FindingId, FindingRefusal)>) {
+        let mut fixable = Vec::new();
+        let mut refused = Vec::new();
+        for (id, note) in orders {
+            match self.open_finding(&id) {
+                Ok(_) if self.state.fix_requests().is_in_progress(&id) => {
+                    refused.push((id, FindingRefusal::BeingFixed));
                 }
-                Ok(finding) => to_fix.push(finding),
-                Err(refusal) => batch.refused.push((id.clone(), refusal)),
+                Ok(finding) => fixable.push((finding, note)),
+                Err(refusal) => refused.push((id, refusal)),
             }
         }
-        to_fix.sort_by_key(|finding| self.reading_order_of(finding));
-        batch.done = to_fix.iter().map(|finding| finding.id.clone()).collect();
+        (fixable, refused)
+    }
+
+    fn request_fixes(
+        &mut self,
+        orders: Vec<(FindingId, Option<FixNote>)>,
+    ) -> FindingsBatch<FindingId> {
+        let (mut to_fix, refused) = self.fixable(orders);
+        let mut batch = FindingsBatch {
+            done: Vec::new(),
+            refused,
+        };
+        to_fix.sort_by_key(|(finding, _)| self.reading_order_of(finding));
+        batch.done = to_fix
+            .iter()
+            .map(|(finding, _)| finding.id.clone())
+            .collect();
         if to_fix.is_empty() {
             return batch;
         }
         match self.state.record(|state| {
-            for finding in &to_fix {
-                state.finding_threads_mut().say(
-                    finding.clone(),
-                    WhyAuthor::Reviewer,
-                    "Fix requested".to_owned(),
+            for (finding, note) in &to_fix {
+                let note = note
+                    .as_ref()
+                    .or_else(|| state.fix_requests().note_to_send(&finding.id));
+                let said = note.map_or_else(
+                    || "Fix requested".to_owned(),
+                    |note| format!("Fix requested: {}", note.as_str()),
                 );
+                state
+                    .finding_threads_mut()
+                    .say(finding.clone(), WhyAuthor::Reviewer, said);
             }
             state.fix_requests_mut().request(to_fix);
         }) {
@@ -189,15 +250,86 @@ impl ReviewCore {
         batch
     }
 
+    /// Each finding waits for Send fixes, so the reviewer goes on reading and sends them together.
+    pub fn add_to_fixes(&mut self, ids: &[FindingId]) -> FindingsBatch<FindingId> {
+        self.hold_fixes(ids.iter().map(|id| (id.clone(), None)).collect())
+    }
+
+    fn hold_fixes(
+        &mut self,
+        orders: Vec<(FindingId, Option<FixNote>)>,
+    ) -> FindingsBatch<FindingId> {
+        let (to_add, refused) = self.fixable(orders);
+        let mut batch = FindingsBatch {
+            done: Vec::new(),
+            refused,
+        };
+        if to_add.is_empty() {
+            return batch;
+        }
+        let added: Vec<FindingId> = to_add
+            .iter()
+            .map(|(finding, _)| finding.id.clone())
+            .collect();
+        match self
+            .state
+            .record(|state| state.fix_requests_mut().add_to_send(to_add))
+        {
+            Ok(()) => {
+                batch.done = added;
+                self.place_threads();
+            }
+            Err(error) => {
+                let reason = format!("{error:#}");
+                batch.refused.extend(
+                    added
+                        .into_iter()
+                        .map(|id| (id, FindingRefusal::NotKept(reason.clone()))),
+                );
+            }
+        }
+        batch
+    }
+
+    pub fn remove_from_fixes(&mut self, id: &FindingId) -> Result<(), FindingRefusal> {
+        if self.state.fix_requests().state_of(id) != Some(&FixState::ToSend) {
+            return Err(FindingRefusal::NotInFixes);
+        }
+        self.state
+            .record(|state| state.fix_requests_mut().remove_to_send(id))
+            .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
+        self.place_threads();
+        Ok(())
+    }
+
+    /// How many findings wait for Send fixes.
+    pub fn fixes_to_send(&self) -> usize {
+        self.state.fix_requests().to_send().count()
+    }
+
+    /// Every finding added to fixes goes to the tour agent as one batch, in reading order.
+    pub fn send_fixes(&mut self) -> FindingsBatch<FindingId> {
+        let ids: Vec<FindingId> = self.state.fix_requests().to_send().cloned().collect();
+        self.fix_findings(&ids)
+    }
+
     /// The tour agent's word on one finding. A finding it fixed is closed.
     pub fn fix_replied(&mut self, id: &FindingId, reply: &FixReply) -> anyhow::Result<()> {
         self.state.record(|state| state.fix_replied(id, reply))??;
-        if matches!(reply, FixReply::Fixed { .. }) {
-            self.close_finding(id);
-        } else {
-            self.place_threads();
-        }
+        self.place_threads();
         Ok(())
+    }
+
+    /// The reviewer accepts the tour agent's fix: the finding closes, and a later run is told it was fixed.
+    pub fn mark_fixed(&mut self, id: &FindingId) -> Result<(), FindingRefusal> {
+        let finding = self.open_finding(id)?;
+        if !matches!(
+            self.state.fix_requests().state_of(id),
+            Some(FixState::Fixed { .. })
+        ) {
+            return Err(FindingRefusal::NotFixedYet);
+        }
+        self.record_decision(finding, Fate::Fixed)
     }
 
     /// The reviewer's answer to what the tour agent asked before fixing: it goes to the agent as the next message.
@@ -330,7 +462,7 @@ impl ReviewCore {
         };
         let mut by_place: Vec<(CommentPlace, Vec<Finding>)> = Vec::new();
         for id in ids {
-            let placed = self.open_finding(id).and_then(|finding| {
+            let placed = self.decidable_finding(id).and_then(|finding| {
                 let place = self.comment_place_of(&finding.anchor)?;
                 Ok((place, finding))
             });
