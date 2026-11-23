@@ -221,10 +221,11 @@ pub struct ThreadMessage {
 }
 
 impl ThreadMessage {
+    /// The comment as the reviewer saw it, without what GitHub hides.
     fn of(comment: &ThreadComment) -> Self {
         Self {
             author: comment.author.clone(),
-            body: comment.body.clone(),
+            body: HiddenText::of(&comment.body).visible().to_owned(),
         }
     }
 
@@ -265,7 +266,7 @@ impl HandedComment {
         Self {
             author: comment.author.clone(),
             text: hidden.visible().to_owned(),
-            left_out: hidden.summary(),
+            left_out: hidden.tally(),
             replies_after: replies_after.iter().map(ThreadMessage::of).collect(),
         }
     }
@@ -280,8 +281,8 @@ impl HandedComment {
         }
         if let Some(left_out) = &self.left_out {
             lines.push(format!(
-                "Left out of the comment: {left_out}. GitHub does not show them, so the reviewer \
-                 did not see them, and they are no part of the request."
+                "Left out of the comment, since GitHub hides it: {left_out}. The reviewer did not \
+                 see it, and it is no part of the request."
             ));
         }
         lines.push(format!(
@@ -378,7 +379,9 @@ impl HandOff {
             .position(|said| Some(&said.id) == self.reviewer_comment.as_ref())?;
         let (before, from) = thread.comments.split_at_checked(at)?;
         let comment = from.first()?;
-        self.said = Said::ByReviewer(comment.body.clone());
+        if let Said::ByReviewer(said) = &mut self.said {
+            said.clone_from(&comment.body);
+        }
         self.thread_so_far = before
             .iter()
             .map(|said| ThreadMessage {

@@ -1272,8 +1272,7 @@ impl ReviewCore {
 
     /// What the PR's description hides from its reader; `None` when it hides nothing.
     pub fn pr_description_hidden_text(&self) -> Option<HiddenText> {
-        Some(HiddenText::of(self.state.pr_description()))
-            .filter(|hidden| !hidden.parts().is_empty())
+        HiddenText::hiding(self.state.pr_description())
     }
 
     /// `None` when the tour has no such diagram, picture or summary, or the review has no PR.
@@ -2274,7 +2273,7 @@ impl ReviewCore {
 
     /// The reviewer hands someone else's comment to the tour agent, to handle as the reviewer would ask.
     pub fn hand_to_agent(&mut self, comment: &CommentId) -> Result<(), HandToAgentRefused> {
-        if !self.subject().has_pending_review() {
+        if self.subject().pull_request().is_none() {
             return Err(HandToAgentRefused::NotAPullRequest);
         }
         let threads = &self.pulled_threads;
@@ -2289,7 +2288,7 @@ impl ReviewCore {
     fn agent_of_threads(&self) -> AgentOfThreads<'_> {
         AgentOfThreads {
             hand_offs: self.state.hand_offs(),
-            takes_others_comments: self.subject().has_pending_review(),
+            takes_others_comments: self.subject().pull_request().is_some(),
         }
     }
 

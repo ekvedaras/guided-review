@@ -124,3 +124,25 @@ fn the_summary_counts_each_kind_and_plain_text_has_none() {
     );
     assert_eq!(HiddenText::of("Plain **text**").summary(), None);
 }
+
+#[test]
+fn blank_letters_that_draw_nothing_count_as_invisible_characters_in_numbers() {
+    let blank = "\u{2800}\u{3164}\u{115F}\u{FFA0}".repeat(2);
+
+    let hidden = HiddenText::of(&format!("ok{blank}"));
+
+    assert_eq!(hidden.visible(), "ok");
+    assert_eq!(
+        hidden.parts(),
+        [HiddenPart::InvisibleCharacters {
+            count: 8,
+            spelled: String::new()
+        }]
+    );
+}
+
+#[test]
+fn hiding_is_none_for_text_that_hides_nothing() {
+    assert_eq!(HiddenText::hiding("Plain text"), None);
+    assert!(HiddenText::hiding("a <!-- b -->").is_some());
+}

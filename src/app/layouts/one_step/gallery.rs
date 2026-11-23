@@ -158,8 +158,7 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
     };
     let comments_hiding_text: BTreeMap<CommentId, HiddenText> = comments
         .iter()
-        .map(|comment| (comment.id.clone(), HiddenText::of(&comment.body)))
-        .filter(|(_, hidden)| hidden.summary().is_some())
+        .filter_map(|comment| Some((comment.id.clone(), HiddenText::hiding(&comment.body)?)))
         .collect();
     let view = ThreadView {
         followed: None,

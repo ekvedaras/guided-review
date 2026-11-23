@@ -400,8 +400,7 @@ pub(super) fn views(
                 .comments
                 .iter()
                 .filter_map(|comment| {
-                    let hidden = HiddenText::of(&comment.body);
-                    (!hidden.parts().is_empty()).then(|| (comment.id.clone(), hidden))
+                    HiddenText::hiding(&comment.body).map(|hidden| (comment.id.clone(), hidden))
                 })
                 .collect(),
             thread: without_working_on_it(thread, hand_offs),

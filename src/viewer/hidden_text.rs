@@ -35,7 +35,7 @@ enum Invisible {
     /// Hides or turns text around however few there are: tag characters, variation selectors that
     /// can carry bytes, and the controls that change the direction of text.
     Always,
-    /// Zero-width spaces, joiners and marks: hiding only in numbers.
+    /// Zero-width spaces, joiners and marks, and letters that draw nothing: hiding only in numbers.
     InNumbers,
 }
 
@@ -50,8 +50,19 @@ fn invisible(c: char) -> Option<Invisible> {
         | '\u{200E}'
         | '\u{200F}'
         | '\u{2060}'..='\u{2064}'
+        | '\u{206A}'..='\u{206F}'
         | '\u{FEFF}'
-        | '\u{180E}' => Some(Invisible::InNumbers),
+        | '\u{180E}'
+        | '\u{00AD}'
+        | '\u{034F}'
+        | '\u{061C}'
+        | '\u{115F}'
+        | '\u{1160}'
+        | '\u{17B4}'
+        | '\u{17B5}'
+        | '\u{2800}'
+        | '\u{3164}'
+        | '\u{FFA0}' => Some(Invisible::InNumbers),
         _ => None,
     }
 }
@@ -92,6 +103,11 @@ impl HiddenText {
         }
     }
 
+    /// `None` when the text hides nothing.
+    pub fn hiding(markdown: &str) -> Option<Self> {
+        Some(Self::of(markdown)).filter(|hidden| !hidden.parts.is_empty())
+    }
+
     pub fn parts(&self) -> &[HiddenPart] {
         &self.parts
     }
@@ -103,6 +119,11 @@ impl HiddenText {
 
     /// One line that names what is hidden, `None` when nothing is.
     pub fn summary(&self) -> Option<String> {
+        self.tally().map(|tally| format!("Hidden text: {tally}"))
+    }
+
+    /// How many of each kind are hidden, such as "2 HTML comments, 1 invisible character".
+    pub fn tally(&self) -> Option<String> {
         let comments = self
             .parts
             .iter()
@@ -133,7 +154,7 @@ impl HiddenText {
             format!("{count} {what}{plural}")
         })
         .collect();
-        (!named.is_empty()).then(|| format!("Hidden text: {}", named.join(", ")))
+        (!named.is_empty()).then(|| named.join(", "))
     }
 }
 
