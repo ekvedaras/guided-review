@@ -45,6 +45,7 @@ use crate::app::components::findings_sheet::{FindingsEvent, FindingsSheet};
 use crate::app::components::finish_review::{FinishReviewDialog, OnBodyEdit, OnFinish, OnMarkDone};
 use crate::app::components::fold_toggle::FoldToggle;
 use crate::app::components::guided_tour_banner::{GuidedTourReadyBanner, switch_button};
+use crate::app::components::hidden_text_notice::hidden_text_notice;
 use crate::app::components::icon::{Icon, icon, sized_icon};
 use crate::app::components::image_row::ImageRow;
 use crate::app::components::jump_palette::{JumpEvent, JumpPalette};
@@ -81,8 +82,8 @@ use crate::app::components::sidebar_row::{
 use crate::app::components::step_notes::{StepNotesCard, note_label};
 use crate::app::components::switching_veil::SwitchingVeil;
 use crate::app::components::thread_view::{
-    DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnHandOffButton, OnReplyDraft, OnThreadAction,
-    ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement, avatar_circle,
+    DeleteQuestion, OnCommentEdit, OnDeleteQuestion, OnHandOffButton, OnHandToAgent, OnReplyDraft,
+    OnThreadAction, ReplyDraftChange, ThreadChanges, ThreadDrafts, ThreadElement, avatar_circle,
 };
 use crate::app::components::title_bar::{TitleBarArea, TitleBarEdge, title_inset};
 use crate::app::components::toast_stack::{Toaster, post_toast};
@@ -956,6 +957,13 @@ impl OneStepLayout {
         })
     }
 
+    fn on_hand_to_agent(&self) -> OnHandToAgent {
+        let session = self.session.clone();
+        Rc::new(move |comment, cx| {
+            session.update(cx, |session, cx| session.hand_to_agent(comment, cx));
+        })
+    }
+
     /// Reply text goes to the core, which saves it, so it survives scrolling and restarts.
     fn on_reply_draft(&self, thread_id: &ThreadId) -> OnReplyDraft {
         let (session, reply) = (self.session.clone(), TextBox::Reply(thread_id.clone()));
@@ -1093,6 +1101,7 @@ impl OneStepLayout {
                 })),
                 on_action: self.on_thread_action(),
                 on_hand_off_button: self.on_hand_off_button(),
+                on_hand_to_agent: self.on_hand_to_agent(),
             },
         )
     }
@@ -4096,14 +4105,8 @@ impl OneStepLayout {
             .as_ref()
             .zip(prepared_summary)
             .map(|(summary, prepared)| self.reviewer_summary(summary, prepared, cx));
-        let description = prepared_description.map(|description| {
-            self.markdown_card(
-                "PR DESCRIPTION",
-                MarkdownView::new(DESCRIPTION_KEY, description)
-                    .with_diagrams(self.description_diagrams.clone()),
-                cx,
-            )
-        });
+        let description =
+            prepared_description.map(|description| self.description_card(description, cx));
         let beside = (reviewer_summary.is_some() || description.is_some()).then(|| {
             div()
                 .flex_1()
@@ -4177,14 +4180,7 @@ impl OneStepLayout {
             .read(cx)
             .rows()
             .prepared_description()
-            .map(|description| {
-                self.markdown_card(
-                    "PR DESCRIPTION",
-                    MarkdownView::new(DESCRIPTION_KEY, description)
-                        .with_diagrams(self.description_diagrams.clone()),
-                    cx,
-                )
-            });
+            .map(|description| self.description_card(description, cx));
         let local = overview
             .local
             .as_ref()
@@ -4304,6 +4300,24 @@ impl OneStepLayout {
                     .child(card(&colors).py_1().flex().flex_col().children(files)),
             )
             .children(write_guided_tour)
+    }
+
+    /// The PR description's card, with a warning under it when the description hides text.
+    fn description_card(&self, description: Rc<PreparedMarkdown>, cx: &mut Context<Self>) -> Div {
+        let colors = Colors::active(cx);
+        let hidden_notice = self
+            .session
+            .read(cx)
+            .rows()
+            .description_hidden_text()
+            .and_then(|hidden| hidden_text_notice(&colors, "description-hidden-text", hidden));
+        self.markdown_card(
+            "PR DESCRIPTION",
+            MarkdownView::new(DESCRIPTION_KEY, description)
+                .with_diagrams(self.description_diagrams.clone()),
+            cx,
+        )
+        .children(hidden_notice)
     }
 
     fn markdown_card(

@@ -36,6 +36,7 @@ mod focused_change;
 mod github_outage;
 mod guided_tour;
 mod hand_offs;
+mod hidden_text;
 mod highlight;
 mod image_preview;
 mod intent;
@@ -76,6 +77,7 @@ mod replacing_jobs;
 mod review;
 mod review_agents;
 mod review_builder;
+mod review_place;
 mod review_state;
 mod reviewing_mark;
 mod row_selection;
@@ -159,9 +161,10 @@ pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, Audience, HandOff,
-    HandOffButton, HandOffId, HandOffState, HandOffs, NotAHandOffId, ReplyPlacement, Reviewed,
-    SeenMark, ThreadMessage,
+    HandOffButton, HandOffId, HandOffState, HandOffs, HandToAgentRefused, NotAHandOffId,
+    ReplyPlacement, Reviewed, SeenMark, ThreadMessage,
 };
+pub use hidden_text::{HiddenPart, HiddenText};
 pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,
@@ -242,6 +245,7 @@ pub use review::{
 };
 pub use review_agents::ReviewAgents;
 pub use review_builder::ReviewBuilder;
+pub use review_place::{CheckoutPort, ReviewPlace};
 pub use review_state::{ReadTick, RepinRecord, ReviewState, ReviewStateFile};
 pub use reviewing_mark::ReviewingMarkRemoval;
 pub use row_selection::{RowSelection, SelectedLines};

@@ -93,7 +93,7 @@ impl ReviewCore {
         self.has_findings() || self.state.finding_decisions().dismissed().next().is_some()
     }
 
-    /// Run AI review and Try again: the run starts, and the app makes the worktree and starts the agent.
+    /// Run AI review and Try again: the run starts, and the app starts the agent.
     pub fn ask_to_run_ai_review(&mut self) -> Result<(), AiReviewRefusal> {
         if let Some(refusal) = self.run_ai_review_refusal() {
             return Err(refusal);

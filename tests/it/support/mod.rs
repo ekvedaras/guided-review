@@ -11,8 +11,8 @@
 
 pub mod app_path;
 pub mod fake_app;
+pub mod fake_checkouts;
 pub mod fake_ports;
-pub mod fake_review_worktrees;
 pub mod fake_tour_agent;
 pub mod graphql;
 pub mod work;

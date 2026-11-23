@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::support::fake_app::{CliEnded, answering_one_request};
+use crate::support::fake_checkouts::FakeCheckouts;
 use crate::support::fake_ports::FakeAskProcesses;
-use crate::support::fake_review_worktrees::FakeReviewWorktrees;
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run, folders_in};
 use guided_review::config::AskSettings;
@@ -66,7 +66,7 @@ impl Shop {
     fn agents(&self, fake: &Arc<FakeTourAgent>) -> ReviewAgents {
         ReviewAgents::new(
             Arc::clone(fake) as Arc<dyn TourAgentPort>,
-            Arc::new(FakeReviewWorktrees::default()),
+            Arc::new(FakeCheckouts::default()),
             self.repo.folders(),
         )
     }

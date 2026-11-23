@@ -15,6 +15,7 @@ use guided_review::findings::FindingsFile;
 use guided_review::findings_check;
 use guided_review::findings_done::findings_done;
 use guided_review::fix_reply::fix_reply;
+use guided_review::git_checkout::GitCheckouts;
 use guided_review::github::GitHub;
 use guided_review::instructions::SummaryInstructions;
 use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject};
@@ -24,13 +25,13 @@ use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_t
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
-use guided_review::review_worktree::GitReviewWorktrees;
 use guided_review::show::Show;
 use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
 use guided_review::update::{AppVersion, ReleaseInstall, Version};
+use guided_review::viewer::CheckoutPort;
 use guided_review::viewer::FixReply;
 use guided_review::viewer::{RefreshBrief, ReviewStateFile};
 use std::os::unix::process::CommandExt;
@@ -381,7 +382,11 @@ fn check_findings(subject: &ReviewSubject) -> anyhow::Result<()> {
 
     let code = opened.code_to_read()?;
     if findings.pin.head.is_empty() {
-        let agent_head = GitReviewWorktrees::under(folders.review_worktrees()).head_of(subject);
+        // The agent's checkout, in its own folder or the worktree it made, stands at the reviewed head,
+        // which a PR may have moved past since.
+        let agent_head = std::env::current_dir()
+            .ok()
+            .and_then(|folder| GitCheckouts.head_of(&folder).ok());
         findings.pin.pin_to(
             subject,
             &code.merge_base()?,

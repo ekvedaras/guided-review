@@ -1,44 +1,14 @@
-//! The throwaway checkout the review agent works in: the reviewed head, outside the clone, so the agent
-//! never touches the reviewer's files and a build it runs never lands in their folder.
+//! The throwaway checkouts older builds made for the review agent, which the start-up sweep still removes.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::Context;
 
-use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 
-/// A checkout made for one review agent, gone when the agent ends.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReviewWorktree(PathBuf);
-
-impl ReviewWorktree {
-    pub fn at(path: PathBuf) -> Self {
-        Self(path)
-    }
-
-    pub fn as_path(&self) -> &Path {
-        &self.0
-    }
-}
-
-pub trait ReviewWorktreePort: Send + Sync {
-    /// Checks out `head` of the repository at `repo` for the subject's review agent, replacing a
-    /// checkout an earlier run left.
-    fn add(
-        &self,
-        subject: &ReviewSubject,
-        repo: &Path,
-        head: &Sha,
-    ) -> anyhow::Result<ReviewWorktree>;
-
-    /// Deletes the subject's checkout; one that is not there is already gone.
-    fn remove(&self, subject: &ReviewSubject) -> anyhow::Result<()>;
-}
-
-/// Git worktrees under one folder of the app's cache, one per subject at the subject's files folder and
-/// stem, so a checkout names its review.
+/// Git worktrees that older builds made for review agents, under one folder of the app's cache, one per
+/// subject at the subject's files folder and stem. Nothing makes them any more; they are swept away.
 pub struct GitReviewWorktrees {
     root: PathBuf,
 }
@@ -52,16 +22,6 @@ impl GitReviewWorktrees {
         self.root
             .join(subject.files_folder())
             .join(subject.file_stem())
-    }
-
-    /// The commit the subject's checkout stands at: the head its review agent reads, which a PR may
-    /// have moved past since. `None` when there is no checkout.
-    pub fn head_of(&self, subject: &ReviewSubject) -> Option<Sha> {
-        let path = self.path_of(subject);
-        path.exists()
-            .then(|| git(&path, &["rev-parse", "HEAD"]).ok())
-            .flatten()
-            .map(|head| Sha::new(&head))
     }
 
     /// Removes every checkout under the folder but the kept subjects', as after a crash that left
@@ -78,37 +38,6 @@ impl GitReviewWorktrees {
             }
         }
         not_swept
-    }
-}
-
-impl ReviewWorktreePort for GitReviewWorktrees {
-    fn add(
-        &self,
-        subject: &ReviewSubject,
-        repo: &Path,
-        head: &Sha,
-    ) -> anyhow::Result<ReviewWorktree> {
-        anyhow::ensure!(
-            git(repo, &["rev-parse", "--git-dir"]).is_ok(),
-            "There is no clone on this Mac to check the code of {subject} out of: open the PR from a clone of its repository, then run the AI review again"
-        );
-        let path = self.path_of(subject);
-        remove_checkout(&path)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("could not create {}", parent.display()))?;
-        }
-        git(repo, &["worktree", "prune"])?;
-        let path_text = path.to_string_lossy();
-        git(
-            repo,
-            &["worktree", "add", "--detach", &path_text, head.as_str()],
-        )?;
-        Ok(ReviewWorktree(path))
-    }
-
-    fn remove(&self, subject: &ReviewSubject) -> anyhow::Result<()> {
-        remove_checkout(&self.path_of(subject))
     }
 }
 
@@ -153,7 +82,7 @@ fn remove_checkout(path: &Path) -> anyhow::Result<()> {
     std::fs::remove_dir_all(path).with_context(|| format!("could not delete {}", path.display()))
 }
 
-fn git(folder: &Path, args: &[&str]) -> anyhow::Result<String> {
+pub(crate) fn git(folder: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(folder)

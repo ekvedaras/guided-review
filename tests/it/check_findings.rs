@@ -1,6 +1,4 @@
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run};
-use guided_review::pull_request::Sha;
-use guided_review::review_worktree::{GitReviewWorktrees, ReviewWorktreePort};
 use serde_json::{Value, json};
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -110,22 +108,26 @@ fn check_fills_in_the_pin_like_a_tour_check_does() {
 }
 
 #[test]
-fn a_file_with_no_pin_is_pinned_to_the_head_the_review_agent_was_started_at_when_the_pr_moved_on() {
+fn a_file_with_no_pin_is_pinned_to_the_head_the_review_agents_checkout_stands_at_when_the_pr_moved_on()
+ {
     let shop = Shop::with_pull();
-    let worktrees = GitReviewWorktrees::under(shop.repo.folders().review_worktrees());
-    worktrees
-        .add(
-            &PR.parse().unwrap(),
-            shop.repo.path(),
-            &Sha::new(&shop.head),
-        )
-        .unwrap();
+    let checkout = tempfile::TempDir::new().unwrap();
+    let checkout = checkout.path().join("review");
+    shop.repo.git(&[
+        "worktree",
+        "add",
+        "--detach",
+        checkout.to_str().unwrap(),
+        &shop.head,
+    ]);
     shop.repo.write("README.md", "hello\nworld\nagain\n");
     let newer = shop.repo.commit("newer");
     let moved_on = FakeGitHub::serving_pull("acme/shop", 7, &shop.base, &newer);
     shop.write_findings(json!([finding("change", json!({"kind": "change"}))]));
 
-    GuidedReview::new(&shop.repo, &moved_on).run(&["check-findings", PR]);
+    GuidedReview::new(&shop.repo, &moved_on)
+        .in_dir(&checkout)
+        .run(&["check-findings", PR]);
 
     assert_eq!(shop.findings_on_disk()["head"], shop.head.as_str());
 }

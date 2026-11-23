@@ -13,7 +13,6 @@ use crate::local_work_tree::LocalWorkTree;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::pull_request::{PullRequestUrl, RepoName};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
-use crate::review_worktree::ReviewWorktreePort;
 
 /// A herdr terminal, as `hc` names it (`t7`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -174,7 +173,8 @@ pub struct TourAgentStart {
 pub struct ReviewAgentStart {
     pub subject: ReviewSubject,
     pub name: String,
-    /// The throwaway checkout of the reviewed head, never the reviewer's own folder.
+    /// Where the agent starts: the tour agent's folder at the reviewed head, or the clone it makes a
+    /// worktree from (`ReviewPlace`).
     pub folder: PathBuf,
     pub first_task: String,
     /// What the agent may do without asking: the list `--allowedTools` gets.
@@ -456,7 +456,6 @@ pub struct TourAgents {
     /// Tells which branch a PR is opened from, so the reviewer's Claude on it is found. `None`: a PR's
     /// agent is only the terminal with its label.
     head_branches: Option<Arc<dyn PullsOfBranchPort>>,
-    review_worktrees: Option<Arc<dyn ReviewWorktreePort>>,
     /// Head branches GitHub already told, so a lookup asks it once per PR.
     known_head_branches: Arc<Mutex<Vec<KnownHeadBranch>>>,
 }
@@ -468,22 +467,12 @@ impl TourAgents {
             folder: None,
             summary_skill: None,
             head_branches: None,
-            review_worktrees: None,
             known_head_branches: Arc::default(),
         }
     }
 
     pub fn finding_head_branches_with(mut self, head_branches: Arc<dyn PullsOfBranchPort>) -> Self {
         self.head_branches = Some(head_branches);
-        self
-    }
-
-    /// Makes room by ending an idle review agent too, and removes its worktree with it.
-    pub fn removing_review_worktrees_with(
-        mut self,
-        worktrees: Arc<dyn ReviewWorktreePort>,
-    ) -> Self {
-        self.review_worktrees = Some(worktrees);
         self
     }
 
@@ -526,7 +515,7 @@ impl TourAgents {
             bail!("no folder to start a tour agent for {subject} in");
         };
         let name = terminal_name(AgentRole::Tour, subject);
-        make_room(self.port.as_ref(), self.review_worktrees.as_deref(), active)?;
+        make_room(self.port.as_ref(), active)?;
         self.port.start(&TourAgentStart {
             subject: subject.clone(),
             name,
@@ -864,6 +853,23 @@ impl TourAgents {
         }
     }
 
+    /// The folder the subject's tour agent works in: a local change set's own, else the folder of the
+    /// terminal `find` gives a PR. `None` when it has no agent or herdr cannot say.
+    pub fn working_folder_of(&self, subject: &ReviewSubject) -> Option<PathBuf> {
+        if let Some(own) = subject.own_folder() {
+            return Some(own.to_path_buf());
+        }
+        let TourAgentState::Agent { terminal, .. } = self.find(subject).ok()? else {
+            return None;
+        };
+        self.port
+            .live_terminals()
+            .ok()?
+            .into_iter()
+            .find(|live| live.terminal == terminal)
+            .map(|live| live.cwd)
+    }
+
     /// The subject's agent: the terminal with its label, else the one Claude terminal that works on the
     /// subject's code (`find_unclaimed`). Every path that needs the agent asks here.
     fn find(&self, subject: &ReviewSubject) -> anyhow::Result<TourAgentState> {
@@ -929,14 +935,9 @@ impl TourAgents {
     }
 }
 
-/// Ends the idle agent the app started used longest ago, a review agent's worktree with it, when the app
-/// has started as many agents as it keeps, never the one of `active`. Refuses, naming the busy ones, when
+/// Ends the idle agent the app started used longest ago when the app has started as many agents as it keeps, never the one of `active`. Refuses, naming the busy ones, when
 /// nothing can be ended.
-pub(super) fn make_room(
-    port: &dyn TourAgentPort,
-    worktrees: Option<&dyn ReviewWorktreePort>,
-    active: &ReviewSubject,
-) -> anyhow::Result<()> {
+pub(super) fn make_room(port: &dyn TourAgentPort, active: &ReviewSubject) -> anyhow::Result<()> {
     let mut agents = port.app_started()?;
     if agents.len() < MAX_APP_AGENTS {
         return Ok(());
@@ -967,12 +968,6 @@ pub(super) fn make_room(
     };
     port.kill(&to_end.terminal)
         .with_context(|| format!("could not end the agent {}", to_end.terminal))?;
-    if to_end.role == AgentRole::Review
-        && let (Some(worktrees), Some(subject)) = (worktrees, &to_end.subject)
-        && let Err(error) = worktrees.remove(subject)
-    {
-        eprintln!("could not remove the worktree of {subject}: {error:#}");
-    }
     Ok(())
 }
 
@@ -1115,7 +1110,7 @@ impl TourWriter {
             Self::InOwnContext => format!("/tour {subject} {brief} {afterwards}"),
             Self::InSubagent => format!(
                 "Write the guided-review tour of {subject} in one subagent, so your own context stays free for the \
-                 reviewer's comments. Tell the subagent to run the tour skill with the Skill tool, and give it as the \
+                 reviewer's comments. Run the subagent in this folder, with no worktree of its own. Tell it to run the tour skill with the Skill tool, and give it as the \
                  skill's arguments \"{subject}\" followed by this brief: {brief} Wait until the subagent is done. \
                  Before you answer the first comment, read the tour at the path `guided-review tour-path {subject}` \
                  prints. {afterwards}"

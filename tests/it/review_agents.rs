@@ -2,13 +2,12 @@ use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::support::fake_review_worktrees::{FakeReviewWorktrees, WorktreeCall};
+use crate::support::fake_checkouts::FakeCheckouts;
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::folders_in;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
-use guided_review::review_worktree::ReviewWorktreePort;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     AgentStatus, ReviewAgents, SendOutcome, TerminalId, TourAgentPort, TourAgentState, TourAgents,
@@ -25,7 +24,7 @@ fn pr() -> ReviewSubject {
 
 struct Desk {
     fake: Arc<FakeTourAgent>,
-    worktrees: FakeReviewWorktrees,
+    checkouts: FakeCheckouts,
     home: TempDir,
 }
 
@@ -33,32 +32,41 @@ impl Desk {
     fn with(fake: FakeTourAgent) -> Self {
         Self {
             fake: Arc::new(fake),
-            worktrees: FakeReviewWorktrees::default(),
+            checkouts: FakeCheckouts::default().clean_at("/clones/shop", "other"),
             home: TempDir::new().unwrap(),
         }
     }
 
-    fn review_agents(&self) -> ReviewAgents {
-        self.review_agents_over(self.worktrees.clone())
+    fn with_checkouts(mut self, checkouts: FakeCheckouts) -> Self {
+        self.checkouts = checkouts;
+        self
     }
 
-    fn review_agents_over(&self, worktrees: FakeReviewWorktrees) -> ReviewAgents {
+    fn review_agents(&self) -> ReviewAgents {
         ReviewAgents::new(
             Arc::clone(&self.fake) as Arc<dyn TourAgentPort>,
-            Arc::new(worktrees),
+            Arc::new(self.checkouts.clone()),
             folders_in(self.home.path()),
         )
     }
 
     fn tour_agents(&self) -> TourAgents {
         TourAgents::new(Arc::clone(&self.fake) as Arc<dyn TourAgentPort>)
-            .removing_review_worktrees_with(Arc::new(self.worktrees.clone()))
             .starting_in("/clones/shop".into())
     }
 
     fn start(&self, subject: &ReviewSubject) -> anyhow::Result<TerminalId> {
+        self.start_with_tour_agent_in(subject, None)
+    }
+
+    fn start_with_tour_agent_in(
+        &self,
+        subject: &ReviewSubject,
+        tour_agent_folder: Option<&str>,
+    ) -> anyhow::Result<TerminalId> {
         self.review_agents().start(
             subject,
+            tour_agent_folder.map(Path::new),
             Path::new("/clones/shop"),
             &Sha::new("abc123"),
             subject,
@@ -88,37 +96,99 @@ fn started_review(fake: &FakeTourAgent) -> (String, String, String, String) {
     )
 }
 
+fn started_in(fake: &FakeTourAgent) -> std::path::PathBuf {
+    let calls = fake.calls();
+    let [TourAgentCall::StartReview { folder, .. }] = calls.as_slice() else {
+        panic!("one review start, got {calls:?}");
+    };
+    folder.clone()
+}
+
 #[test]
-fn a_review_agent_starts_in_a_worktree_of_the_reviewed_head() {
+fn a_review_agent_starts_in_a_clean_tour_agent_folder_at_the_reviewed_head_and_is_told_to_work_there_as_it_is()
+ {
+    let desk = Desk::with(FakeTourAgent::new())
+        .with_checkouts(FakeCheckouts::default().clean_at("/work/shop", "abc123"));
+
+    let terminal = desk
+        .start_with_tour_agent_in(&pr(), Some("/work/shop"))
+        .unwrap();
+
+    assert_eq!(started_in(&desk.fake), Path::new("/work/shop"));
+    let (_, first_task, tools, _) = started_review(&desk.fake);
+    assert!(
+        first_task.contains("in this folder as it is"),
+        "{first_task}"
+    );
+    assert!(!first_task.contains("EnterWorktree"), "{first_task}");
+    assert!(tools.contains("Read(//work/shop/**)"), "{tools}");
+    assert_eq!(desk.fake.review_agents_of(PR), [terminal.to_string()]);
+}
+
+fn assert_told_to_make_its_own_worktree(desk: &Desk) {
+    assert_eq!(started_in(&desk.fake), Path::new("/clones/shop"));
+    let (_, first_task, _, _) = started_review(&desk.fake);
+    assert!(first_task.contains("EnterWorktree"), "{first_task}");
+    assert!(
+        first_task.contains("git checkout --detach abc123"),
+        "{first_task}"
+    );
+    assert!(
+        first_task.contains("never with `git worktree add`"),
+        "{first_task}"
+    );
+    assert!(first_task.contains("ExitWorktree"), "{first_task}");
+    assert!(first_task.contains("\"remove\""), "{first_task}");
+    assert!(!first_task.contains("as it is"), "{first_task}");
+}
+
+#[test]
+fn a_tour_agent_folder_on_another_commit_starts_the_agent_in_the_clone_to_make_its_own_worktree() {
+    let desk = Desk::with(FakeTourAgent::new()).with_checkouts(
+        FakeCheckouts::default()
+            .clean_at("/clones/shop", "other")
+            .clean_at("/work/shop", "def456"),
+    );
+
+    desk.start_with_tour_agent_in(&pr(), Some("/work/shop"))
+        .unwrap();
+
+    assert_told_to_make_its_own_worktree(&desk);
+}
+
+#[test]
+fn a_dirty_tour_agent_folder_starts_the_agent_in_the_clone_to_make_its_own_worktree() {
+    let desk = Desk::with(FakeTourAgent::new()).with_checkouts(
+        FakeCheckouts::default()
+            .clean_at("/clones/shop", "other")
+            .dirty_at("/work/shop", "abc123"),
+    );
+
+    desk.start_with_tour_agent_in(&pr(), Some("/work/shop"))
+        .unwrap();
+
+    assert_told_to_make_its_own_worktree(&desk);
+}
+
+#[test]
+fn no_tour_agent_starts_the_agent_in_the_clone_to_make_its_own_worktree() {
     let desk = Desk::with(FakeTourAgent::new());
 
     let terminal = desk.start(&pr()).unwrap();
 
-    assert_eq!(
-        desk.worktrees.calls().last(),
-        Some(&WorktreeCall::Add {
-            subject: PR.to_owned(),
-            repo: "/clones/shop".into(),
-            head: "abc123".to_owned()
-        })
-    );
-    let calls = desk.fake.calls();
-    let [
-        TourAgentCall::StartReview {
-            subject, folder, ..
-        },
-    ] = calls.as_slice()
-    else {
-        panic!("one review start, got {calls:?}");
-    };
-    assert_eq!(subject, &pr());
-    assert_eq!(
-        folder,
-        Path::new("/fake/review-worktrees")
-            .join(pr().file_stem())
-            .as_path()
-    );
+    assert_told_to_make_its_own_worktree(&desk);
     assert_eq!(desk.fake.review_agents_of(PR), [terminal.to_string()]);
+}
+
+#[test]
+fn an_agent_that_makes_its_own_worktree_is_allowed_to_enter_and_leave_it() {
+    let desk = Desk::with(FakeTourAgent::new());
+
+    desk.start(&pr()).unwrap();
+
+    let (_, _, tools, _) = started_review(&desk.fake);
+    assert!(tools.contains("EnterWorktree"), "{tools}");
+    assert!(tools.contains("ExitWorktree"), "{tools}");
 }
 
 #[test]
@@ -171,30 +241,17 @@ fn the_review_agent_runs_the_review_skill_when_the_reviewer_set_one() {
 }
 
 #[test]
-fn a_failed_start_takes_the_worktree_back() {
-    let desk = Desk::with(FakeTourAgent::new().failing_to_start("herdr said no"));
+fn a_clone_that_is_no_checkout_starts_no_agent() {
+    let desk = Desk::with(FakeTourAgent::new()).with_checkouts(FakeCheckouts::default());
 
     let error = desk.start(&pr()).unwrap_err();
 
-    assert!(format!("{error:#}").contains("herdr said no"));
-    assert_eq!(desk.worktrees.standing(), Vec::<String>::new());
-}
-
-#[test]
-fn a_worktree_git_refuses_starts_no_agent() {
-    let desk = Desk::with(FakeTourAgent::new());
-
-    let error = desk
-        .review_agents_over(FakeReviewWorktrees::refusing())
-        .start(&pr(), Path::new("/clones/shop"), &Sha::new("abc"), &pr())
-        .unwrap_err();
-
-    assert!(format!("{error:#}").contains("git refused the worktree"));
+    assert!(format!("{error:#}").contains("no clone"));
     assert_eq!(desk.fake.calls(), vec![]);
 }
 
 #[test]
-fn a_second_run_replaces_the_first_agent_and_its_worktree() {
+fn a_second_run_replaces_the_first_agent() {
     let desk = Desk::with(FakeTourAgent::new().review_agent("t5", PR, AgentStatus::Idle, 10));
 
     let terminal = desk.start(&pr()).unwrap();
@@ -205,13 +262,6 @@ fn a_second_run_replaces_the_first_agent_and_its_worktree() {
         calls.first(),
         Some(&TourAgentCall::Kill(TerminalId::new("t5")))
     );
-    assert_eq!(
-        desk.worktrees.calls().first(),
-        Some(&WorktreeCall::Remove {
-            subject: PR.to_owned()
-        })
-    );
-    assert_eq!(desk.worktrees.standing(), [PR]);
 }
 
 #[test]
@@ -223,7 +273,7 @@ fn herdr_being_off_starts_nothing() {
     let error = desk.start(&pr()).unwrap_err();
 
     assert!(error.to_string().contains("not running"), "{error}");
-    assert_eq!(desk.worktrees.calls(), vec![]);
+    assert_eq!(desk.fake.calls(), vec![]);
 }
 
 fn five_working_tour_agents() -> FakeTourAgent {
@@ -289,13 +339,12 @@ fn a_review_agent_shares_the_five_slots_and_ends_the_idle_tour_agent_used_longes
 }
 
 #[test]
-fn with_five_busy_agents_no_review_agent_starts_and_no_worktree_is_made() {
+fn with_five_busy_agents_no_review_agent_starts() {
     let desk = Desk::with(five_working_tour_agents());
 
     let error = desk.start(&pr()).unwrap_err();
 
     assert!(error.to_string().contains("none can be ended"), "{error}");
-    assert_eq!(desk.worktrees.standing(), Vec::<String>::new());
 }
 
 fn four_working_tour_agents(fake: FakeTourAgent) -> FakeTourAgent {
@@ -310,21 +359,13 @@ fn four_working_tour_agents(fake: FakeTourAgent) -> FakeTourAgent {
 }
 
 #[test]
-fn an_idle_review_agent_is_ended_with_its_worktree_like_an_idle_tour_agent_when_room_is_needed() {
+fn an_idle_review_agent_is_ended_like_an_idle_tour_agent_when_room_is_needed() {
     let desk = Desk::with(four_working_tour_agents(FakeTourAgent::new().review_agent(
         "t1",
         OTHER_PR,
         AgentStatus::Idle,
         0,
     )));
-    desk.worktrees
-        .add(
-            &OTHER_PR.parse().unwrap(),
-            Path::new("/clones/shop"),
-            &Sha::new("abc"),
-        )
-        .unwrap();
-
     desk.tour_agents()
         .start(&pr(), &pr(), TourKind::Guided)
         .unwrap();
@@ -334,7 +375,6 @@ fn an_idle_review_agent_is_ended_with_its_worktree_like_an_idle_tour_agent_when_
             .calls()
             .contains(&TourAgentCall::Kill(TerminalId::new("t1")))
     );
-    assert_eq!(desk.worktrees.standing(), Vec::<String>::new());
 }
 
 #[test]
@@ -520,7 +560,7 @@ fn showing_brings_up_the_review_agents_terminal_and_a_missing_one_is_said() {
 }
 
 #[test]
-fn ending_the_review_ends_its_agent_and_removes_its_worktree() {
+fn ending_the_review_ends_its_agent() {
     let desk = Desk::with(FakeTourAgent::new());
     let terminal = desk.start(&pr()).unwrap();
 
@@ -528,5 +568,4 @@ fn ending_the_review_ends_its_agent_and_removes_its_worktree() {
 
     assert!(desk.fake.calls().contains(&TourAgentCall::Kill(terminal)));
     assert_eq!(desk.fake.review_agents_of(PR), Vec::<String>::new());
-    assert_eq!(desk.worktrees.standing(), Vec::<String>::new());
 }

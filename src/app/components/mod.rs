@@ -10,6 +10,7 @@ pub mod findings_sheet;
 pub mod finish_review;
 pub mod fold_toggle;
 pub mod guided_tour_banner;
+pub mod hidden_text_notice;
 pub mod icon;
 pub mod image_row;
 pub mod jump_palette;
