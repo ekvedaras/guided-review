@@ -14,7 +14,7 @@ pub use column::Column;
 pub use git_grep::GitGrep;
 pub use import::Import;
 pub use language_server::{
-    LanguageServers, ServerCatalog, ServerLaunch, ServersOnThisMachine, Timeouts,
+    LanguageServers, ManagedServers, ReleasePin, ServerCatalog, ServerLaunch, ServerPins, Timeouts,
 };
 pub use lookup::{FILES_PARSED_AT_MOST, FileSearch, FilesWithWord, Lookup, Lookups, Reach};
 pub use navigator::{

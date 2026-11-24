@@ -46,10 +46,18 @@ while True:
             send({"jsonrpc": "2.0", "id": "create", "method": "window/workDoneProgress/create", "params": {"token": "index"}})
             progress("begin")
             threading.Timer(script["indexing_ms"] / 1000, lambda: progress("end")).start()
+        if method == "initialized" and script.get("reports_status") and not script.get("busy_ms"):
+            send({"jsonrpc": "2.0", "method": "experimental/serverStatus", "params": {"health": "ok", "quiescent": True}})
         if method == "exit":
             break
         continue
     if method in script.get("silent_on", []):
+        continue
+    if method == "$/guidedReviewBarrier" and script.get("busy_ms"):
+        # Like rust-analyzer, whose status comes after the reply to a request sent right after initialized.
+        send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32601, "message": "unknown request"}})
+        threading.Timer(0.1, lambda: send({"jsonrpc": "2.0", "method": "experimental/serverStatus", "params": {"health": "ok", "quiescent": False}})).start()
+        threading.Timer(script["busy_ms"] / 1000, lambda: send({"jsonrpc": "2.0", "method": "experimental/serverStatus", "params": {"health": "ok", "quiescent": True}})).start()
         continue
     if method == "initialize":
         capabilities = {}

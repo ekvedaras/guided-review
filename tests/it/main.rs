@@ -84,6 +84,7 @@ mod intents;
 mod jump;
 mod keymap;
 mod language_server;
+mod language_server_downloads;
 mod line_number;
 mod local_guided_tour;
 mod local_key_commands;

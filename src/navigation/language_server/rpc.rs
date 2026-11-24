@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+use super::StatusReports;
+
 pub(super) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -34,11 +36,15 @@ type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, Failure>>>>>;
 struct Busy {
     progress: HashSet<String>,
     quiescent: Option<bool>,
+    /// The server's first status may come after the reply to the first request, so a server that
+    /// reports status is busy until it has.
+    status: StatusReports,
 }
 
 impl Busy {
     fn is_busy(&self) -> bool {
-        !self.progress.is_empty() || self.quiescent == Some(false)
+        let status_due = self.status == StatusReports::Yes && self.quiescent.is_none();
+        !self.progress.is_empty() || self.quiescent == Some(false) || status_due
     }
 }
 
@@ -62,6 +68,7 @@ impl Connection {
         args: &[String],
         folder: &std::path::Path,
         settings: Value,
+        status: StatusReports,
     ) -> std::io::Result<Self> {
         let mut child = Command::new(program)
             .args(args)
@@ -77,7 +84,10 @@ impl Connection {
         let stdout = child.stdout.take().ok_or_else(|| missing("stdout"))?;
         let pending: Pending = Arc::default();
         let shared = Arc::new(Shared {
-            busy: Mutex::new(Busy::default()),
+            busy: Mutex::new(Busy {
+                status,
+                ..Busy::default()
+            }),
             changed: Condvar::new(),
         });
         let reader = Reader {

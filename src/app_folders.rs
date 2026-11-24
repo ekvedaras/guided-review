@@ -275,6 +275,11 @@ impl AppFolders {
         self.state.join("app.log")
     }
 
+    /// The language servers the app downloaded, one folder per server and pinned version.
+    pub fn language_servers(&self) -> PathBuf {
+        self.cache.join("language-servers")
+    }
+
     pub fn images(&self) -> PathBuf {
         self.cache.join("images")
     }

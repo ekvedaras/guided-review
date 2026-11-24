@@ -2,14 +2,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use guided_review::app_folders::AppFolders;
+use guided_review::github::GitHub;
 use guided_review::language::Language;
 use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, DefinitionKind, FallbackReason, FileSearch,
-    LanguageServers, Lookups, NavigationRequest, Place, ServerCatalog, ServerLaunch, ServerName,
-    Timeouts, Waiting, Word,
+    LanguageServers, Lookups, ManagedServers, NavigationRequest, Place, ServerCatalog,
+    ServerLaunch, ServerName, ServerPins, Timeouts, Waiting, Word,
 };
 use guided_review::pull_request::{RepoName, Sha};
+use guided_review::update::Target;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -42,14 +45,23 @@ struct FakeCatalog {
 }
 
 impl ServerCatalog for FakeCatalog {
-    fn launch_for(&self, _language: Language) -> Result<ServerLaunch, FallbackReason> {
+    fn launch_for(
+        &self,
+        _language: Language,
+        _waiting: &dyn Fn(Waiting),
+    ) -> Result<ServerLaunch, FallbackReason> {
         let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
-        Ok(
-            ServerLaunch::rust_analyzer(PathBuf::from("python3")).with_args(vec![
-                fake.to_string_lossy().into_owned(),
-                self.script.to_string_lossy().into_owned(),
-            ]),
-        )
+        let script: Value =
+            serde_json::from_str(&std::fs::read_to_string(&self.script).unwrap()).unwrap();
+        let launch = ServerLaunch::rust_analyzer(PathBuf::from("python3")).with_args(vec![
+            fake.to_string_lossy().into_owned(),
+            self.script.to_string_lossy().into_owned(),
+        ]);
+        Ok(if script["reports_status"] == json!(true) {
+            launch.reporting_status()
+        } else {
+            launch
+        })
     }
 }
 
@@ -258,6 +270,20 @@ fn a_utf8_server_gets_the_byte_column() {
 }
 
 #[test]
+fn a_server_that_reports_its_status_only_after_the_first_reply_is_still_waited_for() {
+    let rig = Rig::new(LIB, |repo| {
+        json!({"reports_status": true, "busy_ms": 400, "answers": {
+            "textDocument/definition": [location(repo, "src/lib.rs", 3, 7, 10)],
+        }})
+    });
+
+    let (answer, waits) = rig.hover_add();
+
+    assert_eq!(answer.unwrap().lookup.definitions.len(), 1);
+    assert_eq!(waits.last(), Some(&Waiting::Indexing));
+}
+
+#[test]
 fn the_first_hover_reports_starting_and_then_indexing_while_the_server_works() {
     let rig = Rig::new(LIB, |_| json!({"indexing_ms": 300, "answers": {}}));
 
@@ -407,26 +433,27 @@ fn a_location_outside_the_repo_is_kept_to_open_from_disk() {
     assert_eq!(answer.lookup.on_disk(&file_path("src/lib.rs")), None);
 }
 
-struct Real;
-
-impl ServerCatalog for Real {
-    fn launch_for(&self, _: Language) -> Result<ServerLaunch, FallbackReason> {
-        Ok(ServerLaunch::rust_analyzer(PathBuf::from("rust-analyzer")))
-    }
+/// The pinned rust-analyzer the app downloaded into its cache folder. It is not downloaded here unless
+/// `GUIDED_REVIEW_DOWNLOAD_SMOKE` is set, so a pin bump is tried by hand with that set.
+fn downloaded_rust_analyzer() -> Option<Arc<ManagedServers>> {
+    let cache = AppFolders::xdg().ok()?.language_servers();
+    let managed = ManagedServers::new(
+        cache,
+        Arc::new(GitHub::from_env()),
+        ServerPins::pinned(),
+        Target::running(),
+    );
+    let installed = managed.is_downloaded(Language::Rust);
+    let may_download = std::env::var_os("GUIDED_REVIEW_DOWNLOAD_SMOKE").is_some();
+    (installed || may_download).then(|| Arc::new(managed))
 }
 
 #[test]
 fn the_real_rust_analyzer_finds_a_definition() {
-    let Ok(found) = std::process::Command::new("rust-analyzer")
-        .arg("--version")
-        .output()
-    else {
-        eprintln!("rust-analyzer is not installed: skipped");
+    let Some(managed) = downloaded_rust_analyzer() else {
+        eprintln!("the pinned rust-analyzer is not downloaded: skipped");
         return;
     };
-    if !found.status.success() {
-        return;
-    }
     let repo = FixtureRepo::cloned_from("acme/shop");
     repo.write(
         "Cargo.toml",
@@ -435,7 +462,7 @@ fn the_real_rust_analyzer_finds_a_definition() {
     repo.write("src/lib.rs", LIB);
     let head = Sha::new(&repo.commit("head"));
     let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
-    let servers = LanguageServers::new(Arc::new(Real), Timeouts::default());
+    let servers = LanguageServers::new(managed, Timeouts::default());
     let by_name: Arc<dyn CodeNavigator> =
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
             file_path("src/lib.rs"),
@@ -451,7 +478,7 @@ fn the_real_rust_analyzer_finds_a_definition() {
                     path: file_path("src/lib.rs"),
                     line: line(6),
                 },
-                column: Column::try_from(23).unwrap(),
+                column: Column::try_from(24).unwrap(),
                 word: Word::new("add").unwrap(),
             },
             &|_| {},

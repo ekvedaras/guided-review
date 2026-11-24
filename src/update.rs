@@ -8,7 +8,7 @@ use anyhow::Context;
 
 use crate::platform::Os;
 
-pub use release_install::{Build, InTheWay, Installed, ReleaseInstall, SkillLink};
+pub use release_install::{Build, InTheWay, Installed, ReleaseInstall, SkillLink, check_digest};
 
 /// The build of this binary as `--version` prints it and the app shows it: the release version and
 /// the commit it was built from, marked `-dirty` when built with uncommitted changes.

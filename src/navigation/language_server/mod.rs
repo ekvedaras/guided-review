@@ -3,6 +3,7 @@
 //! whenever the server cannot.
 
 mod hover;
+mod managed;
 mod rpc;
 
 use std::collections::{HashMap, HashSet};
@@ -24,7 +25,16 @@ use super::{
     NavigationRequest, Place, Reach, ServerName, Usage, Waiting, Word,
 };
 use hover::{Hovered, kind_of};
+pub use managed::{ManagedServers, ReleasePin, ServerPins};
 use rpc::{Connection, Failure, locked};
+
+/// Whether a server says by `experimental/serverStatus` that it is busy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusReports {
+    Yes,
+    #[default]
+    No,
+}
 
 /// How to start one server.
 #[derive(Debug, Clone)]
@@ -34,6 +44,7 @@ pub struct ServerLaunch {
     pub args: Vec<String>,
     /// Sent as `initializationOptions`, and as the answer to the server's configuration requests.
     pub options: Value,
+    pub status: StatusReports,
 }
 
 impl ServerLaunch {
@@ -43,12 +54,19 @@ impl ServerLaunch {
             name: ServerName::new("rust-analyzer"),
             program,
             args: Vec::new(),
+            status: StatusReports::No,
             options: json!({
                 "cargo": {"buildScripts": {"enable": false}},
                 "procMacro": {"enable": false},
                 "checkOnSave": false,
             }),
         }
+    }
+
+    /// The server tells whether it is busy with `experimental/serverStatus`, so until it has, it is.
+    pub fn reporting_status(mut self) -> Self {
+        self.status = StatusReports::Yes;
+        self
     }
 
     pub fn with_args(mut self, args: Vec<String>) -> Self {
@@ -59,53 +77,13 @@ impl ServerLaunch {
 
 /// Which server answers which language, and how it is started.
 pub trait ServerCatalog: Send + Sync {
-    /// `Err` says why no server answers the language.
-    fn launch_for(&self, language: Language) -> Result<ServerLaunch, FallbackReason>;
-}
-
-/// A rust-analyzer found on the machine; the managed download replaces it.
-#[derive(Default)]
-pub struct ServersOnThisMachine {
-    rust_analyzer: Mutex<Option<PathBuf>>,
-}
-
-impl ServerCatalog for ServersOnThisMachine {
-    fn launch_for(&self, language: Language) -> Result<ServerLaunch, FallbackReason> {
-        let name = ServerName::of(language);
-        match language {
-            Language::Rust => {
-                let mut found = locked(&self.rust_analyzer);
-                if found.is_none() {
-                    *found = find_on_path("rust-analyzer");
-                }
-                found
-                    .clone()
-                    .map(ServerLaunch::rust_analyzer)
-                    .ok_or_else(|| FallbackReason::new("rust-analyzer is not installed"))
-            }
-            Language::Php | Language::TypeScript | Language::Tsx => Err(FallbackReason::new(
-                &format!("{name} is not downloaded by the app yet"),
-            )),
-        }
-    }
-}
-
-fn find_on_path(program: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    let home = std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cargo/bin"));
-    std::env::split_paths(&path)
-        .chain(home)
-        .map(|folder| folder.join(program))
-        .find(|candidate| runs(candidate))
-}
-
-/// A rustup proxy with no toolchain component behind it exists but fails, so ask it.
-fn runs(program: &Path) -> bool {
-    std::process::Command::new(program)
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .is_ok_and(|output| output.status.success())
+    /// `Err` says why no server answers the language. `waiting` is told when the server has to be
+    /// downloaded first.
+    fn launch_for(
+        &self,
+        language: Language,
+        waiting: &dyn Fn(Waiting),
+    ) -> Result<ServerLaunch, FallbackReason>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -150,6 +128,7 @@ impl Running {
             &launch.args,
             folder,
             launch.options.clone(),
+            launch.status,
         )
         .map_err(|error| format!("{} could not start: {error}", launch.name))?;
         let uri = uri_of(folder);
@@ -376,7 +355,7 @@ impl CodeNavigator for ServerNavigator {
         let Some(language) = Language::for_path(request.at.path.as_str()) else {
             return by_name(None);
         };
-        let launch = match self.pool.catalog.launch_for(language) {
+        let launch = match self.pool.catalog.launch_for(language, waiting) {
             Ok(launch) => launch,
             Err(reason) => return by_name(Some(reason)),
         };
