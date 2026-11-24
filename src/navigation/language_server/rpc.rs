@@ -27,6 +27,13 @@ pub(super) enum Failure {
     Silent,
     /// The server answered with an error.
     Refused(String),
+    /// The server dropped the question because files changed under it; asking again gets an answer.
+    Modified,
+}
+
+/// LSP's `ContentModified` and `ServerCancelled`.
+fn is_modified(code: &Value) -> bool {
+    matches!(code.as_i64(), Some(-32801 | -32802))
 }
 
 type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, Failure>>>>>;
@@ -285,6 +292,7 @@ impl Reader {
             return;
         };
         let outcome = match message.get("error") {
+            Some(error) if is_modified(&error["code"]) => Err(Failure::Modified),
             Some(error) => Err(Failure::Refused(
                 error["message"].as_str().unwrap_or("an error").to_owned(),
             )),

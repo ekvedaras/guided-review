@@ -3,6 +3,7 @@ import json, sys, threading
 script = json.load(open(sys.argv[1]))
 log = open(script["log"], "a")
 lock = threading.Lock()
+modified = set()
 
 
 def read():
@@ -52,6 +53,10 @@ while True:
             break
         continue
     if method in script.get("silent_on", []):
+        continue
+    if method in script.get("content_modified_once", []) and method not in modified:
+        modified.add(method)
+        send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32801, "message": "content modified"}})
         continue
     if method == "$/guidedReviewBarrier" and script.get("busy_ms"):
         # Like rust-analyzer, whose status comes after the reply to a request sent right after initialized.

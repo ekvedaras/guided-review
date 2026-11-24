@@ -280,6 +280,12 @@ impl AppFolders {
         self.cache.join("language-servers")
     }
 
+    /// The app's own worktree of each repo that language servers run in, one folder per owner and repo.
+    /// In the state folder, since the index a server built there is costly to rebuild.
+    pub fn server_checkouts(&self) -> PathBuf {
+        self.state.join("server-checkouts")
+    }
+
     pub fn images(&self) -> PathBuf {
         self.cache.join("images")
     }

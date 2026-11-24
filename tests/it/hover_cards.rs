@@ -1120,3 +1120,66 @@ fn a_repo_that_said_no_before_asks_no_question_and_the_adapter_is_never_asked() 
     assert_eq!(card.definitions.len(), 1, "the by-name lookup answered");
     assert_eq!(adapter.asked(), []);
 }
+
+const DEPENDENCY_NOTE: &str = "The PR changes dependency files, so answers may be off";
+
+fn notes_of_a_hover_in_a_pr_that_changes(file: &str, answered_by: AnsweredBy) -> Vec<String> {
+    let shop = Shop::with_changes(&[], |repo| repo.write(file, "changed\n"));
+    let source = shop.source();
+    let mut review = shop.open(&source);
+    review.use_navigator(Arc::new(FakeNavigator::answering_by(answered_by)));
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+    card.notes
+        .iter()
+        .map(|note| note.text().into_owned())
+        .collect()
+}
+
+#[test]
+fn a_language_server_answer_says_it_may_be_off_when_the_pr_changes_a_dependency_file() {
+    for file in [
+        "composer.json",
+        "composer.lock",
+        "package.json",
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "bun.lock",
+        "bun.lockb",
+        "Cargo.toml",
+        "Cargo.lock",
+        "packages/app/package.json",
+    ] {
+        assert_eq!(
+            notes_of_a_hover_in_a_pr_that_changes(
+                file,
+                AnsweredBy::LanguageServer(rust_analyzer())
+            ),
+            [DEPENDENCY_NOTE],
+            "{file}"
+        );
+    }
+}
+
+#[test]
+fn a_pr_that_changes_no_dependency_file_and_an_answer_by_name_carry_no_dependency_note() {
+    assert_eq!(
+        notes_of_a_hover_in_a_pr_that_changes(
+            "src/composer.php",
+            AnsweredBy::LanguageServer(rust_analyzer())
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        notes_of_a_hover_in_a_pr_that_changes(
+            "composer.lock",
+            AnsweredBy::ByName { because: None }
+        ),
+        Vec::<String>::new()
+    );
+}

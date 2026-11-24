@@ -1,1 +1,1 @@
-Hovering a Rust name in a clean clone shows the definition the code calls, its usages and doc, from rust-analyzer.
+Hovering a Rust name shows its definition, usages and doc from rust-analyzer, whatever your clone has checked out.

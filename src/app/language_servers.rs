@@ -7,7 +7,7 @@ use gpui::{App, Global};
 use crate::app_folders::AppFolders;
 use crate::config::Config;
 use crate::github::GitHub;
-use crate::navigation::{LanguageServers, ManagedServers, ServerPins, Timeouts};
+use crate::navigation::{LanguageServers, ManagedServers, ServerCheckouts, ServerPins, Timeouts};
 use crate::update::Target;
 use crate::viewer::Review;
 
@@ -35,7 +35,11 @@ pub fn use_language_servers(review: &mut Review, folders: &AppFolders, cx: &mut 
         if let Err(error) = managed.remove_unpinned() {
             eprintln!("could not remove old language server downloads: {error:#}");
         }
-        let servers = Arc::new(LanguageServers::new(Arc::new(managed), Timeouts::default()));
+        let servers = Arc::new(LanguageServers::new(
+            Arc::new(managed),
+            ServerCheckouts::new(folders.server_checkouts()),
+            Timeouts::default(),
+        ));
         let on_quit = Arc::clone(&servers);
         cx.on_app_quit(move |_| {
             let servers = Arc::clone(&on_quit);

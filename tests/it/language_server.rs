@@ -9,7 +9,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, DefinitionKind, FallbackReason, FileSearch,
     LanguageServers, Lookups, ManagedServers, NavigationRequest, Place, ServerCatalog,
-    ServerLaunch, ServerName, ServerPins, Timeouts, Waiting, Word,
+    ServerCheckouts, ServerLaunch, ServerName, ServerPins, Timeouts, Waiting, Word,
 };
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::update::Target;
@@ -69,27 +69,30 @@ struct Rig {
     repo: FixtureRepo,
     head: Sha,
     scratch: TempDir,
+    /// Where the app's checkout of the repo will be: what a server's locations are under.
+    checkout: PathBuf,
     servers: LanguageServers,
 }
 
-fn location(repo: &FixtureRepo, path: &str, line: u32, from: u32, to: u32) -> Value {
+fn location(checkout: &Path, path: &str, line: u32, from: u32, to: u32) -> Value {
     json!({
-        "uri": format!("file://{}", repo.path().join(path).display()),
+        "uri": format!("file://{}", checkout.join(path).display()),
         "range": {"start": {"line": line, "character": from}, "end": {"line": line, "character": to}}
     })
 }
 
 impl Rig {
-    fn new(text: &str, script: impl FnOnce(&FixtureRepo) -> Value) -> Self {
+    fn new(text: &str, script: impl FnOnce(&Path) -> Value) -> Self {
         Self::timed(text, script, Timeouts::default())
     }
 
-    fn timed(text: &str, script: impl FnOnce(&FixtureRepo) -> Value, timeouts: Timeouts) -> Self {
+    fn timed(text: &str, script: impl FnOnce(&Path) -> Value, timeouts: Timeouts) -> Self {
         let repo = FixtureRepo::cloned_from("acme/shop");
         repo.write("src/lib.rs", text);
         let head = Sha::new(&repo.commit("head"));
         let scratch = TempDir::new().unwrap();
-        let mut script = script(&repo);
+        let checkout = scratch.path().join("checkouts/acme/shop");
+        let mut script = script(&checkout);
         script["log"] = json!(scratch.path().join("log").to_string_lossy());
         let script_file = scratch.path().join("script.json");
         std::fs::write(&script_file, script.to_string()).unwrap();
@@ -97,12 +100,14 @@ impl Rig {
             Arc::new(FakeCatalog {
                 script: script_file,
             }),
+            ServerCheckouts::new(scratch.path().join("checkouts")),
             timeouts,
         );
         Self {
             repo,
             head,
             scratch,
+            checkout,
             servers,
         }
     }
@@ -132,20 +137,48 @@ impl Rig {
         let code =
             LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap();
         let waits = Mutex::new(Vec::new());
-        let answer = self.servers.navigator(self.by_name()).navigate(
-            &code,
-            &NavigationRequest {
-                sha: self.head.clone(),
-                at: Place {
-                    path: file_path("src/lib.rs"),
-                    line: line(number),
+        let answer = self
+            .servers
+            .navigator(RepoName::new("acme", "shop"), self.by_name())
+            .navigate(
+                &code,
+                &NavigationRequest {
+                    sha: self.head.clone(),
+                    at: Place {
+                        path: file_path("src/lib.rs"),
+                        line: line(number),
+                    },
+                    column: Column::try_from(column).unwrap(),
+                    word: Word::new(word).unwrap(),
                 },
-                column: Column::try_from(column).unwrap(),
-                word: Word::new(word).unwrap(),
-            },
-            &|waiting| waits.lock().unwrap().push(waiting),
-        );
+                &|waiting| waits.lock().unwrap().push(waiting),
+            );
         (answer, waits.into_inner().unwrap())
+    }
+
+    /// A later review of the repo: the clone gets another commit, and the hover is at that head.
+    fn hover_add_at_a_new_head(&self, text: &str) -> (anyhow::Result<Answer>, Vec<Waiting>) {
+        self.repo.write("src/lib.rs", text);
+        let head = Sha::new(&self.repo.commit("later head"));
+        let code =
+            LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap();
+        let answer = self
+            .servers
+            .navigator(RepoName::new("acme", "shop"), self.by_name())
+            .navigate(
+                &code,
+                &NavigationRequest {
+                    sha: head,
+                    at: Place {
+                        path: file_path("src/lib.rs"),
+                        line: line(6),
+                    },
+                    column: Column::try_from(23).unwrap(),
+                    word: Word::new("add").unwrap(),
+                },
+                &|_| {},
+            );
+        (answer, Vec::new())
     }
 
     fn hover_add(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
@@ -396,20 +429,30 @@ fn quitting_shuts_every_server_down() {
 }
 
 #[test]
-fn a_dirty_clone_is_answered_by_name_with_a_reason() {
+fn a_dirty_clone_is_answered_by_the_server_from_the_checkout_and_stays_as_it_was() {
     let rig = Rig::answering_add();
-    rig.repo.write("src/lib.rs", &format!("{LIB}// edited\n"));
+    let edited = format!("{LIB}// edited\n");
+    rig.repo.write("src/lib.rs", &edited);
+    let status = rig.repo.git(&["status", "--porcelain"]);
 
     let answer = rig.hover_add().0.unwrap();
 
-    let AnsweredBy::ByName {
-        because: Some(because),
-    } = &answer.answered_by
-    else {
-        panic!("by name with a reason, got {:?}", answer.answered_by)
-    };
-    assert!(because.as_str().contains("clean"), "{}", because.as_str());
-    assert_eq!(rig.methods(), Vec::<String>::new());
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(rust_analyzer())
+    );
+    let [initialize] = rig.params_of("initialize").try_into().unwrap();
+    assert_eq!(
+        initialize["rootUri"],
+        json!(format!("file://{}", rig.checkout.display()))
+    );
+    let [opened] = rig.params_of("textDocument/didOpen").try_into().unwrap();
+    assert_eq!(opened["textDocument"]["text"], json!(LIB));
+    assert_eq!(
+        std::fs::read_to_string(rig.repo.path().join("src/lib.rs")).unwrap(),
+        edited
+    );
+    assert_eq!(rig.repo.git(&["status", "--porcelain"]), status);
 }
 
 #[test]
@@ -462,14 +505,19 @@ fn the_real_rust_analyzer_finds_a_definition() {
     repo.write("src/lib.rs", LIB);
     let head = Sha::new(&repo.commit("head"));
     let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
-    let servers = LanguageServers::new(managed, Timeouts::default());
+    let scratch = TempDir::new().unwrap();
+    let servers = LanguageServers::new(
+        managed,
+        ServerCheckouts::new(scratch.path().join("checkouts")),
+        Timeouts::default(),
+    );
     let by_name: Arc<dyn CodeNavigator> =
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
             file_path("src/lib.rs"),
         ]))));
 
     let answer = servers
-        .navigator(by_name)
+        .navigator(RepoName::new("acme", "shop"), by_name)
         .navigate(
             &code,
             &NavigationRequest {
@@ -491,4 +539,78 @@ fn the_real_rust_analyzer_finds_a_definition() {
         AnsweredBy::LanguageServer(rust_analyzer())
     );
     assert_eq!(answer.lookup.definitions[0].place.line, line(4));
+}
+
+#[test]
+fn a_review_at_another_head_moves_the_checkout_and_tells_the_running_server_which_files_changed() {
+    let rig = Rig::answering_add();
+    rig.hover_add().0.unwrap();
+    let later = format!("{LIB}// later\n");
+
+    let answer = rig.hover_add_at_a_new_head(&later).0.unwrap();
+
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(rust_analyzer())
+    );
+    let methods = rig.methods();
+    assert_eq!(methods.iter().filter(|m| *m == "initialize").count(), 1);
+    assert!(!methods.contains(&"shutdown".to_owned()), "{methods:?}");
+    let file = format!("file://{}/src/lib.rs", rig.checkout.display());
+    let [watched] = rig
+        .params_of("workspace/didChangeWatchedFiles")
+        .try_into()
+        .unwrap();
+    assert_eq!(watched["changes"], json!([{"uri": file, "type": 2}]));
+    let opened = rig.params_of("textDocument/didOpen");
+    assert_eq!(opened.len(), 2, "the changed file is opened again");
+    assert_eq!(opened[1]["textDocument"]["text"], json!(later));
+    assert_eq!(rig.params_of("textDocument/didClose").len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(rig.checkout.join("src/lib.rs")).unwrap(),
+        later
+    );
+}
+
+#[test]
+fn a_location_in_a_borrowed_dependency_shows_as_a_repo_path_and_opens_from_disk() {
+    let rig = Rig::new(
+        LIB,
+        |checkout| json!({"answers": {"textDocument/definition": [location(checkout, "vendor/laravel/framework.php", 0, 6, 9)]}}),
+    );
+    rig.repo
+        .write("vendor/laravel/framework.php", "<?php // installed\n");
+
+    let answer = rig.hover_add().0.unwrap();
+
+    let [definition] = answer.lookup.definitions.as_slice() else {
+        panic!("one definition")
+    };
+    assert_eq!(
+        definition.place.path,
+        file_path("vendor/laravel/framework.php")
+    );
+    assert_eq!(
+        answer.lookup.on_disk(&definition.place.path),
+        Some(rig.checkout.join("vendor/laravel/framework.php").as_path())
+    );
+    assert_eq!(&*definition.signature, "<?php // installed");
+}
+
+#[test]
+fn a_question_the_server_cancels_because_files_changed_is_asked_again() {
+    let rig = Rig::new(LIB, |checkout| {
+        json!({"content_modified_once": ["textDocument/definition"], "answers": {
+            "textDocument/definition": [location(checkout, "src/lib.rs", 3, 7, 10)],
+        }})
+    });
+
+    let answer = rig.hover_add().0.unwrap();
+
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(rust_analyzer())
+    );
+    assert_eq!(answer.lookup.definitions.len(), 1);
+    assert_eq!(rig.params_of("textDocument/definition").len(), 2);
 }

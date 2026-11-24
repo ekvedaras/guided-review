@@ -2,6 +2,7 @@
 //! asked for the definition, the usages and the hover of a name, with the by-name lookup answering
 //! whenever the server cannot.
 
+mod checkout;
 mod hover;
 mod managed;
 mod rpc;
@@ -18,12 +19,13 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::line_number::LineNumber;
-use crate::pull_request::Sha;
+use crate::pull_request::{RepoName, Sha};
 
 use super::{
     Answer, AnsweredBy, CodeNavigator, Column, Definition, FallbackReason, Lookup,
     NavigationRequest, Place, Reach, ServerName, Usage, Waiting, Word,
 };
+pub use checkout::{Change, ChangedFile, Checkout, ServerCheckouts};
 use hover::{Hovered, kind_of};
 pub use managed::{ManagedServers, ReleasePin, ServerPins};
 use rpc::{Connection, Failure, locked};
@@ -107,6 +109,10 @@ impl Default for Timeouts {
     }
 }
 
+/// How often a question the server dropped because files changed is asked again.
+const MODIFIED_RETRIES: u32 = 5;
+const MODIFIED_PAUSE: Duration = Duration::from_millis(250);
+
 /// Counts a position's column in the unit the server speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Encoding {
@@ -153,6 +159,7 @@ impl Running {
             Failure::Silent => format!("{} did not start in time", launch.name),
             Failure::Died => format!("{} stopped while starting", launch.name),
             Failure::Refused(why) => format!("{} refused to start: {why}", launch.name),
+            Failure::Modified => format!("{} was not ready to start", launch.name),
         })?;
         let encoding = match initialized
             .pointer("/capabilities/positionEncoding")
@@ -203,6 +210,40 @@ impl Running {
                 "text": text,
             }}),
         )
+    }
+
+    /// The checkout moved to another head: files the server has open are opened again from their new
+    /// text, and the server hears which files changed on disk so it re-indexes those only. A server
+    /// that does not hear is stale until it is restarted, so the failure is not an answer's.
+    fn hear_of(&self, folder: &Path, changed: &[ChangedFile]) {
+        if changed.is_empty() {
+            return;
+        }
+        let mut opened = locked(&self.opened);
+        let mut events = Vec::new();
+        for file in changed {
+            let path = file.path.under(folder);
+            if opened.remove(&path) {
+                self.connection
+                    .notify(
+                        "textDocument/didClose",
+                        &json!({"textDocument": {"uri": uri_of(&path)}}),
+                    )
+                    .ok();
+            }
+            let kind = match file.change {
+                Change::Created => 1,
+                Change::Changed => 2,
+                Change::Deleted => 3,
+            };
+            events.push(json!({"uri": uri_of(&path), "type": kind}));
+        }
+        self.connection
+            .notify(
+                "workspace/didChangeWatchedFiles",
+                &json!({"changes": events}),
+            )
+            .ok();
     }
 
     fn character(&self, text: &str, line: LineNumber, column: Column) -> Option<u32> {
@@ -266,12 +307,19 @@ type Slot = Arc<Mutex<Option<Arc<Running>>>>;
 
 struct Pool {
     catalog: Arc<dyn ServerCatalog>,
+    checkouts: ServerCheckouts,
     timeouts: Timeouts,
     /// One per (folder, server): the server is reused by every review of the repo.
     slots: Mutex<HashMap<(PathBuf, String), Slot>>,
+    turns: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 impl Pool {
+    /// What one repo's reviews take turns with, since they share one checkout.
+    fn turn_of(&self, repo: &RepoName) -> Arc<Mutex<()>> {
+        Arc::clone(locked(&self.turns).entry(repo.to_string()).or_default())
+    }
+
     fn slot(&self, folder: &Path, name: &ServerName) -> Slot {
         let mut slots = locked(&self.slots);
         Arc::clone(
@@ -300,11 +348,17 @@ pub struct LanguageServers {
 }
 
 impl LanguageServers {
-    pub fn new(catalog: Arc<dyn ServerCatalog>, timeouts: Timeouts) -> Self {
+    pub fn new(
+        catalog: Arc<dyn ServerCatalog>,
+        checkouts: ServerCheckouts,
+        timeouts: Timeouts,
+    ) -> Self {
         let pool = Arc::new(Pool {
             catalog,
+            checkouts,
             timeouts,
             slots: Mutex::default(),
+            turns: Mutex::default(),
         });
         let watched: Weak<Pool> = Arc::downgrade(&pool);
         let idle = timeouts.idle;
@@ -322,9 +376,14 @@ impl LanguageServers {
     }
 
     /// The adapter for one review: `by_name` answers what no server can.
-    pub fn navigator(&self, by_name: Arc<dyn CodeNavigator>) -> Arc<dyn CodeNavigator> {
+    pub fn navigator(
+        &self,
+        repo: RepoName,
+        by_name: Arc<dyn CodeNavigator>,
+    ) -> Arc<dyn CodeNavigator> {
         Arc::new(ServerNavigator {
             pool: Arc::clone(&self.pool),
+            repo,
             by_name,
         })
     }
@@ -337,6 +396,7 @@ impl LanguageServers {
 
 struct ServerNavigator {
     pool: Arc<Pool>,
+    repo: RepoName,
     by_name: Arc<dyn CodeNavigator>,
 }
 
@@ -365,13 +425,23 @@ impl CodeNavigator for ServerNavigator {
                 launch.name
             ))));
         };
-        if !code.working_tree_is_at(&request.sha) {
-            return by_name(Some(FallbackReason::new(&format!(
-                "{} needs the clone clean at the reviewed head, and it is not",
-                launch.name
-            ))));
-        }
-        match self.answer(code, clone, &launch, language, request, waiting) {
+        // One review at a time moves the checkout and asks, so another head cannot move it mid-question.
+        let turn = self.pool.turn_of(&self.repo);
+        let _turn = locked(&turn);
+        let checkout = match self
+            .pool
+            .checkouts
+            .moved_to(clone, &self.repo, &request.sha)
+        {
+            Ok(checkout) => checkout,
+            Err(error) => {
+                return by_name(Some(FallbackReason::new(&format!(
+                    "{} could not get the reviewed head checked out: {error:#}",
+                    launch.name
+                ))));
+            }
+        };
+        match self.answer(code, &checkout, &launch, language, request, waiting) {
             Ok(answer) => Ok(answer),
             Err(reason) => by_name(Some(FallbackReason::new(&reason))),
         }
@@ -381,17 +451,19 @@ impl CodeNavigator for ServerNavigator {
 impl ServerNavigator {
     fn running(
         &self,
-        clone: &Path,
+        checkout: &Checkout,
         launch: &ServerLaunch,
         waiting: &dyn Fn(Waiting),
     ) -> Result<(Slot, Arc<Running>), String> {
-        let slot = self.pool.slot(clone, &launch.name);
+        let folder = checkout.folder.as_path();
+        let slot = self.pool.slot(folder, &launch.name);
         let mut held = locked(&slot);
         if let Some(server) = held.as_ref().filter(|server| server.connection.is_alive()) {
+            server.hear_of(folder, &checkout.changed);
             return Ok((Arc::clone(&slot), Arc::clone(server)));
         }
         waiting(Waiting::Starting(launch.name.clone()));
-        let server = Arc::new(Running::start(launch, clone, &self.pool.timeouts)?);
+        let server = Arc::new(Running::start(launch, folder, &self.pool.timeouts)?);
         *held = Some(Arc::clone(&server));
         drop(held);
         Ok((slot, server))
@@ -400,7 +472,7 @@ impl ServerNavigator {
     fn answer(
         &self,
         code: &dyn CodeSource,
-        clone: &Path,
+        checkout: &Checkout,
         launch: &ServerLaunch,
         language: Language,
         request: &NavigationRequest,
@@ -408,7 +480,7 @@ impl ServerNavigator {
     ) -> Result<Answer, String> {
         let name = &launch.name;
         let timeouts = self.pool.timeouts;
-        let (slot, server) = self.running(clone, launch, waiting)?;
+        let (slot, server) = self.running(checkout, launch, waiting)?;
         server.touch();
         let failed = |failure: Failure| {
             if failure == Failure::Died {
@@ -421,13 +493,15 @@ impl ServerNavigator {
                 Failure::Silent => format!("{name} did not answer in time"),
                 Failure::Died => format!("{name} stopped answering"),
                 Failure::Refused(why) => format!("{name} refused the question: {why}"),
+                Failure::Modified => format!("{name} kept changing its mind about the question"),
             }
         };
         server
             .connection
             .wait_until_quiet(timeouts.indexing, &|| waiting(Waiting::Indexing))
             .map_err(failed)?;
-        let file = request.at.path.under(clone);
+        let folder = checkout.folder.as_path();
+        let file = request.at.path.under(folder);
         let text = std::fs::read_to_string(&file)
             .map_err(|error| format!("{} could not read {}: {error}", name, request.at.path))?;
         server.open(&file, &text, language).map_err(failed)?;
@@ -446,19 +520,33 @@ impl ServerNavigator {
             "context": {"includeDeclaration": false},
         });
         let within = timeouts.answer;
-        let definitions = server
-            .ask("textDocument/definition", &place, within)
-            .map_err(failed)?;
-        let usages = server
-            .ask("textDocument/references", &references, within)
-            .map_err(failed)?;
-        let hover = server
-            .ask("textDocument/hover", &place, within)
-            .map_err(failed)?;
+        let ask_all = || -> Result<[Value; 3], Failure> {
+            Ok([
+                server.ask("textDocument/definition", &place, within)?,
+                server.ask("textDocument/references", &references, within)?,
+                server.ask("textDocument/hover", &place, within)?,
+            ])
+        };
+        let mut retries = 0;
+        let [definitions, usages, hover] = loop {
+            match ask_all() {
+                Err(Failure::Modified) if retries < MODIFIED_RETRIES => {
+                    retries += 1;
+                    // The server drops questions while it takes in changed files, and it says it is busy
+                    // only a moment after.
+                    std::thread::sleep(MODIFIED_PAUSE);
+                    server
+                        .connection
+                        .wait_until_quiet(timeouts.indexing, &|| waiting(Waiting::Indexing))
+                        .map_err(failed)?;
+                }
+                asked => break asked.map_err(failed)?,
+            }
+        };
         server.touch();
         let places = Places {
             code,
-            clone,
+            checkout: folder,
             sha: &request.sha,
         };
         Ok(Answer {
@@ -471,7 +559,8 @@ impl ServerNavigator {
 /// Turns the server's locations into places of the repo.
 struct Places<'a> {
     code: &'a dyn CodeSource,
-    clone: &'a Path,
+    /// The server checkout the server's locations are under.
+    checkout: &'a Path,
     sha: &'a Sha,
 }
 
@@ -553,11 +642,11 @@ impl Places<'_> {
         .ok()?;
         let absolute = path_of(uri)?;
         let inside = absolute
-            .strip_prefix(self.clone)
+            .strip_prefix(self.checkout)
             .ok()
             .map(Path::to_path_buf)
             .or_else(|| {
-                let root = self.clone.canonicalize().ok()?;
+                let root = self.checkout.canonicalize().ok()?;
                 absolute
                     .canonicalize()
                     .ok()?

@@ -148,6 +148,7 @@ mod review_worktree;
 mod reviewing_mark;
 mod running_binary;
 mod screen_travel;
+mod server_checkout;
 mod settings;
 mod settings_pages;
 mod shortcuts;

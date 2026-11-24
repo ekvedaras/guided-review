@@ -7,8 +7,8 @@ use flate2::write::GzEncoder;
 use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, FileSearch, LanguageServers, Lookups,
-    ManagedServers, NavigationRequest, Place, ReleasePin, ServerName, ServerPins, Timeouts,
-    Waiting, Word,
+    ManagedServers, NavigationRequest, Place, ReleasePin, ServerCheckouts, ServerName, ServerPins,
+    Timeouts, Waiting, Word,
 };
 use guided_review::platform::Os;
 use guided_review::pull_request::{RepoName, Sha};
@@ -100,7 +100,7 @@ impl Rig {
             "reports_status": true,
             "answers": {
                 "textDocument/definition": [{
-                    "uri": format!("file://{}", repo.path().join("src/lib.rs").display()),
+                    "uri": format!("file://{}", scratch.path().join("checkouts/acme/shop/src/lib.rs").display()),
                     "range": {"start": {"line": 0, "character": 7}, "end": {"line": 0, "character": 10}}
                 }],
             },
@@ -134,6 +134,7 @@ impl Rig {
         ));
         let servers = LanguageServers::new(
             Arc::clone(&managed) as Arc<dyn guided_review::navigation::ServerCatalog>,
+            ServerCheckouts::new(scratch.path().join("checkouts")),
             Timeouts::default(),
         );
         Self {
@@ -155,19 +156,22 @@ impl Rig {
                 file_path("src/lib.rs"),
             ]))));
         let waits = Mutex::new(Vec::new());
-        let answer = self.servers.navigator(by_name).navigate(
-            &code,
-            &NavigationRequest {
-                sha: self.head.clone(),
-                at: Place {
-                    path: file_path("src/lib.rs"),
-                    line: line(3),
+        let answer = self
+            .servers
+            .navigator(RepoName::new("acme", "shop"), by_name)
+            .navigate(
+                &code,
+                &NavigationRequest {
+                    sha: self.head.clone(),
+                    at: Place {
+                        path: file_path("src/lib.rs"),
+                        line: line(3),
+                    },
+                    column: Column::try_from(23).unwrap(),
+                    word: Word::new("add").unwrap(),
                 },
-                column: Column::try_from(23).unwrap(),
-                word: Word::new("add").unwrap(),
-            },
-            &|waiting| waits.lock().unwrap().push(waiting),
-        );
+                &|waiting| waits.lock().unwrap().push(waiting),
+            );
         (answer, waits.into_inner().unwrap())
     }
 

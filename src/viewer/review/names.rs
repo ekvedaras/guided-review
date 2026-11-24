@@ -5,7 +5,9 @@ use std::cell::OnceCell;
 use std::sync::Arc;
 
 use crate::file_path::FilePath;
-use crate::navigation::{AnsweredBy, CodeNavigator, LanguageServers, Lookup, Place, ServerAnswer};
+use crate::navigation::{
+    AnsweredBy, CodeNavigator, LanguageServers, Lookup, Place, ServerAnswer, is_dependency_file,
+};
 use crate::pieces::ChangedFile;
 use crate::pull_request::RepoName;
 use crate::viewer::code_link::CodeLinks;
@@ -54,7 +56,7 @@ impl ReviewCore {
         repo: RepoName,
         answer: Option<ServerAnswer>,
     ) {
-        let adapter = servers.navigator(self.names.by_name());
+        let adapter = servers.navigator(repo.clone(), self.names.by_name());
         self.use_language_servers(adapter, repo, answer);
     }
 
@@ -216,6 +218,13 @@ impl<'a> ReviewPlaces<'a> {
 impl PlacesOfReview for ReviewPlaces<'_> {
     fn is_changed(&self, path: &FilePath) -> bool {
         self.changed_file_at(path).is_some()
+    }
+
+    fn changes_dependencies(&self) -> bool {
+        self.core
+            .files
+            .iter()
+            .any(|file| is_dependency_file(&file.path))
     }
 
     fn target_of(&self, place: &Place) -> NameTarget {

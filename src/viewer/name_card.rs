@@ -45,6 +45,9 @@ pub enum CardNote {
     /// A language server would have answered but did not, so the answer is by name and can include
     /// other things of the same name.
     AnsweredByName(FallbackReason),
+    /// A language server answered from the checkout of the PR's head, where installed packages are
+    /// the clone's, and the PR changes which packages it needs.
+    DependenciesChanged,
 }
 
 impl CardNote {
@@ -56,6 +59,9 @@ impl CardNote {
             }
             Self::AnsweredByName(because) => {
                 Cow::Owned(format!("Answered by name: {}", because.as_str()))
+            }
+            Self::DependenciesChanged => {
+                Cow::Borrowed("The PR changes dependency files, so answers may be off")
             }
         }
     }
@@ -309,6 +315,8 @@ pub enum DefinitionCard {
 /// What the review knows of the places a lookup found.
 pub(super) trait PlacesOfReview {
     fn is_changed(&self, path: &FilePath) -> bool;
+    /// Whether the review changes a file that says which packages the repo needs.
+    fn changes_dependencies(&self) -> bool;
     fn target_of(&self, place: &Place) -> NameTarget;
 }
 
@@ -374,6 +382,10 @@ impl DefinitionCard {
         } = answered_by
         {
             notes.push(CardNote::AnsweredByName(because.clone()));
+        }
+        if matches!(answered_by, AnsweredBy::LanguageServer(_)) && in_review.changes_dependencies()
+        {
+            notes.push(CardNote::DependenciesChanged);
         }
         Self::Found(FoundNames {
             word: lookup.word.clone(),
@@ -477,6 +489,10 @@ struct WithFilesOnDisk<'a> {
 impl PlacesOfReview for WithFilesOnDisk<'_> {
     fn is_changed(&self, path: &FilePath) -> bool {
         self.lookup.on_disk(path).is_none() && self.in_review.is_changed(path)
+    }
+
+    fn changes_dependencies(&self) -> bool {
+        self.in_review.changes_dependencies()
     }
 
     fn target_of(&self, place: &Place) -> NameTarget {
