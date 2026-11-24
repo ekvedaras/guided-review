@@ -4,6 +4,8 @@
 
 ## Why tree-sitter and not language servers
 
+_Superseded on 2026-11-24 by [Language servers first](#language-servers-first-2026-11-24) below; kept as the record of the first choice._
+
 The app already parses these languages with tree-sitter to cut files into pieces. A language server needs the project installed and built (`composer install`, `node_modules`, a compiling Rust workspace), one server per language and a running process per repo, and it answers for the checkout on disk, not for the PR's head or base commit. A tags query over the git objects at the commit needs none of that and works for any sha. The cost: matching is by name only, so `total` in two classes is one name. The card never hides that: it counts the definitions ("2 definitions"), ranks them and shows each file, so the reviewer sees the guess.
 
 ## What a lookup does
@@ -32,3 +34,16 @@ The app already parses these languages with tree-sitter to cut files into pieces
 - A name defined by a macro, a re-export or a generated file is found only if a tags pattern names it.
 - Usages by name include other classes' methods of the same name.
 - The card does not follow a page that scrolls under it: it closes.
+
+## Language servers first (2026-11-24)
+
+On 2026-11-24 the maintainer tried the card (as of `ekvedaras/guided-review@66682ce`) on a Laravel PHP repo and rejected the by-name results: a function-local `$deliveryDate` was grepped across the repo (1558 usages in 274 files, with unrelated `deliveryDate()` methods as definitions), and `$this->schedule()` listed 9 `schedule` definitions from other classes. Scope rules on top of tree-sitter were weighed and turned down as a weak copy of a type checker.
+
+Decided by the maintainer the same day:
+
+- Language servers answer first (rust-analyzer, Intelephense, typescript-language-server); the tree-sitter lookup stays as the fallback and the card says when it answered by name only.
+- The app manages the servers: it downloads, pins and updates them, and the Node runtime that two of them need, so the reviewer installs nothing. On the maintainer's Mac on that day only rust-analyzer was installed; there was no node, php or composer.
+- One port for definitions and usages with a tree-sitter and an LSP adapter; the LSP adapter is tested against a scripted fake server over stdio, with a smoke test per real server only where it is installed.
+- Same branch (`139-symbol-hover`) and one PR for all of it.
+
+The spec and tickets are GitHub issues linked from issue #139.
