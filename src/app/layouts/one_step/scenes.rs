@@ -22,19 +22,25 @@ use crate::app::updater::Updates;
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
 use crate::issue::{IssueLink, IssueUrl};
+use crate::line_number::LineNumber;
+use crate::navigation::{Definition, DefinitionKind, Lookup, Place, Reach, Usage};
 use crate::pull_request::RepoName;
 use crate::review_subject::{BranchName, ReviewSubject};
 use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
     AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
-    LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
-    OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness, TerminalId,
-    TextBox,
+    HoveredName, LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability,
+    Merging, OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness,
+    TerminalId, TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue, Station, StationHealth, StationKind};
 
 const MAX_SCREENS: usize = 16;
+/// Rows the name card's line is scrolled below the top of the list, so the sticky bar leaves it free.
+const ROWS_ABOVE: usize = 3;
+/// The bottom of that row under the top of the list, about 19 px a row.
+const ROW_BOTTOM: f32 = 76.;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
 const OTHER_PR: u32 = 14;
 
@@ -113,10 +119,11 @@ enum Scene {
     TitleBarMerging,
     FoldedMarkdownParts,
     StationsBusy,
+    NameCard,
 }
 
 impl Scene {
-    const ALL: [Self; 73] = [
+    const ALL: [Self; 74] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -190,6 +197,7 @@ impl Scene {
         Self::TitleBarMerging,
         Self::FoldedMarkdownParts,
         Self::StationsBusy,
+        Self::NameCard,
     ];
 
     fn file_name(self) -> &'static str {
@@ -267,6 +275,7 @@ impl Scene {
             Self::TitleBarMerging => "92-title-bar-merging",
             Self::FoldedMarkdownParts => "93-folded-markdown-parts",
             Self::StationsBusy => "95-sidebar-stations-busy",
+            Self::NameCard => "96-name-card",
         }
     }
 
@@ -726,8 +735,45 @@ impl OneStepLayout {
             .collect()
     }
 
+    /// A hovered name on the first added line of a language the card knows, with a lookup that
+    /// found two definitions, some usages and a note, so the card has all its parts.
+    fn stage_name_card(&mut self, cx: &mut Context<Self>) {
+        self.go_to_first_open_code(cx);
+        let rows = self.session.read(cx).rows();
+        let staged = self
+            .added_lines(usize::MAX, cx)
+            .into_iter()
+            .find_map(|(row, location)| {
+                let code = Arc::clone(&rows.line(row)?.code);
+                let under = code
+                    .char_indices()
+                    .filter_map(|(byte, _)| {
+                        HoveredName::under_pointer(location.clone(), &code, byte)
+                    })
+                    .max_by_key(|under| under.range.len())?;
+                Some((row, under))
+            });
+        let Some((row, under)) = staged else {
+            eprintln!("no added line of a known language on this screen to hover");
+            return;
+        };
+        self.scroll_to_row(row.saturating_sub(ROWS_ABOVE));
+        let viewport = self.screen_list.viewport_bounds();
+        let at = point(
+            viewport.left()
+                + px(134. + 7. * f32::from(u16::try_from(under.range.start).unwrap_or(0))),
+            viewport.top() + px(ROW_BOTTOM),
+        );
+        let lookup = staged_lookup(&under.name);
+        self.session.update(cx, |session, cx| {
+            session.stage_name_card(&under.name, lookup, cx);
+        });
+        self.show_staged_name_card(under, at, cx);
+    }
+
     fn stage(&mut self, scene: Scene, window: &mut Window, cx: &mut Context<Self>) {
         match scene {
+            Scene::NameCard => self.stage_name_card(cx),
             Scene::Settings => self
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
@@ -1203,6 +1249,7 @@ impl OneStepLayout {
                     toaster.0.update(cx, ToastShelf::clear);
                 }
             }
+            Scene::NameCard => self.dismiss_name_card(cx),
             Scene::StationsBusy => {
                 self.session
                     .update(cx, |session, cx| session.stage_viewed_wait(false, cx));
@@ -1382,6 +1429,60 @@ impl OneStepLayout {
                 session.type_in(&draft, "Should a blank value be refused here?", cx);
             }
         });
+    }
+}
+
+fn staged_lookup(hovered: &HoveredName) -> Lookup {
+    let word = &hovered.word;
+    let line = |number: u32| LineNumber::try_from(number).unwrap_or(LineNumber::FIRST);
+    let place = |path: &str, number: u32| Place {
+        path: FilePath::new(path).unwrap_or_else(|_| hovered.at.path.clone()),
+        line: line(number),
+    };
+    let usage = |path: &str, number: u32, text: String| Usage {
+        place: place(path, number),
+        text: text.into(),
+    };
+    Lookup {
+        word: word.clone(),
+        definitions: vec![
+            Definition {
+                name: word.clone(),
+                kind: DefinitionKind::Method,
+                place: Place {
+                    path: hovered.at.path.clone(),
+                    line: line(12),
+                },
+                signature: format!("pub fn {word}(&self) -> Money").into(),
+                doc: Some(
+                    "Sum of the lines with discounts applied, rounded to the currency's minor unit."
+                        .into(),
+                ),
+            },
+            Definition {
+                name: word.clone(),
+                kind: DefinitionKind::Function,
+                place: place("src/billing/legacy.rs", 40),
+                signature: format!("fn {word}(items: &[Item]) -> u64").into(),
+                doc: None,
+            },
+        ],
+        usages: Arc::from(vec![
+            usage(
+                hovered.at.path.as_str(),
+                58,
+                format!("let amount = cart.{word}();"),
+            ),
+            usage("src/checkout.rs", 21, format!("charge(order.{word}())?;")),
+            usage("src/billing/invoice.rs", 77, format!("self.{word}() + tax")),
+            usage(
+                "tests/cart.rs",
+                8,
+                format!("assert_eq!(cart.{word}(), Money::zero());"),
+            ),
+        ]),
+        reach: Reach::ChangedFiles,
+        cut_short: false,
     }
 }
 

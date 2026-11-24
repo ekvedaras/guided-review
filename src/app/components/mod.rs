@@ -18,6 +18,7 @@ pub mod key_cap;
 pub mod loading_screen;
 pub mod markdown_view;
 pub mod motion;
+pub mod name_card;
 pub mod new_commits_banner;
 pub mod overlay;
 pub mod palette;

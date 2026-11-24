@@ -52,6 +52,7 @@ mod move_offer;
 mod move_to_pr;
 mod name_card;
 mod name_desk;
+mod name_hover;
 mod new_commits;
 mod no_github;
 mod outdated_lines;
@@ -193,7 +194,8 @@ pub use move_to_pr::{PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
 pub use name_card::{
     CardNote, DefinitionCard, DefinitionRow, FoundNames, NameTarget, USAGES_SHOWN, UsageRow,
 };
-pub use name_desk::{HoveredName, NameOutcome, NameWork};
+pub use name_desk::{HoveredName, NameOutcome, NameUnderPointer, NameWork};
+pub use name_hover::{HoverTicket, NameHover};
 pub use new_commits::{
     PickCodeSource, RepinnedTour, TourReloader, TourRepinner, catch_up_findings, repin_tour,
 };

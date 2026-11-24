@@ -93,6 +93,8 @@ mod local_work_tree;
 mod lost_snapshot_ref;
 mod markdown;
 mod move_to_pr;
+mod name_hover;
+mod name_under_pointer;
 mod new_commits;
 mod open_app;
 mod open_pr;

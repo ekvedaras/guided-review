@@ -12,8 +12,8 @@ use gpui::{
 use crate::app::code_links::{open_code, open_code_hint, open_code_label};
 use crate::app::components::tooltip::tooltip;
 use crate::viewer::{
-    BlockChange, BoxEdges, CodeLink, HiddenLines, LineKind, LineLocation, MoreContext, PieceLabel,
-    ShownLine,
+    BlockChange, BoxEdges, CodeLink, HiddenLines, HoveredName, LineKind, LineLocation, MoreContext,
+    NameUnderPointer, PieceLabel, ShownLine,
 };
 
 use super::button::{ButtonKind, ButtonSize, icon_button};
@@ -52,6 +52,18 @@ pub enum CodeGesture {
 /// A sideways scroll on a row: how far the row's file box should move its code, in pixels.
 pub type OnScrollX = Rc<dyn Fn(Pixels, &mut Window, &mut App)>;
 
+/// The pointer over a row's code: on a name that the card can look up, or off it.
+pub enum NamePointer {
+    On {
+        under: NameUnderPointer,
+        /// Where the card's top left goes: under the start of the name.
+        card_at: gpui::Point<Pixels>,
+    },
+    Off,
+}
+
+pub type OnNamePointer = Rc<dyn Fn(NamePointer, &mut Window, &mut App)>;
+
 pub type OnImageComment = Rc<dyn Fn(&mut Window, &mut App)>;
 
 pub type OnRowGesture = Rc<dyn Fn(RowGesture, &LineLocation, &mut Window, &mut App)>;
@@ -79,6 +91,7 @@ pub struct DiffRow {
     /// Without it the row takes no comment.
     on_gesture: Option<OnRowGesture>,
     code_selection: Option<CodeSelectionHooks>,
+    on_name_pointer: Option<OnNamePointer>,
     /// How far the code is moved left; all rows of a file box share it, so they scroll together.
     scroll_x: Pixels,
     on_scroll_x: Option<OnScrollX>,
@@ -92,6 +105,7 @@ impl DiffRow {
             is_selected: false,
             on_gesture: None,
             code_selection: None,
+            on_name_pointer: None,
             scroll_x: Pixels::ZERO,
             on_scroll_x: None,
             edges: BoxEdges::default(),
@@ -114,6 +128,12 @@ impl DiffRow {
 
     pub fn with_code_selection(mut self, hooks: CodeSelectionHooks) -> Self {
         self.code_selection = Some(hooks);
+        self
+    }
+
+    /// Reports the pointer's rests on names, for a card that says where each is defined.
+    pub fn with_name_pointer(mut self, on_name_pointer: OnNamePointer) -> Self {
+        self.on_name_pointer = Some(on_name_pointer);
         self
     }
 
@@ -175,6 +195,7 @@ impl RenderOnce for DiffRow {
         };
         let code = StyledText::new(SharedString::from(&line.code)).with_highlights(highlights);
         let code_layout = code.layout().clone();
+        let name_layout = code_layout.clone();
         let code = div()
             .flex_1()
             .min_w_0()
@@ -201,6 +222,11 @@ impl RenderOnce for DiffRow {
                     })
             }
             None => code,
+        };
+        let code = match self.on_name_pointer {
+            Some(on_pointer) => name_pointer(code, &location, &line.code, name_layout, on_pointer)
+                .into_any_element(),
+            None => code.into_any_element(),
         };
         let link = line.code_link.clone();
         let gutter_background = match line.kind {
@@ -290,6 +316,58 @@ impl RenderOnce for DiffRow {
             LineKind::Context { .. } => fill,
         };
         row.child(fill.child(gutter).child(comment_button).child(code))
+    }
+}
+
+fn name_pointer(
+    code: Div,
+    location: &LineLocation,
+    text: &Arc<str>,
+    layout: TextLayout,
+    on_pointer: OnNamePointer,
+) -> Stateful<Div> {
+    let id = SharedString::from(format!(
+        "code-{}-{:?}-{}",
+        location.path, location.side, location.line
+    ));
+    let (on_move, on_leave) = (Rc::clone(&on_pointer), on_pointer);
+    let (location, text) = (location.clone(), Arc::clone(text));
+    code.id(id)
+        .on_mouse_move(move |event, window, cx| {
+            if event.pressed_button.is_some() {
+                return;
+            }
+            on_move(
+                name_under(&layout, &location, &text, event.position),
+                window,
+                cx,
+            );
+        })
+        .on_hover(move |is_hovered, window, cx| {
+            if !*is_hovered {
+                on_leave(NamePointer::Off, window, cx);
+            }
+        })
+}
+
+fn name_under(
+    layout: &TextLayout,
+    location: &LineLocation,
+    text: &str,
+    position: gpui::Point<Pixels>,
+) -> NamePointer {
+    let Ok(byte) = layout.index_for_position(position) else {
+        return NamePointer::Off;
+    };
+    let Some(under) = HoveredName::under_pointer(location.clone(), text, byte) else {
+        return NamePointer::Off;
+    };
+    let Some(start) = layout.position_for_index(under.range.start) else {
+        return NamePointer::Off;
+    };
+    NamePointer::On {
+        card_at: gpui::point(start.x, start.y + layout.line_height()),
+        under,
     }
 }
 

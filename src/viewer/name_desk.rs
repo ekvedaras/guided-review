@@ -4,10 +4,12 @@
 //! of different names are asked and answered side by side.
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
+use crate::language::Language;
 use crate::line_number::LineNumber;
 use crate::navigation::{FileSearch, Lookup, Lookups, Word};
 use crate::pull_request::Sha;
@@ -21,6 +23,58 @@ use super::step_page::{LineLocation, Side};
 pub struct HoveredName {
     pub at: LineLocation,
     pub word: Word,
+}
+
+/// The name under the pointer, and where it sits in the line's code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameUnderPointer {
+    pub name: HoveredName,
+    /// Byte range of the name in the line's code.
+    pub range: Range<usize>,
+}
+
+impl HoveredName {
+    pub fn under_pointer(at: LineLocation, code: &str, byte: usize) -> Option<NameUnderPointer> {
+        Language::for_path(at.path.as_str())?;
+        let range = name_range(code, byte)?;
+        let word = Word::new(code.get(range.clone())?)?;
+        Some(NameUnderPointer {
+            name: Self { at, word },
+            range,
+        })
+    }
+}
+
+/// The run of letters, digits and `_` the byte is on, or ends. A `$`, `->` or `::` is not part of it.
+fn name_range(code: &str, byte: usize) -> Option<Range<usize>> {
+    let is_name = |(_, c): &(usize, char)| c.is_alphanumeric() || *c == '_';
+    if byte > code.len() {
+        return None;
+    }
+    let chars: Vec<(usize, char)> = code.char_indices().collect();
+    let under = chars.iter().rposition(|(start, _)| *start <= byte)?;
+    let at = chars
+        .get(under)
+        .filter(|char| is_name(char))
+        .map(|_| under)
+        .or_else(|| {
+            under
+                .checked_sub(1)
+                .filter(|before| chars.get(*before).is_some_and(is_name))
+        })?;
+    let first = chars
+        .get(..=at)?
+        .iter()
+        .rposition(|char| !is_name(char))
+        .map_or(0, |gap| gap + 1);
+    let after = chars
+        .get(at..)?
+        .iter()
+        .position(|char| !is_name(char))
+        .map_or(chars.len(), |gap| at + gap);
+    let start = chars.get(first)?.0;
+    let end = chars.get(after).map_or(code.len(), |(end, _)| *end);
+    Some(start..end)
 }
 
 /// One lookup: the same name on the same line is one key, whatever the pointer did between.

@@ -32,11 +32,11 @@ use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
     AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CommentId,
     CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal, FinishResult,
-    GitHubPort, HandOffButton, HandOffId, ImageCache, JobOutcome, JobProgress, LineLocation,
-    NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour, ReplacingJob,
-    Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId, TextBox,
-    ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher,
-    TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
+    GitHubPort, HandOffButton, HandOffId, HoveredName, ImageCache, JobOutcome, JobProgress,
+    LineLocation, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour,
+    ReplacingJob, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId,
+    TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
+    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -923,6 +923,24 @@ impl ReviewSession {
         })
     }
 
+    /// A name hovered in a diff line is read and parsed off the UI thread; its card reads
+    /// `Loading` until it lands.
+    pub fn look_up_name(&mut self, hovered: &HoveredName, cx: &mut Context<Self>) {
+        let Some(work) = self.review.look_up_name(hovered) else {
+            return;
+        };
+        let source = Arc::clone(&self.source);
+        self.run_off_thread(
+            cx,
+            move || work.run(source.as_ref()),
+            |this, outcome, cx| {
+                this.review.name_looked_up(outcome);
+                cx.notify();
+            },
+        )
+        .detach();
+    }
+
     /// GPUI's splice moves the view to the top of a replaced row; a reply box opening on a long thread
     /// would throw the reader to the thread's start. The view stays where it was in that row instead.
     fn splice_keeping_place(&self, old: Range<usize>, new_count: usize) {
@@ -975,6 +993,18 @@ impl ReviewSession {
         } else {
             cx.notify();
         }
+    }
+
+    /// A name's card as a lookup would have filled it, for a snapshot scene.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_name_card(
+        &mut self,
+        hovered: &HoveredName,
+        lookup: crate::navigation::Lookup,
+        cx: &mut Context<Self>,
+    ) {
+        self.review.stage_looked_up_name(hovered, lookup);
+        cx.notify();
     }
 
     /// Draws one station as given, until it is staged back to `None`: nothing in the review changes.

@@ -1,7 +1,7 @@
 //! The Definition card of a name hovered in a diff line: which commit it is read at, who answers,
 //! and where a click on what the card lists goes.
 
-use crate::navigation::Place;
+use crate::navigation::{Lookup, Place};
 use crate::pieces::ChangedFile;
 use crate::viewer::code_link::CodeLinks;
 use crate::viewer::jump::{JumpPlace, JumpTarget};
@@ -24,6 +24,18 @@ impl ReviewCore {
     /// Takes in what a `NameWork` brought back and makes the card of it.
     pub fn name_looked_up(&mut self, outcome: NameOutcome) {
         let NameOutcome { key, result } = outcome;
+        self.keep_card_of(key, result);
+    }
+
+    /// A snapshot scene's lookup, landed as if it had run, for a name the review does not have to
+    /// hold in a real file.
+    pub fn stage_looked_up_name(&mut self, hovered: &HoveredName, lookup: Lookup) {
+        if let Some(key) = self.name_key(hovered) {
+            self.keep_card_of(key, Ok(lookup));
+        }
+    }
+
+    fn keep_card_of(&mut self, key: NameKey, result: Result<Lookup, String>) {
         let card = match result {
             Ok(lookup) => {
                 let hovered = Place {
