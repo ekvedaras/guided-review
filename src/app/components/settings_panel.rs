@@ -1491,7 +1491,7 @@ impl SettingsPanel {
                             .truncate()
                             .font_family(*CODE_FONT)
                             .text_sm()
-                            .child(SharedString::from(row.repo.clone())),
+                            .child(SharedString::from(row.codebase.to_string())),
                     )
                     .child(
                         Segmented::new(

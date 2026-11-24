@@ -4,6 +4,7 @@ use anyhow::Context;
 use toml_edit::{DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
 use crate::app_folders::AppFolders;
+use crate::codebase::Codebase;
 use crate::config::{AskEffortChoice, AskModelChoice};
 use crate::home::expand_home;
 use crate::ide::{IdeChoice, IdeTemplate};
@@ -135,10 +136,10 @@ impl CloneRow {
     }
 }
 
-/// One `[language_servers]` entry: the repo as written, and what the reviewer answered for it.
+/// One `[language_servers]` entry: the codebase, and what the reviewer answered for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanguageServersRow {
-    pub repo: String,
+    pub codebase: Codebase,
     pub answer: ServerAnswer,
 }
 
@@ -596,7 +597,7 @@ impl Settings {
         self.edited.merge_method = method;
     }
 
-    /// The repos the reviewer was asked about, in the order the config lists them.
+    /// The codebases the reviewer was asked about, in the order the config lists them.
     pub fn language_servers(&self) -> &[LanguageServersRow] {
         &self.edited.language_servers
     }
@@ -608,23 +609,25 @@ impl Settings {
         }
     }
 
-    pub fn set_language_servers(&mut self, repo: &RepoName, answer: ServerAnswer) {
-        let repo = repo.to_string();
+    pub fn set_language_servers(&mut self, codebase: &Codebase, answer: ServerAnswer) {
         let rows = &mut self.edited.language_servers;
-        match rows.iter_mut().find(|row| row.repo == repo) {
+        match rows.iter_mut().find(|row| row.codebase == *codebase) {
             Some(row) => row.answer = answer,
-            None => rows.push(LanguageServersRow { repo, answer }),
+            None => rows.push(LanguageServersRow {
+                codebase: codebase.clone(),
+                answer,
+            }),
         }
     }
 
     /// Loads the config, sets the repo's answer and saves, as the Settings page would.
     pub fn remember_language_servers(
         folders: &AppFolders,
-        repo: &RepoName,
+        codebase: &Codebase,
         answer: ServerAnswer,
     ) -> anyhow::Result<()> {
         let mut settings = Self::load(folders)?;
-        settings.set_language_servers(repo, answer);
+        settings.set_language_servers(codebase, answer);
         match settings.save()? {
             SaveOutcome::Refused(problems) => {
                 anyhow::bail!("config.toml has settings that must be fixed first: {problems:?}")
@@ -789,9 +792,9 @@ fn language_servers_in(document: &DocumentMut) -> Vec<LanguageServersRow> {
         .and_then(Item::as_table_like)
         .into_iter()
         .flat_map(TableLike::iter)
-        .filter_map(|(repo, answer)| {
+        .filter_map(|(codebase, answer)| {
             Some(LanguageServersRow {
-                repo: repo.to_owned(),
+                codebase: codebase.parse().ok()?,
                 answer: ServerAnswer::of(answer.as_bool()?),
             })
         })
@@ -810,7 +813,11 @@ fn write_language_servers(
         .as_table_like_mut()
         .with_context(|| format!("{LANGUAGE_SERVERS} is not a table"))?;
     for row in edited.iter().filter(|row| !saved.contains(row)) {
-        set_value(servers, &row.repo, Some(Value::from(row.answer.is_yes())));
+        set_value(
+            servers,
+            &row.codebase.to_string(),
+            Some(Value::from(row.answer.is_yes())),
+        );
     }
     Ok(())
 }

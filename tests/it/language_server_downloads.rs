@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use guided_review::codebase::Codebase;
 use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, FileSearch, LanguageServers, Lookups,
@@ -287,7 +288,7 @@ impl Rig {
         let waits = Mutex::new(Vec::new());
         let answer = self
             .servers
-            .navigator(RepoName::new("acme", "shop"), by_name)
+            .navigator(Codebase::GitHub(RepoName::new("acme", "shop")), by_name)
             .navigate(
                 &code,
                 &NavigationRequest {

@@ -5,6 +5,7 @@ use anyhow::Context;
 use serde::Deserialize;
 
 use crate::app_folders::AppFolders;
+use crate::codebase::Codebase;
 use crate::home::expand_home;
 use crate::ide::IdeTemplate;
 use crate::instructions::{Agent, Instructions, InstructionsChoice, InstructionsKind};
@@ -245,15 +246,12 @@ impl Config {
         .unwrap_or_default()
     }
 
-    /// What the reviewer answered for the repo; none while it has not been asked. A value that is
+    /// What the reviewer answered for the codebase; none while it has not been asked. A value that is
     /// not true or false is passed over, so a typo cannot stop the app opening.
-    pub fn language_servers(&self, repo: &RepoName) -> Option<ServerAnswer> {
+    pub fn language_servers(&self, codebase: &Codebase) -> Option<ServerAnswer> {
         self.language_servers
             .iter()
-            .find(|(name, _)| {
-                name.split_once('/')
-                    .is_some_and(|(owner, name)| RepoName::new(owner, name) == *repo)
-            })
+            .find(|(name, _)| name.parse::<Codebase>().is_ok_and(|key| key == *codebase))
             .and_then(|(_, answer)| answer.as_bool())
             .map(ServerAnswer::of)
     }

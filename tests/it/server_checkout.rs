@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use guided_review::codebase::Codebase;
 use guided_review::navigation::{Change, ServerCheckouts};
 use guided_review::pull_request::{RepoName, Sha};
 use tempfile::TempDir;
@@ -14,8 +15,8 @@ struct Rig {
     second: Sha,
 }
 
-fn shop() -> RepoName {
-    RepoName::new("acme", "shop")
+fn shop() -> Codebase {
+    Codebase::GitHub(RepoName::new("acme", "shop"))
 }
 
 impl Rig {

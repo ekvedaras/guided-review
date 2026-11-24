@@ -1,10 +1,12 @@
 use crate::support::FixtureRepo;
 use crate::support::folders_in;
+use guided_review::codebase::Codebase;
 use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings, Config};
 use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use guided_review::navigation::ServerAnswer;
 use guided_review::pull_request::RepoName;
+use guided_review::review_subject::WorkTreeRoot;
 use guided_review::viewer::{
     Chord, CloneRow, CloneRowProblem, Command, KeyProblem, LanguageServersRow, MergeMethod,
     SaveOutcome, SendAction, SettingProblem, Settings,
@@ -1286,6 +1288,40 @@ fn an_unreadable_review_instructions_is_a_problem_on_open_and_refuses_save() {
     assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
 }
 
+fn github(owner: &str, name: &str) -> Codebase {
+    Codebase::GitHub(RepoName::new(owner, name))
+}
+
+#[test]
+fn a_folder_with_no_github_origin_keeps_its_answer_under_its_path_beside_the_repos() {
+    let home = tempfile::TempDir::new().unwrap();
+    write_config(home.path(), "[language_servers]\n\"acme/shop\" = false\n");
+    let folder = Codebase::Folder(WorkTreeRoot::new("/work/shop".into()).unwrap());
+
+    Settings::remember_language_servers(&folders_in(home.path()), &folder, ServerAnswer::Yes)
+        .unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "[language_servers]\n\"acme/shop\" = false\n\"/work/shop\" = true\n"
+    );
+    let config = Config::load_from(&folders_in(home.path())).unwrap();
+    assert_eq!(config.language_servers(&folder), Some(ServerAnswer::Yes));
+    assert_eq!(
+        config.language_servers(&github("acme", "shop")),
+        Some(ServerAnswer::No)
+    );
+    let settings = Settings::load(&folders_in(home.path())).unwrap();
+    assert_eq!(
+        settings
+            .language_servers()
+            .iter()
+            .map(|row| row.codebase.clone())
+            .collect::<Vec<_>>(),
+        [github("acme", "shop"), folder]
+    );
+}
+
 #[test]
 fn a_repo_answers_language_servers_with_what_the_config_holds_and_is_not_asked_without_it() {
     let config = Config::from_text(
@@ -1294,15 +1330,15 @@ fn a_repo_answers_language_servers_with_what_the_config_holds_and_is_not_asked_w
     .unwrap();
 
     assert_eq!(
-        config.language_servers(&RepoName::new("acme", "shop")),
+        config.language_servers(&github("acme", "shop")),
         Some(ServerAnswer::Yes)
     );
     assert_eq!(
-        config.language_servers(&RepoName::new("acme", "old")),
+        config.language_servers(&github("acme", "old")),
         Some(ServerAnswer::No)
     );
-    assert_eq!(config.language_servers(&RepoName::new("acme", "bad")), None);
-    assert_eq!(config.language_servers(&RepoName::new("acme", "new")), None);
+    assert_eq!(config.language_servers(&github("acme", "bad")), None);
+    assert_eq!(config.language_servers(&github("acme", "new")), None);
 }
 
 #[test]
@@ -1315,11 +1351,11 @@ fn settings_list_the_repos_with_an_answer_and_the_others_are_not_listed() {
         settings.language_servers(),
         [
             LanguageServersRow {
-                repo: "acme/shop".to_owned(),
+                codebase: github("acme", "shop"),
                 answer: ServerAnswer::Yes
             },
             LanguageServersRow {
-                repo: "acme/old".to_owned(),
+                codebase: github("acme", "old"),
                 answer: ServerAnswer::No
             },
         ]
@@ -1332,7 +1368,7 @@ fn changing_a_repos_answer_writes_that_entry_only_and_keeps_the_comments() {
         "ask_model = \"sonnet\" # quick\n\n# my servers\n[language_servers]\n\"acme/shop\" = true # trusted\n\"acme/old\" = false\n",
     );
 
-    settings.set_language_servers(&RepoName::new("acme", "shop"), ServerAnswer::No);
+    settings.set_language_servers(&github("acme", "shop"), ServerAnswer::No);
     assert!(settings.has_unsaved_changes());
     settings.save().unwrap();
 
@@ -1346,7 +1382,7 @@ fn changing_a_repos_answer_writes_that_entry_only_and_keeps_the_comments() {
 fn a_repo_answered_for_the_first_time_is_added_to_the_config() {
     let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
 
-    settings.set_language_servers(&RepoName::new("acme", "shop"), ServerAnswer::Yes);
+    settings.set_language_servers(&github("acme", "shop"), ServerAnswer::Yes);
     settings.save().unwrap();
 
     assert_eq!(
@@ -1356,7 +1392,7 @@ fn a_repo_answered_for_the_first_time_is_added_to_the_config() {
     assert_eq!(
         settings.language_servers(),
         [LanguageServersRow {
-            repo: "acme/shop".to_owned(),
+            codebase: github("acme", "shop"),
             answer: ServerAnswer::Yes
         }]
     );
@@ -1369,7 +1405,7 @@ fn an_answer_given_on_the_card_is_saved_through_settings_with_the_comments_kept(
 
     Settings::remember_language_servers(
         &folders_in(home.path()),
-        &RepoName::new("acme", "shop"),
+        &github("acme", "shop"),
         ServerAnswer::No,
     )
     .unwrap();

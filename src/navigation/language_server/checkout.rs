@@ -6,10 +6,11 @@ use std::process::Command;
 
 use anyhow::{Context as _, bail};
 
+use crate::codebase::Codebase;
 use crate::file_path::FilePath;
-use crate::pull_request::{RepoName, Sha};
+use crate::pull_request::Sha;
 
-/// Where the server checkouts live, one folder per repo.
+/// Where the server checkouts live, one folder per codebase.
 pub struct ServerCheckouts {
     folder: PathBuf,
 }
@@ -42,8 +43,13 @@ impl ServerCheckouts {
 
     /// Makes the repo's checkout when it has none, and checks it out detached at `head`. The clone's
     /// files, index and branch are never touched.
-    pub fn moved_to(&self, clone: &Path, repo: &RepoName, head: &Sha) -> anyhow::Result<Checkout> {
-        let folder = self.folder.join(repo.owner()).join(repo.name());
+    pub fn moved_to(
+        &self,
+        clone: &Path,
+        codebase: &Codebase,
+        head: &Sha,
+    ) -> anyhow::Result<Checkout> {
+        let folder = self.folder.join(codebase.state_folder());
         let mut changed = Vec::new();
         if folder.join(".git").exists() {
             let at = git(&folder, &["rev-parse", "HEAD"])?;

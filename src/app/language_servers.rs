@@ -24,7 +24,7 @@ pub fn use_language_servers(review: &mut Review, folders: &AppFolders, cx: &mut 
     if cfg!(feature = "snapshots") {
         return;
     }
-    let repo = review.subject().language_server_repo();
+    let codebase = review.subject().codebase();
     if !cx.has_global::<ActiveLanguageServers>() {
         let managed = ManagedServers::new(
             ServerFolders {
@@ -52,12 +52,12 @@ pub fn use_language_servers(review: &mut Review, folders: &AppFolders, cx: &mut 
         cx.set_global(ActiveLanguageServers(servers));
     }
     let answer = match Config::load_from(folders) {
-        Ok(config) => config.language_servers(&repo),
+        Ok(config) => config.language_servers(&codebase),
         Err(error) => {
             eprintln!("could not read config.toml for the language server answer: {error:#}");
             None
         }
     };
     let servers = Arc::clone(&cx.global::<ActiveLanguageServers>().0);
-    review.use_language_server_pool(&servers, repo, answer);
+    review.use_language_server_pool(&servers, codebase, answer);
 }

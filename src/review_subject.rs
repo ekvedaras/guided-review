@@ -5,6 +5,7 @@ use std::str::FromStr;
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 
+use crate::codebase::Codebase;
 use crate::pull_request::{PullRequestUrl, RepoName};
 
 /// What a review reads: a PR, or a local change set.
@@ -39,8 +40,6 @@ const LOCAL_LABEL_KEY: &str = "gr.local";
 /// The folder, under the tours folder and the state folder, that holds every local review's files.
 pub const LOCAL_FILES_FOLDER: &str = "local";
 /// Four bytes are the 8 hex characters of the short hash in a local review's folder name.
-/// The owner of the key a folder with no GitHub origin is kept under, e.g. for language servers.
-const UNHOSTED_FOLDER_OWNER: &str = "local folder";
 const SHORT_HASH_BYTES: usize = 4;
 
 impl ReviewSubject {
@@ -97,12 +96,12 @@ impl ReviewSubject {
         }
     }
 
-    /// The repo the reviewer's yes or no to language servers is kept for, and whose server checkout
+    /// What the reviewer's yes or no to language servers is kept for, and whose server checkout
     /// the review reads from.
-    pub fn language_server_repo(&self) -> RepoName {
+    pub fn codebase(&self) -> Codebase {
         match self {
-            Self::PullRequest(pr) => pr.repo.clone(),
-            Self::Local(change_set) => change_set.language_server_repo(),
+            Self::PullRequest(pr) => Codebase::GitHub(pr.repo.clone()),
+            Self::Local(change_set) => change_set.codebase(),
         }
     }
 
@@ -321,22 +320,14 @@ impl LocalChangeSet {
     }
 
     fn files_folder(&self) -> PathBuf {
-        PathBuf::from(LOCAL_FILES_FOLDER).join(self.folder_stem())
+        PathBuf::from(LOCAL_FILES_FOLDER).join(self.folder.stem())
     }
 
-    /// `<folder name>-<short hash of the folder path>`.
-    fn folder_stem(&self) -> String {
-        let digest = Sha256::digest(self.folder.as_path().to_string_lossy().as_bytes());
-        let hash = crate::hex::lower(digest.iter().take(SHORT_HASH_BYTES));
-        format!("{}-{hash}", self.folder.name())
-    }
-
-    /// The repo of `origin`; a folder with none is keyed by itself, under an owner no GitHub account
-    /// can have since it holds a space.
-    fn language_server_repo(&self) -> RepoName {
+    /// The repo of `origin`; a folder with none is its own codebase.
+    fn codebase(&self) -> Codebase {
         self.repo
             .clone()
-            .unwrap_or_else(|| RepoName::new(UNHOSTED_FOLDER_OWNER, &self.folder_stem()))
+            .map_or_else(|| Codebase::Folder(self.folder.clone()), Codebase::GitHub)
     }
 
     pub const fn folder(&self) -> &WorkTreeRoot {
@@ -377,6 +368,13 @@ impl WorkTreeRoot {
 
     pub fn as_path(&self) -> &Path {
         &self.0
+    }
+
+    /// `<folder name>-<short hash of the folder path>`.
+    pub fn stem(&self) -> String {
+        let digest = Sha256::digest(self.0.to_string_lossy().as_bytes());
+        let hash = crate::hex::lower(digest.iter().take(SHORT_HASH_BYTES));
+        format!("{}-{hash}", self.name())
     }
 
     /// The folder's own name; `root` for `/`.

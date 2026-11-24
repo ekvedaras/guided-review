@@ -6,6 +6,7 @@ pub mod app_link;
 pub mod cached_code_source;
 pub mod claude_cli;
 pub mod code_source;
+pub mod codebase;
 pub mod config;
 pub mod coverage;
 pub mod eval;

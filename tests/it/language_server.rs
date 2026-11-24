@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use guided_review::app_folders::AppFolders;
+use guided_review::codebase::Codebase;
 use guided_review::github::GitHub;
 use guided_review::language::Language;
 use guided_review::local_git::LocalGit;
@@ -18,6 +19,10 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use crate::support::{FixtureRepo, file_path, line};
+
+fn shop_codebase() -> Codebase {
+    Codebase::GitHub(RepoName::new("acme", "shop"))
+}
 
 const LIB: &str = "/// Adds two numbers.
 ///
@@ -49,7 +54,7 @@ impl ServerCatalog for FakeCatalog {
     fn launch_for(
         &self,
         _language: Language,
-        _repo: &RepoName,
+        _codebase: &Codebase,
         _waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
         let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
@@ -153,7 +158,7 @@ impl Rig {
         let waits = Mutex::new(Vec::new());
         let answer = self
             .servers
-            .navigator(RepoName::new("acme", "shop"), self.by_name())
+            .navigator(shop_codebase(), self.by_name())
             .navigate(
                 &code,
                 &NavigationRequest {
@@ -178,7 +183,7 @@ impl Rig {
             LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap();
         let answer = self
             .servers
-            .navigator(RepoName::new("acme", "shop"), self.by_name())
+            .navigator(shop_codebase(), self.by_name())
             .navigate(
                 &code,
                 &NavigationRequest {
@@ -613,7 +618,7 @@ fn the_real_rust_analyzer_finds_a_definition() {
         ]))));
 
     let answer = servers
-        .navigator(RepoName::new("acme", "shop"), by_name)
+        .navigator(shop_codebase(), by_name)
         .navigate(
             &code,
             &NavigationRequest {
@@ -696,7 +701,7 @@ fn the_real_intelephense_finds_the_method_of_the_class_the_code_calls() {
         ]))));
 
     let answer = servers
-        .navigator(RepoName::new("acme", "shop"), by_name)
+        .navigator(shop_codebase(), by_name)
         .navigate(
             &code,
             &NavigationRequest {
@@ -823,7 +828,7 @@ fn the_real_typescript_language_server_finds_the_method_of_the_class_the_code_ca
             file_path("src/shapes.ts"),
             file_path("src/main.ts"),
         ]))));
-    let navigator = servers.navigator(RepoName::new("acme", "shop"), by_name);
+    let navigator = servers.navigator(shop_codebase(), by_name);
     let ask = |path: &str, number: usize, column: usize, word: &str| {
         navigator
             .navigate(
@@ -995,7 +1000,7 @@ fn a_local_review_is_answered_in_the_server_checkout_at_its_snapshot_and_update_
     let code = LocalGit::at_worktree(work_tree.change_set().unwrap().folder());
     let local_review_of = |snapshot: Sha| {
         rig.servers
-            .navigator(RepoName::new("acme", "shop"), rig.by_name())
+            .navigator(shop_codebase(), rig.by_name())
             .navigate(
                 &code,
                 &NavigationRequest {

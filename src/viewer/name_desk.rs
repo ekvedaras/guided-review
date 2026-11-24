@@ -8,6 +8,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::code_source::CodeSource;
+use crate::codebase::Codebase;
 use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::line_number::LineNumber;
@@ -15,7 +16,7 @@ use crate::navigation::{
     AnsweredBy, CodeNavigator, Column, Lookup, NavigationRequest, Place, ServerAnswer, Waiting,
     Word,
 };
-use crate::pull_request::{RepoName, Sha};
+use crate::pull_request::Sha;
 
 use super::highlight::Capture;
 use super::name_card::{DefinitionCard, ServerQuestion};
@@ -218,7 +219,7 @@ pub struct NameOutcome {
 /// A language server adapter that may answer names in one repo, once the reviewer has said yes.
 struct ServerOptIn {
     adapter: Arc<dyn CodeNavigator>,
-    repo: RepoName,
+    codebase: Codebase,
     /// `None` until the reviewer is asked.
     answer: Option<ServerAnswer>,
 }
@@ -252,12 +253,12 @@ impl NameDesk {
     pub(super) fn use_language_servers(
         &mut self,
         adapter: Arc<dyn CodeNavigator>,
-        repo: RepoName,
+        codebase: Codebase,
         answer: Option<ServerAnswer>,
     ) {
         self.servers = Some(ServerOptIn {
             adapter,
-            repo,
+            codebase,
             answer,
         });
         self.cards.clear();
@@ -280,14 +281,14 @@ impl NameDesk {
     pub(super) fn question_for(&self, key: &NameKey) -> Option<ServerQuestion> {
         let servers = self.servers.as_ref()?;
         let language = Language::for_path(key.path.as_str()).filter(|_| key.side == Side::Head)?;
-        (servers.answer.is_none()).then(|| ServerQuestion::about(&servers.repo, language))
+        (servers.answer.is_none()).then(|| ServerQuestion::about(&servers.codebase, language))
     }
 
     /// Yes: the cards are forgotten, to be asked of the adapter. No: they stay, without the question.
-    pub(super) fn answer(&mut self, answer: ServerAnswer) -> Option<RepoName> {
+    pub(super) fn answer(&mut self, answer: ServerAnswer) -> Option<Codebase> {
         let servers = self.servers.as_mut()?;
         servers.answer = Some(answer);
-        let repo = servers.repo.clone();
+        let codebase = servers.codebase.clone();
         match answer {
             ServerAnswer::Yes => self.cards.clear(),
             ServerAnswer::No => {
@@ -298,7 +299,7 @@ impl NameDesk {
                 }
             }
         }
-        Some(repo)
+        Some(codebase)
     }
 
     /// Work to run unless the name is on its way or known. A failed lookup is asked again.

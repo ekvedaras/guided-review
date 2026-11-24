@@ -1,4 +1,4 @@
-//! The language server adapter of the code navigator port: one long-lived server per (repo, server),
+//! The language server adapter of the code navigator port: one long-lived server per (codebase, server),
 //! asked for the definition, the usages and the hover of a name, with the by-name lookup answering
 //! whenever the server cannot.
 
@@ -16,10 +16,11 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::code_source::CodeSource;
+use crate::codebase::Codebase;
 use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::line_number::LineNumber;
-use crate::pull_request::{RepoName, Sha};
+use crate::pull_request::Sha;
 
 use super::{
     Answer, AnsweredBy, CodeNavigator, Column, Definition, FallbackReason, Lookup,
@@ -113,7 +114,7 @@ pub trait ServerCatalog: Send + Sync {
     fn launch_for(
         &self,
         language: Language,
-        repo: &RepoName,
+        codebase: &Codebase,
         waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason>;
 }
@@ -346,8 +347,8 @@ struct Pool {
 
 impl Pool {
     /// What one repo's reviews take turns with, since they share one checkout.
-    fn turn_of(&self, repo: &RepoName) -> Arc<Mutex<()>> {
-        Arc::clone(locked(&self.turns).entry(repo.to_string()).or_default())
+    fn turn_of(&self, codebase: &Codebase) -> Arc<Mutex<()>> {
+        Arc::clone(locked(&self.turns).entry(codebase.to_string()).or_default())
     }
 
     fn slot(&self, folder: &Path, name: &ServerName) -> Slot {
@@ -408,12 +409,12 @@ impl LanguageServers {
     /// The adapter for one review: `by_name` answers what no server can.
     pub fn navigator(
         &self,
-        repo: RepoName,
+        codebase: Codebase,
         by_name: Arc<dyn CodeNavigator>,
     ) -> Arc<dyn CodeNavigator> {
         Arc::new(ServerNavigator {
             pool: Arc::clone(&self.pool),
-            repo,
+            codebase,
             by_name,
         })
     }
@@ -426,7 +427,7 @@ impl LanguageServers {
 
 struct ServerNavigator {
     pool: Arc<Pool>,
-    repo: RepoName,
+    codebase: Codebase,
     by_name: Arc<dyn CodeNavigator>,
 }
 
@@ -445,7 +446,11 @@ impl CodeNavigator for ServerNavigator {
         let Some(language) = Language::for_path(request.at.path.as_str()) else {
             return by_name(None);
         };
-        let launch = match self.pool.catalog.launch_for(language, &self.repo, waiting) {
+        let launch = match self
+            .pool
+            .catalog
+            .launch_for(language, &self.codebase, waiting)
+        {
             Ok(launch) => launch,
             Err(reason) => return by_name(Some(reason)),
         };
@@ -456,12 +461,12 @@ impl CodeNavigator for ServerNavigator {
             ))));
         };
         // One review at a time moves the checkout and asks, so another head cannot move it mid-question.
-        let turn = self.pool.turn_of(&self.repo);
+        let turn = self.pool.turn_of(&self.codebase);
         let _turn = locked(&turn);
         let checkout = match self
             .pool
             .checkouts
-            .moved_to(clone, &self.repo, &request.sha)
+            .moved_to(clone, &self.codebase, &request.sha)
         {
             Ok(checkout) => checkout,
             Err(error) => {

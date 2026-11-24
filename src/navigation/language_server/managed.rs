@@ -10,9 +10,9 @@ use anyhow::Context as _;
 use flate2::read::GzDecoder;
 use sha2::{Digest as _, Sha512};
 
+use crate::codebase::Codebase;
 use crate::language::Language;
 use crate::platform::Os;
-use crate::pull_request::RepoName;
 use crate::update::{Cpu, ReleasesPort, Target, check_digest};
 
 /// Where the package's server is, inside its download folder.
@@ -273,7 +273,7 @@ impl ManagedServers {
     /// Intelephense keeps its index of the repo in a folder of its own, so a restart reads it back.
     fn intelephense(
         &self,
-        repo: &RepoName,
+        codebase: &Codebase,
         waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
         let node = self.node_binary();
@@ -286,8 +286,7 @@ impl ManagedServers {
         })?;
         let index = self
             .indexes
-            .join(repo.owner())
-            .join(repo.name())
+            .join(codebase.state_folder())
             .join("intelephense");
         Ok(ServerLaunch::intelephense(node, &script, &index))
     }
@@ -502,12 +501,12 @@ impl ServerCatalog for ManagedServers {
     fn launch_for(
         &self,
         language: Language,
-        repo: &RepoName,
+        codebase: &Codebase,
         waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
         match language {
             Language::Rust => self.rust_analyzer(waiting),
-            Language::Php => self.intelephense(repo, waiting),
+            Language::Php => self.intelephense(codebase, waiting),
             Language::TypeScript | Language::Tsx => self.typescript_language_server(waiting),
         }
     }

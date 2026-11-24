@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
+use guided_review::codebase::Codebase;
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     AnsweredBy, Column, FallbackReason, ServerAnswer, ServerName, Waiting, Word,
 };
 use guided_review::pull_request::{RepoName, Sha};
+use guided_review::review_subject::WorkTreeRoot;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Capture, CardNote, CodeRun, DefinitionCard, FoundNames, HoveredName, JumpPlace, LineLocation,
@@ -870,8 +872,8 @@ fn an_answer_by_name_with_no_reason_and_a_language_server_answer_carry_no_note()
 const SERVER_QUESTION: &str =
     "Use language servers for acme/shop? typescript-language-server may build it";
 
-fn shop_repo() -> RepoName {
-    RepoName::new("acme", "shop")
+fn shop_repo() -> Codebase {
+    Codebase::GitHub(RepoName::new("acme", "shop"))
 }
 
 /// A review whose language server adapter is `adapter`, with the repo not asked yet.
@@ -905,9 +907,32 @@ fn the_first_hover_in_a_repo_asks_to_use_language_servers_and_the_by_name_lookup
     ));
 
     assert_eq!(question_of(&card), Some(SERVER_QUESTION.to_owned()));
-    assert_eq!(card.question.unwrap().repo, shop_repo());
+    assert_eq!(card.question.unwrap().codebase, shop_repo());
     assert_eq!(card.definitions.len(), 1, "the by-name lookup answered");
     assert_eq!(adapter.asked(), []);
+}
+
+#[test]
+fn the_question_for_a_folder_with_no_github_origin_names_its_path() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let mut review = shop.open(&source);
+    let folder = Codebase::Folder(WorkTreeRoot::new("/work/shop".into()).unwrap());
+    review.use_language_servers(Arc::new(language_server_adapter()), folder, None);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+
+    assert_eq!(
+        question_of(&card),
+        Some(
+            "Use language servers for /work/shop? typescript-language-server may build it"
+                .to_owned()
+        )
+    );
 }
 
 #[test]

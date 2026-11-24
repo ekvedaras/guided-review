@@ -8,10 +8,10 @@ use crate::file_path::FilePath;
 use crate::language::Language;
 use std::borrow::Cow;
 
+use crate::codebase::Codebase;
 use crate::navigation::{
     AnsweredBy, Definition, FallbackReason, Lookup, Place, Reach, ServerName, Usage, Waiting, Word,
 };
-use crate::pull_request::RepoName;
 
 use super::code_link::CodeLink;
 use super::highlight::Capture;
@@ -70,16 +70,16 @@ impl CardNote {
 /// "Use language servers for acme/shop? rust-analyzer may build it", with Yes and No.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerQuestion {
-    pub repo: RepoName,
+    pub codebase: Codebase,
     pub says: Arc<str>,
 }
 
 impl ServerQuestion {
-    pub(super) fn about(repo: &RepoName, language: Language) -> Self {
+    pub(super) fn about(codebase: &Codebase, language: Language) -> Self {
         let server = ServerName::of(language);
         Self {
-            repo: repo.clone(),
-            says: format!("Use language servers for {repo}? {server} may build it").into(),
+            codebase: codebase.clone(),
+            says: format!("Use language servers for {codebase}? {server} may build it").into(),
         }
     }
 }

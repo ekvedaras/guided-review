@@ -968,11 +968,11 @@ impl ReviewSession {
         answer: ServerAnswer,
         cx: &mut Context<Self>,
     ) {
-        let Some(repo) = self.review.answer_language_servers(answer) else {
+        let Some(codebase) = self.review.answer_language_servers(answer) else {
             return;
         };
         let folders = cx.global::<PrSwitching>().folders.clone();
-        if let Err(error) = Settings::remember_language_servers(&folders, &repo, answer) {
+        if let Err(error) = Settings::remember_language_servers(&folders, &codebase, answer) {
             post_toast(
                 cx,
                 ToastTone::Danger,
