@@ -7,7 +7,9 @@ use gpui::{App, Global};
 use crate::app_folders::AppFolders;
 use crate::config::Config;
 use crate::github::GitHub;
-use crate::navigation::{LanguageServers, ManagedServers, ServerCheckouts, ServerPins, Timeouts};
+use crate::navigation::{
+    LanguageServers, ManagedServers, ServerCheckouts, ServerFolders, ServerPins, Timeouts,
+};
 use crate::update::Target;
 use crate::viewer::Review;
 
@@ -27,7 +29,10 @@ pub fn use_language_servers(review: &mut Review, folders: &AppFolders, cx: &mut 
     };
     if !cx.has_global::<ActiveLanguageServers>() {
         let managed = ManagedServers::new(
-            folders.language_servers(),
+            ServerFolders {
+                downloads: folders.language_servers(),
+                indexes: folders.server_indexes(),
+            },
             Arc::new(GitHub::from_env()),
             ServerPins::pinned(),
             Target::running(),

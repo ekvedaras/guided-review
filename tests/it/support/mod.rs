@@ -33,6 +33,24 @@ pub fn file_path(path: &str) -> guided_review::file_path::FilePath {
     guided_review::file_path::FilePath::new(path).unwrap()
 }
 
+/// A gzipped tar of `files`, each `(path, content, mode)`: a release archive as a host serves it.
+pub fn tarball(files: &[(impl AsRef<str>, impl AsRef<str>, u32)]) -> Vec<u8> {
+    let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+        Vec::new(),
+        flate2::Compression::fast(),
+    ));
+    for (path, content, mode) in files {
+        let content = content.as_ref();
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(*mode);
+        header.set_cksum();
+        tar.append_data(&mut header, path.as_ref(), content.as_bytes())
+            .unwrap();
+    }
+    tar.into_inner().unwrap().finish().unwrap()
+}
+
 pub fn line(number: usize) -> guided_review::line_number::LineNumber {
     guided_review::line_number::LineNumber::try_from(number).unwrap()
 }

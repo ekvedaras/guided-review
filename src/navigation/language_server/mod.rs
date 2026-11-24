@@ -27,7 +27,7 @@ use super::{
 };
 pub use checkout::{Change, ChangedFile, Checkout, ServerCheckouts};
 use hover::{Hovered, kind_of};
-pub use managed::{ManagedServers, ReleasePin, ServerPins};
+pub use managed::{ManagedServers, PackagePin, ReleasePin, ServerFolders, ServerPins};
 use rpc::{Connection, Failure, locked};
 
 /// Whether a server says by `experimental/serverStatus` that it is busy.
@@ -65,6 +65,20 @@ impl ServerLaunch {
         }
     }
 
+    /// Intelephense on the app's Node, keeping its index in `index`.
+    pub fn intelephense(node: PathBuf, script: &Path, index: &Path) -> Self {
+        Self {
+            name: ServerName::of(Language::Php),
+            program: node,
+            args: vec![script.to_string_lossy().into_owned(), "--stdio".to_owned()],
+            status: StatusReports::No,
+            options: json!({
+                "storagePath": index.join("storage"),
+                "globalStoragePath": index.join("global"),
+            }),
+        }
+    }
+
     /// The server tells whether it is busy with `experimental/serverStatus`, so until it has, it is.
     pub fn reporting_status(mut self) -> Self {
         self.status = StatusReports::Yes;
@@ -84,6 +98,7 @@ pub trait ServerCatalog: Send + Sync {
     fn launch_for(
         &self,
         language: Language,
+        repo: &RepoName,
         waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason>;
 }
@@ -415,7 +430,7 @@ impl CodeNavigator for ServerNavigator {
         let Some(language) = Language::for_path(request.at.path.as_str()) else {
             return by_name(None);
         };
-        let launch = match self.pool.catalog.launch_for(language, waiting) {
+        let launch = match self.pool.catalog.launch_for(language, &self.repo, waiting) {
             Ok(launch) => launch,
             Err(reason) => return by_name(Some(reason)),
         };
@@ -566,6 +581,8 @@ struct Places<'a> {
 
 struct Found {
     place: Place,
+    /// The last line of the location's range: a declaration's range can start at its doc comment.
+    through: LineNumber,
     /// Set when the file is not in the repo's git, so a click opens it from disk.
     on_disk: Option<PathBuf>,
 }
@@ -588,6 +605,7 @@ impl Places<'_> {
             .take(10)
             .enumerate()
         {
+            let found = self.at_name(&mut sources, found, word);
             keep(&found);
             let line_text = self.line_at(&mut sources, &found).unwrap_or_default();
             let (signature, doc) = match (index, &hovered.signature) {
@@ -634,12 +652,16 @@ impl Places<'_> {
         } else {
             &location["range"]
         };
-        let line = LineNumber::try_from(
-            u32::try_from(range.pointer("/start/line")?.as_u64()?)
-                .ok()?
-                .checked_add(1)?,
-        )
-        .ok()?;
+        let line_at = |end: &str| {
+            LineNumber::try_from(
+                u32::try_from(range.pointer(&format!("/{end}/line"))?.as_u64()?)
+                    .ok()?
+                    .checked_add(1)?,
+            )
+            .ok()
+        };
+        let line = line_at("start")?;
+        let through = line_at("end").unwrap_or(line);
         let absolute = path_of(uri)?;
         let inside = absolute
             .strip_prefix(self.checkout)
@@ -668,8 +690,38 @@ impl Places<'_> {
         };
         Some(Found {
             place: Place { path, line },
+            through,
             on_disk,
         })
+    }
+
+    /// Moves a definition to the first line of its range that names it outside a comment.
+    fn at_name(
+        &self,
+        sources: &mut HashMap<FilePath, Option<String>>,
+        mut found: Found,
+        word: &Word,
+    ) -> Found {
+        let first = usize::from(found.place.line);
+        let last = usize::from(found.through);
+        let named = (first..=last).find_map(|number| {
+            let line = LineNumber::try_from(number).ok()?;
+            let at = Found {
+                place: Place {
+                    path: found.place.path.clone(),
+                    line,
+                },
+                through: line,
+                on_disk: found.on_disk.clone(),
+            };
+            let text = self.line_at(sources, &at)?;
+            let comment = ["*", "/", "#"].iter().any(|start| text.starts_with(start));
+            (!comment && text.contains(word.as_str())).then_some(line)
+        });
+        if let Some(line) = named {
+            found.place.line = line;
+        }
+        found
     }
 
     fn line_at(

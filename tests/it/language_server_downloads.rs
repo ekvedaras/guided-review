@@ -7,17 +7,17 @@ use flate2::write::GzEncoder;
 use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, FileSearch, LanguageServers, Lookups,
-    ManagedServers, NavigationRequest, Place, ReleasePin, ServerCheckouts, ServerName, ServerPins,
-    Timeouts, Waiting, Word,
+    ManagedServers, NavigationRequest, PackagePin, Place, ReleasePin, ServerCheckouts,
+    ServerFolders, ServerName, ServerPins, Timeouts, Waiting, Word,
 };
 use guided_review::platform::Os;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::update::{Cpu, ReleasesPort, Target};
 use serde_json::json;
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha512};
 use tempfile::TempDir;
 
-use crate::support::{FixtureRepo, file_path, line};
+use crate::support::{FixtureRepo, file_path, line, tarball};
 
 const LIB: &str = "pub fn add(a: u32, b: u32) -> u32 { a + b }
 
@@ -30,6 +30,40 @@ const TARGET: Target = Target {
 };
 
 const TAG: &str = "2030-01-01";
+
+const NODE: &str = "v99.0.0";
+
+const INTELEPHENSE: &str = "9.9.9";
+
+const JOBS: &str = "<?php
+
+class Jobs
+{
+    public function schedule(): void {}
+
+    public function run(): void { $this->schedule(); }
+}
+";
+
+fn node_url(target: Target) -> String {
+    let platform = match target.os {
+        Os::MacOs => "darwin",
+        Os::Linux => "linux",
+    };
+    let arch = match target.cpu {
+        Cpu::Arm64 => "arm64",
+        Cpu::X86_64 => "x64",
+    };
+    format!("https://nodejs.org/dist/{NODE}/node-{NODE}-{platform}-{arch}.tar.gz")
+}
+
+fn intelephense_url() -> String {
+    format!("https://registry.npmjs.org/intelephense/-/intelephense-{INTELEPHENSE}.tgz")
+}
+
+fn sha512_of(bytes: &[u8]) -> String {
+    guided_review::hex::lower(&Sha512::digest(bytes))
+}
 
 fn url_of(tag: &str, target: Target) -> String {
     format!(
@@ -93,6 +127,7 @@ impl Rig {
     fn new() -> Self {
         let repo = FixtureRepo::cloned_from("acme/shop");
         repo.write("src/lib.rs", LIB);
+        repo.write("app/Jobs.php", JOBS);
         let head = Sha::new(&repo.commit("head"));
         let scratch = TempDir::new().unwrap();
         let script = json!({
@@ -114,20 +149,50 @@ impl Rig {
             script_file.display()
         );
         let archive = gzip(binary.as_bytes());
+        let node = format!(
+            "#!/bin/sh\necho \"$@\" > '{}'\nexec python3 '{}' '{}'\n",
+            scratch.path().join("node-args").display(),
+            fake.display(),
+            script_file.display()
+        );
+        let node_archive = tarball(&[
+            (format!("node-{NODE}-darwin-arm64/bin/node"), node, 0o755),
+            (
+                format!("node-{NODE}-darwin-arm64/README.md"),
+                "Node".to_owned(),
+                0o644,
+            ),
+        ]);
+        let intelephense_archive = tarball(&[
+            ("package/package.json", "{}", 0o644),
+            ("package/lib/intelephense.js", "// the server", 0o644),
+        ]);
         let host = Arc::new(Host::default());
-        host.files
-            .lock()
-            .unwrap()
-            .push((url_of(TAG, TARGET), archive.clone()));
+        host.files.lock().unwrap().extend([
+            (url_of(TAG, TARGET), archive.clone()),
+            (node_url(TARGET), node_archive.clone()),
+            (intelephense_url(), intelephense_archive.clone()),
+        ]);
         let pins = ServerPins {
             rust_analyzer: ReleasePin {
                 tag: TAG.to_owned(),
                 sha256: vec![(TARGET, sha256_of(&archive))],
             },
+            node: ReleasePin {
+                tag: NODE.to_owned(),
+                sha256: vec![(TARGET, sha256_of(&node_archive))],
+            },
+            intelephense: PackagePin {
+                version: INTELEPHENSE.to_owned(),
+                sha512: sha512_of(&intelephense_archive),
+            },
         };
         let cache = scratch.path().join("cache/language-servers");
         let managed = Arc::new(ManagedServers::new(
-            cache.clone(),
+            ServerFolders {
+                downloads: cache.clone(),
+                indexes: scratch.path().join("state/server-indexes"),
+            },
             Arc::clone(&host) as Arc<dyn ReleasesPort>,
             pins,
             TARGET,
@@ -149,11 +214,26 @@ impl Rig {
     }
 
     fn hover_add(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
+        self.hover("src/lib.rs", 3, 23, "add")
+    }
+
+    /// `$this->schedule()` in `run`.
+    fn hover_schedule(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
+        self.hover("app/Jobs.php", 7, 41, "schedule")
+    }
+
+    fn hover(
+        &self,
+        path: &str,
+        number: usize,
+        column: usize,
+        word: &str,
+    ) -> (anyhow::Result<Answer>, Vec<Waiting>) {
         let code =
             LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap();
         let by_name: Arc<dyn CodeNavigator> =
             Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
-                file_path("src/lib.rs"),
+                file_path(path),
             ]))));
         let waits = Mutex::new(Vec::new());
         let answer = self
@@ -164,11 +244,11 @@ impl Rig {
                 &NavigationRequest {
                     sha: self.head.clone(),
                     at: Place {
-                        path: file_path("src/lib.rs"),
-                        line: line(3),
+                        path: file_path(path),
+                        line: line(number),
                     },
-                    column: Column::try_from(23).unwrap(),
-                    word: Word::new("add").unwrap(),
+                    column: Column::try_from(column).unwrap(),
+                    word: Word::new(word).unwrap(),
                 },
                 &|waiting| waits.lock().unwrap().push(waiting),
             );
@@ -184,7 +264,13 @@ impl Rig {
     }
 
     fn serving(&self, archive: &[u8]) {
-        self.host.files.lock().unwrap()[0].1 = archive.to_vec();
+        self.serving_at(&url_of(TAG, TARGET), archive);
+    }
+
+    fn serving_at(&self, url: &str, archive: &[u8]) {
+        let mut files = self.host.files.lock().unwrap();
+        let served = files.iter_mut().find(|(served, _)| served == url).unwrap();
+        served.1 = archive.to_vec();
     }
 
     fn downloads(&self) -> Vec<String> {
@@ -223,6 +309,65 @@ fn the_first_rust_hover_downloads_the_pinned_rust_analyzer_for_this_machine_and_
     );
 }
 
+fn intelephense() -> ServerName {
+    ServerName::new("Intelephense")
+}
+
+#[test]
+fn the_first_php_hover_downloads_the_pinned_node_and_intelephense_and_runs_intelephense_on_that_node()
+ {
+    let rig = Rig::new();
+
+    let (answer, waits) = rig.hover_schedule();
+    let answer = answer.unwrap();
+
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(intelephense())
+    );
+    assert_eq!(
+        waits[..2],
+        [
+            Waiting::Downloading(ServerName::new("Node")),
+            Waiting::Downloading(intelephense())
+        ]
+    );
+    assert_eq!(rig.requested(), vec![node_url(TARGET), intelephense_url()]);
+    let args = std::fs::read_to_string(rig.scratch.path().join("node-args")).unwrap();
+    assert_eq!(
+        args.trim(),
+        format!(
+            "{}/intelephense-{INTELEPHENSE}/package/lib/intelephense.js --stdio",
+            rig.cache.display()
+        )
+    );
+}
+
+#[test]
+fn intelephense_keeps_its_index_in_a_folder_of_the_repo_under_the_state_folder() {
+    let rig = Rig::new();
+
+    rig.hover_schedule().0.unwrap();
+
+    let log = std::fs::read_to_string(rig.scratch.path().join("log")).unwrap();
+    let initialize: serde_json::Value = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|message| message["method"] == "initialize")
+        .unwrap();
+    let index = rig
+        .scratch
+        .path()
+        .join("state/server-indexes/acme/shop/intelephense");
+    assert_eq!(
+        initialize["params"]["initializationOptions"],
+        json!({
+            "storagePath": index.join("storage"),
+            "globalStoragePath": index.join("global"),
+        })
+    );
+}
+
 fn note_of(answer: &Answer) -> Option<String> {
     match &answer.answered_by {
         AnsweredBy::ByName { because } => because.as_ref().map(|reason| reason.as_str().to_owned()),
@@ -242,6 +387,24 @@ fn a_download_that_is_not_the_pinned_one_is_refused_unpacked_nowhere_and_never_r
     assert!(note.contains("rust-analyzer"), "{note}");
     assert!(note.contains("does not match its checksum"), "{note}");
     assert!(rig.downloads().is_empty(), "{:?}", rig.downloads());
+    assert!(!rig.server_started());
+}
+
+#[test]
+fn an_intelephense_tarball_that_is_not_the_pinned_one_is_refused_unpacked_nowhere_and_never_run() {
+    let rig = Rig::new();
+    rig.serving_at(
+        &intelephense_url(),
+        &tarball(&[("package/lib/intelephense.js", "// another server", 0o644)]),
+    );
+
+    let (answer, _) = rig.hover_schedule();
+    let answer = answer.unwrap();
+
+    let note = note_of(&answer).expect("answered by name with a note");
+    assert!(note.contains("Intelephense"), "{note}");
+    assert!(note.contains("does not match its checksum"), "{note}");
+    assert_eq!(rig.downloads(), vec![format!("node-{NODE}")]);
     assert!(!rig.server_started());
 }
 
@@ -310,6 +473,26 @@ fn downloads_of_versions_the_app_no_longer_pins_are_removed_at_start() {
     rig.managed.remove_unpinned().unwrap();
 
     assert_eq!(rig.downloads(), vec![format!("rust-analyzer-{TAG}")]);
+}
+
+#[test]
+fn removing_unpinned_downloads_keeps_the_pinned_node_and_intelephense() {
+    let rig = Rig::new();
+    rig.hover_schedule().0.unwrap();
+    std::fs::create_dir_all(rig.cache.join("node-v1.0.0")).unwrap();
+    std::fs::create_dir_all(rig.cache.join("intelephense-0.0.1")).unwrap();
+
+    rig.managed.remove_unpinned().unwrap();
+
+    let mut downloads = rig.downloads();
+    downloads.sort();
+    assert_eq!(
+        downloads,
+        vec![
+            format!("intelephense-{INTELEPHENSE}"),
+            format!("node-{NODE}")
+        ]
+    );
 }
 
 #[test]

@@ -286,6 +286,12 @@ impl AppFolders {
         self.state.join("server-checkouts")
     }
 
+    /// The index each language server keeps of a repo, one folder per owner and repo. In the state
+    /// folder for the same reason as the server checkouts.
+    pub fn server_indexes(&self) -> PathBuf {
+        self.state.join("server-indexes")
+    }
+
     pub fn images(&self) -> PathBuf {
         self.cache.join("images")
     }

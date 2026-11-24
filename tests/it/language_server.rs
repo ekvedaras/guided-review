@@ -9,7 +9,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, DefinitionKind, FallbackReason, FileSearch,
     LanguageServers, Lookups, ManagedServers, NavigationRequest, Place, ServerCatalog,
-    ServerCheckouts, ServerLaunch, ServerName, ServerPins, Timeouts, Waiting, Word,
+    ServerCheckouts, ServerFolders, ServerLaunch, ServerName, ServerPins, Timeouts, Waiting, Word,
 };
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::update::Target;
@@ -48,6 +48,7 @@ impl ServerCatalog for FakeCatalog {
     fn launch_for(
         &self,
         _language: Language,
+        _repo: &RepoName,
         _waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
         let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
@@ -66,6 +67,8 @@ impl ServerCatalog for FakeCatalog {
 }
 
 struct Rig {
+    /// The file every hover is in.
+    file: &'static str,
     repo: FixtureRepo,
     head: Sha,
     scratch: TempDir,
@@ -87,8 +90,17 @@ impl Rig {
     }
 
     fn timed(text: &str, script: impl FnOnce(&Path) -> Value, timeouts: Timeouts) -> Self {
+        Self::with_file("src/lib.rs", text, script, timeouts)
+    }
+
+    fn with_file(
+        file: &'static str,
+        text: &str,
+        script: impl FnOnce(&Path) -> Value,
+        timeouts: Timeouts,
+    ) -> Self {
         let repo = FixtureRepo::cloned_from("acme/shop");
-        repo.write("src/lib.rs", text);
+        repo.write(file, text);
         let head = Sha::new(&repo.commit("head"));
         let scratch = TempDir::new().unwrap();
         let checkout = scratch.path().join("checkouts/acme/shop");
@@ -104,6 +116,7 @@ impl Rig {
             timeouts,
         );
         Self {
+            file,
             repo,
             head,
             scratch,
@@ -124,7 +137,7 @@ impl Rig {
 
     fn by_name(&self) -> Arc<dyn CodeNavigator> {
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
-            file_path("src/lib.rs"),
+            file_path(self.file),
         ]))))
     }
 
@@ -145,7 +158,7 @@ impl Rig {
                 &NavigationRequest {
                     sha: self.head.clone(),
                     at: Place {
-                        path: file_path("src/lib.rs"),
+                        path: file_path(self.file),
                         line: line(number),
                     },
                     column: Column::try_from(column).unwrap(),
@@ -237,6 +250,54 @@ fn a_name_is_answered_with_the_definition_its_usages_signature_and_doc_summary()
     };
     assert_eq!(usage.place.line, line(6));
     assert_eq!(&*usage.text, "pub fn total() -> u32 { add(1, 2) }");
+}
+
+/// What the real Intelephense 1.18.5 says on `$this->schedule(5)` in `BILLING`.
+const INTELEPHENSE_HOVER: &str = "__App\\Billing::schedule__
+
+Charges the customer.
+
+```php
+<?php
+public function schedule(int $amount): void { }
+```
+
+_@param_ `int $amount` in cents
+
+_@return_ `void`";
+
+#[test]
+fn an_intelephense_answer_shows_the_method_line_its_signature_and_its_doc_summary_without_tags() {
+    let rig = Rig::with_file(
+        "app/Billing.php",
+        BILLING,
+        |repo| {
+            json!({"answers": {
+                // Intelephense's range starts at the doc comment and ends with the method.
+                "textDocument/definition": [{
+                    "uri": format!("file://{}", repo.join("app/Billing.php").display()),
+                    "range": {"start": {"line": 6, "character": 4}, "end": {"line": 14, "character": 5}}
+                }],
+                "textDocument/references": [location(repo, "app/Billing.php", 18, 15, 23)],
+                "textDocument/hover": {"contents": {"kind": "markdown", "value": INTELEPHENSE_HOVER}},
+            }})
+        },
+        Timeouts::default(),
+    );
+
+    let (answer, _) = rig.navigate_at(19, 15, "schedule");
+    let answer = answer.unwrap();
+
+    let [definition] = answer.lookup.definitions.as_slice() else {
+        panic!("one definition")
+    };
+    assert_eq!(definition.place.line, line(13));
+    assert_eq!(definition.kind, DefinitionKind::Method);
+    assert_eq!(
+        &*definition.signature,
+        "public function schedule(int $amount): void { }"
+    );
+    assert_eq!(definition.doc.as_deref(), Some("Charges the customer."));
 }
 
 #[test]
@@ -476,24 +537,58 @@ fn a_location_outside_the_repo_is_kept_to_open_from_disk() {
     assert_eq!(answer.lookup.on_disk(&file_path("src/lib.rs")), None);
 }
 
-/// The pinned rust-analyzer the app downloaded into its cache folder. It is not downloaded here unless
-/// `GUIDED_REVIEW_DOWNLOAD_SMOKE` is set, so a pin bump is tried by hand with that set.
-fn downloaded_rust_analyzer() -> Option<Arc<ManagedServers>> {
-    let cache = AppFolders::xdg().ok()?.language_servers();
+#[test]
+fn a_location_in_the_borrowed_vendor_folder_shows_its_repo_path_and_opens_from_disk() {
+    let rig = Rig::with_file(
+        "app/Billing.php",
+        BILLING,
+        |repo| {
+            json!({"answers": {"textDocument/definition": [
+                location(repo, "vendor/laravel/framework/src/Clock.php", 9, 4, 12),
+            ]}})
+        },
+        Timeouts::default(),
+    );
+
+    let (answer, _) = rig.navigate_at(19, 15, "schedule");
+    let answer = answer.unwrap();
+
+    let place = &answer.lookup.definitions[0].place;
+    assert_eq!(
+        place.path,
+        file_path("vendor/laravel/framework/src/Clock.php")
+    );
+    assert_eq!(
+        answer.lookup.on_disk(&place.path),
+        Some(
+            rig.checkout
+                .join("vendor/laravel/framework/src/Clock.php")
+                .as_path()
+        )
+    );
+}
+
+/// The pinned server of `language` the app downloaded into its cache folder. It is not downloaded here
+/// unless `GUIDED_REVIEW_DOWNLOAD_SMOKE` is set, so a pin bump is tried by hand with that set.
+fn downloaded_server(language: Language) -> Option<Arc<ManagedServers>> {
+    let folders = AppFolders::xdg().ok()?;
     let managed = ManagedServers::new(
-        cache,
+        ServerFolders {
+            downloads: folders.language_servers(),
+            indexes: folders.server_indexes(),
+        },
         Arc::new(GitHub::from_env()),
         ServerPins::pinned(),
         Target::running(),
     );
-    let installed = managed.is_downloaded(Language::Rust);
+    let installed = managed.is_downloaded(language);
     let may_download = std::env::var_os("GUIDED_REVIEW_DOWNLOAD_SMOKE").is_some();
     (installed || may_download).then(|| Arc::new(managed))
 }
 
 #[test]
 fn the_real_rust_analyzer_finds_a_definition() {
-    let Some(managed) = downloaded_rust_analyzer() else {
+    let Some(managed) = downloaded_server(Language::Rust) else {
         eprintln!("the pinned rust-analyzer is not downloaded: skipped");
         return;
     };
@@ -539,6 +634,93 @@ fn the_real_rust_analyzer_finds_a_definition() {
         AnsweredBy::LanguageServer(rust_analyzer())
     );
     assert_eq!(answer.lookup.definitions[0].place.line, line(4));
+}
+
+const BILLING: &str = "<?php
+
+namespace App;
+
+class Billing
+{
+    /**
+     * Charges the customer.
+     *
+     * @param int $amount in cents
+     * @return void
+     */
+    public function schedule(int $amount): void
+    {
+    }
+
+    public function run(): void
+    {
+        $this->schedule(5);
+    }
+}
+";
+
+const SHIPPING: &str = "<?php
+
+namespace App;
+
+class Shipping
+{
+    public function schedule(): void
+    {
+    }
+}
+";
+
+#[test]
+fn the_real_intelephense_finds_the_method_of_the_class_the_code_calls() {
+    let Some(managed) = downloaded_server(Language::Php) else {
+        eprintln!("the pinned Intelephense is not downloaded: skipped");
+        return;
+    };
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("app/Billing.php", BILLING);
+    repo.write("app/Shipping.php", SHIPPING);
+    let head = Sha::new(&repo.commit("head"));
+    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let scratch = TempDir::new().unwrap();
+    let servers = LanguageServers::new(
+        managed,
+        ServerCheckouts::new(scratch.path().join("checkouts")),
+        Timeouts::default(),
+    );
+    let by_name: Arc<dyn CodeNavigator> =
+        Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
+            file_path("app/Billing.php"),
+            file_path("app/Shipping.php"),
+        ]))));
+
+    let answer = servers
+        .navigator(RepoName::new("acme", "shop"), by_name)
+        .navigate(
+            &code,
+            &NavigationRequest {
+                sha: head,
+                at: Place {
+                    path: file_path("app/Billing.php"),
+                    line: line(19),
+                },
+                column: Column::try_from(15).unwrap(),
+                word: Word::new("schedule").unwrap(),
+            },
+            &|_| {},
+        )
+        .unwrap();
+    servers.stop_all();
+
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(ServerName::new("Intelephense"))
+    );
+    let [definition] = &answer.lookup.definitions[..] else {
+        panic!("one definition: {:?}", answer.lookup.definitions);
+    };
+    assert_eq!(definition.place.path, file_path("app/Billing.php"));
+    assert_eq!(definition.place.line, line(13));
 }
 
 #[test]

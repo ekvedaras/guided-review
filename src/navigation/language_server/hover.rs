@@ -13,13 +13,15 @@ pub(super) struct Hovered {
 impl Hovered {
     pub(super) fn of(hover: &Value) -> Self {
         let markdown = markdown_of(&hover["contents"]);
+        // rust-analyzer puts the doc under a rule; Intelephense puts its summary between a bold title
+        // and the code, and the tags after the code.
         let (head, doc) = match markdown.split_once("\n---") {
-            Some((head, doc)) => (head, Some(doc)),
-            None => (markdown.as_str(), None),
+            Some((head, doc)) => (head, summary(doc)),
+            None => (markdown.as_str(), summary(&prose_of(&markdown))),
         };
         Self {
             signature: last_code_block(head),
-            doc: doc.and_then(summary),
+            doc,
         }
     }
 }
@@ -51,18 +53,44 @@ fn last_code_block(markdown: &str) -> Option<String> {
                 Some(block) => blocks.push(block.join(" ")),
                 None => open = Some(Vec::new()),
             }
-        } else if let Some(block) = &mut open {
+        } else if let Some(block) = &mut open
+            && line.trim() != "<?php"
+        {
             block.push(line.trim());
         }
     }
     blocks.pop().filter(|block| !block.is_empty())
 }
 
+/// Intelephense's first line: `__App\\Billing::schedule__`.
+fn is_title(line: &str) -> bool {
+    line.len() > 4 && line.starts_with("__") && line.ends_with("__")
+}
+
+/// The lines outside code blocks, without a bold title line.
+fn prose_of(markdown: &str) -> String {
+    let mut in_code = false;
+    let mut prose = Vec::new();
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            in_code = !in_code;
+        } else if !in_code && !is_title(trimmed) {
+            prose.push(line);
+        }
+    }
+    prose.join("\n")
+}
+
 /// The first paragraph, cut where raw tags (`@param`) or a section heading start.
 fn summary(doc: &str) -> Option<String> {
     let mut words: Vec<&str> = Vec::new();
     for line in doc.lines().map(str::trim) {
-        if line.starts_with('@') || line.starts_with('#') || line.starts_with("```") {
+        if line.starts_with('@')
+            || line.starts_with("_@")
+            || line.starts_with('#')
+            || line.starts_with("```")
+        {
             break;
         }
         if line.is_empty() {
@@ -78,20 +106,37 @@ fn summary(doc: &str) -> Option<String> {
 
 /// What a declaration is, read from the start of its signature.
 pub(super) fn kind_of(signature: &str) -> DefinitionKind {
+    let mut in_a_class = false;
     let mut tokens = signature
         .split(|c: char| c.is_whitespace() || c == '(')
         .filter(|token| !token.is_empty())
         .skip_while(|token| {
+            if matches!(*token, "public" | "protected" | "private") {
+                in_a_class = true;
+            }
             matches!(
                 *token,
-                "pub" | "async" | "unsafe" | "extern" | "default" | "export" | "declare"
+                "pub"
+                    | "async"
+                    | "unsafe"
+                    | "extern"
+                    | "default"
+                    | "export"
+                    | "declare"
+                    | "public"
+                    | "protected"
+                    | "private"
+                    | "static"
+                    | "final"
+                    | "abstract"
+                    | "readonly"
             ) || token.starts_with("crate)")
                 || token.starts_with("super)")
                 || token.starts_with('"')
         });
     match tokens.next() {
         Some("fn" | "function") => {
-            if signature.contains("self") {
+            if in_a_class || signature.contains("self") {
                 DefinitionKind::Method
             } else {
                 DefinitionKind::Function
@@ -104,7 +149,7 @@ pub(super) fn kind_of(signature: &str) -> DefinitionKind {
         Some("mod" | "namespace") => DefinitionKind::Module,
         Some("macro_rules!" | "macro") => DefinitionKind::Macro,
         Some("const" | "static") => DefinitionKind::Constant,
-        Some("class" | "abstract") => DefinitionKind::Class,
+        Some("class") => DefinitionKind::Class,
         Some("interface") => DefinitionKind::Interface,
         Some("method" | "constructor") => DefinitionKind::Method,
         _ => DefinitionKind::Variable,
