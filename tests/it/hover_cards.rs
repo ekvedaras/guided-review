@@ -867,7 +867,8 @@ fn an_answer_by_name_with_no_reason_and_a_language_server_answer_carry_no_note()
     }
 }
 
-const SERVER_QUESTION: &str = "Use language servers for acme/shop? rust-analyzer may build it";
+const SERVER_QUESTION: &str =
+    "Use language servers for acme/shop? typescript-language-server may build it";
 
 fn shop_repo() -> RepoName {
     RepoName::new("acme", "shop")
@@ -907,6 +908,97 @@ fn the_first_hover_in_a_repo_asks_to_use_language_servers_and_the_by_name_lookup
     assert_eq!(card.question.unwrap().repo, shop_repo());
     assert_eq!(card.definitions.len(), 1, "the by-name lookup answered");
     assert_eq!(adapter.asked(), []);
+}
+
+#[test]
+fn the_question_names_the_server_of_the_hovered_files_language() {
+    let shop = Shop::with_changes(&[], |repo| {
+        repo.write("src/Order.php", "<?php\nclass Order {}\n");
+        repo.write("src/lib.rs", "pub struct Order;\n");
+    });
+    let source = shop.source();
+    let mut review = review_with_servers(&shop, &source, &language_server_adapter());
+
+    let php = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/Order.php", Side::Head, 2, "Order"),
+    ));
+    let rust = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/lib.rs", Side::Head, 1, "Order"),
+    ));
+
+    assert_eq!(
+        question_of(&php),
+        Some("Use language servers for acme/shop? Intelephense may build it".to_owned())
+    );
+    assert_eq!(
+        question_of(&rust),
+        Some("Use language servers for acme/shop? rust-analyzer may build it".to_owned())
+    );
+}
+
+/// Answers with a definition in a file git does not hold, as rust-analyzer does for the standard library.
+struct StandardLibraryNavigator;
+
+impl guided_review::navigation::CodeNavigator for StandardLibraryNavigator {
+    fn navigate(
+        &self,
+        _code: &dyn CodeSource,
+        request: &guided_review::navigation::NavigationRequest,
+        _waiting: &dyn Fn(Waiting),
+    ) -> anyhow::Result<guided_review::navigation::Answer> {
+        let place = guided_review::navigation::Place {
+            path: file_path("opt/rust/library/core/src/option.rs"),
+            line: line(10),
+        };
+        Ok(guided_review::navigation::Answer {
+            lookup: guided_review::navigation::Lookup {
+                word: request.word.clone(),
+                definitions: vec![guided_review::navigation::Definition {
+                    name: request.word.clone(),
+                    kind: guided_review::navigation::DefinitionKind::Enum,
+                    place,
+                    signature: "pub enum Option<T>".into(),
+                    signature_origin: Arc::new([]),
+                    doc: None,
+                }],
+                usages: Arc::new([]),
+                reach: guided_review::navigation::Reach::WholeRepo,
+                cut_short: false,
+                on_disk_files: Arc::new([(
+                    file_path("opt/rust/library/core/src/option.rs"),
+                    "/opt/rust/library/core/src/option.rs".into(),
+                )]),
+            },
+            answered_by: AnsweredBy::LanguageServer(rust_analyzer()),
+        })
+    }
+}
+
+#[test]
+fn a_row_in_a_file_outside_git_opens_that_file_on_disk() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let mut review = shop.open(&source);
+    review.use_navigator(Arc::new(StandardLibraryNavigator));
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+
+    assert_eq!(
+        card.definitions[0].target,
+        NameTarget::OnDisk {
+            path: "/opt/rust/library/core/src/option.rs".into(),
+            line: line(10),
+        }
+    );
+    assert!(!card.definitions[0].in_pr);
 }
 
 #[test]

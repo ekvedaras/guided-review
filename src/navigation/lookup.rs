@@ -74,6 +74,17 @@ pub struct Lookup {
     pub reach: Reach,
     /// More files hold the word than were parsed, so definitions and usages may be missing.
     pub cut_short: bool,
+    /// Files a language server named that are not in the repo's git: where each is on disk.
+    pub on_disk_files: Arc<[(FilePath, std::path::PathBuf)]>,
+}
+
+impl Lookup {
+    /// Where a place's file is on disk when git does not hold it.
+    pub fn on_disk(&self, path: &FilePath) -> Option<&Path> {
+        self.on_disk_files
+            .iter()
+            .find_map(|(file, disk)| (file == path).then_some(disk.as_path()))
+    }
 }
 
 /// How many files a lookup parses at most, so a word as common as `new` cannot stall it.
@@ -144,6 +155,7 @@ impl Lookups {
             usages: Arc::clone(&found.usages),
             reach: self.search.reach(),
             cut_short: found.cut_short,
+            on_disk_files: Arc::new([]),
         })
     }
 
@@ -238,6 +250,7 @@ impl Lookups {
             usages: local.usages.into(),
             reach: Reach::EnclosingFunction,
             cut_short: false,
+            on_disk_files: Arc::new([]),
         })
     }
 

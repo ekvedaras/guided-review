@@ -5,7 +5,7 @@ use std::cell::OnceCell;
 use std::sync::Arc;
 
 use crate::file_path::FilePath;
-use crate::navigation::{AnsweredBy, CodeNavigator, Lookup, Place, ServerAnswer};
+use crate::navigation::{AnsweredBy, CodeNavigator, LanguageServers, Lookup, Place, ServerAnswer};
 use crate::pieces::ChangedFile;
 use crate::pull_request::RepoName;
 use crate::viewer::code_link::CodeLinks;
@@ -44,6 +44,18 @@ impl ReviewCore {
         answer: Option<ServerAnswer>,
     ) {
         self.names.use_language_servers(adapter, repo, answer);
+    }
+
+    /// Lets `servers` answer names in `repo` once its reviewer says yes, with the by-name lookup
+    /// answering whatever they cannot.
+    pub fn use_language_server_pool(
+        &mut self,
+        servers: &LanguageServers,
+        repo: RepoName,
+        answer: Option<ServerAnswer>,
+    ) {
+        let adapter = servers.navigator(self.names.by_name());
+        self.use_language_servers(adapter, repo, answer);
     }
 
     /// Takes the reviewer's answer to the card's question; returns the repo it is about, for the

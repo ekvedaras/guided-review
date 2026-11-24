@@ -239,6 +239,10 @@ impl NameDesk {
         }
     }
 
+    pub(super) fn by_name(&self) -> Arc<dyn CodeNavigator> {
+        Arc::clone(&self.by_name)
+    }
+
     /// Answers by name through `by_name` from now on, with nothing kept of what was asked before.
     pub(super) fn use_by_name(&mut self, by_name: Arc<dyn CodeNavigator>) {
         self.by_name = by_name;
@@ -275,8 +279,8 @@ impl NameDesk {
     /// Asked on a head line of a language a server answers, while the repo is not answered for.
     pub(super) fn question_for(&self, key: &NameKey) -> Option<ServerQuestion> {
         let servers = self.servers.as_ref()?;
-        let has_server = key.side == Side::Head && Language::for_path(key.path.as_str()).is_some();
-        (servers.answer.is_none() && has_server).then(|| ServerQuestion::about(&servers.repo))
+        let language = Language::for_path(key.path.as_str()).filter(|_| key.side == Side::Head)?;
+        (servers.answer.is_none()).then(|| ServerQuestion::about(&servers.repo, language))
     }
 
     /// Yes: the cards are forgotten, to be asked of the adapter. No: they stay, without the question.

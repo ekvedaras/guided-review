@@ -5,10 +5,11 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::file_path::FilePath;
+use crate::language::Language;
 use std::borrow::Cow;
 
 use crate::navigation::{
-    AnsweredBy, Definition, FallbackReason, Lookup, Place, Reach, Usage, Waiting, Word,
+    AnsweredBy, Definition, FallbackReason, Lookup, Place, Reach, ServerName, Usage, Waiting, Word,
 };
 use crate::pull_request::RepoName;
 
@@ -27,6 +28,11 @@ pub enum NameTarget {
     Tour(JumpTarget),
     /// Any other place opens through the `CodeOpener`, at the commit the lookup read.
     Code(CodeLink),
+    /// A file git does not hold (the Rust standard library, a vendored package) opens from disk.
+    OnDisk {
+        path: std::path::PathBuf,
+        line: crate::line_number::LineNumber,
+    },
 }
 
 /// Why the card may show less than the repo holds.
@@ -63,10 +69,11 @@ pub struct ServerQuestion {
 }
 
 impl ServerQuestion {
-    pub(super) fn about(repo: &RepoName) -> Self {
+    pub(super) fn about(repo: &RepoName, language: Language) -> Self {
+        let server = ServerName::of(language);
         Self {
             repo: repo.clone(),
-            says: format!("Use language servers for {repo}? rust-analyzer may build it").into(),
+            says: format!("Use language servers for {repo}? {server} may build it").into(),
         }
     }
 }
@@ -330,10 +337,11 @@ impl DefinitionCard {
     pub(super) fn of(
         lookup: &Lookup,
         hovered: &Place,
-        review: &dyn PlacesOfReview,
+        in_review: &dyn PlacesOfReview,
         highlights: &NameHighlights,
         answered_by: &AnsweredBy,
     ) -> Self {
+        let review = &WithFilesOnDisk { in_review, lookup };
         let definitions: Vec<DefinitionRow> = lookup
             .definitions
             .iter()
@@ -458,6 +466,28 @@ fn usage_file(
             })
             .collect(),
     })
+}
+
+/// The review's places, and the files a language server found that git does not hold.
+struct WithFilesOnDisk<'a> {
+    in_review: &'a dyn PlacesOfReview,
+    lookup: &'a Lookup,
+}
+
+impl PlacesOfReview for WithFilesOnDisk<'_> {
+    fn is_changed(&self, path: &FilePath) -> bool {
+        self.lookup.on_disk(path).is_none() && self.in_review.is_changed(path)
+    }
+
+    fn target_of(&self, place: &Place) -> NameTarget {
+        match self.lookup.on_disk(&place.path) {
+            Some(path) => NameTarget::OnDisk {
+                path: path.to_path_buf(),
+                line: place.line,
+            },
+            None => self.in_review.target_of(place),
+        }
+    }
 }
 
 fn counted(count: usize, one: &str, many: &str) -> String {

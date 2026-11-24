@@ -10,7 +10,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use crate::app::code_links::open_code;
+use crate::app::code_links::{open_code, open_disk_file};
 use crate::app::components::diff_view::NamePointer;
 use crate::app::components::name_card::{OnNameTarget, OnServerAnswer, name_card};
 use crate::app::components::overlay::popover_by;
@@ -127,6 +127,7 @@ impl OneStepLayout {
         match target {
             NameTarget::Tour(target) => self.jump_to(target, cx),
             NameTarget::Code(link) => open_code(link, cx),
+            NameTarget::OnDisk { path, line } => open_disk_file(path, *line, cx),
         }
         self.dismiss_name_card(cx);
         cx.notify();

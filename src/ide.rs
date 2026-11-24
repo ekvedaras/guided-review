@@ -151,6 +151,11 @@ impl Ide {
         path.under(&self.clone_root).is_file()
     }
 
+    /// A file that is not in the clone: its own absolute path.
+    pub fn launch_file(&self, absolute: &Path, line: LineNumber) -> IdeLaunch {
+        self.template.launch(&absolute.to_string_lossy(), line)
+    }
+
     /// `path` is relative to the clone root.
     pub fn launch(&self, path: &FilePath, line: LineNumber) -> IdeLaunch {
         let absolute = path.under(&self.clone_root).to_string_lossy().into_owned();

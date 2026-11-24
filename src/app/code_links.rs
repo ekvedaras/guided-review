@@ -6,6 +6,7 @@ use gpui::{App, Global, SharedString};
 use crate::app::active_session::session_of;
 use crate::app::components::icon::Icon;
 use crate::ide::IdeLaunch;
+use crate::line_number::LineNumber;
 use crate::viewer::{CodeLink, CodeOpener, Destination, Opened};
 
 struct ActiveCodeOpener(CodeOpener);
@@ -19,6 +20,15 @@ pub fn use_code_opener(opener: CodeOpener, cx: &mut App) {
 
 pub fn open_code(link: &CodeLink, cx: &mut App) {
     let destination = cx.global::<ActiveCodeOpener>().0.destination(link);
+    open(&destination, cx);
+}
+
+/// A file git does not hold, from disk in the IDE.
+pub fn open_disk_file(path: &std::path::Path, line: LineNumber, cx: &mut App) {
+    let destination = cx
+        .global::<ActiveCodeOpener>()
+        .0
+        .destination_of_file(path, line);
     open(&destination, cx);
 }
 

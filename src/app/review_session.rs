@@ -22,6 +22,7 @@ use crate::app::components::markdown_view::OpenDetails;
 use crate::app::components::pr_switcher::PrSwitching;
 use crate::app::components::toast_stack::post_toast;
 use crate::app::frame_stats::FrameStatsHook;
+use crate::app::language_servers::use_language_servers;
 use crate::app::page_rows::{PageRows, RowsChange};
 use crate::app::review_agent;
 use crate::app::sidebar_rows::SidebarRows;
@@ -190,6 +191,7 @@ impl ReviewSession {
             review.raise_problem(Problem::ReleaseInstallInTheWay(in_the_way));
         }
         let folders = cx.global::<PrSwitching>().folders.clone();
+        use_language_servers(&mut review, &folders, cx);
         let not_read = AppFolders::xdg().map_or_default(|xdg| folders.files_not_read(&xdg));
         if !not_read.is_empty() {
             review.raise_problem(Problem::FilesNotRead(not_read));

@@ -3,6 +3,7 @@
 mod column;
 mod git_grep;
 mod import;
+mod language_server;
 mod local;
 mod lookup;
 mod navigator;
@@ -12,6 +13,9 @@ mod word_in_file;
 pub use column::Column;
 pub use git_grep::GitGrep;
 pub use import::Import;
+pub use language_server::{
+    LanguageServers, ServerCatalog, ServerLaunch, ServersOnThisMachine, Timeouts,
+};
 pub use lookup::{FILES_PARSED_AT_MOST, FileSearch, FilesWithWord, Lookup, Lookups, Reach};
 pub use navigator::{
     Answer, AnsweredBy, CodeNavigator, FallbackReason, NavigationRequest, ServerAnswer, ServerName,

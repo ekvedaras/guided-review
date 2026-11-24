@@ -192,6 +192,22 @@ impl CodeOpener {
         self.code_destination(link.in_working_copy.clone(), link.on_github.as_deref())
     }
 
+    /// A file git does not hold, in the IDE when one is set.
+    pub fn destination_of_file(&self, path: &std::path::Path, line: LineNumber) -> Destination {
+        match &self.ide {
+            Ok(ide) => Destination::Ide {
+                launch: ide.launch_file(path, line),
+                caveat: None,
+            },
+            Err(NoIde::NoTemplate) => Destination::NotOpenable {
+                because: NotInIde::NoIdeTemplate,
+            },
+            Err(NoIde::NoClone) => Destination::NotOpenable {
+                because: NotInIde::NoLocalFolder,
+            },
+        }
+    }
+
     /// For links in markdown text: a GitHub link to a file of this repo, or a repo-relative path,
     /// is a code link; every other link opens as it is written.
     pub fn destination_of_url(&self, url: &str) -> Destination {

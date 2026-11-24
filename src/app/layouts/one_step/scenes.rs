@@ -1576,6 +1576,7 @@ fn staged_lookup(hovered: &HoveredName) -> Lookup {
         usages: Arc::from(usages),
         reach: Reach::ChangedFiles,
         cut_short: false,
+        on_disk_files: Arc::new([]),
     }
 }
 

@@ -1134,6 +1134,7 @@ impl guided_review::navigation::CodeNavigator for FakeNavigator {
                 }]),
                 reach: guided_review::navigation::Reach::WholeRepo,
                 cut_short: false,
+                on_disk_files: Arc::new([]),
             },
             answered_by: self.answered_by.clone(),
         })

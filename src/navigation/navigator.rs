@@ -43,6 +43,16 @@ impl ServerName {
     pub fn new(name: &str) -> Self {
         Self(name.into())
     }
+
+    /// The server that answers files of `language`.
+    pub fn of(language: crate::language::Language) -> Self {
+        use crate::language::Language;
+        Self::new(match language {
+            Language::Rust => "rust-analyzer",
+            Language::Php => "Intelephense",
+            Language::TypeScript | Language::Tsx => "typescript-language-server",
+        })
+    }
 }
 
 impl fmt::Display for ServerName {
