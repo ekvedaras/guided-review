@@ -67,6 +67,7 @@ impl ServerCheckouts {
         remove_earlier_worktree(&folder)?;
         let repo = OwnRepo::opened(&folder, &source)?;
         repo.fill_with(&source, head)?;
+        repo.keep_out_program_settings()?;
         unlink_what_head_tracks(&folder, head)?;
         git(&folder, &["checkout", "--quiet", "--detach", head.as_str()])?;
         borrow_dependencies(clone, &folder, head)?;
@@ -104,17 +105,18 @@ impl ServerCheckouts {
 impl Checkout {
     /// What changed in the files a server may have read since it last heard of `heard`.
     pub fn changes_since(&self, heard: &Sha) -> anyhow::Result<Vec<ChangedFile>> {
-        let listed = git(
-            &self.folder,
-            &[
-                "diff",
-                "--name-status",
-                "--no-renames",
-                "-z",
-                heard.as_str(),
-                self.head.as_str(),
-            ],
-        )?;
+        let left_out = PROGRAM_SETTINGS.map(|name| format!(":(exclude,glob)**/{name}"));
+        let mut args = vec![
+            "diff",
+            "--name-status",
+            "--no-renames",
+            "-z",
+            heard.as_str(),
+            self.head.as_str(),
+            "--",
+        ];
+        args.extend(left_out.iter().map(String::as_str));
+        let listed = git(&self.folder, &args)?;
         let mut fields = listed.split('\0').filter(|field| !field.is_empty());
         let mut changed = Vec::new();
         while let (Some(status), Some(path)) = (fields.next(), fields.next()) {
@@ -150,6 +152,19 @@ impl<'a> ReviewClone<'a> {
         Ok(Self { folder, objects })
     }
 }
+
+/// Files in the PR's tree that make a language server, or the cargo or rustup it runs, start a
+/// program the PR names (tried against the real servers, see docs/wiki/definitions-on-hover.md).
+const PROGRAM_SETTINGS: [&str; 6] = [
+    ".cargo/config.toml",
+    ".cargo/config",
+    "rust-toolchain.toml",
+    "rust-toolchain",
+    "rust-project.json",
+    // No key of it ran anything with rust-analyzer 2026-11-23, but the keys a workspace may set
+    // change between releases.
+    "rust-analyzer.toml",
+];
 
 /// Where the checkout's objects are: read from the clone it was made from, or copied into its own.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -204,6 +219,15 @@ impl<'a> OwnRepo<'a> {
             .with_context(|| format!("could not point {} at the clone", folder.display()))?;
         }
         Ok(Self { folder })
+    }
+
+    /// A sparse checkout leaves the program settings out of the folder wherever they are in the tree,
+    /// and takes them out of a checkout an earlier build filled.
+    fn keep_out_program_settings(&self) -> anyhow::Result<()> {
+        let left_out = PROGRAM_SETTINGS.map(|name| format!("!**/{name}"));
+        let mut args = vec!["sparse-checkout", "set", "--no-cone", "/*"];
+        args.extend(left_out.iter().map(String::as_str));
+        git(self.folder, &args).map(drop)
     }
 
     fn fill_with(&self, source: &ReviewClone<'_>, head: &Sha) -> anyhow::Result<()> {

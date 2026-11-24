@@ -378,3 +378,55 @@ fn checkouts_and_indexes_earlier_builds_kept_under_local_folder_are_removed() {
         3
     );
 }
+
+/// Files that make a server, or the cargo or rustup it runs, start a program the PR names.
+const PROGRAM_SETTINGS: [&str; 8] = [
+    ".cargo/config.toml",
+    ".cargo/config",
+    "crates/shop/.cargo/config.toml",
+    "rust-toolchain.toml",
+    "crates/shop/rust-toolchain",
+    "rust-project.json",
+    "crates/shop/rust-project.json",
+    "rust-analyzer.toml",
+];
+
+#[test]
+fn program_settings_in_the_prs_files_are_kept_out_of_the_checkout_and_stay_in_the_clone() {
+    let rig = Rig::with_a_dirty_clone();
+    for file in PROGRAM_SETTINGS {
+        rig.clone.write(file, "hostile\n");
+    }
+    let hostile = Sha::new(&rig.clone.commit("program settings"));
+
+    let checkout = rig.move_to(&hostile);
+
+    for file in PROGRAM_SETTINGS {
+        assert!(
+            !checkout.folder.join(file).exists(),
+            "{file} is in the checkout"
+        );
+        assert!(
+            rig.clone.path().join(file).exists(),
+            "{file} left the clone"
+        );
+    }
+    assert_eq!(read(&checkout.folder, "src/lib.rs"), "pub fn second() {}\n");
+}
+
+#[test]
+fn a_cargo_config_an_earlier_build_checked_out_is_removed_by_the_next_move() {
+    let rig = Rig::with_a_dirty_clone();
+    rig.clone.write(
+        ".cargo/config.toml",
+        "[build]\nrustc-wrapper = \"wrap.sh\"\n",
+    );
+    let hostile = Sha::new(&rig.clone.commit("a cargo config"));
+    let checkout = rig.move_to(&hostile);
+    git_in(&checkout.folder, &["sparse-checkout", "disable"]);
+    assert!(checkout.folder.join(".cargo/config.toml").exists());
+
+    let checkout = rig.move_to(&hostile);
+
+    assert!(!checkout.folder.join(".cargo/config.toml").exists());
+}

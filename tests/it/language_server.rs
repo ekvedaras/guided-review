@@ -18,7 +18,7 @@ use guided_review::update::Target;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-use crate::support::{FixtureRepo, file_path, line};
+use crate::support::{FixtureRepo, file_path, line, write_executable};
 
 fn shop_codebase() -> Codebase {
     Codebase::GitHub(RepoName::new("acme", "shop"))
@@ -657,6 +657,104 @@ fn the_real_rust_analyzer_finds_a_definition() {
     assert_eq!(answer.lookup.definitions[0].place.line, line(4));
 }
 
+/// Hovers `add` with the real rust-analyzer in a repo whose head also holds what `plant` writes, given
+/// the server checkout's folder and a marker file; says whether anything wrote the marker. `None`
+/// when the pinned rust-analyzer is not downloaded.
+fn the_real_rust_analyzer_wrote_a_marker_with(
+    plant: impl FnOnce(&FixtureRepo, &Path, &Path),
+) -> Option<bool> {
+    let managed = downloaded_server(Language::Rust)?;
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write(
+        "Cargo.toml",
+        "[package]\nname = \"tiny\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    );
+    repo.write("src/lib.rs", LIB);
+    let scratch = TempDir::new().unwrap();
+    let checkouts = scratch.path().join("checkouts");
+    let marker = scratch.path().join("ran");
+    plant(&repo, &checkouts.join("acme/shop"), &marker);
+    let head = Sha::new(&repo.commit("head"));
+    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let servers = LanguageServers::new(
+        managed,
+        ServerCheckouts::new(checkouts),
+        Timeouts::default(),
+    );
+    let by_name: Arc<dyn CodeNavigator> =
+        Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
+            file_path("src/lib.rs"),
+        ]))));
+
+    servers
+        .navigator(shop_codebase(), by_name)
+        .navigate(
+            &code,
+            &NavigationRequest {
+                sha: head,
+                at: Place {
+                    path: file_path("src/lib.rs"),
+                    line: line(6),
+                },
+                column: Column::try_from(24).unwrap(),
+                word: Word::new("add").unwrap(),
+            },
+            &|_| {},
+        )
+        .unwrap();
+    servers.stop_all();
+
+    Some(marker.exists())
+}
+
+fn marking(marker: &Path) -> String {
+    format!("#!/bin/sh\ntouch '{}'\n", marker.display())
+}
+
+#[test]
+fn the_real_rust_analyzer_runs_no_rustc_wrapper_that_a_cargo_config_in_the_prs_files_names() {
+    let ran = the_real_rust_analyzer_wrote_a_marker_with(|repo, _, marker| {
+        repo.write(
+            ".cargo/config.toml",
+            "[build]\nrustc-wrapper = \"tools/wrap.sh\"\n",
+        );
+        std::fs::create_dir_all(repo.path().join("tools")).unwrap();
+        write_executable(
+            &repo.path().join("tools/wrap.sh"),
+            format!("{}exec \"$@\"\n", marking(marker)),
+        );
+    });
+
+    let Some(ran) = ran else {
+        eprintln!("the pinned rust-analyzer is not downloaded: skipped");
+        return;
+    };
+    assert!(!ran, "the PR's rustc wrapper ran");
+}
+
+#[test]
+fn the_real_rust_analyzer_runs_no_sysroot_tool_that_a_rust_project_file_in_the_prs_files_names() {
+    let ran = the_real_rust_analyzer_wrote_a_marker_with(|repo, _, marker| {
+        repo.write(
+            "rust-project.json",
+            r#"{"sysroot": "sysroot", "crates": [{"root_module": "src/lib.rs", "edition": "2021", "deps": []}]}"#,
+        );
+        std::fs::create_dir_all(repo.path().join("sysroot/bin")).unwrap();
+        for tool in ["cargo", "rustc"] {
+            write_executable(
+                &repo.path().join("sysroot/bin").join(tool),
+                format!("{}exit 1\n", marking(marker)),
+            );
+        }
+    });
+
+    let Some(ran) = ran else {
+        eprintln!("the pinned rust-analyzer is not downloaded: skipped");
+        return;
+    };
+    assert!(!ran, "the PR's sysroot tool ran");
+}
+
 const BILLING: &str = "<?php
 
 namespace App;
@@ -884,6 +982,68 @@ fn the_real_typescript_language_server_finds_the_method_of_the_class_the_code_ca
 }
 
 #[test]
+fn the_real_typescript_language_server_loads_no_tsserver_plugin_that_the_prs_tsconfig_names() {
+    let Some(managed) = downloaded_server(Language::TypeScript) else {
+        eprintln!("the pinned typescript-language-server is not downloaded: skipped");
+        return;
+    };
+    let scratch = TempDir::new().unwrap();
+    let marker = scratch.path().join("loaded");
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("src/shapes.ts", SHAPES);
+    repo.write(
+        "tsconfig.json",
+        r#"{"compilerOptions": {"plugins": [{"name": "evil-plugin"}]}}"#,
+    );
+    let head = Sha::new(&repo.commit("head"));
+    repo.write(
+        "node_modules/evil-plugin/package.json",
+        r#"{"name": "evil-plugin", "main": "index.js"}"#,
+    );
+    repo.write(
+        "node_modules/evil-plugin/index.js",
+        &format!(
+            "require('fs').writeFileSync({:?}, '');\nmodule.exports = () => ({{ create: (info) => info.languageService }});\n",
+            marker.display().to_string()
+        ),
+    );
+    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let servers = LanguageServers::new(
+        managed,
+        ServerCheckouts::new(scratch.path().join("checkouts")),
+        Timeouts::default(),
+    );
+    let by_name: Arc<dyn CodeNavigator> =
+        Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
+            file_path("src/shapes.ts"),
+        ]))));
+
+    let area = servers
+        .navigator(shop_codebase(), by_name)
+        .navigate(
+            &code,
+            &NavigationRequest {
+                sha: head,
+                at: Place {
+                    path: file_path("src/shapes.ts"),
+                    line: line(12),
+                },
+                column: Column::try_from(28).unwrap(),
+                word: Word::new("area").unwrap(),
+            },
+            &|_| {},
+        )
+        .unwrap();
+    servers.stop_all();
+
+    assert_eq!(
+        area.answered_by,
+        AnsweredBy::LanguageServer(ServerName::new("typescript-language-server"))
+    );
+    assert!(!marker.exists(), "the PR's tsserver plugin was loaded");
+}
+
+#[test]
 fn a_review_at_another_head_moves_the_checkout_and_tells_the_running_server_which_files_changed() {
     let rig = Rig::answering_add();
     rig.hover_add().0.unwrap();
@@ -912,6 +1072,27 @@ fn a_review_at_another_head_moves_the_checkout_and_tells_the_running_server_whic
         std::fs::read_to_string(rig.checkout.join("src/lib.rs")).unwrap(),
         later
     );
+}
+
+#[test]
+fn a_server_hears_nothing_of_program_settings_the_checkout_keeps_out() {
+    let rig = Rig::answering_add();
+    rig.hover_add().0.unwrap();
+    rig.repo.write(
+        ".cargo/config.toml",
+        "[build]\nrustc-wrapper = \"wrap.sh\"\n",
+    );
+
+    rig.hover_add_at_a_new_head(&format!("{LIB}// later\n"))
+        .0
+        .unwrap();
+
+    let file = format!("file://{}/src/lib.rs", rig.checkout.display());
+    let [watched] = rig
+        .params_of("workspace/didChangeWatchedFiles")
+        .try_into()
+        .unwrap();
+    assert_eq!(watched["changes"], json!([{"uri": file, "type": 2}]));
 }
 
 #[test]
