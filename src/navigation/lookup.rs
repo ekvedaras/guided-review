@@ -7,7 +7,8 @@ use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::pull_request::Sha;
 
-use super::{Definition, GitGrep, Import, Usage, Word, WordInFile};
+use super::local::Local;
+use super::{Column, Definition, GitGrep, Import, Place, Usage, Word, WordInFile};
 
 /// Finds the files at a commit that hold a word, so only those are parsed.
 pub trait FilesWithWord: Send + Sync {
@@ -18,6 +19,9 @@ pub trait FilesWithWord: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reach {
     WholeRepo,
+    /// A local (a variable or parameter) is looked up in the function that holds it, so no other
+    /// file is searched.
+    EnclosingFunction,
     /// The code is read from GitHub, so only the review's changed files are searched.
     ChangedFiles,
 }
@@ -206,6 +210,32 @@ impl Lookups {
             })
             .collect();
         Ok((files, cut_short))
+    }
+
+    /// The name that starts at `column` of the line at `at`: a local in its function only, anything
+    /// else by name, as `look_up` does.
+    pub fn look_up_at(
+        &self,
+        code: &dyn CodeSource,
+        sha: &Sha,
+        word: &Word,
+        at: &Place,
+        column: Column,
+    ) -> anyhow::Result<Lookup> {
+        let local = Language::for_path(at.path.as_str()).and_then(|language| {
+            let source = code.file_at(sha, &at.path).ok()?;
+            Local::at(&at.path, &source, language, at.line, column, word)
+        });
+        let Some(local) = local else {
+            return self.look_up(code, sha, word, &at.path);
+        };
+        Ok(Lookup {
+            word: word.clone(),
+            definitions: local.definition.into_iter().collect(),
+            usages: local.usages.into(),
+            reach: Reach::EnclosingFunction,
+            cut_short: false,
+        })
     }
 
     /// Without its imports the hovered file still ranks its own definitions first.

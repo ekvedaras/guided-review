@@ -1,4 +1,4 @@
-use guided_review::navigation::Word;
+use guided_review::navigation::{Column, Word};
 use guided_review::viewer::{HoveredName, LineLocation, NameHover, NameUnderPointer, Side};
 
 use crate::support::{file_path, line};
@@ -11,6 +11,7 @@ fn on(word: &str, from: usize) -> NameUnderPointer {
                 side: Side::Head,
                 line: line(2),
             },
+            column: Column::try_from(from).unwrap(),
             word: Word::new(word).unwrap(),
         },
         range: from..from + word.len(),

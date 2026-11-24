@@ -86,6 +86,7 @@ mod keymap;
 mod line_number;
 mod local_guided_tour;
 mod local_key_commands;
+mod local_names;
 mod local_open;
 mod local_review;
 mod local_tasks;

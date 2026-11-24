@@ -78,6 +78,7 @@ impl ReviewCore {
             sha,
             path: file.path_on(hovered.at.side).clone(),
             line: hovered.at.line,
+            column: hovered.column,
             word: hovered.word.clone(),
         })
     }

@@ -11,7 +11,7 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::line_number::LineNumber;
-use crate::navigation::{FileSearch, Lookup, Lookups, Place, Word};
+use crate::navigation::{Column, FileSearch, Lookup, Lookups, Place, Word};
 use crate::pull_request::Sha;
 
 use super::highlight::Capture;
@@ -24,6 +24,8 @@ use super::step_page::{LineLocation, Side};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HoveredName {
     pub at: LineLocation,
+    /// Where the name starts in the line, so two names spelt alike on one line are two names.
+    pub column: Column,
     pub word: Word,
 }
 
@@ -58,8 +60,9 @@ impl HoveredName {
             return None;
         }
         let word = Word::new(text)?;
+        let column = Column::try_from(range.start).ok()?;
         Some(NameUnderPointer {
-            name: Self { at, word },
+            name: Self { at, column, word },
             range,
         })
     }
@@ -124,6 +127,7 @@ pub(super) struct NameKey {
     /// The file's path at `sha`, which differs from the shown one for a renamed file's removed lines.
     pub(super) path: FilePath,
     pub(super) line: LineNumber,
+    pub(super) column: Column,
     pub(super) word: Word,
 }
 
@@ -137,14 +141,20 @@ pub struct NameWork {
 
 impl NameWork {
     pub fn run(self, source: &dyn CodeSource) -> NameOutcome {
+        let hovered = Place {
+            path: self.key.path.clone(),
+            line: self.key.line,
+        };
         let result = self
             .lookups
-            .look_up(source, &self.key.sha, &self.key.word, &self.key.path)
+            .look_up_at(
+                source,
+                &self.key.sha,
+                &self.key.word,
+                &hovered,
+                self.key.column,
+            )
             .map(|lookup| {
-                let hovered = Place {
-                    path: self.key.path.clone(),
-                    line: self.key.line,
-                };
                 let highlights = NameHighlights::of(
                     &lookup,
                     &hovered,

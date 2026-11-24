@@ -29,6 +29,10 @@ pub enum DefinitionKind {
     Constant,
     Module,
     Macro,
+    /// A local first given a value in its function.
+    Variable,
+    /// A local its function takes.
+    Parameter,
 }
 
 impl DefinitionKind {
@@ -72,6 +76,8 @@ impl DefinitionKind {
             Self::Constant => "constant",
             Self::Module => "module",
             Self::Macro => "macro",
+            Self::Variable => "variable",
+            Self::Parameter => "parameter",
         }
     }
 }

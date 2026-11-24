@@ -3,7 +3,7 @@ use std::sync::Arc;
 use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
-use guided_review::navigation::Word;
+use guided_review::navigation::{Column, Word};
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -92,13 +92,19 @@ fn step(id: &str, title: &str, pieces: Value) -> Value {
     json!({"id": id, "title": title, "why": "because", "pieces": pieces})
 }
 
+/// A name at the start of its line, where these tests' names are not: they are looked up by name.
 fn hover(path: &str, side: Side, at: usize, word: &str) -> HoveredName {
+    hover_at(path, side, at, 0, word)
+}
+
+fn hover_at(path: &str, side: Side, at: usize, column: usize, word: &str) -> HoveredName {
     HoveredName {
         at: LineLocation {
             path: file_path(path),
             side,
             line: line(at),
         },
+        column: Column::try_from(column).unwrap(),
         word: Word::new(word).unwrap(),
     }
 }
@@ -146,6 +152,26 @@ fn a_context_line_is_looked_up_at_head_and_its_definition_outside_the_pr_opens_a
             shop.head
         )
     );
+}
+
+#[test]
+fn a_parameter_is_looked_up_in_its_function_and_defined_where_the_function_takes_it() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover_at("src/checkout.ts", Side::Head, 5, 9, "cart"),
+    ));
+
+    let [definition] = card.definitions.as_slice() else {
+        panic!("one definition expected: {:?}", card.definitions);
+    };
+    assert_eq!(&*definition.place, "src/checkout.ts:4");
+    assert_eq!(&*definition.signature, "export function pay(cart: Cart) {");
+    assert!(card.usages.is_empty(), "{:?}", card.usages);
 }
 
 #[test]
