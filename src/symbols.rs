@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::{Range, RangeInclusive};
 
-use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
 use crate::language::Language;
 use crate::pieces::PieceKind;
@@ -54,14 +54,11 @@ pub struct Symbols {
 impl Symbols {
     #[expect(
         clippy::expect_used,
-        reason = "the grammars and symbol queries are compiled in, so they match tree-sitter"
+        reason = "the symbol queries are compiled in, so they match their grammars"
     )]
     pub fn find(source: &str, language: Language) -> Self {
         let grammar = language.grammar();
-        let mut parser = Parser::new();
-        parser
-            .set_language(&grammar)
-            .expect("grammar matches tree-sitter");
+        let mut parser = language.parser();
         let lines = source.lines().map(str::to_owned).collect();
         let (Some(tree), Some(symbol_query)) =
             (parser.parse(source, None), language.symbol_query())

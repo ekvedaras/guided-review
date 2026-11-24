@@ -1,7 +1,9 @@
 use std::path::Path;
+use std::sync::OnceLock;
 
-use tree_sitter::Node;
+use tree_sitter::{Node, Parser, Query};
 
+use crate::navigation::Import;
 use crate::pieces::PieceKind;
 
 /// The one place that decides which source files are parsed, with which grammar and queries,
@@ -40,10 +42,7 @@ impl Language {
     /// Rust is parsed to find definitions and usages, but its files stay one piece each until
     /// a change of its own teaches the outline Rust's symbols.
     pub fn cuts_into_pieces(self) -> bool {
-        match self {
-            Self::Php | Self::TypeScript | Self::Tsx => true,
-            Self::Rust => false,
-        }
+        self.symbol_query().is_some()
     }
 
     /// Git pathspecs of every file this module parses: `*.php`, `*.ts`, ...
@@ -71,13 +70,35 @@ impl Language {
         }
     }
 
-    /// Definitions and references, in tree-sitter's tags convention.
-    pub fn tags_query(self) -> &'static str {
-        match self {
-            Self::Php => include_str!("../queries/php/tags.scm"),
-            Self::TypeScript | Self::Tsx => include_str!("../queries/typescript/tags.scm"),
-            Self::Rust => include_str!("../queries/rust/tags.scm"),
-        }
+    #[expect(
+        clippy::expect_used,
+        reason = "the grammars are compiled in, so they match tree-sitter"
+    )]
+    pub fn parser(self) -> Parser {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&self.grammar())
+            .expect("grammar matches tree-sitter");
+        parser
+    }
+
+    /// Definitions and references, in tree-sitter's tags convention, compiled once per language.
+    #[expect(
+        clippy::expect_used,
+        reason = "the tags queries are compiled in, so they match their grammars"
+    )]
+    pub fn tags_query(self) -> &'static Query {
+        static PHP: OnceLock<Query> = OnceLock::new();
+        static TYPESCRIPT: OnceLock<Query> = OnceLock::new();
+        static TSX: OnceLock<Query> = OnceLock::new();
+        static RUST: OnceLock<Query> = OnceLock::new();
+        let (compiled, text) = match self {
+            Self::Php => (&PHP, include_str!("../queries/php/tags.scm")),
+            Self::TypeScript => (&TYPESCRIPT, include_str!("../queries/typescript/tags.scm")),
+            Self::Tsx => (&TSX, include_str!("../queries/typescript/tags.scm")),
+            Self::Rust => (&RUST, include_str!("../queries/rust/tags.scm")),
+        };
+        compiled.get_or_init(|| Query::new(&self.grammar(), text).expect("valid tags query"))
     }
 
     /// Statements that only bring names into the file: they make up the `imports` piece.
@@ -98,7 +119,16 @@ impl Language {
         match self {
             Self::Php => php_imports(text),
             Self::TypeScript | Self::Tsx => typescript_imports(text),
-            Self::Rust => rust_imports(text),
+            Self::Rust => Import::all_in(self, text)
+                .iter()
+                .flat_map(|import| {
+                    import
+                        .module_names()
+                        .chain([import.name.as_str()])
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .collect(),
         }
     }
 
@@ -169,41 +199,6 @@ fn typescript_imports(text: &str) -> Vec<String> {
             let imported = part.split(" as ").next().unwrap_or(part).trim();
             if !imported.is_empty() && !imported.starts_with('*') {
                 names.push(imported.to_owned());
-            }
-        }
-        statement.clear();
-    }
-    names
-}
-
-/// `use crate::cart::{Cart, item::Item as Line};` gives `cart`, `Cart`, `item` and `Item`.
-fn rust_imports(text: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut statement = String::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if statement.is_empty() {
-            let Some(rest) = line.trim_start_matches("pub ").strip_prefix("use ") else {
-                continue;
-            };
-            statement.push_str(rest);
-        } else {
-            statement.push(' ');
-            statement.push_str(line);
-        }
-        let Some((paths, _)) = statement.split_once(';') else {
-            continue;
-        };
-        let mut words = paths
-            .split(|c: char| c == ':' || c == '{' || c == '}' || c == ',' || c.is_whitespace())
-            .filter(|word| !word.is_empty());
-        while let Some(word) = words.next() {
-            match word {
-                "as" => {
-                    words.next();
-                }
-                "crate" | "self" | "super" | "*" => {}
-                name => names.push(name.to_owned()),
             }
         }
         statement.clear();

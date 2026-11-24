@@ -54,7 +54,7 @@
 
 **Issue card**: What a hover of the issue button, or of a row of its list, shows: for a GitHub issue its title, state (open, closed as completed or as not planned), author, labels, assignees and description cut to a set height; for a ticket only its link. The viewer reads the details of the shown issues from GitHub in one trip, again on window focus and whenever the shown issues change, and keeps the last answer when a read fails.
 
-**Definition**: Where a name is defined at a commit: its kind (class, function, method, ...), file and line, signature and doc comment. Found by name alone with tree-sitter, so a name defined twice has two, ranked: the file it was read in first, then files that file imports, then the rest. Avoid: symbol (that is what cuts a file into diff pieces).
+**Definition**: Where a name is defined at a commit: its kind (class, function, method, ...), file and line, signature and doc comment. Found by name alone with tree-sitter, so a name defined twice has two, ranked: the file it was read in first, then those in the module that file imports the name itself from (a Rust `use` path, a PHP namespace, a TypeScript module path), then the rest. Avoid: symbol (that is what cuts a file into diff pieces).
 
 **Usage**: A line at a commit that refers to a name by that name, not where it is defined. Like a definition, it is matched by name, so it can belong to another thing of the same name. Avoid: reference, call site.
 

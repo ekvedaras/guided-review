@@ -516,3 +516,214 @@ fn a_word_in_more_files_than_the_cap_parses_the_first_ones_and_says_so() {
     .unwrap();
     assert!(!whole.cut_short);
 }
+
+/// A clone at one commit holding `files`, and the lookup's ranking of `word` hovered in `from`.
+fn ranked(files: &[(&str, &str)], word_text: &str, from: &str) -> Vec<String> {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    for (path, text) in files {
+        repo.write(path, text);
+    }
+    let head = Sha::new(&repo.commit("head"));
+    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let paths: Vec<&str> = files.iter().map(|(path, _)| *path).collect();
+    let search = FakeFilesWithWord::default().with(word_text, &paths);
+    let lookup = Lookups::new(FileSearch::whole_repo(Arc::new(search)))
+        .look_up(&code, &head, &word(word_text), &file_path(from))
+        .unwrap();
+    lookup
+        .definitions
+        .iter()
+        .map(|definition| definition.place.path.to_string())
+        .collect()
+}
+
+#[test]
+fn a_rust_definition_ranks_as_imported_when_its_module_path_is_the_imports() {
+    let ranked = ranked(
+        &[
+            ("src/aaa/word.rs", "pub struct Word;\n"),
+            ("src/navigation/word.rs", "pub struct Word;\n"),
+            (
+                "src/app/hover.rs",
+                "pub(crate) use crate::navigation::Word;\n\nfn f(_: Word) {}\n",
+            ),
+        ],
+        "Word",
+        "src/app/hover.rs",
+    );
+
+    assert_eq!(ranked, ["src/navigation/word.rs", "src/aaa/word.rs"]);
+}
+
+#[test]
+fn a_rust_import_of_a_module_in_a_mod_rs_file_or_by_super_ranks_it_first() {
+    let cart = "pub struct Cart;\n";
+    let files = [
+        ("src/a/cart.rs", cart),
+        ("src/shop/cart/mod.rs", cart),
+        (
+            "src/shop/checkout.rs",
+            "use super::cart::Cart;\n\nfn f(_: Cart) {}\n",
+        ),
+        (
+            "src/web/pay.rs",
+            "use crate::shop::cart::Cart;\n\nfn f(_: Cart) {}\n",
+        ),
+    ];
+
+    assert_eq!(
+        ranked(&files, "Cart", "src/shop/checkout.rs"),
+        ["src/shop/cart/mod.rs", "src/a/cart.rs"]
+    );
+    assert_eq!(
+        ranked(&files, "Cart", "src/web/pay.rs"),
+        ["src/shop/cart/mod.rs", "src/a/cart.rs"]
+    );
+}
+
+#[test]
+fn a_php_definition_ranks_as_imported_when_its_folder_ends_with_the_used_namespace() {
+    let order = "<?php\nclass Order {}\n";
+    let ranked = ranked(
+        &[
+            ("app/Legacy/Order.php", order),
+            ("app/Models/Order.php", order),
+            (
+                "app/Http/Checkout.php",
+                "<?php\nnamespace App\\Http;\n\nuse App\\Models\\Order;\n\nnew Order();\n",
+            ),
+        ],
+        "Order",
+        "app/Http/Checkout.php",
+    );
+
+    assert_eq!(ranked, ["app/Models/Order.php", "app/Legacy/Order.php"]);
+}
+
+#[test]
+fn a_typescript_definition_ranks_as_imported_when_the_import_resolves_to_its_file() {
+    let cart = "export class Cart {}\n";
+    let ranked = ranked(
+        &[
+            ("lib/cart.ts", cart),
+            ("src/shop/cart.ts", cart),
+            (
+                "src/web/checkout.ts",
+                "import { Cart } from \"../shop/cart\";\n\nnew Cart();\n",
+            ),
+        ],
+        "Cart",
+        "src/web/checkout.ts",
+    );
+
+    assert_eq!(ranked, ["src/shop/cart.ts", "lib/cart.ts"]);
+}
+
+#[test]
+fn a_file_imported_for_another_name_does_not_rank_the_word() {
+    let cart = "export class Cart {}\nexport class Item {}\n";
+    let ranked = ranked(
+        &[
+            ("lib/cart.ts", cart),
+            ("src/cart.ts", cart),
+            (
+                "src/checkout.ts",
+                "import { Item } from \"./cart\";\n\nnew Cart();\n",
+            ),
+        ],
+        "Cart",
+        "src/checkout.ts",
+    );
+
+    assert_eq!(ranked, ["lib/cart.ts", "src/cart.ts"]);
+}
+
+#[test]
+fn rust_imports_behind_any_visibility_are_read() {
+    let names = Language::Rust.imported_names(
+        "pub(crate) use crate::cart::Cart;\npub(super) use super::Item;\npub(in crate::shop) use crate::Price;\npub use crate::Tax;\n",
+    );
+
+    for name in ["Cart", "Item", "Price", "Tax"] {
+        assert!(
+            names.iter().any(|imported| imported == name),
+            "{name} in {names:?}"
+        );
+    }
+}
+
+#[test]
+fn a_file_that_cannot_be_read_is_skipped_and_the_rest_still_answer() {
+    let shop = Shop::new();
+    let search = FakeFilesWithWord::default().with(
+        "Cart",
+        &["legacy/basket.ts", "src/cart.ts", "src/checkout.ts"],
+    );
+    let lookups = Lookups::new(FileSearch::whole_repo(Arc::new(search)));
+    let code = UnreadableAt {
+        code: shop.code(),
+        paths: vec![file_path("legacy/basket.ts"), file_path("src/checkout.ts")],
+    };
+
+    let lookup = lookups
+        .look_up(
+            &code,
+            &shop.head,
+            &word("Cart"),
+            &file_path("src/checkout.ts"),
+        )
+        .unwrap();
+
+    let places: Vec<String> = lookup
+        .definitions
+        .iter()
+        .map(|definition| definition.place.path.to_string())
+        .collect();
+    assert_eq!(places, ["src/cart.ts"]);
+}
+
+/// Reads like `code` but fails for `paths`.
+struct UnreadableAt {
+    code: Arc<dyn CodeSource>,
+    paths: Vec<guided_review::file_path::FilePath>,
+}
+
+impl CodeSource for UnreadableAt {
+    fn file_at(
+        &self,
+        sha: &Sha,
+        path: &guided_review::file_path::FilePath,
+    ) -> anyhow::Result<String> {
+        if self.paths.contains(path) {
+            anyhow::bail!("cannot read {path}");
+        }
+        self.code.file_at(sha, path)
+    }
+    fn blob_at(
+        &self,
+        sha: &Sha,
+        path: &guided_review::file_path::FilePath,
+    ) -> anyhow::Result<Arc<[u8]>> {
+        self.code.blob_at(sha, path)
+    }
+    fn blob_info_at(
+        &self,
+        sha: &Sha,
+        path: &guided_review::file_path::FilePath,
+    ) -> anyhow::Result<guided_review::code_source::BlobInfo> {
+        self.code.blob_info_at(sha, path)
+    }
+    fn diff(
+        &self,
+        base: &Sha,
+        head: &Sha,
+    ) -> anyhow::Result<Vec<guided_review::code_source::FileDiff>> {
+        self.code.diff(base, head)
+    }
+    fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha> {
+        self.code.merge_base(a, b)
+    }
+    fn working_tree_is_at(&self, head: &Sha) -> bool {
+        self.code.working_tree_is_at(head)
+    }
+}

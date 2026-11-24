@@ -2,14 +2,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use anyhow::Context as _;
-
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::pull_request::Sha;
 
-use super::{Definition, GitGrep, Usage, Word, WordInFile};
+use super::{Definition, GitGrep, Import, Usage, Word, WordInFile};
 
 /// Finds the files at a commit that hold a word, so only those are parsed.
 pub trait FilesWithWord: Send + Sync {
@@ -113,15 +111,18 @@ impl Lookups {
         from: &FilePath,
     ) -> anyhow::Result<Lookup> {
         let found = self.found_at(code, sha, word)?;
-        let imported = Self::imported_names(code, sha, from)?;
+        let imports: Vec<Import> = Self::imports_of(code, sha, from)
+            .into_iter()
+            .filter(|import| import.name == word.as_str())
+            .collect();
         let mut definitions = found.definitions.to_vec();
         definitions.sort_by(|a, b| {
             let rank = |definition: &Definition| {
                 if definition.place.path == *from {
                     Rank::SameFile
-                } else if imported
+                } else if imports
                     .iter()
-                    .any(|name| name == file_stem(&definition.place.path))
+                    .any(|import| import.leads_to(from, &definition.place.path))
                 {
                     Rank::Imported
                 } else {
@@ -195,56 +196,32 @@ impl Lookups {
             .collect();
         let cut_short = parsed.len() > self.file_cap;
         parsed.truncate(self.file_cap);
-        let files = match &self.search {
-            FileSearch::WholeRepo(_) => parsed
-                .into_iter()
-                .map(|path| {
-                    let source = code
-                        .file_at(sha, &path)
-                        .with_context(|| format!("reading {path} at {sha} for {word}"))?;
-                    Ok((path, source))
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?,
-            // A changed file is missing on one side of the review: added at head, deleted at
-            // base. A file that cannot be read is one of those and holds nothing to find.
-            FileSearch::ChangedFiles(_) => parsed
-                .into_iter()
-                .filter_map(|path| {
-                    let source = code.file_at(sha, &path).ok()?;
-                    Some((path, source))
-                })
-                .collect(),
-        };
+        // A file that cannot be read holds nothing to find: a changed file is missing on one side
+        // of the review (added at head, deleted at base), and one bad read must not lose the rest.
+        let files = parsed
+            .into_iter()
+            .filter_map(|path| {
+                let source = code.file_at(sha, &path).ok()?;
+                Some((path, source))
+            })
+            .collect();
         Ok((files, cut_short))
     }
 
-    fn imported_names(
-        code: &dyn CodeSource,
-        sha: &Sha,
-        from: &FilePath,
-    ) -> anyhow::Result<Vec<String>> {
+    /// Without its imports the hovered file still ranks its own definitions first.
+    fn imports_of(code: &dyn CodeSource, sha: &Sha, from: &FilePath) -> Vec<Import> {
         let Some(language) = Language::for_path(from.as_str()) else {
-            return Ok(Vec::new());
+            return Vec::new();
         };
-        let source = code
-            .file_at(sha, from)
-            .with_context(|| format!("reading {from} at {sha} for its imports"))?;
-        Ok(language.imported_names(&source))
+        code.file_at(sha, from)
+            .map_or_else(|_| Vec::new(), |source| Import::all_in(language, &source))
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Rank {
     SameFile,
-    /// In a file the hovered file imports: its name is one the imports give.
+    /// The hovered file imports the word from the module the definition's file is.
     Imported,
     Elsewhere,
-}
-
-/// `src/cart.ts` gives `cart`.
-fn file_stem(path: &FilePath) -> &str {
-    Path::new(path.as_str())
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or_default()
 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, QueryCursor, StreamingIterator};
 
 use crate::file_path::FilePath;
 use crate::language::Language;
@@ -109,28 +109,19 @@ struct Tagged<'tree> {
 }
 
 impl WordInFile {
-    #[expect(
-        clippy::expect_used,
-        reason = "the grammars and tags queries are compiled in, so they match tree-sitter"
-    )]
     pub fn read(path: &FilePath, source: &str, language: Language, word: &Word) -> Self {
-        let grammar = language.grammar();
-        let mut parser = Parser::new();
-        parser
-            .set_language(&grammar)
-            .expect("grammar matches tree-sitter");
-        let Some(tree) = parser.parse(source, None) else {
+        let Some(tree) = language.parser().parse(source, None) else {
             return Self {
                 definitions: Vec::new(),
                 usages: Vec::new(),
             };
         };
-        let query = Query::new(&grammar, language.tags_query()).expect("valid tags query");
+        let query = language.tags_query();
 
         let mut tagged: Vec<Tagged> = Vec::new();
         let mut references: Vec<Node> = Vec::new();
         let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&query, tree.root_node(), source.as_bytes());
+        let mut matches = cursor.matches(query, tree.root_node(), source.as_bytes());
         while let Some(found) = matches.next() {
             let mut name = None;
             let mut definition = None;
