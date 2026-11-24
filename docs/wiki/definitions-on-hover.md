@@ -13,6 +13,7 @@ The app already parses these languages with tree-sitter to cut files into pieces
 - Commit: the review's head for added and context lines, the base for removed lines (`NameKey` in `src/viewer/name_desk.rs`).
 - Files: with a local clone, `git grep -w -l <word> <sha>` over the three languages' globs (`src/navigation/git_grep.rs`); at most 300 files are parsed, and the card says when more hold the name. Without a clone (code read from GitHub) only the review's changed files are searched, and the card says "Usages from the PR's files only".
 - Definitions and usages come from `queries/<language>/tags.scm` (`@definition.<kind>`, `@reference.<kind>`). Definitions rank: the hovered file first, then those in the module the hovered file imports the name itself from (`Import::leads_to` in `src/navigation/import.rs`: a Rust `use` path resolved through `crate`/`super`, `mod.rs` and the file stem; a PHP namespace's tail against the folders; a TypeScript module path resolved against the hovered file), then the rest, ties by path. A file that cannot be read is skipped, and an unreadable hovered file only loses the import ranking.
+- A local is looked up in its function only (2026-11-24, issue #183, commit 8bd96a8): see [Locals stay in their function](#locals-stay-in-their-function-2026-11-24).
 - One lookup per (sha, word) is kept for the review's life: a commit never changes. It runs on a background thread (`NameWork::run`) and its card reads "Looking up" until it lands. A failed lookup is asked again on the next hover.
 - The card lists up to 20 usages, those in the PR's files first, and counts the rest.
 - A click on a row jumps to the line's own row (`JumpPlace::Line`) on the first screen that shows it, base or head side, removed lines included; any other line, also one in a changed file outside every shown hunk, opens through the `CodeOpener` (`NameTarget::Code`). A context line is shown only once the files at head are read, so before that it opens as code.
@@ -32,8 +33,20 @@ The app already parses these languages with tree-sitter to cut files into pieces
 ## Open
 
 - A name defined by a macro, a re-export or a generated file is found only if a tags pattern names it.
-- Usages by name include other classes' methods of the same name.
+- Usages by name include other classes' methods of the same name (locals excepted since 8bd96a8).
 - The card does not follow a page that scrolls under it: it closes.
+
+## Locals stay in their function (2026-11-24)
+
+Issue #183, commit 8bd96a8. The by-name lookup searched the repo for a function-local `$deliveryDate` (1558 usages in 274 files, see below). Now `Lookups::look_up_at` (`src/navigation/lookup.rs`) first asks `Local::at` (`src/navigation/local.rs`) whether the name at the hovered line and column is a local; if so it parses only the hovered file and runs no file search (`Reach::EnclosingFunction`).
+
+- Which names: a PHP `$variable` other than `$this`, not a property declaration or `self::$x`; a Rust identifier that does not start with a capital (a capital in a pattern is a variant or constant); a TypeScript identifier or shorthand property. `$this->x`, `self.x`, `obj.x`, methods, functions, classes and module-level names go to the repo search as before.
+- Which function: walking up from the name, the first function-like node that binds the name (a parameter, a `let`/assignment/`foreach`/`for`/`catch`/pattern binding). A PHP function, method or closure (`function () use ($x)`) is the scope even when nothing in it binds the name, since it sees nothing around it; a PHP arrow function, a Rust closure and every TypeScript function see their parent's locals, so the walk goes on past them. A Rust `fn` that does not bind the name stops the walk: the name is a constant, function or unit struct, looked up by name.
+- A function inside the scope that binds the name itself, or is a PHP closure or Rust `fn`, has its own local and is left out of the usages.
+- The definition is the first binding in source order, kind `variable` or `parameter`, its signature the whole line. A local nothing binds (a PHP superglobal) has usages only.
+- The hovered name now carries its column (`HoveredName::column`, `NameKey::column`, a byte offset in the line, `navigation::Column`), so `$total` and `->total` on one line are two cards. Lookups by name are still kept per (sha, word); a local is parsed again on each new card, one file.
+
+Open: TypeScript block scope is not read (a `let` in two sibling blocks of one function is one local); shadowing inside one function is not read; a PHP `$variable` at a file's top level, outside any function, is looked up by name across the repo.
 
 ## Language servers first (2026-11-24)
 
