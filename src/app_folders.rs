@@ -275,6 +275,23 @@ impl AppFolders {
         self.state.join("app.log")
     }
 
+    /// The language servers the app downloaded, one folder per server and pinned version.
+    pub fn language_servers(&self) -> PathBuf {
+        self.cache.join("language-servers")
+    }
+
+    /// The app's own worktree of each repo that language servers run in, one folder per owner and repo.
+    /// In the state folder, since the index a server built there is costly to rebuild.
+    pub fn server_checkouts(&self) -> PathBuf {
+        self.state.join("server-checkouts")
+    }
+
+    /// The index each language server keeps of a repo, one folder per owner and repo. In the state
+    /// folder for the same reason as the server checkouts.
+    pub fn server_indexes(&self) -> PathBuf {
+        self.state.join("server-indexes")
+    }
+
     pub fn images(&self) -> PathBuf {
         self.cache.join("images")
     }

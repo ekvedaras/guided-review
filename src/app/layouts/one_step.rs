@@ -33,10 +33,10 @@ use crate::app::components::comment_composer::{
 };
 use crate::app::components::diagram::{DiagramSet, DiagramView, Diagrams};
 use crate::app::components::diff_view::{
-    CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnRowGesture,
-    OnScrollX, PIECE_HEADER_HEIGHT, PieceHeader, PieceMarker, RowGesture, binary_file_row, box_row,
-    hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row, piece_end,
-    rendered_block_row, rendered_file_waiting_row,
+    CodeGesture, CodeSelectionHooks, DiffRow, GapAsk, OnGapAsk, OnImageComment, OnNamePointer,
+    OnRowGesture, OnScrollX, PIECE_HEADER_HEIGHT, PieceHeader, PieceMarker, RowGesture,
+    binary_file_row, box_row, hung_row, hunk_gap, no_change_since_read_row, only_whitespace_row,
+    piece_end, rendered_block_row, rendered_file_waiting_row,
 };
 use crate::app::components::finding_view::{
     FindingBox, FindingBoxKeys, FindingQuestions, finding_card,
@@ -120,13 +120,15 @@ use crate::viewer::{
 };
 use crate::viewer::{
     DEFAULT_WHY_QUESTION, FindingRefusal, FindingRow, FixNote, FixReply, FixTiming, FixesOffer,
-    IssueDetails, RelatedIssue, StationKind, WhyAsked, WhyReply,
+    IssueDetails, NameHover, RelatedIssue, StationKind, WhyAsked, WhyReply,
 };
 use issue_card::{CardSide, IssueHover, issue_card};
+use name_card_hover::NameCardPlace;
 
 #[cfg(feature = "snapshots")]
 mod gallery;
 mod issue_card;
+mod name_card_hover;
 #[cfg(feature = "snapshots")]
 mod scenes;
 mod stations_view;
@@ -209,6 +211,12 @@ pub struct OneStepLayout {
     /// The description of the issue whose card shows, prepared once for as long as the card shows it.
     issue_card_body: std::cell::RefCell<Option<(Arc<IssueDetails>, Rc<PreparedMarkdown>)>>,
     on_code_gesture: OnTextSpot,
+    on_name_pointer: OnNamePointer,
+    /// When the Definition card of a name in a diff line is open.
+    name_hover: NameHover,
+    /// Where the card goes if the pointer rests on the name it is on now.
+    name_card_waits_at: gpui::Bounds<Pixels>,
+    name_card_place: Option<NameCardPlace>,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
     /// Which way the reader went to the screen on show, so its content comes in from that side.
@@ -346,16 +354,7 @@ impl OneStepLayout {
                     palette.update(cx, |palette, _| palette.set_groups(groups));
                 }
                 JumpEvent::Act(action) => this.act((*action).into(), window, cx),
-                JumpEvent::Picked(target) => {
-                    let row = this.session.update(cx, |session, cx| {
-                        session.change(cx, |review| review.jump_to(target));
-                        session.rows().row_of_jump(target)
-                    });
-                    this.screen_list.scroll_to(ListOffset {
-                        item_ix: row,
-                        offset_in_item: px(0.),
-                    });
-                }
+                JumpEvent::Picked(target) => this.jump_to(target, cx),
             },
         )
         .detach();
@@ -412,6 +411,12 @@ impl OneStepLayout {
                 })
                 .ok();
         });
+        let layout_handle = cx.weak_entity();
+        let on_name_pointer: OnNamePointer = Rc::new(move |pointer, _window, cx| {
+            layout_handle
+                .update(cx, |this, cx| this.on_name_pointer(pointer, cx))
+                .ok();
+        });
         cx.on_app_quit(|this, _| {
             this.frame_stats.report_on_quit();
             async {}
@@ -445,6 +450,10 @@ impl OneStepLayout {
             issue_hover: IssueHover::default(),
             issue_card_body: std::cell::RefCell::new(None),
             on_code_gesture,
+            on_name_pointer,
+            name_hover: NameHover::default(),
+            name_card_waits_at: gpui::Bounds::default(),
+            name_card_place: None,
             selection_notice: None,
             page_drag: ScrollbarDrag::default(),
             issue_card_drag: ScrollbarDrag::default(),
@@ -601,6 +610,18 @@ impl OneStepLayout {
         ))
     }
 
+    /// To the screen, scrolled to the row the jump lands on.
+    fn jump_to(&mut self, target: &crate::viewer::JumpTarget, cx: &mut Context<Self>) {
+        let row = self.session.update(cx, |session, cx| {
+            session.change(cx, |review| review.jump_to(target));
+            session.rows().row_of_jump(target)
+        });
+        self.screen_list.scroll_to(ListOffset {
+            item_ix: row,
+            offset_in_item: px(0.),
+        });
+    }
+
     fn on_row_gesture(&mut self, gesture: RowGesture, at: &LineLocation, cx: &mut Context<Self>) {
         if gesture == RowGesture::Press {
             self.selection_notice = None;
@@ -615,6 +636,9 @@ impl OneStepLayout {
     }
 
     fn on_code_gesture(&mut self, gesture: CodeGesture, at: TextSpot, cx: &mut Context<Self>) {
+        if gesture != CodeGesture::Over {
+            self.dismiss_name_card(cx);
+        }
         match gesture {
             CodeGesture::Press => {
                 let screen = self.session.read(cx).review().screen().clone();
@@ -3964,6 +3988,7 @@ impl OneStepLayout {
                         }),
                     })
                     .with_gestures(Rc::clone(&self.on_row_gesture))
+                    .with_name_pointer(Rc::clone(&self.on_name_pointer))
                     .into_any_element()
             }
             PageRow::Thread { view, place, .. } => {
@@ -5670,6 +5695,7 @@ impl Render for OneStepLayout {
             Self::KEY_CONTEXT.to_owned()
         };
         let frame_painted_marker = self.frame_stats.frame_started();
+        let name_card = self.name_card_layer(window, cx);
         let switching_veil = cx
             .global::<PrSwitching>()
             .active
@@ -5871,6 +5897,11 @@ impl Render for OneStepLayout {
             .when(self.issue_list_open, |root| {
                 root.on_key_down(cx.listener(Self::pick_issue_by_key))
             })
+            .when(self.name_hover.shown().is_some(), |root| {
+                root.on_key_down(cx.listener(|this, event, _, cx| {
+                    this.close_name_card_by_key(event, cx);
+                }))
+            })
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
                 if this.may_leave(Departure::CloseWindow, cx) {
                     window.remove_window();
@@ -5962,6 +5993,7 @@ impl Render for OneStepLayout {
             .child(self.shortcuts.clone())
             .child(self.findings.clone())
             .child(self.picture_zoom.clone())
+            .children(name_card)
             .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))
             .children(frame_painted_marker)
     }

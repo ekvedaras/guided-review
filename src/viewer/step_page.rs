@@ -85,8 +85,12 @@ impl DiffLine {
     /// A thread hangs under this row when it is on the row's own line, or, for an unchanged row,
     /// on the line it has at base.
     pub(super) fn holds(&self, location: &LineLocation) -> bool {
-        self.takes_comment()
-            && self.location.path == location.path
+        self.takes_comment() && self.shows(location)
+    }
+
+    /// Whether this row is `location`: its own line, or for an unchanged row, the line it has at base.
+    pub(super) fn shows(&self, location: &LineLocation) -> bool {
+        self.location.path == location.path
             && match (self.kind, location.side) {
                 (LineKind::Context { base_line, .. }, Side::Base) => {
                     base_line == Some(location.line)
@@ -140,6 +144,16 @@ impl DiffLine {
         match self.view {
             RowView::PrDiff => self.is_inside_hunk(),
             RowView::ChangeSinceRead { .. } => true,
+        }
+    }
+}
+
+impl ChangedFile {
+    /// Where the file is on `side`: at base, a renamed file's old path.
+    pub fn path_on(&self, side: Side) -> &FilePath {
+        match side {
+            Side::Base => self.old_path.as_ref().unwrap_or(&self.path),
+            Side::Head => &self.path,
         }
     }
 }

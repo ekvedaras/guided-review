@@ -62,6 +62,7 @@ fn kind(place: &JumpPlace) -> &'static str {
         JumpPlace::Overview => "Overview",
         JumpPlace::File(_) => "File",
         JumpPlace::Piece(_) => "Symbol",
+        JumpPlace::Line(_) => "Line",
     }
 }
 

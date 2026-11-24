@@ -250,7 +250,12 @@ fn check_sum(archive: &[u8], checksum_file: &str) -> anyhow::Result<()> {
         .split_whitespace()
         .next()
         .context("the checksum file is empty")?;
-    let actual = crate::hex::lower(&Sha256::digest(archive));
+    check_digest(archive, expected)
+}
+
+/// Fails unless `bytes` has the sha256 `expected`, in hex.
+pub fn check_digest(bytes: &[u8], expected: &str) -> anyhow::Result<()> {
+    let actual = crate::hex::lower(&Sha256::digest(bytes));
     anyhow::ensure!(
         actual.eq_ignore_ascii_case(expected),
         "the archive does not match its checksum: {actual} is not {expected}"

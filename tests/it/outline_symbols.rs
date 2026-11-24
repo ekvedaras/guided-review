@@ -161,3 +161,38 @@ enum Status: string
         ]
     );
 }
+
+#[test]
+fn rust_files_are_not_cut_into_symbol_pieces() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("README.md", "# Shop\n");
+    let base = repo.commit("base");
+    repo.write(
+        "src/cart.rs",
+        r"use crate::item::Item;
+
+/// A cart of items.
+pub struct Cart {
+    items: Vec<Item>,
+}
+
+impl Cart {
+    pub fn total(&self) -> u32 {
+        0
+    }
+}
+",
+    );
+    let head = repo.commit("head");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &base, &head);
+
+    let run = GuidedReview::new(&repo, &github).run(&["outline", PR]);
+
+    let pieces: Vec<String> = run
+        .stdout_with(&[(&base, "<base>"), (&head, "<head>")])
+        .lines()
+        .filter(|line| line.starts_with("  ") && !line.trim_start().starts_with("subjects:"))
+        .map(|line| line.trim_start().to_owned())
+        .collect();
+    assert_eq!(pieces, ["src/cart.rs  file  added  +12 −0"]);
+}

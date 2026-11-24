@@ -207,7 +207,7 @@ impl ImportedNames {
         let Ok(text) = source.file_at(head, path) else {
             return Self(Vec::new());
         };
-        let language = Language::for_path(path.as_str()).unwrap_or(Language::TypeScript);
+        let language = Language::for_pieces(path.as_str()).unwrap_or(Language::TypeScript);
         Self(
             language
                 .imported_names(&text)

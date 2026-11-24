@@ -5,6 +5,7 @@ use std::str::FromStr;
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 
+use crate::codebase::Codebase;
 use crate::pull_request::{PullRequestUrl, RepoName};
 
 /// What a review reads: a PR, or a local change set.
@@ -92,6 +93,15 @@ impl ReviewSubject {
         match self {
             Self::PullRequest(pr) => Some(&pr.repo),
             Self::Local(_) => None,
+        }
+    }
+
+    /// What the reviewer's yes or no to language servers is kept for, and whose server checkout
+    /// the review reads from.
+    pub fn codebase(&self) -> Codebase {
+        match self {
+            Self::PullRequest(pr) => Codebase::GitHub(pr.repo.clone()),
+            Self::Local(change_set) => change_set.codebase(),
         }
     }
 
@@ -310,11 +320,14 @@ impl LocalChangeSet {
     }
 
     fn files_folder(&self) -> PathBuf {
-        let path = self.folder.as_path();
-        let name = self.folder.name();
-        let digest = Sha256::digest(path.to_string_lossy().as_bytes());
-        let hash = crate::hex::lower(digest.iter().take(SHORT_HASH_BYTES));
-        PathBuf::from(LOCAL_FILES_FOLDER).join(format!("{name}-{hash}"))
+        PathBuf::from(LOCAL_FILES_FOLDER).join(self.folder.stem())
+    }
+
+    /// The repo of `origin`; a folder with none is its own codebase.
+    fn codebase(&self) -> Codebase {
+        self.repo
+            .clone()
+            .map_or_else(|| Codebase::Folder(self.folder.clone()), Codebase::GitHub)
     }
 
     pub const fn folder(&self) -> &WorkTreeRoot {
@@ -355,6 +368,13 @@ impl WorkTreeRoot {
 
     pub fn as_path(&self) -> &Path {
         &self.0
+    }
+
+    /// `<folder name>-<short hash of the folder path>`.
+    pub fn stem(&self) -> String {
+        let digest = Sha256::digest(self.0.to_string_lossy().as_bytes());
+        let hash = crate::hex::lower(digest.iter().take(SHORT_HASH_BYTES));
+        format!("{}-{hash}", self.name())
     }
 
     /// The folder's own name; `root` for `/`.

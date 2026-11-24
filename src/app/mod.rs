@@ -9,6 +9,7 @@ mod code_selection;
 pub mod components;
 mod frame_stats;
 pub mod keymap;
+mod language_servers;
 mod layouts;
 mod page_rows;
 mod prose_selection;

@@ -23,6 +23,19 @@ fn a_url_template_gets_the_clone_path_and_line() {
 }
 
 #[test]
+fn a_file_outside_the_clone_opens_by_its_own_path() {
+    let ide = ide("idea://open?file={path}&line={line}", "/code/shop");
+
+    assert_eq!(
+        ide.launch_file(
+            std::path::Path::new("/rust/library/core/src/option.rs"),
+            line(10)
+        ),
+        IdeLaunch::Url("idea://open?file=/rust/library/core/src/option.rs&line=10".into())
+    );
+}
+
+#[test]
 fn a_url_path_is_percent_encoded() {
     let ide = ide("idea://open?file={path}&line={line}", "/code/my shop");
 

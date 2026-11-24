@@ -17,6 +17,18 @@ pub mod fake_tour_agent;
 pub mod graphql;
 pub mod work;
 
+/// The fake language server (`tests/fixtures/fake_lsp.py`) is a Python script.
+pub fn require_python3() {
+    static FOUND: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    FOUND.get_or_init(|| {
+        let runs = Command::new("python3")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success());
+        assert!(runs, "the language server tests need python3 on PATH");
+    });
+}
+
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -31,6 +43,24 @@ use tempfile::TempDir;
 
 pub fn file_path(path: &str) -> guided_review::file_path::FilePath {
     guided_review::file_path::FilePath::new(path).unwrap()
+}
+
+/// A gzipped tar of `files`, each `(path, content, mode)`: a release archive as a host serves it.
+pub fn tarball(files: &[(impl AsRef<str>, impl AsRef<str>, u32)]) -> Vec<u8> {
+    let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+        Vec::new(),
+        flate2::Compression::fast(),
+    ));
+    for (path, content, mode) in files {
+        let content = content.as_ref();
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(*mode);
+        header.set_cksum();
+        tar.append_data(&mut header, path.as_ref(), content.as_bytes())
+            .unwrap();
+    }
+    tar.into_inner().unwrap().finish().unwrap()
 }
 
 pub fn line(number: usize) -> guided_review::line_number::LineNumber {

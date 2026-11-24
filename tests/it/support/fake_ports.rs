@@ -23,6 +23,7 @@ pub fn blocked_merging() -> Merging {
 }
 use guided_review::file_path::FilePath;
 use guided_review::issue::IssueUrl;
+use guided_review::navigation::{ServerMessage, ServerMessages};
 use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
@@ -1046,5 +1047,120 @@ impl guided_review::update::ReleasesPort for FakeReleases {
             .get(url)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("404 for {url}"))
+    }
+}
+
+/// Stands in for searching a commit for the files that hold a word: answers what it was given
+/// and keeps the words it was asked for.
+#[derive(Clone, Default)]
+pub struct FakeFilesWithWord {
+    files: BTreeMap<String, Vec<FilePath>>,
+    searches: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeFilesWithWord {
+    pub fn with(mut self, word: &str, paths: &[&str]) -> Self {
+        self.files.insert(
+            word.to_owned(),
+            paths.iter().map(|path| file_path(path)).collect(),
+        );
+        self
+    }
+
+    pub fn searches(&self) -> Vec<String> {
+        self.searches.lock().unwrap().clone()
+    }
+}
+
+impl guided_review::navigation::FilesWithWord for FakeFilesWithWord {
+    fn files_with(
+        &self,
+        _sha: &Sha,
+        word: &guided_review::navigation::Word,
+    ) -> anyhow::Result<Vec<FilePath>> {
+        self.searches.lock().unwrap().push(word.as_str().to_owned());
+        Ok(self.files.get(word.as_str()).cloned().unwrap_or_default())
+    }
+}
+
+/// Stands in for a code navigator adapter: reports the states it was told to wait in, then gives
+/// the answer it was given, and keeps what it was asked.
+#[derive(Clone)]
+pub struct FakeNavigator {
+    waits: Vec<guided_review::navigation::Waiting>,
+    answered_by: guided_review::navigation::AnsweredBy,
+    asked: Arc<Mutex<Vec<guided_review::navigation::NavigationRequest>>>,
+}
+
+impl FakeNavigator {
+    pub fn answering_by(answered_by: guided_review::navigation::AnsweredBy) -> Self {
+        Self {
+            waits: Vec::new(),
+            answered_by,
+            asked: Arc::default(),
+        }
+    }
+
+    pub fn waiting(mut self, states: &[guided_review::navigation::Waiting]) -> Self {
+        self.waits = states.to_vec();
+        self
+    }
+
+    pub fn asked(&self) -> Vec<guided_review::navigation::NavigationRequest> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+impl guided_review::navigation::CodeNavigator for FakeNavigator {
+    fn navigate(
+        &self,
+        _code: &dyn guided_review::code_source::CodeSource,
+        request: &guided_review::navigation::NavigationRequest,
+        waiting: &dyn Fn(guided_review::navigation::Waiting),
+    ) -> anyhow::Result<guided_review::navigation::Answer> {
+        self.asked.lock().unwrap().push(request.clone());
+        for state in &self.waits {
+            waiting(state.clone());
+        }
+        Ok(guided_review::navigation::Answer {
+            lookup: guided_review::navigation::Lookup {
+                word: request.word.clone(),
+                definitions: Vec::new(),
+                usages: Arc::new([guided_review::navigation::Usage {
+                    place: guided_review::navigation::Place {
+                        path: file_path("src/checkout.ts"),
+                        line: crate::support::line(5),
+                    },
+                    text: "return cart.total() + price();".into(),
+                }]),
+                reach: guided_review::navigation::Reach::WholeRepo,
+                cut_short: false,
+                on_disk_files: Arc::new([]),
+            },
+            answered_by: self.answered_by.clone(),
+        })
+    }
+}
+
+/// Server messages nobody reads.
+pub struct IgnoredServerMessages;
+
+impl ServerMessages for IgnoredServerMessages {
+    fn show(&self, _message: ServerMessage) {}
+}
+
+/// Server messages kept in the order they were shown.
+#[derive(Default)]
+pub struct RecordedServerMessages(Mutex<Vec<ServerMessage>>);
+
+impl RecordedServerMessages {
+    pub fn shown(&self) -> Vec<ServerMessage> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl ServerMessages for RecordedServerMessages {
+    fn show(&self, message: ServerMessage) {
+        self.0.lock().unwrap().push(message);
     }
 }

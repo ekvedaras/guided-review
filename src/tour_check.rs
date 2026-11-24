@@ -126,7 +126,7 @@ fn check_step(step: &Step, files: &[ChangedFile], report: &mut Report) {
     let mut pieces = 0;
     for pointer in &step.pieces {
         if let PieceRef::Lines { file, lines } = pointer
-            && Language::for_path(file).is_some()
+            && Language::for_pieces(file).is_some()
         {
             report.warnings.push(Warning::LinesOnParsableFile {
                 step: step.id.clone(),

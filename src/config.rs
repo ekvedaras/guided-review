@@ -5,9 +5,11 @@ use anyhow::Context;
 use serde::Deserialize;
 
 use crate::app_folders::AppFolders;
+use crate::codebase::Codebase;
 use crate::home::expand_home;
 use crate::ide::IdeTemplate;
 use crate::instructions::{Agent, Instructions, InstructionsChoice, InstructionsKind};
+use crate::navigation::ServerAnswer;
 use crate::pull_request::RepoName;
 use crate::viewer::{
     KeyChanges, KeyProblem, Keymap, MergeMethod, MoreLines, ResolvedKeymap, SendChoice, WrittenKeys,
@@ -42,6 +44,10 @@ pub struct Config {
     /// `"owner/repo" = "squash"`: a repo's own merge method, over `merge_method`.
     #[serde(default)]
     merge_methods: BTreeMap<String, String>,
+    /// `"owner/repo" = true`: whether language servers answer the Definition card in that repo. A
+    /// repo that is not in it has not been asked.
+    #[serde(default)]
+    language_servers: BTreeMap<String, toml::Value>,
     /// A send action (`"add_to_review"`, `"comment_now"`, `"suggest_change"`, `"ask_agent"` or
     /// `"ask_agent_now"`): the one with Cmd+Enter and the accent colour.
     #[serde(default)]
@@ -238,6 +244,16 @@ impl Config {
                 .and_then(MergeMethod::of_config_text)
         })
         .unwrap_or_default()
+    }
+
+    /// What the reviewer answered for the codebase; none while it has not been asked. A value that is
+    /// not true or false is passed over, so a typo cannot stop the app opening.
+    pub fn language_servers(&self, codebase: &Codebase) -> Option<ServerAnswer> {
+        self.language_servers
+            .iter()
+            .find(|(name, _)| name.parse::<Codebase>().is_ok_and(|key| key == *codebase))
+            .and_then(|(_, answer)| answer.as_bool())
+            .map(ServerAnswer::of)
     }
 
     pub fn send_choice(&self) -> SendChoice {

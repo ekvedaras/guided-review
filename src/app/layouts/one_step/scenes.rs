@@ -5,9 +5,9 @@
 use std::sync::Arc;
 
 use gpui::{
-    App, AsyncWindowContext, Context, Keystroke, ListOffset, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput, Task, WeakEntity, Window, point,
-    px,
+    App, AsyncWindowContext, Bounds, Context, Keystroke, ListOffset, Modifiers, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Task, WeakEntity, Window,
+    point, px,
 };
 
 use super::OneStepLayout;
@@ -22,19 +22,23 @@ use crate::app::updater::Updates;
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
 use crate::issue::{IssueLink, IssueUrl};
+use crate::line_number::LineNumber;
+use crate::navigation::{Definition, DefinitionKind, Lookup, Place, Reach, Usage};
 use crate::pull_request::RepoName;
 use crate::review_subject::{BranchName, ReviewSubject};
 use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
 use crate::viewer::{
     AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
-    LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
-    OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness, TerminalId,
-    TextBox,
+    HoveredName, LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability,
+    Merging, NameUnderPointer, OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind,
+    Readiness, TerminalId, TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue, Station, StationHealth, StationKind};
 
 const MAX_SCREENS: usize = 16;
+/// Rows the name card's line is scrolled below the top of the list, so the sticky bar leaves it free.
+const ROWS_ABOVE: usize = 3;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
 const OTHER_PR: u32 = 14;
 
@@ -427,6 +431,7 @@ async fn shoot(
         }
     }
     camera.wait_for_loading(cx).await?;
+    hover_a_name(camera, layout, cx).await?;
     layout.update(cx, OneStepLayout::go_to_first_open_code)?;
     for scene in Scene::ALL {
         layout.update_in(cx, |layout, window, cx| layout.stage(scene, window, cx))?;
@@ -435,6 +440,70 @@ async fn shoot(
     }
     drag_the_issue_cards_scrollbar(camera, layout, cx).await?;
     pick_a_word_and_copy(camera, layout, cx).await
+}
+
+/// The pointer moved along a line, as the mouse gives it, until it rests on the line's longest
+/// name; the card opens where that name is drawn.
+async fn hover_a_name(
+    camera: &Camera,
+    layout: &WeakEntity<OneStepLayout>,
+    cx: &mut AsyncWindowContext,
+) -> anyhow::Result<()> {
+    let Some((row, wanted)) = layout.update(cx, OneStepLayout::scroll_to_a_name)? else {
+        eprintln!("no added line of a known language on this screen to hover");
+        return Ok(());
+    };
+    let move_to = |position: gpui::Point<Pixels>| {
+        PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
+        })
+    };
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+    })?;
+    let (line, viewport) = layout.update(cx, |layout, _| {
+        (
+            layout.screen_list.bounds_for_item(row),
+            layout.screen_list.viewport_bounds(),
+        )
+    })?;
+    let line = line.ok_or_else(|| anyhow::anyhow!("the line to hover is not on screen"))?;
+    // The line is looked for around where the list says it is, since a pinned header may lie over it.
+    let mut ys = vec![line.center().y];
+    for step in 1..60_u8 {
+        let off = px(f32::from(step) * 11.);
+        ys.extend([line.center().y + off, line.center().y - off]);
+    }
+    ys.retain(|y| viewport.top() < *y && *y < viewport.bottom());
+    let mut on_name = None;
+    'search: for y in ys {
+        let mut x = viewport.left();
+        while x < viewport.right() {
+            let spot = point(x, y);
+            cx.update(|window, cx| window.dispatch_event(move_to(spot), cx))?;
+            on_name = layout.update(cx, |layout, _| {
+                layout
+                    .name_hover
+                    .pointer()
+                    .filter(|under| under.name == wanted.name)
+                    .map(|under| (under.clone(), layout.name_card_waits_at))
+            })?;
+            if on_name.is_some() {
+                break 'search;
+            }
+            x += px(4.);
+        }
+    }
+    let (under, word) = on_name
+        .ok_or_else(|| anyhow::anyhow!("the pointer found no {} on screen", wanted.name.word))?;
+    // Off the window, so the pointer's rest opens no card of its own over the staged one.
+    cx.update(|window, cx| window.dispatch_event(move_to(point(px(-1000.), px(-1000.))), cx))?;
+    layout.update(cx, |layout, cx| layout.stage_name_card(under, word, cx))?;
+    camera.take("96-name-card", cx).await?;
+    layout.update(cx, OneStepLayout::dismiss_name_card)
 }
 
 /// The issue card's description dragged down by its scrollbar, as the mouse gives it: pressed on the
@@ -724,6 +793,48 @@ impl OneStepLayout {
             })
             .take(count)
             .collect()
+    }
+
+    /// The first added line of a language the card knows, scrolled into view, and its longest name.
+    fn scroll_to_a_name(&mut self, cx: &mut Context<Self>) -> Option<(usize, NameUnderPointer)> {
+        self.go_to_first_open_code(cx);
+        let rows = self.session.read(cx).rows();
+        let (row, under) =
+            self.added_lines(usize::MAX, cx)
+                .into_iter()
+                .find_map(|(row, location)| {
+                    let line = rows.line(row)?;
+                    let under = line
+                        .code
+                        .char_indices()
+                        .filter_map(|(byte, _)| {
+                            HoveredName::under_pointer(
+                                location.clone(),
+                                &line.code,
+                                &line.highlights,
+                                byte,
+                            )
+                        })
+                        .max_by_key(|under| under.range.len())?;
+                    Some((row, under))
+                })?;
+        self.scroll_to_row(row.saturating_sub(ROWS_ABOVE));
+        Some((row, under))
+    }
+
+    /// The card by `word`, with a lookup that found two definitions, some usages and a note, so
+    /// the card has all its parts.
+    fn stage_name_card(
+        &mut self,
+        under: NameUnderPointer,
+        word: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let lookup = staged_lookup(&under.name);
+        self.session.update(cx, |session, cx| {
+            session.stage_name_card(&under.name, lookup, cx);
+        });
+        self.show_staged_name_card(under, word, cx);
     }
 
     fn stage(&mut self, scene: Scene, window: &mut Window, cx: &mut Context<Self>) {
@@ -1382,6 +1493,90 @@ impl OneStepLayout {
                 session.type_in(&draft, "Should a blank value be refused here?", cx);
             }
         });
+    }
+}
+
+/// The maintainer's case: a PHP enum used all over a big repo, with a same-named TypeScript enum.
+fn staged_lookup(hovered: &HoveredName) -> Lookup {
+    const FOLDERS: [&str; 6] = [
+        "app/Domain/StandingOrders/Actions",
+        "app/Http/Controllers/Api/V2/StandingOrders",
+        "app/Models/StandingOrders/Scopes",
+        "tests/Feature/Domain/StandingOrders",
+        "resources/js/features/standing-orders/components",
+        "database/migrations",
+    ];
+    const FILES: [&str; 7] = [
+        "UpdateStandingOrder.php",
+        "StandingOrder.php",
+        "ListStandingOrderScheduleItems.php",
+        "CancelStandingOrderTest.php",
+        "ScheduleItemRow.tsx",
+        "StandingOrderScheduleItemFactory.php",
+        "RescheduleDeliveries.php",
+    ];
+    const LINES: [&str; 4] = [
+        "use App\\Models\\Enum\\StandingOrders\\{word};",
+        "->where('status', {word}::PENDING)",
+        "return collect([{word}::PENDING, {word}::WAITING_FOR_APPROVAL, {word}::CANCELLED])->contains($this->status);",
+        "$items = $standingOrder->scheduleItems()->whereIn('status', [{word}::PENDING, {word}::REJECTED]);",
+    ];
+    let word = &hovered.word;
+    let line = |number: u32| LineNumber::try_from(number).unwrap_or(LineNumber::FIRST);
+    let place = |path: &str, number: u32| Place {
+        path: FilePath::new(path).unwrap_or_else(|_| hovered.at.path.clone()),
+        line: line(number),
+    };
+    let mut usages = Vec::new();
+    for file in 0..41_usize {
+        let folder = FOLDERS
+            .get(file % FOLDERS.len())
+            .copied()
+            .unwrap_or_default();
+        let name = FILES.get(file % FILES.len()).copied().unwrap_or_default();
+        let path = format!("{folder}/{}/{name}", file / FILES.len());
+        for (n, template) in LINES
+            .iter()
+            .cycle()
+            .take(if file < 14 { 16 } else { 15 })
+            .enumerate()
+        {
+            usages.push(Usage {
+                place: place(&path, u32::try_from(7 + n * 3).unwrap_or(7)),
+                text: template.replace("{word}", word.as_str()).into(),
+            });
+        }
+    }
+    Lookup {
+        word: word.clone(),
+        definitions: vec![
+            Definition {
+                name: word.clone(),
+                kind: DefinitionKind::Enum,
+                place: place("app/Models/Enum/StandingOrders/StandingOrderScheduleItemStatus.php", 12),
+                signature: format!(
+                    "enum {word}: string implements HasLabel, HasColor, JsonSerializable"
+                )
+                .into(),
+                signature_origin: Arc::from([]),
+                doc: Some(
+                    "Where a scheduled delivery is in its life, from the week it is planned to the day it is delivered or called off. Drives the badge in the schedule."
+                        .into(),
+                ),
+            },
+            Definition {
+                name: word.clone(),
+                kind: DefinitionKind::Enum,
+                place: place("resources/js/features/standing-orders/types/standing-order-schedule-item-status.ts", 3),
+                signature: format!("export enum {word}").into(),
+                signature_origin: Arc::from([]),
+                doc: None,
+            },
+        ],
+        usages: Arc::from(usages),
+        reach: Reach::ChangedFiles,
+        cut_short: false,
+        on_disk_files: Arc::new([]),
     }
 }
 

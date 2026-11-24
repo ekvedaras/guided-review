@@ -1,12 +1,15 @@
 use crate::support::FixtureRepo;
 use crate::support::folders_in;
+use guided_review::codebase::Codebase;
 use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings, Config};
 use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::instructions::{InstructionsChoice, InstructionsKind, SkillName};
+use guided_review::navigation::ServerAnswer;
 use guided_review::pull_request::RepoName;
+use guided_review::review_subject::WorkTreeRoot;
 use guided_review::viewer::{
-    Chord, CloneRow, CloneRowProblem, Command, KeyProblem, MergeMethod, SaveOutcome, SendAction,
-    SettingProblem, Settings,
+    Chord, CloneRow, CloneRowProblem, Command, KeyProblem, LanguageServersRow, MergeMethod,
+    SaveOutcome, SendAction, SettingProblem, Settings,
 };
 use std::path::{Path, PathBuf};
 
@@ -1283,4 +1286,147 @@ fn an_unreadable_review_instructions_is_a_problem_on_open_and_refuses_save() {
     );
     settings.set_instructions(InstructionsKind::Review, InstructionsChoice::Off);
     assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
+}
+
+fn github(owner: &str, name: &str) -> Codebase {
+    Codebase::GitHub(RepoName::new(owner, name))
+}
+
+#[test]
+fn a_folder_with_no_github_origin_keeps_its_answer_under_its_path_beside_the_repos() {
+    let home = tempfile::TempDir::new().unwrap();
+    write_config(home.path(), "[language_servers]\n\"acme/shop\" = false\n");
+    let folder = Codebase::Folder(WorkTreeRoot::new("/work/shop".into()).unwrap());
+
+    Settings::remember_language_servers(&folders_in(home.path()), &folder, ServerAnswer::Yes)
+        .unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "[language_servers]\n\"acme/shop\" = false\n\"/work/shop\" = true\n"
+    );
+    let config = Config::load_from(&folders_in(home.path())).unwrap();
+    assert_eq!(config.language_servers(&folder), Some(ServerAnswer::Yes));
+    assert_eq!(
+        config.language_servers(&github("acme", "shop")),
+        Some(ServerAnswer::No)
+    );
+    let settings = Settings::load(&folders_in(home.path())).unwrap();
+    assert_eq!(
+        settings
+            .language_servers()
+            .iter()
+            .map(|row| row.codebase.clone())
+            .collect::<Vec<_>>(),
+        [github("acme", "shop"), folder]
+    );
+}
+
+#[test]
+fn a_repo_answers_language_servers_with_what_the_config_holds_and_is_not_asked_without_it() {
+    let config = Config::from_text(
+        "[language_servers]\n\"acme/shop\" = true\n\"acme/old\" = false\n\"acme/bad\" = \"yes\"\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.language_servers(&github("acme", "shop")),
+        Some(ServerAnswer::Yes)
+    );
+    assert_eq!(
+        config.language_servers(&github("acme", "old")),
+        Some(ServerAnswer::No)
+    );
+    assert_eq!(config.language_servers(&github("acme", "bad")), None);
+    assert_eq!(config.language_servers(&github("acme", "new")), None);
+}
+
+#[test]
+fn settings_list_the_repos_with_an_answer_and_the_others_are_not_listed() {
+    let (_home, settings) = loaded_from(
+        "[language_servers]\n\"acme/shop\" = true\n\"acme/old\" = false\n\"acme/bad\" = \"yes\"\n",
+    );
+
+    assert_eq!(
+        settings.language_servers(),
+        [
+            LanguageServersRow {
+                codebase: github("acme", "shop"),
+                answer: ServerAnswer::Yes
+            },
+            LanguageServersRow {
+                codebase: github("acme", "old"),
+                answer: ServerAnswer::No
+            },
+        ]
+    );
+}
+
+#[test]
+fn changing_a_repos_answer_writes_that_entry_only_and_keeps_the_comments() {
+    let (home, mut settings) = loaded_from(
+        "ask_model = \"sonnet\" # quick\n\n# my servers\n[language_servers]\n\"acme/shop\" = true # trusted\n\"acme/old\" = false\n",
+    );
+
+    settings.set_language_servers(&github("acme", "shop"), ServerAnswer::No);
+    assert!(settings.has_unsaved_changes());
+    settings.save().unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"sonnet\" # quick\n\n# my servers\n[language_servers]\n\"acme/shop\" = false # trusted\n\"acme/old\" = false\n"
+    );
+}
+
+#[test]
+fn a_repo_answered_for_the_first_time_is_added_to_the_config() {
+    let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
+
+    settings.set_language_servers(&github("acme", "shop"), ServerAnswer::Yes);
+    settings.save().unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "ask_model = \"sonnet\" # quick\n\n[language_servers]\n\"acme/shop\" = true\n"
+    );
+    assert_eq!(
+        settings.language_servers(),
+        [LanguageServersRow {
+            codebase: github("acme", "shop"),
+            answer: ServerAnswer::Yes
+        }]
+    );
+}
+
+#[test]
+fn an_answer_given_on_the_card_is_saved_through_settings_with_the_comments_kept() {
+    let home = tempfile::TempDir::new().unwrap();
+    write_config(home.path(), "# mine\nide = \"zed {path}:{line}\" # fast\n");
+
+    Settings::remember_language_servers(
+        &folders_in(home.path()),
+        &github("acme", "shop"),
+        ServerAnswer::No,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "# mine\nide = \"zed {path}:{line}\" # fast\n\n[language_servers]\n\"acme/shop\" = false\n"
+    );
+}
+
+#[test]
+fn a_listed_repos_answer_is_changed_by_its_row_and_saved() {
+    let (home, mut settings) =
+        loaded_from("[language_servers]\n\"acme/shop\" = true\n\"acme/old\" = false\n");
+
+    settings.change_language_servers(1, ServerAnswer::Yes);
+    settings.change_language_servers(7, ServerAnswer::No);
+    settings.save().unwrap();
+
+    assert_eq!(
+        config_text(home.path()),
+        "[language_servers]\n\"acme/shop\" = true\n\"acme/old\" = true\n"
+    );
 }

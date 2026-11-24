@@ -563,6 +563,12 @@ impl Highlights {
     }
 }
 
+/// Spans per line of a whole file, read in the context of all its lines; `None` for a file the
+/// highlighter has no language for.
+pub fn highlight_file_lines(path: &str, source: &str) -> Option<Vec<Vec<Span>>> {
+    HighlightLanguage::for_path(path)?.highlight(source)
+}
+
 /// Spans per line of a code fence in a comment. A language we cannot colour gives plain lines.
 pub fn highlight_snippet(language: Option<&str>, text: &str) -> Vec<Vec<Span>> {
     let line_count = text.lines().count();

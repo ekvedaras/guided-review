@@ -14,6 +14,7 @@ use crate::app::code_links::open_file_in_ide;
 use crate::config::{AskEffortChoice, AskModelChoice, AskSettings};
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
+use crate::navigation::ServerAnswer;
 use crate::viewer::{
     CloneRowProblem, MergeMethod, MoreLines, Motion, Presence, SaveOutcome, SendAction, SendRole,
     SettingProblem, Settings, SettingsPage,
@@ -453,6 +454,10 @@ impl SettingsPanel {
             }
             Ok(SaveOutcome::Written) => {
                 crate::app::apply_keymap(editing.settings.keymap(), cx);
+                crate::app::language_servers::answers_saved(
+                    editing.settings.language_servers(),
+                    cx,
+                );
                 editing.problems.clear();
                 editing.note = None;
                 cx.emit(SettingsEvent::Saved);
@@ -770,6 +775,13 @@ impl SettingsPanel {
                     "More lines",
                     "How many lines the arrows on a gap and the [ and ] keys show at a time.",
                     self.more_lines(editing, colors, cx),
+                )
+                .into_any_element(),
+                Self::section(
+                    colors,
+                    "Language servers",
+                    "Whether language servers may answer the Definition card in a repo. Until yes, and after no, it answers by name, and nothing is downloaded or started.",
+                    Self::language_servers(editing, colors, cx),
                 )
                 .into_any_element(),
                 Self::section(
@@ -1437,6 +1449,66 @@ impl SettingsPanel {
             )
             .picked(SendAction::ALL.iter().position(|action| *action == chosen)),
         )
+    }
+
+    /// The repos the reviewer was asked about, each with its answer.
+    fn language_servers(
+        editing: &Editing,
+        colors: &Colors,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let rows = editing.settings.language_servers();
+        if rows.is_empty() {
+            return div()
+                .text_sm()
+                .text_color(colors.muted_text)
+                .child("No repo yet. The Definition card asks on the first hover in a repo.")
+                .into_any_element();
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .children(rows.iter().enumerate().map(|(index, row)| {
+                let segments = [ServerAnswer::Yes, ServerAnswer::No]
+                    .into_iter()
+                    .map(|answer| {
+                        Segment::new(
+                            if answer.is_yes() { "yes" } else { "no" },
+                            if answer.is_yes() { "Use" } else { "Do not use" },
+                            cx.listener(move |this, _, _, cx| {
+                                this.edit(cx, |editing| {
+                                    editing.settings.change_language_servers(index, answer);
+                                });
+                            }),
+                        )
+                    })
+                    .collect();
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_x_6()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(*CODE_FONT)
+                            .text_sm()
+                            .child(SharedString::from(row.codebase.to_string())),
+                    )
+                    .child(
+                        Segmented::new(
+                            SharedString::from(format!("language-servers-{index}")),
+                            SegmentLayout::Row {
+                                segment_width: px(110.),
+                            },
+                            segments,
+                        )
+                        .picked(Some(usize::from(!row.answer.is_yes()))),
+                    )
+            }))
+            .into_any_element()
     }
 
     fn merge_method(editing: &Editing, colors: &Colors, cx: &Context<Self>) -> impl IntoElement {

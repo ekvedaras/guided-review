@@ -2,8 +2,9 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnimationElement, Context, Deferred, Div, ElementId, InteractiveElement, IntoElement,
-    ParentElement, Stateful, StatefulInteractiveElement, Styled, anchored, deferred, div, px,
+    AnimationElement, Bounds, Context, Deferred, Div, ElementId, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Point, Stateful, StatefulInteractiveElement, Styled, anchored, deferred,
+    div, point, px,
 };
 
 use crate::viewer::{Closing, Motion, Presence, Shown};
@@ -136,6 +137,38 @@ pub fn rise_for<E: IntoElement + Styled + ParentElement + 'static>(
 pub fn popover(panel: impl IntoElement) -> Deferred {
     deferred(
         anchored()
+            .snap_to_window_with_margin(px(8.))
+            .child(div().occlude().child(panel)),
+    )
+}
+
+/// A `popover` whose top left corner is at `position` in the window, for a panel that belongs to
+/// a spot inside a drawn text rather than to the element it is built in.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a floating panel is built here, so it occludes like every other"
+)]
+pub fn popover_at(position: Point<Pixels>, panel: impl IntoElement) -> Deferred {
+    deferred(
+        anchored()
+            .position(position)
+            .snap_to_window_with_margin(px(8.))
+            .child(div().occlude().child(panel)),
+    )
+}
+
+/// Under `word`, or over it when the window has no room below; kept inside the window either way.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a floating panel is built here, so it occludes like every other"
+)]
+pub fn popover_by(word: Bounds<Pixels>, panel: impl IntoElement) -> Deferred {
+    // The window's edge flips the panel around `position`, without the offset: from under the
+    // word's bottom to over its top.
+    deferred(
+        anchored()
+            .position(word.origin)
+            .offset(point(px(0.), word.size.height))
             .snap_to_window_with_margin(px(8.))
             .child(div().occlude().child(panel)),
     )

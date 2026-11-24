@@ -235,7 +235,7 @@ fn files_cut_reads(base: &Sha, head: &Sha, diffs: &[FileDiff]) -> Vec<FileAt> {
         !diff.binary
             && diff.status() != FileStatus::Deleted
             && (!is_cut_per_hunk(diff.path()) || diff.hunks.is_empty())
-            && Language::for_path(diff.path()).is_some()
+            && Language::for_pieces(diff.path()).is_some()
     });
     let both_sides = cut_by_symbols.flat_map(|diff| {
         let at_base = diff.old_path.as_ref().map(|path| (base, path));
@@ -278,7 +278,7 @@ struct CutContext<'a> {
 impl<'a> CutContext<'a> {
     /// With no symbol piece the whole file is one piece, which shows every change.
     fn cut_by_symbols(&self) -> anyhow::Result<PlacedChanges> {
-        let placed = match Language::for_path(self.diff.path()) {
+        let placed = match Language::for_pieces(self.diff.path()) {
             Some(language) => self.cut_symbols(language)?,
             None => PlacedChanges::default(),
         };

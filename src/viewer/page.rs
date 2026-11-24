@@ -239,11 +239,15 @@ impl Page {
         self.line_rows.get(line).copied()
     }
 
-    /// The row a jump lands on: a file's first piece, a symbol's piece (its file's header while the
-    /// file's piece labels are hidden), else the top.
+    /// The row a jump lands on: a line's row, a file's first piece, a symbol's piece (its file's
+    /// header while the file's piece labels are hidden), else the top.
     pub fn row_of_jump(&self, target: &JumpTarget) -> usize {
         let piece = match &target.place {
             JumpPlace::StepTop | JumpPlace::Overview => None,
+            JumpPlace::Line(line) => match self.row_of_line(line) {
+                Some(row) => return row,
+                None => self.pieces.iter().find(|piece| piece.path == line.path),
+            },
             JumpPlace::File(path) => self.pieces.iter().find(|piece| piece.path == *path),
             JumpPlace::Piece(id) => self
                 .pieces

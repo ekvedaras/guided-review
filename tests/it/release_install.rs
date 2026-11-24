@@ -3,8 +3,6 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
-use flate2::Compression;
-use flate2::write::GzEncoder;
 use guided_review::app_folders::Mover;
 use guided_review::github::GitHub;
 use guided_review::platform::{EntryPlaced, Os, info_plist};
@@ -16,7 +14,7 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 use crate::support::fake_ports::FakeReleases;
-use crate::support::serve_files;
+use crate::support::{serve_files, tarball};
 
 const TARGET: Target = Target {
     os: Os::MacOs,
@@ -42,7 +40,7 @@ fn update_to(version: &str) -> Update {
 /// A release archive as the release workflow packs it.
 fn archive_of(version: &str, binary: &str) -> Vec<u8> {
     let folder = format!("guided-review-{version}-{}", TARGET.triple());
-    packed(&[
+    tarball(&[
         (format!("{folder}/guided-review"), binary.to_owned(), 0o755),
         (
             format!("{folder}/skills/tour/SKILL.md"),
@@ -56,7 +54,7 @@ fn archive_of(version: &str, binary: &str) -> Vec<u8> {
 fn archive_with_bundle_of(version: &str, binary: &str) -> Vec<u8> {
     let folder = format!("guided-review-{version}-{}", TARGET.triple());
     let app = format!("{folder}/Guided Review.app/Contents");
-    packed(&[
+    tarball(&[
         (format!("{folder}/guided-review"), binary.to_owned(), 0o755),
         (
             format!("{folder}/skills/tour/SKILL.md"),
@@ -79,20 +77,6 @@ fn archive_with_bundle_of(version: &str, binary: &str) -> Vec<u8> {
             0o644,
         ),
     ])
-}
-
-fn packed(files: &[(String, String, u32)]) -> Vec<u8> {
-    let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
-    for (path, content, mode) in files {
-        let mode = *mode;
-        let mut header = tar::Header::new_gnu();
-        header.set_size(content.len() as u64);
-        header.set_mode(mode);
-        header.set_cksum();
-        tar.append_data(&mut header, path, content.as_bytes())
-            .unwrap();
-    }
-    tar.into_inner().unwrap().finish().unwrap()
 }
 
 fn checksum_of(update: &Update, archive: &[u8]) -> String {
@@ -621,7 +605,7 @@ fn a_linux_release_install_finds_its_archive_in_the_published_release_and_instal
     let icon = |size: &str| {
         format!("{folder}/icons/hicolor/{size}/apps/io.github.ekvedaras.guided-review.png")
     };
-    let archive = packed(&[
+    let archive = tarball(&[
         (
             format!("{folder}/guided-review"),
             "binary 0.9.0".to_owned(),
