@@ -10,10 +10,13 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div, px,
 };
 
+use crate::navigation::ServerAnswer;
 use crate::viewer::{
-    CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, UsageFile, UsageLine,
+    CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, ServerQuestion, UsageFile,
+    UsageLine,
 };
 
+use super::button::{ButtonKind, ButtonSize, button};
 use super::chip::chip;
 use super::overlay::{overlay_panel, picker_row_at};
 use super::palette::{CODE_FONT, Colors, Tone};
@@ -29,11 +32,15 @@ const LINE_GUTTER: f32 = 40.;
 /// What a click on a row of the card does: jumps in the tour or opens the code.
 pub type OnNameTarget = Rc<dyn Fn(&NameTarget, &mut Window, &mut App)>;
 
+/// What a click on Yes or No under the card's question does.
+pub type OnServerAnswer = Rc<dyn Fn(ServerAnswer, &mut Window, &mut App)>;
+
 /// `room` is the width the window leaves for the card, so a narrow window shrinks it.
 pub fn name_card(
     colors: &Colors,
     card: &DefinitionCard,
     on_open: &OnNameTarget,
+    on_answer: &OnServerAnswer,
     room: Pixels,
 ) -> Div {
     let panel = overlay_panel(colors).w(px(NAME_CARD_WIDTH)).max_w(room);
@@ -46,6 +53,12 @@ pub fn name_card(
         }
         DefinitionCard::Found(found) => panel
             .child(header(colors, found))
+            .children(
+                found
+                    .question
+                    .as_ref()
+                    .map(|question| question_band(colors, question, on_answer)),
+            )
             .child(found_lists(colors, found, on_open)),
     }
 }
@@ -81,6 +94,48 @@ fn header(colors: &Colors, found: &FoundNames) -> Div {
                 .text_xs()
                 .text_color(colors.muted_text)
                 .child(SharedString::from(Arc::clone(&found.counts))),
+        )
+}
+
+fn question_band(colors: &Colors, question: &ServerQuestion, on_answer: &OnServerAnswer) -> Div {
+    let answer_button = |id: &'static str, label: &'static str, answer: ServerAnswer| {
+        let on_answer = Rc::clone(on_answer);
+        button(colors, id, ButtonKind::Secondary, ButtonSize::Small)
+            .on_click(move |_, window, cx| on_answer(answer, window, cx))
+            .child(label)
+    };
+    div()
+        .flex_none()
+        .px_4()
+        .py_2()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .border_b_1()
+        .border_color(colors.subtle_border)
+        .bg(colors.header_band())
+        .text_xs()
+        .child(
+            div()
+                .min_w_0()
+                .child(SharedString::from(Arc::clone(&question.says))),
+        )
+        .child(
+            div()
+                .flex_none()
+                .flex()
+                .gap_2()
+                .child(answer_button(
+                    "name-card-servers-yes",
+                    "Yes",
+                    ServerAnswer::Yes,
+                ))
+                .child(answer_button(
+                    "name-card-servers-no",
+                    "No",
+                    ServerAnswer::No,
+                )),
         )
 }
 

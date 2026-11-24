@@ -3,12 +3,14 @@ use std::sync::Arc;
 use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
-use guided_review::navigation::{AnsweredBy, Column, FallbackReason, ServerName, Waiting, Word};
+use guided_review::navigation::{
+    AnsweredBy, Column, FallbackReason, ServerAnswer, ServerName, Waiting, Word,
+};
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    Capture, CardNote, CodeRun, DefinitionCard, HoveredName, JumpPlace, LineLocation, NameTarget,
-    Review, ReviewStateFile, Side, Snippet,
+    Capture, CardNote, CodeRun, DefinitionCard, FoundNames, HoveredName, JumpPlace, LineLocation,
+    NameTarget, Review, ReviewStateFile, Side, Snippet,
 };
 use serde_json::{Value, json};
 
@@ -118,7 +120,7 @@ fn card_of(review: &mut Review, source: &dyn CodeSource, hovered: &HoveredName) 
     (*review.definition_card(hovered).unwrap()).clone()
 }
 
-fn found(card: DefinitionCard) -> guided_review::viewer::FoundNames {
+fn found(card: DefinitionCard) -> FoundNames {
     match card {
         DefinitionCard::Found(found) => found,
         other => panic!("expected a found card, got {other:?}"),
@@ -863,4 +865,166 @@ fn an_answer_by_name_with_no_reason_and_a_language_server_answer_carry_no_note()
         ));
         assert_eq!(card.notes, []);
     }
+}
+
+const SERVER_QUESTION: &str = "Use language servers for acme/shop? rust-analyzer may build it";
+
+fn shop_repo() -> RepoName {
+    RepoName::new("acme", "shop")
+}
+
+/// A review whose language server adapter is `adapter`, with the repo not asked yet.
+fn review_with_servers(shop: &Shop, source: &LocalGit, adapter: &FakeNavigator) -> Review {
+    let mut review = shop.open(source);
+    review.use_language_servers(Arc::new(adapter.clone()), shop_repo(), None);
+    review
+}
+
+fn language_server_adapter() -> FakeNavigator {
+    FakeNavigator::answering_by(AnsweredBy::LanguageServer(rust_analyzer()))
+}
+
+fn question_of(card: &FoundNames) -> Option<String> {
+    card.question
+        .as_ref()
+        .map(|question| question.says.to_string())
+}
+
+#[test]
+fn the_first_hover_in_a_repo_asks_to_use_language_servers_and_the_by_name_lookup_answers() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let adapter = language_server_adapter();
+    let mut review = review_with_servers(&shop, &source, &adapter);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+
+    assert_eq!(question_of(&card), Some(SERVER_QUESTION.to_owned()));
+    assert_eq!(card.question.unwrap().repo, shop_repo());
+    assert_eq!(card.definitions.len(), 1, "the by-name lookup answered");
+    assert_eq!(adapter.asked(), []);
+}
+
+#[test]
+fn a_review_with_no_language_server_adapter_asks_nothing() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+
+    assert_eq!(card.question, None);
+}
+
+#[test]
+fn a_name_on_the_base_side_asks_nothing_since_no_server_answers_there() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let adapter = language_server_adapter();
+    let mut review = review_with_servers(&shop, &source, &adapter);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/report.ts", Side::Base, 3, "Legacy"),
+    ));
+
+    assert_eq!(card.question, None);
+}
+
+#[test]
+fn saying_no_takes_the_question_off_the_cards_and_no_later_hover_asks_the_adapter() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let adapter = language_server_adapter();
+    let mut review = review_with_servers(&shop, &source, &adapter);
+    let first = hover("src/checkout.ts", Side::Head, 4, "Cart");
+    found(card_of(&mut review, &source, &first));
+
+    let repo = review.answer_language_servers(ServerAnswer::No);
+
+    assert_eq!(repo, Some(shop_repo()));
+    let after = found(card_of(&mut review, &source, &first));
+    assert_eq!(after.question, None);
+    assert_eq!(after.definitions.len(), 1);
+    let later = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 5, "price"),
+    ));
+    assert_eq!(later.question, None);
+    assert_eq!(adapter.asked(), []);
+}
+
+#[test]
+fn saying_yes_asks_the_name_again_of_the_adapter_and_the_card_has_no_question() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let adapter = language_server_adapter();
+    let mut review = review_with_servers(&shop, &source, &adapter);
+    let first = hover("src/checkout.ts", Side::Head, 4, "Cart");
+    found(card_of(&mut review, &source, &first));
+    assert_eq!(adapter.asked(), []);
+
+    let repo = review.answer_language_servers(ServerAnswer::Yes);
+
+    assert_eq!(repo, Some(shop_repo()));
+    assert!(review.definition_card(&first).is_none(), "asked again");
+    let after = found(card_of(&mut review, &source, &first));
+    assert_eq!(after.question, None);
+    assert_eq!(adapter.asked().len(), 1);
+    assert_eq!(adapter.asked()[0].word, Word::new("Cart").unwrap());
+}
+
+#[test]
+fn a_repo_that_said_yes_before_asks_no_question_and_the_adapter_answers() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let adapter = language_server_adapter();
+    let mut review = shop.open(&source);
+    review.use_language_servers(
+        Arc::new(adapter.clone()),
+        shop_repo(),
+        Some(ServerAnswer::Yes),
+    );
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+
+    assert_eq!(card.question, None);
+    assert_eq!(adapter.asked().len(), 1);
+}
+
+#[test]
+fn a_repo_that_said_no_before_asks_no_question_and_the_adapter_is_never_asked() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let adapter = language_server_adapter();
+    let mut review = shop.open(&source);
+    review.use_language_servers(
+        Arc::new(adapter.clone()),
+        shop_repo(),
+        Some(ServerAnswer::No),
+    );
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+
+    assert_eq!(card.question, None);
+    assert_eq!(card.definitions.len(), 1, "the by-name lookup answered");
+    assert_eq!(adapter.asked(), []);
 }

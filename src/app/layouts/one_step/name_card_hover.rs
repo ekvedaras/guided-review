@@ -12,7 +12,7 @@ use gpui::{
 
 use crate::app::code_links::open_code;
 use crate::app::components::diff_view::NamePointer;
-use crate::app::components::name_card::{OnNameTarget, name_card};
+use crate::app::components::name_card::{OnNameTarget, OnServerAnswer, name_card};
 use crate::app::components::overlay::popover_by;
 use crate::app::components::palette::Colors;
 use crate::viewer::{HoverTicket, NameTarget, Screen};
@@ -166,6 +166,21 @@ impl OneStepLayout {
                 .update(cx, |this, cx| this.open_name_target(&target, cx))
                 .ok();
         });
+        let answered = name;
+        let on_answer: OnServerAnswer = Rc::new({
+            let layout = cx.weak_entity();
+            move |answer, _, cx| {
+                let answered = answered.clone();
+                layout
+                    .update(cx, |this, cx| {
+                        this.session.update(cx, |session, cx| {
+                            session.answer_language_servers(&answered, answer, cx);
+                        });
+                        cx.notify();
+                    })
+                    .ok();
+            }
+        });
         let colors = Colors::active(cx);
         let room = window.viewport_size().width - px(2. * WINDOW_MARGIN);
         Some(
@@ -181,7 +196,7 @@ impl OneStepLayout {
                             this.wait(GRACE, ticket, Self::name_grace_over, cx);
                         }
                     }))
-                    .child(name_card(&colors, &card, &on_open, room)),
+                    .child(name_card(&colors, &card, &on_open, &on_answer, room)),
             )
             .into_any_element(),
         )

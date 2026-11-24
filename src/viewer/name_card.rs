@@ -10,6 +10,7 @@ use std::borrow::Cow;
 use crate::navigation::{
     AnsweredBy, Definition, FallbackReason, Lookup, Place, Reach, Usage, Waiting, Word,
 };
+use crate::pull_request::RepoName;
 
 use super::code_link::CodeLink;
 use super::highlight::Capture;
@@ -50,6 +51,22 @@ impl CardNote {
             Self::AnsweredByName(because) => {
                 Cow::Owned(format!("Answered by name: {}", because.as_str()))
             }
+        }
+    }
+}
+
+/// "Use language servers for acme/shop? rust-analyzer may build it", with Yes and No.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerQuestion {
+    pub repo: RepoName,
+    pub says: Arc<str>,
+}
+
+impl ServerQuestion {
+    pub(super) fn about(repo: &RepoName) -> Self {
+        Self {
+            repo: repo.clone(),
+            says: format!("Use language servers for {repo}? rust-analyzer may build it").into(),
         }
     }
 }
@@ -254,6 +271,8 @@ pub struct FoundNames {
     pub usages: Vec<UsageFile>,
     pub usages_not_shown: usize,
     pub notes: Vec<CardNote>,
+    /// Asked on the first hover in a repo that has not said whether language servers may answer.
+    pub question: Option<ServerQuestion>,
     /// "and 6 more in 2 files"
     pub more_usages: Option<Arc<str>>,
 }
@@ -355,6 +374,7 @@ impl DefinitionCard {
             usages: files,
             usages_not_shown,
             notes,
+            question: None,
             more_usages: (usages_not_shown > 0).then(|| {
                 format!(
                     "and {usages_not_shown} more in {}",

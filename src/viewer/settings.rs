@@ -9,6 +9,7 @@ use crate::home::expand_home;
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use crate::local_git::{CloneProblem, LocalGit};
+use crate::navigation::ServerAnswer;
 use crate::pull_request::RepoName;
 
 use super::chord::Chord;
@@ -43,6 +44,7 @@ struct Values {
     more_lines: MoreLinesEntry,
     /// A value that names no method reads as the default, as the app reads it.
     merge_method: MergeMethod,
+    language_servers: Vec<LanguageServersRow>,
 }
 
 impl Values {
@@ -81,6 +83,7 @@ impl Values {
                 .as_deref()
                 .and_then(MergeMethod::of_config_text)
                 .unwrap_or_default(),
+            language_servers: language_servers_in(document),
         }
     }
 
@@ -130,6 +133,13 @@ impl CloneRow {
         let well_formed = !owner.is_empty() && !name.is_empty() && !name.contains('/');
         well_formed.then(|| RepoName::new(owner, name))
     }
+}
+
+/// One `[language_servers]` entry: the repo as written, and what the reviewer answered for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanguageServersRow {
+    pub repo: String,
+    pub answer: ServerAnswer,
 }
 
 /// A setting that would be wrong if saved, so Save writes nothing.
@@ -226,6 +236,7 @@ const CLONES: &str = "clones";
 const KEYS: &str = "keys";
 const MORE_LINES: &str = "more_lines";
 const MERGE_METHOD: &str = "merge_method";
+const LANGUAGE_SERVERS: &str = "language_servers";
 const PRIMARY_COMMENT_ACTION: &str = "primary_comment_action";
 const SECONDARY_COMMENT_ACTION: &str = "secondary_comment_action";
 const SKILLS_FOLDER: &str = ".claude/skills";
@@ -585,6 +596,43 @@ impl Settings {
         self.edited.merge_method = method;
     }
 
+    /// The repos the reviewer was asked about, in the order the config lists them.
+    pub fn language_servers(&self) -> &[LanguageServersRow] {
+        &self.edited.language_servers
+    }
+
+    /// Changes the answer of a listed repo.
+    pub fn change_language_servers(&mut self, row: usize, answer: ServerAnswer) {
+        if let Some(row) = self.edited.language_servers.get_mut(row) {
+            row.answer = answer;
+        }
+    }
+
+    pub fn set_language_servers(&mut self, repo: &RepoName, answer: ServerAnswer) {
+        let repo = repo.to_string();
+        let rows = &mut self.edited.language_servers;
+        match rows.iter_mut().find(|row| row.repo == repo) {
+            Some(row) => row.answer = answer,
+            None => rows.push(LanguageServersRow { repo, answer }),
+        }
+    }
+
+    /// Loads the config, sets the repo's answer and saves, as the Settings page would.
+    pub fn remember_language_servers(
+        folders: &AppFolders,
+        repo: &RepoName,
+        answer: ServerAnswer,
+    ) -> anyhow::Result<()> {
+        let mut settings = Self::load(folders)?;
+        settings.set_language_servers(repo, answer);
+        match settings.save()? {
+            SaveOutcome::Refused(problems) => {
+                anyhow::bail!("config.toml has settings that must be fixed first: {problems:?}")
+            }
+            SaveOutcome::NothingChanged | SaveOutcome::Written => Ok(()),
+        }
+    }
+
     pub fn has_unsaved_changes(&self) -> bool {
         self.edited != self.saved
     }
@@ -661,6 +709,9 @@ impl Settings {
                 (method != MergeMethod::default()).then(|| method.config_text()),
             );
         }
+        if saved.language_servers != edited.language_servers {
+            write_language_servers(root, &saved.language_servers, &edited.language_servers)?;
+        }
         self.write()?;
         self.saved = self.edited.clone();
         Ok(SaveOutcome::Written)
@@ -728,6 +779,38 @@ fn write_keys(root: &mut Table, saved: &KeyChanges, edited: &KeyChanges) -> anyh
             };
             set_value(keys, name, Some(value));
         }
+    }
+    Ok(())
+}
+
+fn language_servers_in(document: &DocumentMut) -> Vec<LanguageServersRow> {
+    document
+        .get(LANGUAGE_SERVERS)
+        .and_then(Item::as_table_like)
+        .into_iter()
+        .flat_map(TableLike::iter)
+        .filter_map(|(repo, answer)| {
+            Some(LanguageServersRow {
+                repo: repo.to_owned(),
+                answer: ServerAnswer::of(answer.as_bool()?),
+            })
+        })
+        .collect()
+}
+
+/// Touches only the entries that were added or changed.
+fn write_language_servers(
+    root: &mut Table,
+    saved: &[LanguageServersRow],
+    edited: &[LanguageServersRow],
+) -> anyhow::Result<()> {
+    let servers = root
+        .entry(LANGUAGE_SERVERS)
+        .or_insert_with(|| Item::Table(Table::new()))
+        .as_table_like_mut()
+        .with_context(|| format!("{LANGUAGE_SERVERS} is not a table"))?;
+    for row in edited.iter().filter(|row| !saved.contains(row)) {
+        set_value(servers, &row.repo, Some(Value::from(row.answer.is_yes())));
     }
     Ok(())
 }

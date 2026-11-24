@@ -18,6 +18,23 @@ pub struct NavigationRequest {
     pub word: Word,
 }
 
+/// What the reviewer answered to "Use language servers for this repo?"; asked once per repo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerAnswer {
+    Yes,
+    No,
+}
+
+impl ServerAnswer {
+    pub fn of(use_servers: bool) -> Self {
+        if use_servers { Self::Yes } else { Self::No }
+    }
+
+    pub fn is_yes(self) -> bool {
+        self == Self::Yes
+    }
+}
+
 /// A language server, named as the card says it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerName(Arc<str>);

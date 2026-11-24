@@ -12,12 +12,13 @@ use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::line_number::LineNumber;
 use crate::navigation::{
-    AnsweredBy, CodeNavigator, Column, Lookup, NavigationRequest, Place, Waiting, Word,
+    AnsweredBy, CodeNavigator, Column, Lookup, NavigationRequest, Place, ServerAnswer, Waiting,
+    Word,
 };
-use crate::pull_request::Sha;
+use crate::pull_request::{RepoName, Sha};
 
 use super::highlight::Capture;
-use super::name_card::DefinitionCard;
+use super::name_card::{DefinitionCard, ServerQuestion};
 use super::name_highlights::NameHighlights;
 use super::step_page::{LineLocation, Side};
 
@@ -214,17 +215,86 @@ pub struct NameOutcome {
     pub(super) result: Result<Looked, String>,
 }
 
+/// A language server adapter that may answer names in one repo, once the reviewer has said yes.
+struct ServerOptIn {
+    adapter: Arc<dyn CodeNavigator>,
+    repo: RepoName,
+    /// `None` until the reviewer is asked.
+    answer: Option<ServerAnswer>,
+}
+
 pub(super) struct NameDesk {
-    navigator: Arc<dyn CodeNavigator>,
+    /// Answers whenever no language server may.
+    by_name: Arc<dyn CodeNavigator>,
+    servers: Option<ServerOptIn>,
     cards: HashMap<NameKey, Arc<DefinitionCard>>,
 }
 
 impl NameDesk {
-    pub(super) fn new(navigator: Arc<dyn CodeNavigator>) -> Self {
+    pub(super) fn new(by_name: Arc<dyn CodeNavigator>) -> Self {
         Self {
-            navigator,
+            by_name,
+            servers: None,
             cards: HashMap::new(),
         }
+    }
+
+    /// Answers by name through `by_name` from now on, with nothing kept of what was asked before.
+    pub(super) fn use_by_name(&mut self, by_name: Arc<dyn CodeNavigator>) {
+        self.by_name = by_name;
+        self.cards.clear();
+    }
+
+    pub(super) fn use_language_servers(
+        &mut self,
+        adapter: Arc<dyn CodeNavigator>,
+        repo: RepoName,
+        answer: Option<ServerAnswer>,
+    ) {
+        self.servers = Some(ServerOptIn {
+            adapter,
+            repo,
+            answer,
+        });
+        self.cards.clear();
+    }
+
+    /// The adapter is only asked once the reviewer said yes for the repo; before that and after a
+    /// no the by-name lookup answers.
+    fn navigator_for(&self, key: &NameKey) -> Arc<dyn CodeNavigator> {
+        match &self.servers {
+            Some(servers)
+                if servers.answer == Some(ServerAnswer::Yes) && key.side == Side::Head =>
+            {
+                Arc::clone(&servers.adapter)
+            }
+            _ => Arc::clone(&self.by_name),
+        }
+    }
+
+    /// Asked on a head line of a language a server answers, while the repo is not answered for.
+    pub(super) fn question_for(&self, key: &NameKey) -> Option<ServerQuestion> {
+        let servers = self.servers.as_ref()?;
+        let has_server = key.side == Side::Head && Language::for_path(key.path.as_str()).is_some();
+        (servers.answer.is_none() && has_server).then(|| ServerQuestion::about(&servers.repo))
+    }
+
+    /// Yes: the cards are forgotten, to be asked of the adapter. No: they stay, without the question.
+    pub(super) fn answer(&mut self, answer: ServerAnswer) -> Option<RepoName> {
+        let servers = self.servers.as_mut()?;
+        servers.answer = Some(answer);
+        let repo = servers.repo.clone();
+        match answer {
+            ServerAnswer::Yes => self.cards.clear(),
+            ServerAnswer::No => {
+                for card in self.cards.values_mut() {
+                    if let DefinitionCard::Found(found) = Arc::make_mut(card) {
+                        found.question = None;
+                    }
+                }
+            }
+        }
+        Some(repo)
     }
 
     /// Work to run unless the name is on its way or known. A failed lookup is asked again.
@@ -241,7 +311,7 @@ impl NameDesk {
             Arc::new(DefinitionCard::loading(key.word.clone())),
         );
         Some(NameWork {
-            navigator: Arc::clone(&self.navigator),
+            navigator: self.navigator_for(&key),
             key,
             changed,
         })

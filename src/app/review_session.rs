@@ -3,7 +3,8 @@
 
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
-use crate::viewer::{FixNote, FixReply, FixTiming, WhyReply, catch_up_findings};
+use crate::navigation::ServerAnswer;
+use crate::viewer::{FixNote, FixReply, FixTiming, Settings, WhyReply, catch_up_findings};
 use std::collections::{HashMap, HashSet};
 use std::ops::{ControlFlow, Range};
 use std::path::PathBuf;
@@ -955,6 +956,29 @@ impl ReviewSession {
             },
         )
         .detach();
+    }
+
+    /// The reviewer's answer to the card's question: kept in `config.toml`, then the name is asked
+    /// again, this time of whoever may answer it.
+    pub fn answer_language_servers(
+        &mut self,
+        hovered: &HoveredName,
+        answer: ServerAnswer,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(repo) = self.review.answer_language_servers(answer) else {
+            return;
+        };
+        let folders = cx.global::<PrSwitching>().folders.clone();
+        if let Err(error) = Settings::remember_language_servers(&folders, &repo, answer) {
+            post_toast(
+                cx,
+                ToastTone::Danger,
+                format!("Could not keep your answer in config.toml: {error:#}"),
+            );
+        }
+        self.look_up_name(hovered, cx);
+        cx.notify();
     }
 
     /// GPUI's splice moves the view to the top of a replaced row; a reply box opening on a long thread

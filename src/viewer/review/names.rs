@@ -5,14 +5,13 @@ use std::cell::OnceCell;
 use std::sync::Arc;
 
 use crate::file_path::FilePath;
-use crate::navigation::{AnsweredBy, CodeNavigator, Lookup, Place};
+use crate::navigation::{AnsweredBy, CodeNavigator, Lookup, Place, ServerAnswer};
 use crate::pieces::ChangedFile;
+use crate::pull_request::RepoName;
 use crate::viewer::code_link::CodeLinks;
 use crate::viewer::jump::{JumpPlace, JumpTarget};
 use crate::viewer::name_card::{DefinitionCard, NameTarget, PlacesOfReview};
-use crate::viewer::name_desk::{
-    HoveredName, Looked, NameDesk, NameKey, NameOutcome, NameWaiting, NameWork,
-};
+use crate::viewer::name_desk::{HoveredName, Looked, NameKey, NameOutcome, NameWaiting, NameWork};
 use crate::viewer::name_highlights::NameHighlights;
 use crate::viewer::step_page::{LineLocation, PieceDiff, Side};
 
@@ -33,7 +32,24 @@ impl ReviewCore {
 
     /// Answers names through `navigator` from now on, with nothing kept of what was asked before.
     pub fn use_navigator(&mut self, navigator: Arc<dyn CodeNavigator>) {
-        self.names = NameDesk::new(navigator);
+        self.names.use_by_name(navigator);
+    }
+
+    /// Lets `adapter` answer names in `repo` once its reviewer says yes; `answer` is what they said
+    /// before. The first hover of a name in a repo with no answer carries the question.
+    pub fn use_language_servers(
+        &mut self,
+        adapter: Arc<dyn CodeNavigator>,
+        repo: RepoName,
+        answer: Option<ServerAnswer>,
+    ) {
+        self.names.use_language_servers(adapter, repo, answer);
+    }
+
+    /// Takes the reviewer's answer to the card's question; returns the repo it is about, for the
+    /// app to keep in the config. Nothing without a language server adapter.
+    pub fn answer_language_servers(&mut self, answer: ServerAnswer) -> Option<RepoName> {
+        self.names.answer(answer)
     }
 
     /// The card of a name that is still on its way says what the navigator waits on.
@@ -69,7 +85,7 @@ impl ReviewCore {
     }
 
     fn keep_card_of(&mut self, key: NameKey, result: Result<Looked, String>) {
-        let card = match result {
+        let mut card = match result {
             Ok(Looked {
                 lookup,
                 answered_by,
@@ -84,6 +100,9 @@ impl ReviewCore {
             }
             Err(because) => DefinitionCard::failed(key.word.clone(), because),
         };
+        if let DefinitionCard::Found(found) = &mut card {
+            found.question = self.names.question_for(&key);
+        }
         self.names.keep(key, card);
     }
 

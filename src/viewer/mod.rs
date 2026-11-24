@@ -195,8 +195,8 @@ pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 pub use move_to_pr::{PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
 pub use name_card::{
-    CardNote, CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, Snippet,
-    USAGES_SHOWN, UsageFile, UsageLine,
+    CardNote, CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, ServerQuestion,
+    Snippet, USAGES_SHOWN, UsageFile, UsageLine,
 };
 pub use name_desk::{HoveredName, NameOutcome, NameUnderPointer, NameWaiting, NameWork};
 pub use name_highlights::NameHighlights;
@@ -267,7 +267,9 @@ pub use saved_state::RepinRunning;
 pub use screen_fold::ScreenFold;
 pub use screen_travel::{Arrival, ScreenTravel, Travel};
 pub use send_action::{SendAction, SendChoice, SendRole};
-pub use settings::{CloneRow, CloneRowProblem, SaveOutcome, SettingProblem, Settings};
+pub use settings::{
+    CloneRow, CloneRowProblem, LanguageServersRow, SaveOutcome, SettingProblem, Settings,
+};
 pub use settings_page::SettingsPage;
 pub use shortcuts::{Command, KeyScope, ShortcutGroup, in_group};
 pub use stations::{Station, StationHealth, StationKind, Stations, waited};
