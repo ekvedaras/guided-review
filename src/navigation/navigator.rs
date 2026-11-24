@@ -5,6 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::code_source::CodeSource;
+use crate::codebase::Codebase;
 use crate::pull_request::Sha;
 
 use super::{Column, Lookup, Place, Word};
@@ -33,6 +34,13 @@ impl ServerAnswer {
     pub fn is_yes(self) -> bool {
         self == Self::Yes
     }
+}
+
+/// The reviewer's answers to "Use language servers for this repo?" while the app runs, shared by
+/// every open review, so an answer given on a card or in Settings counts in each of them at once.
+pub trait ServerOptIns: Send + Sync {
+    fn answer(&self, codebase: &Codebase) -> Option<ServerAnswer>;
+    fn answered(&self, codebase: &Codebase, answer: ServerAnswer);
 }
 
 /// A language server, named as the card says it.

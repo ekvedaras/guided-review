@@ -454,6 +454,10 @@ impl SettingsPanel {
             }
             Ok(SaveOutcome::Written) => {
                 crate::app::apply_keymap(editing.settings.keymap(), cx);
+                crate::app::language_servers::answers_saved(
+                    editing.settings.language_servers(),
+                    cx,
+                );
                 editing.problems.clear();
                 editing.note = None;
                 cx.emit(SettingsEvent::Saved);

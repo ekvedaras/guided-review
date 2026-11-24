@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::code_source::CodeSource;
 use crate::codebase::Codebase;
@@ -13,8 +13,8 @@ use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::line_number::LineNumber;
 use crate::navigation::{
-    AnsweredBy, CodeNavigator, Column, Lookup, NavigationRequest, Place, ServerAnswer, Waiting,
-    Word,
+    AnsweredBy, CodeNavigator, Column, Lookup, NavigationRequest, Place, ServerAnswer,
+    ServerOptIns, Waiting, Word,
 };
 use crate::pull_request::Sha;
 
@@ -220,8 +220,29 @@ pub struct NameOutcome {
 struct ServerOptIn {
     adapter: Arc<dyn CodeNavigator>,
     codebase: Codebase,
+    answers: Arc<dyn ServerOptIns>,
+    /// What the answer was when the kept cards were made: they follow a change on the next ask.
+    cards_made_under: Option<ServerAnswer>,
+}
+
+impl ServerOptIn {
     /// `None` until the reviewer is asked.
-    answer: Option<ServerAnswer>,
+    fn answer(&self) -> Option<ServerAnswer> {
+        self.answers.answer(&self.codebase)
+    }
+}
+
+/// The answer of a review that shares it with no other.
+struct OwnAnswer(Mutex<Option<ServerAnswer>>);
+
+impl ServerOptIns for OwnAnswer {
+    fn answer(&self, _codebase: &Codebase) -> Option<ServerAnswer> {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn answered(&self, _codebase: &Codebase, answer: ServerAnswer) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(answer);
+    }
 }
 
 pub(super) struct NameDesk {
@@ -250,16 +271,29 @@ impl NameDesk {
         self.cards.clear();
     }
 
+    /// `answer` is this review's own, shared with no other.
     pub(super) fn use_language_servers(
         &mut self,
         adapter: Arc<dyn CodeNavigator>,
         codebase: Codebase,
         answer: Option<ServerAnswer>,
     ) {
+        let answers = Arc::new(OwnAnswer(Mutex::new(answer)));
+        self.use_shared_language_servers(adapter, codebase, answers);
+    }
+
+    pub(super) fn use_shared_language_servers(
+        &mut self,
+        adapter: Arc<dyn CodeNavigator>,
+        codebase: Codebase,
+        answers: Arc<dyn ServerOptIns>,
+    ) {
+        let cards_made_under = answers.answer(&codebase);
         self.servers = Some(ServerOptIn {
             adapter,
             codebase,
-            answer,
+            answers,
+            cards_made_under,
         });
         self.cards.clear();
     }
@@ -269,7 +303,7 @@ impl NameDesk {
     fn navigator_for(&self, key: &NameKey) -> Arc<dyn CodeNavigator> {
         match &self.servers {
             Some(servers)
-                if servers.answer == Some(ServerAnswer::Yes) && key.side == Side::Head =>
+                if servers.answer() == Some(ServerAnswer::Yes) && key.side == Side::Head =>
             {
                 Arc::clone(&servers.adapter)
             }
@@ -281,17 +315,31 @@ impl NameDesk {
     pub(super) fn question_for(&self, key: &NameKey) -> Option<ServerQuestion> {
         let servers = self.servers.as_ref()?;
         let language = Language::for_path(key.path.as_str()).filter(|_| key.side == Side::Head)?;
-        (servers.answer.is_none()).then(|| ServerQuestion::about(&servers.codebase, language))
+        (servers.answer().is_none()).then(|| ServerQuestion::about(&servers.codebase, language))
     }
 
-    /// Yes: the cards are forgotten, to be asked of the adapter. No: they stay, without the question.
     pub(super) fn answer(&mut self, answer: ServerAnswer) -> Option<Codebase> {
-        let servers = self.servers.as_mut()?;
-        servers.answer = Some(answer);
+        let servers = self.servers.as_ref()?;
+        servers.answers.answered(&servers.codebase, answer);
         let codebase = servers.codebase.clone();
+        self.follow_answer();
+        Some(codebase)
+    }
+
+    /// After a yes the cards are forgotten, to be asked of the adapter; after a no they stay, without
+    /// the question.
+    fn follow_answer(&mut self) {
+        let Some(servers) = self.servers.as_mut() else {
+            return;
+        };
+        let answer = servers.answer();
+        if answer == servers.cards_made_under {
+            return;
+        }
+        servers.cards_made_under = answer;
         match answer {
-            ServerAnswer::Yes => self.cards.clear(),
-            ServerAnswer::No => {
+            Some(ServerAnswer::Yes) | None => self.cards.clear(),
+            Some(ServerAnswer::No) => {
                 for card in self.cards.values_mut() {
                     if let DefinitionCard::Found(found) = Arc::make_mut(card) {
                         found.question = None;
@@ -299,11 +347,11 @@ impl NameDesk {
                 }
             }
         }
-        Some(codebase)
     }
 
     /// Work to run unless the name is on its way or known. A failed lookup is asked again.
     pub(super) fn ask(&mut self, key: NameKey, changed: Arc<[FilePath]>) -> Option<NameWork> {
+        self.follow_answer();
         if self
             .cards
             .get(&key)

@@ -49,15 +49,20 @@ impl ReviewCore {
     }
 
     /// Lets `servers` answer names in `repo` once its reviewer says yes, with the by-name lookup
-    /// answering whatever they cannot.
+    /// answering whatever they cannot. `answer`, read from the config, counts for every review of the
+    /// codebase, and so does any answer given later, in this review or another or in Settings.
     pub fn use_language_server_pool(
         &mut self,
         servers: &LanguageServers,
         codebase: Codebase,
         answer: Option<ServerAnswer>,
     ) {
+        if let Some(answer) = answer {
+            servers.answered(&codebase, answer);
+        }
         let adapter = servers.navigator(codebase.clone(), self.names.by_name());
-        self.use_language_servers(adapter, codebase, answer);
+        self.names
+            .use_shared_language_servers(adapter, codebase, servers.opt_ins());
     }
 
     /// Takes the reviewer's answer to the card's question; returns the repo it is about, for the

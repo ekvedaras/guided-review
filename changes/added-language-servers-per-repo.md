@@ -1,1 +1,1 @@
-Settings' Code page has a Language servers list, where you choose per repo whether servers may answer the card.
+Settings' Code page lists repos where you choose whether language servers answer the card; a change applies at once.

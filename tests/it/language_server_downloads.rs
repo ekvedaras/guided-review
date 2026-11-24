@@ -4,11 +4,13 @@ use std::sync::{Arc, Mutex};
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
 use guided_review::codebase::Codebase;
+use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
-    Answer, AnsweredBy, CodeNavigator, Column, FileSearch, LanguageServers, Lookups,
-    ManagedServers, NavigationRequest, PackagePin, Place, ReleasePin, ServerCheckouts,
+    Answer, AnsweredBy, CodeNavigator, Column, FallbackReason, FileSearch, LanguageServers,
+    Lookups, ManagedServers, NavigationRequest, PackagePin, Place, ReleasePin, ServerCheckouts,
     ServerFolders, ServerName, ServerPins, Timeouts, Waiting, Word,
 };
 use guided_review::platform::Os;
@@ -279,8 +281,21 @@ impl Rig {
         column: usize,
         word: &str,
     ) -> (anyhow::Result<Answer>, Vec<Waiting>) {
-        let code =
-            LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap();
+        self.hover_read_from(&self.clone_source(), path, number, column, word)
+    }
+
+    fn clone_source(&self) -> LocalGit {
+        LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap()
+    }
+
+    fn hover_read_from(
+        &self,
+        code: &dyn CodeSource,
+        path: &str,
+        number: usize,
+        column: usize,
+        word: &str,
+    ) -> (anyhow::Result<Answer>, Vec<Waiting>) {
         let by_name: Arc<dyn CodeNavigator> =
             Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
                 file_path(path),
@@ -290,7 +305,7 @@ impl Rig {
             .servers
             .navigator(Codebase::GitHub(RepoName::new("acme", "shop")), by_name)
             .navigate(
-                &code,
+                code,
                 &NavigationRequest {
                     sha: self.head.clone(),
                     at: Place {
@@ -356,6 +371,60 @@ fn the_first_rust_hover_downloads_the_pinned_rust_analyzer_for_this_machine_and_
         rig.cache
             .join(format!("rust-analyzer-{TAG}/rust-analyzer"))
             .is_file()
+    );
+}
+
+/// The clone's files, read as a review without a local clone reads them from GitHub.
+struct ReadFromGitHub(LocalGit);
+
+impl CodeSource for ReadFromGitHub {
+    fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String> {
+        self.0.file_at(sha, path)
+    }
+
+    fn blob_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<Arc<[u8]>> {
+        self.0.blob_at(sha, path)
+    }
+
+    fn blob_info_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<BlobInfo> {
+        self.0.blob_info_at(sha, path)
+    }
+
+    fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>> {
+        self.0.diff(base, head)
+    }
+
+    fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha> {
+        self.0.merge_base(a, b)
+    }
+
+    fn working_tree_is_at(&self, _head: &Sha) -> bool {
+        false
+    }
+}
+
+#[test]
+fn a_review_without_a_local_clone_downloads_nothing_and_is_answered_by_name_with_a_note() {
+    let rig = Rig::new();
+
+    let (answer, waits) = rig.hover_read_from(
+        &ReadFromGitHub(rig.clone_source()),
+        "src/lib.rs",
+        3,
+        23,
+        "add",
+    );
+    let answer = answer.unwrap();
+
+    assert_eq!(rig.requested(), Vec::<String>::new());
+    assert_eq!(waits, []);
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::ByName {
+            because: Some(FallbackReason::new(
+                "rust-analyzer needs a local clone, and the code is read from GitHub"
+            ))
+        }
     );
 }
 

@@ -10,11 +10,16 @@ use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, DefinitionKind, FallbackReason, FileSearch,
-    LanguageServers, Lookups, ManagedServers, NavigationRequest, Place, ServerCatalog,
-    ServerCheckouts, ServerFolders, ServerLaunch, ServerName, ServerPins, Timeouts, Waiting, Word,
+    LanguageServers, Lookups, ManagedServers, NavigationRequest, Place, ServerAnswer,
+    ServerCatalog, ServerCheckouts, ServerFolders, ServerLaunch, ServerName, ServerPins, Timeouts,
+    Waiting, Word,
 };
 use guided_review::pull_request::{RepoName, Sha};
+use guided_review::tour::GuidedTour;
 use guided_review::update::Target;
+use guided_review::viewer::{
+    DefinitionCard, HoveredName, LineLocation, Review, ReviewStateFile, Side,
+};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -461,6 +466,72 @@ fn a_server_that_does_not_answer_in_time_falls_back_with_a_reason() {
     assert!(because.as_str().contains("in time"), "{}", because.as_str());
 }
 
+/// Run in a process of its own whose PATH has relative and empty entries, by the test after it.
+#[test]
+#[ignore = "run by a_server_starts_with_no_relative_or_empty_entries_in_its_path"]
+fn a_server_started_by_a_process_whose_path_has_relative_entries() {
+    let rig = Rig::new(LIB, |_| json!({"reports_path": true, "answers": {}}));
+
+    rig.hover_add().0.unwrap();
+
+    let path = rig
+        .sent()
+        .iter()
+        .find_map(|m| m["path"].as_str().map(str::to_owned))
+        .unwrap();
+    let entries: Vec<&str> = path.split(':').collect();
+    assert!(entries.contains(&"/usr/bin"), "{path}");
+    assert!(entries.iter().all(|entry| entry.starts_with('/')), "{path}");
+}
+
+#[test]
+fn a_server_starts_with_no_relative_or_empty_entries_in_its_path() {
+    let path = std::env::var("PATH").unwrap();
+    let run = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "language_server::a_server_started_by_a_process_whose_path_has_relative_entries",
+            "--ignored",
+        ])
+        .env("PATH", format!("bin::vendor/bin:{path}:/usr/bin:."))
+        .output()
+        .unwrap();
+
+    let said = String::from_utf8_lossy(&run.stdout);
+    assert!(run.status.success(), "{said}");
+    assert!(said.contains("1 passed"), "{said}");
+}
+
+#[test]
+fn a_server_that_did_not_answer_in_time_is_stopped_and_a_later_hover_starts_it_again() {
+    let timeouts = Timeouts {
+        answer: Duration::from_millis(300),
+        ..Timeouts::default()
+    };
+    let rig = Rig::timed(
+        LIB,
+        |checkout| {
+            json!({"silent_in_first_start": ["textDocument/definition"], "answers": {
+                "textDocument/definition": [location(checkout, "src/lib.rs", 3, 7, 10)],
+            }})
+        },
+        timeouts,
+    );
+    let first = rig.hover_add().0.unwrap();
+    assert!(matches!(first.answered_by, AnsweredBy::ByName { .. }));
+
+    let later = rig.hover_add().0.unwrap();
+
+    assert_eq!(
+        later.answered_by,
+        AnsweredBy::LanguageServer(rust_analyzer())
+    );
+    assert_eq!(
+        rig.methods().iter().filter(|m| *m == "initialize").count(),
+        2
+    );
+}
+
 #[test]
 fn one_server_answers_every_hover_of_the_repo() {
     let rig = Rig::answering_add();
@@ -497,6 +568,96 @@ fn an_idle_server_is_stopped() {
         "{:?}",
         rig.methods()
     );
+}
+
+#[test]
+fn hovers_that_get_no_answer_do_not_keep_an_idle_server_running() {
+    let timeouts = Timeouts {
+        indexing: Duration::from_millis(50),
+        idle: Duration::from_millis(600),
+        ..Timeouts::default()
+    };
+    let rig = Rig::timed(
+        LIB,
+        |_| json!({"indexing_ms": 60_000, "answers": {}}),
+        timeouts,
+    );
+
+    for _ in 0..12 {
+        rig.hover_add().0.unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+    }
+
+    assert!(
+        rig.methods().contains(&"exit".to_owned()),
+        "{:?}",
+        rig.methods()
+    );
+}
+
+#[test]
+fn a_slow_server_holds_up_no_hover_another_server_of_the_repo_answers() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("src/lib.rs", LIB);
+    repo.write("app/Billing.php", BILLING);
+    let head = Sha::new(&repo.commit("head"));
+    let scratch = TempDir::new().unwrap();
+    let script_file = scratch.path().join("script.json");
+    let script = json!({
+        "log": scratch.path().join("log").to_string_lossy(),
+        "slow": {"server": "Php", "method": "textDocument/definition", "ms": 4000},
+        "answers": {},
+    });
+    std::fs::write(&script_file, script.to_string()).unwrap();
+    let servers = LanguageServers::new(
+        Arc::new(FakeCatalog {
+            script: script_file,
+            servers: FakeServers::PerLanguage,
+        }),
+        ServerCheckouts::new(scratch.path().join("checkouts")),
+        Timeouts::default(),
+    );
+    let by_name: Arc<dyn CodeNavigator> =
+        Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
+            file_path("src/lib.rs"),
+            file_path("app/Billing.php"),
+        ]))));
+    let navigator = servers.navigator(shop_codebase(), by_name);
+    let hover = |path: &str, number: usize, column: usize, word: &str| {
+        let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+        navigator
+            .navigate(
+                &code,
+                &NavigationRequest {
+                    sha: head.clone(),
+                    at: Place {
+                        path: file_path(path),
+                        line: line(number),
+                    },
+                    column: Column::try_from(column).unwrap(),
+                    word: Word::new(word).unwrap(),
+                },
+                &|_| {},
+            )
+            .unwrap()
+    };
+
+    std::thread::scope(|scope| {
+        let php = scope.spawn(|| hover("app/Billing.php", 19, 15, "schedule"));
+        std::thread::sleep(Duration::from_millis(1500));
+
+        let rust = hover("src/lib.rs", 6, 23, "add");
+
+        assert!(!php.is_finished(), "the PHP hover ended first");
+        assert_eq!(
+            rust.answered_by,
+            AnsweredBy::LanguageServer(ServerName::of(Language::Rust))
+        );
+        assert_eq!(
+            php.join().unwrap().answered_by,
+            AnsweredBy::LanguageServer(ServerName::of(Language::Php))
+        );
+    });
 }
 
 #[test]
@@ -1227,6 +1388,92 @@ fn a_local_review_is_answered_in_the_server_checkout_at_its_snapshot_and_update_
         rig.methods().iter().filter(|m| *m == "initialize").count(),
         1
     );
+}
+
+/// A review of the rig's repo, whose names the rig's servers may answer.
+fn review_of(rig: &Rig, answer: Option<ServerAnswer>) -> (Review, LocalGit) {
+    let base = rig.repo.git(&["rev-parse", "HEAD"]);
+    rig.repo
+        .write("src/lib.rs", &format!("{LIB}pub fn later() {{}}\n"));
+    let head = rig.repo.commit("head of the PR");
+    let tour: GuidedTour = serde_json::from_value(json!({
+        "pr": "https://github.com/acme/shop/pull/7",
+        "base": base,
+        "head": head,
+        "title": "Adds later",
+        "summary": [],
+        "steps": [{"id": "lib", "title": "Later", "why": "because", "pieces": [{"file": "src/lib.rs"}]}],
+    }))
+    .unwrap();
+    let source =
+        LocalGit::configured_clone(&RepoName::new("acme", "shop"), rig.repo.path()).unwrap();
+    let state_file = ReviewStateFile::for_subject(
+        &rig.repo.folders(),
+        &"https://github.com/acme/shop/pull/7".parse().unwrap(),
+    );
+    let mut review = Review::open(tour, &source, state_file).unwrap();
+    review.use_language_server_pool(&rig.servers, shop_codebase(), answer);
+    (review, source)
+}
+
+/// Hovers a head line of `src/lib.rs` as the app does, running the lookup where the test runs.
+fn hover_in(
+    review: &mut Review,
+    source: &LocalGit,
+    number: usize,
+    column: usize,
+    word: &str,
+) -> DefinitionCard {
+    let hovered = HoveredName {
+        at: LineLocation {
+            path: file_path("src/lib.rs"),
+            side: Side::Head,
+            line: line(number),
+        },
+        column: Column::try_from(column).unwrap(),
+        word: Word::new(word).unwrap(),
+    };
+    if let Some(work) = review.look_up_name(&hovered) {
+        review.name_looked_up(work.run(source));
+    }
+    (*review.definition_card(&hovered).unwrap()).clone()
+}
+
+#[test]
+fn a_no_in_settings_stops_the_running_server_and_an_open_reviews_next_hover_is_answered_by_name() {
+    let rig = Rig::answering_add();
+    let (mut review, source) = review_of(&rig, Some(ServerAnswer::Yes));
+    hover_in(&mut review, &source, 6, 23, "add");
+    assert_eq!(rig.params_of("textDocument/definition").len(), 1);
+
+    rig.servers.answered(&shop_codebase(), ServerAnswer::No);
+
+    assert!(
+        rig.methods().contains(&"exit".to_owned()),
+        "{:?}",
+        rig.methods()
+    );
+    let DefinitionCard::Found(card) = hover_in(&mut review, &source, 6, 7, "total") else {
+        panic!("a found card")
+    };
+    assert_eq!(card.question, None);
+    assert_eq!(rig.params_of("textDocument/definition").len(), 1);
+}
+
+#[test]
+fn a_yes_in_settings_lets_an_open_reviews_next_hover_be_answered_by_the_server_without_asking() {
+    let rig = Rig::answering_add();
+    let (mut review, source) = review_of(&rig, Some(ServerAnswer::No));
+    hover_in(&mut review, &source, 6, 23, "add");
+    assert!(rig.methods().is_empty(), "{:?}", rig.methods());
+
+    rig.servers.answered(&shop_codebase(), ServerAnswer::Yes);
+
+    let DefinitionCard::Found(card) = hover_in(&mut review, &source, 6, 23, "add") else {
+        panic!("a found card")
+    };
+    assert_eq!(card.question, None);
+    assert_eq!(rig.params_of("textDocument/definition").len(), 1);
 }
 
 fn read_checkout(rig: &Rig, file: &str) -> String {

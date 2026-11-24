@@ -2,6 +2,7 @@
 //! messages, requests answered by id, progress and server status noted for the one who waits.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -29,6 +30,18 @@ pub(super) enum Failure {
     Refused(String),
     /// The server dropped the question because files changed under it; asking again gets an answer.
     Modified,
+}
+
+impl Failure {
+    /// Why a question to `server` got no answer, for the card's note.
+    pub(super) fn of_question(self, server: &impl std::fmt::Display) -> String {
+        match self {
+            Self::Silent => format!("{server} did not answer in time"),
+            Self::Died => format!("{server} stopped answering"),
+            Self::Refused(why) => format!("{server} refused the question: {why}"),
+            Self::Modified => format!("{server} kept changing its mind about the question"),
+        }
+    }
 }
 
 /// LSP's `ContentModified` and `ServerCancelled`.
@@ -77,7 +90,11 @@ impl Connection {
         settings: Value,
         status: StatusReports,
     ) -> std::io::Result<Self> {
-        let mut child = Command::new(program)
+        let mut command = Command::new(program);
+        if let Some(path) = std::env::var_os("PATH") {
+            command.env("PATH", absolute_entries(&path));
+        }
+        let mut child = command
             .args(args)
             .current_dir(folder)
             .stdin(Stdio::piped())
@@ -210,6 +227,16 @@ impl Drop for Connection {
     fn drop(&mut self) {
         self.kill();
     }
+}
+
+/// A relative or empty entry of PATH would find programs in the server checkout, the PR's files,
+/// whenever the server or a program it starts runs one by name.
+fn absolute_entries(path: &OsStr) -> OsString {
+    let kept: Vec<PathBuf> = std::env::split_paths(path)
+        .filter(|entry| entry.is_absolute())
+        .collect();
+    // Entries that came out of one PATH join into one again.
+    std::env::join_paths(kept).unwrap_or_default()
 }
 
 fn write_message(stdin: &Mutex<ChildStdin>, message: &Value) -> Result<(), Failure> {

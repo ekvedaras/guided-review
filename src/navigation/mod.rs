@@ -22,7 +22,7 @@ pub use language_server::{
 pub use lookup::{FILES_PARSED_AT_MOST, FileSearch, FilesWithWord, Lookup, Lookups, Reach};
 pub use navigator::{
     Answer, AnsweredBy, CodeNavigator, FallbackReason, NavigationRequest, ServerAnswer, ServerName,
-    Waiting,
+    ServerOptIns, Waiting,
 };
 pub use word::Word;
 pub use word_in_file::{Definition, DefinitionKind, Place, Usage, WordInFile};

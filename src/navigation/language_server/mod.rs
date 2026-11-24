@@ -10,7 +10,7 @@ mod rpc;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, PoisonError, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -24,7 +24,7 @@ use crate::pull_request::Sha;
 
 use super::{
     Answer, AnsweredBy, CodeNavigator, Column, Definition, FallbackReason, Lookup,
-    NavigationRequest, Place, Reach, ServerName, Usage, Waiting, Word,
+    NavigationRequest, Place, Reach, ServerAnswer, ServerName, ServerOptIns, Usage, Waiting, Word,
 };
 pub use checkout::{Change, ChangedFile, Checkout, ServerCheckouts};
 use hover::{Hovered, kind_of};
@@ -155,7 +155,8 @@ struct Running {
     connection: Connection,
     encoding: Encoding,
     opened: Mutex<HashSet<PathBuf>>,
-    last_used: Mutex<Instant>,
+    /// Since the start, until the first answer.
+    last_answered: Mutex<Instant>,
     /// The head of the checkout the server last heard of: what the next move is told against.
     heard: Mutex<Sha>,
 }
@@ -223,17 +224,18 @@ impl Running {
             connection,
             encoding,
             opened: Mutex::default(),
-            last_used: Mutex::new(Instant::now()),
+            last_answered: Mutex::new(Instant::now()),
             heard: Mutex::new(checkout.head.clone()),
         })
     }
 
-    fn touch(&self) {
-        *locked(&self.last_used) = Instant::now();
+    fn answered(&self) {
+        *locked(&self.last_answered) = Instant::now();
     }
 
+    /// Counted from the last answer, so questions that time out do not keep a server running.
     fn idle_for(&self) -> Duration {
-        locked(&self.last_used).elapsed()
+        locked(&self.last_answered).elapsed()
     }
 
     fn open(&self, file: &Path, text: &str, language: Language) -> Result<(), Failure> {
@@ -354,32 +356,69 @@ fn path_of(uri: &str) -> Option<PathBuf> {
 
 type Slot = Arc<Mutex<Option<Arc<Running>>>>;
 
+/// A codebase's server checkout as last moved, and the clone it was filled from.
+struct Placed {
+    clone: PathBuf,
+    checkout: Checkout,
+}
+
+impl Placed {
+    fn is(&self, clone: &Path, head: &Sha) -> bool {
+        self.clone == clone && self.checkout.head == *head
+    }
+}
+
+/// Shared by the questions asked at the checkout's head, held alone by a move.
+type CheckoutPlace = Arc<RwLock<Option<Placed>>>;
+
 struct Pool {
     catalog: Arc<dyn ServerCatalog>,
     checkouts: ServerCheckouts,
     timeouts: Timeouts,
-    /// One per (folder, server): the server is reused by every review of the repo.
-    slots: Mutex<HashMap<(PathBuf, String), Slot>>,
-    turns: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// One per (codebase, server): the server is reused by every review of the codebase.
+    slots: Mutex<HashMap<(Codebase, String), Slot>>,
+    places: Mutex<HashMap<Codebase, CheckoutPlace>>,
+    answers: Mutex<HashMap<Codebase, ServerAnswer>>,
+}
+
+impl ServerOptIns for Pool {
+    fn answer(&self, codebase: &Codebase) -> Option<ServerAnswer> {
+        locked(&self.answers).get(codebase).copied()
+    }
+
+    fn answered(&self, codebase: &Codebase, answer: ServerAnswer) {
+        locked(&self.answers).insert(codebase.clone(), answer);
+        if answer == ServerAnswer::No {
+            self.stop_in(|stopping| stopping == codebase, |_| true);
+        }
+    }
 }
 
 impl Pool {
-    /// What one repo's reviews take turns with, since they share one checkout.
-    fn turn_of(&self, codebase: &Codebase) -> Arc<Mutex<()>> {
-        Arc::clone(locked(&self.turns).entry(codebase.to_string()).or_default())
+    /// What one codebase's reviews share, since they share one checkout.
+    fn checkout_place(&self, codebase: &Codebase) -> CheckoutPlace {
+        Arc::clone(locked(&self.places).entry(codebase.clone()).or_default())
     }
 
-    fn slot(&self, folder: &Path, name: &ServerName) -> Slot {
+    fn slot(&self, codebase: &Codebase, name: &ServerName) -> Slot {
         let mut slots = locked(&self.slots);
         Arc::clone(
             slots
-                .entry((folder.to_path_buf(), name.to_string()))
+                .entry((codebase.clone(), name.to_string()))
                 .or_default(),
         )
     }
 
     fn stop_where(&self, stop_it: impl Fn(&Running) -> bool) {
-        let slots: Vec<Slot> = locked(&self.slots).values().cloned().collect();
+        self.stop_in(|_| true, stop_it);
+    }
+
+    fn stop_in(&self, in_codebase: impl Fn(&Codebase) -> bool, stop_it: impl Fn(&Running) -> bool) {
+        let slots: Vec<Slot> = locked(&self.slots)
+            .iter()
+            .filter(|((codebase, _), _)| in_codebase(codebase))
+            .map(|(_, slot)| Arc::clone(slot))
+            .collect();
         for slot in slots {
             let mut running = locked(&slot);
             if running.as_ref().is_some_and(|server| stop_it(server))
@@ -407,7 +446,8 @@ impl LanguageServers {
             checkouts,
             timeouts,
             slots: Mutex::default(),
-            turns: Mutex::default(),
+            places: Mutex::default(),
+            answers: Mutex::default(),
         });
         let watched: Weak<Pool> = Arc::downgrade(&pool);
         let idle = timeouts.idle;
@@ -437,6 +477,16 @@ impl LanguageServers {
         })
     }
 
+    /// What the reviewer answered for each codebase, as every review of it reads it.
+    pub fn opt_ins(&self) -> Arc<dyn ServerOptIns> {
+        Arc::clone(&self.pool) as Arc<dyn ServerOptIns>
+    }
+
+    /// Counts in every open review from their next hover; a no stops the codebase's servers.
+    pub fn answered(&self, codebase: &Codebase, answer: ServerAnswer) {
+        self.pool.answered(codebase, answer);
+    }
+
     /// Every server shuts down; their indexes stay on disk.
     pub fn stop_all(&self) {
         self.pool.stop_where(|_| true);
@@ -464,6 +514,12 @@ impl CodeNavigator for ServerNavigator {
         let Some(language) = Language::for_path(request.at.path.as_str()) else {
             return by_name(None);
         };
+        let Some(clone) = code.local_clone() else {
+            return by_name(Some(FallbackReason::new(&format!(
+                "{} needs a local clone, and the code is read from GitHub",
+                ServerName::of(language)
+            ))));
+        };
         let launch = match self
             .pool
             .catalog
@@ -472,31 +528,55 @@ impl CodeNavigator for ServerNavigator {
             Ok(launch) => launch,
             Err(reason) => return by_name(Some(reason)),
         };
-        let Some(clone) = code.local_clone() else {
-            return by_name(Some(FallbackReason::new(&format!(
-                "{} needs a local clone, and the code is read from GitHub",
-                launch.name
-            ))));
-        };
-        // One review at a time moves the checkout and asks, so another head cannot move it mid-question.
-        let turn = self.pool.turn_of(&self.codebase);
-        let _turn = locked(&turn);
-        let checkout = match self
-            .pool
-            .checkouts
-            .moved_to(clone, &self.codebase, &request.sha)
-        {
-            Ok(checkout) => checkout,
-            Err(error) => {
-                return by_name(Some(FallbackReason::new(&format!(
-                    "{} could not get the reviewed head checked out: {error:#}",
-                    launch.name
-                ))));
+        let place = self.pool.checkout_place(&self.codebase);
+        loop {
+            {
+                // Questions at the checkout's head share it; a move to another head waits for them, so
+                // no server is asked about files that changed under it.
+                let placed = place.read().unwrap_or_else(PoisonError::into_inner);
+                if let Some(placed) = placed
+                    .as_ref()
+                    .filter(|placed| placed.is(clone, &request.sha))
+                {
+                    return match self.answer(
+                        code,
+                        &placed.checkout,
+                        &launch,
+                        language,
+                        request,
+                        waiting,
+                    ) {
+                        Ok(answer) => Ok(answer),
+                        Err(reason) => by_name(Some(FallbackReason::new(&reason))),
+                    };
+                }
             }
-        };
-        match self.answer(code, &checkout, &launch, language, request, waiting) {
-            Ok(answer) => Ok(answer),
-            Err(reason) => by_name(Some(FallbackReason::new(&reason))),
+            let mut placed = place.write().unwrap_or_else(PoisonError::into_inner);
+            if placed
+                .as_ref()
+                .is_some_and(|placed| placed.is(clone, &request.sha))
+            {
+                continue;
+            }
+            *placed = None;
+            match self
+                .pool
+                .checkouts
+                .moved_to(clone, &self.codebase, &request.sha)
+            {
+                Ok(checkout) => {
+                    *placed = Some(Placed {
+                        clone: clone.to_path_buf(),
+                        checkout,
+                    });
+                }
+                Err(error) => {
+                    return by_name(Some(FallbackReason::new(&format!(
+                        "{} could not get the reviewed head checked out: {error:#}",
+                        launch.name
+                    ))));
+                }
+            }
         }
     }
 }
@@ -508,8 +588,7 @@ impl ServerNavigator {
         launch: &ServerLaunch,
         waiting: &dyn Fn(Waiting),
     ) -> Result<(Slot, Arc<Running>), String> {
-        let folder = checkout.folder.as_path();
-        let slot = self.pool.slot(folder, &launch.name);
+        let slot = self.pool.slot(&self.codebase, &launch.name);
         let mut held = locked(&slot);
         if let Some(server) = held.as_ref().filter(|server| server.connection.is_alive()) {
             if server.catch_up(checkout).is_ok() {
@@ -537,20 +616,25 @@ impl ServerNavigator {
         let name = &launch.name;
         let timeouts = self.pool.timeouts;
         let (slot, server) = self.running(checkout, launch, waiting)?;
-        server.touch();
+        let forget_server = || {
+            let mut held = locked(&slot);
+            if held.as_ref().is_some_and(|held| Arc::ptr_eq(held, &server)) {
+                *held = None;
+            }
+        };
         let failed = |failure: Failure| {
             if failure == Failure::Died {
-                let mut held = locked(&slot);
-                if held.as_ref().is_some_and(|held| Arc::ptr_eq(held, &server)) {
-                    *held = None;
-                }
+                forget_server();
             }
-            match failure {
-                Failure::Silent => format!("{name} did not answer in time"),
-                Failure::Died => format!("{name} stopped answering"),
-                Failure::Refused(why) => format!("{name} refused the question: {why}"),
-                Failure::Modified => format!("{name} kept changing its mind about the question"),
+            failure.of_question(name)
+        };
+        // A server that sat on a question may sit on every later one, so a later hover gets a new one.
+        let unanswered = |failure: Failure| {
+            if failure == Failure::Silent {
+                forget_server();
+                server.connection.stop();
             }
+            failed(failure)
         };
         server
             .connection
@@ -596,10 +680,10 @@ impl ServerNavigator {
                         .wait_until_quiet(timeouts.indexing, &|| waiting(Waiting::Indexing))
                         .map_err(failed)?;
                 }
-                asked => break asked.map_err(failed)?,
+                asked => break asked.map_err(unanswered)?,
             }
         };
-        server.touch();
+        server.answered();
         let places = Places {
             code,
             checkout: folder,

@@ -11,11 +11,22 @@ use crate::navigation::{
     LanguageServers, ManagedServers, ServerCheckouts, ServerFolders, ServerPins, Timeouts,
 };
 use crate::update::Target;
-use crate::viewer::Review;
+use crate::viewer::{LanguageServersRow, Review};
 
 struct ActiveLanguageServers(Arc<LanguageServers>);
 
 impl Global for ActiveLanguageServers {}
+
+/// The answers Settings saved count in every open review at once, and a no stops that codebase's
+/// servers.
+pub fn answers_saved(rows: &[LanguageServersRow], cx: &App) {
+    let Some(ActiveLanguageServers(servers)) = cx.try_global::<ActiveLanguageServers>() else {
+        return;
+    };
+    for row in rows {
+        servers.answered(&row.codebase, row.answer);
+    }
+}
 
 /// Lets the review ask language servers once its reviewer says yes for the repo, which a local review
 /// names by its `origin` or else by its folder.

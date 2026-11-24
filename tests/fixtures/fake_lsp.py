@@ -1,10 +1,17 @@
-import json, sys, threading
+import json, os, sys, threading, time
 
 script = json.load(open(sys.argv[1]))
 # A second argument names the server, which then logs to a file of its own.
 log = open(script["log"] + ("." + sys.argv[2] if len(sys.argv) > 2 else ""), "a")
 lock = threading.Lock()
 modified = set()
+# Methods the first process started with this script leaves unanswered; a later one answers them.
+first_start = not os.path.exists(script["log"] + ".started")
+open(script["log"] + ".started", "a").close()
+silent_on = script.get("silent_on", []) + (script.get("silent_in_first_start", []) if first_start else [])
+if script.get("reports_path"):
+    log.write(json.dumps({"path": os.environ.get("PATH")}) + "\n")
+    log.flush()
 
 
 def read():
@@ -53,8 +60,11 @@ while True:
         if method == "exit":
             break
         continue
-    if method in script.get("silent_on", []):
+    if method in silent_on:
         continue
+    slow = script.get("slow", {})
+    if slow.get("server") == (sys.argv[2] if len(sys.argv) > 2 else None) and slow.get("method") == method:
+        time.sleep(slow["ms"] / 1000)
     if method in script.get("content_modified_once", []) and method not in modified:
         modified.add(method)
         send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32801, "message": "content modified"}})
