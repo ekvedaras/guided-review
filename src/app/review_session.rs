@@ -120,6 +120,8 @@ pub struct ReviewSession {
     #[cfg(feature = "snapshots")]
     is_viewed_wait_staged: bool,
     #[cfg(feature = "snapshots")]
+    staged_station: Option<crate::viewer::Station>,
+    #[cfg(feature = "snapshots")]
     is_unread_end_staged: bool,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
@@ -240,6 +242,8 @@ impl ReviewSession {
             staged_re_review: None,
             #[cfg(feature = "snapshots")]
             is_viewed_wait_staged: false,
+            #[cfg(feature = "snapshots")]
+            staged_station: None,
             #[cfg(feature = "snapshots")]
             is_unread_end_staged: false,
             tour_agent_follow: None,
@@ -971,6 +975,18 @@ impl ReviewSession {
         } else {
             cx.notify();
         }
+    }
+
+    /// Draws one station as given, until it is staged back to `None`: nothing in the review changes.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_station(
+        &mut self,
+        station: Option<crate::viewer::Station>,
+        cx: &mut Context<Self>,
+    ) {
+        self.staged_station = station;
+        self.sidebar = self.sidebar_rows();
+        cx.notify();
     }
 
     /// Shows the open screen and the sidebar as if every step were read, without ticking anything,
@@ -1889,6 +1905,10 @@ impl ReviewSession {
                 StationHealth::Waiting,
                 "3 viewed marks waiting · 4 min",
             ));
+        }
+        #[cfg(feature = "snapshots")]
+        if let Some(station) = &self.staged_station {
+            rows.stations.stage(station.clone());
         }
         rows
     }

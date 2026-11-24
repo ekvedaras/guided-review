@@ -32,7 +32,7 @@ use crate::viewer::{
     TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
-use crate::viewer::{IssueDetails, IssueState, RelatedIssue};
+use crate::viewer::{IssueDetails, IssueState, RelatedIssue, Station, StationHealth, StationKind};
 
 const MAX_SCREENS: usize = 16;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
@@ -753,7 +753,16 @@ impl OneStepLayout {
                         "Reads well. Two small questions inline, nothing blocking.",
                         cx,
                     );
+                    session.stage_station(
+                        Some(Station::new(
+                            StationKind::YourReview,
+                            StationHealth::NotStarted,
+                            "not sent yet",
+                        )),
+                        cx,
+                    );
                 });
+                self.picked_station = Some(StationKind::YourReview);
                 cx.set_global(StagedFinishReview(true));
             }
             Scene::CommentComposer => self.compose_on_first_added_lines(window, cx),
@@ -1148,7 +1157,9 @@ impl OneStepLayout {
             Scene::FinishReview => {
                 self.session.update(cx, |session, cx| {
                     session.type_in(&TextBox::FinishBody, "", cx);
+                    session.stage_station(None, cx);
                 });
+                self.picked_station = None;
                 cx.set_global(StagedFinishReview(false));
             }
             Scene::CommentComposer | Scene::CommentComposerNowPrimary => {
