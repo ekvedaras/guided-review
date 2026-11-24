@@ -612,6 +612,15 @@ fn the_sidebar_line_counts_the_dismissed_findings() {
     assert_eq!(review.ai_review_stage().line, "1 should fix · 1 dismissed");
 }
 
+#[test]
+fn with_every_finding_dismissed_the_sidebar_line_counts_only_the_dismissed() {
+    let shop = Shop::with_findings(&[on_line_2("a", "One.")]);
+    let mut review = shop.open();
+    review.dismiss_finding(&id("a")).unwrap();
+
+    assert_eq!(review.ai_review_stage().line, "1 dismissed");
+}
+
 fn with_dismissed(open: &[Finding], dismissed: &[Finding]) -> FindingsList {
     FindingsList::of(open).with_dismissed(dismissed.to_vec())
 }

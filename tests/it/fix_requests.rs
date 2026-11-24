@@ -452,7 +452,7 @@ fn the_findings_list_says_where_each_fix_is() {
 }
 
 #[test]
-fn the_sidebar_names_the_commits_of_the_fixes_made() {
+fn the_ai_review_card_leaves_the_commits_of_fixes_to_the_findings_list() {
     let shop = Shop::with_findings(&[on_line("a", 1, "First."), on_line("b", 2, "Second.")]);
     let mut review = shop.open();
     review.fix_findings(&[id("a")]);
@@ -468,9 +468,13 @@ fn the_sidebar_names_the_commits_of_the_fixes_made() {
         .unwrap();
 
     assert!(
-        review.ai_review_stage().line.contains("1 fix: abc1234"),
+        !review.ai_review_stage().line.contains("abc1234"),
         "{}",
         review.ai_review_stage().line
+    );
+    assert_eq!(
+        review.findings_list().rows()[0].fix.as_deref(),
+        Some("Fixed in abc1234")
     );
 }
 

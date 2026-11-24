@@ -232,14 +232,6 @@ impl FixRequests {
             .map(|request| &request.state)
     }
 
-    /// The commits of the fixes made, oldest first.
-    pub fn fixed_commits(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|request| match &request.state {
-            FixState::Fixed { commit, .. } => Some(commit.as_str()),
-            _ => None,
-        })
-    }
-
     /// One batch, in the order given. An earlier answer for a finding is replaced; a note given when
     /// it was added to fixes goes with it.
     pub(super) fn request(&mut self, findings: Vec<(Finding, Option<FixNote>)>) {

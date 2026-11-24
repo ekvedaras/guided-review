@@ -56,7 +56,7 @@ impl ReviewCore {
                 has_dismissed_findings,
             },
             AiReviewRun::NotRun => AiReviewStage {
-                line: self.line_with_fixes(),
+                line: self.findings_line(),
                 is_failure: matches!(self.ai_review, AiReview::Unreadable(_)),
                 action: action_if_free(match self.ai_review {
                     AiReview::NotRun => AiReviewAction::Run,
@@ -69,18 +69,13 @@ impl ReviewCore {
         }
     }
 
-    /// The findings' count, and the commits of the fixes the tour agent made.
-    fn line_with_fixes(&self) -> String {
-        let commits: Vec<&str> = self.state.fix_requests().fixed_commits().collect();
+    /// The findings by severity and the dismissed count. The fixes' commits are in the findings list.
+    fn findings_line(&self) -> String {
         let dismissed = self.state.finding_decisions().dismissed().count();
-        let line = match dismissed {
-            0 => self.ai_review.line(),
-            _ => format!("{} · {dismissed} dismissed", self.ai_review.line()),
-        };
-        match commits.len() {
-            0 => line,
-            1 => format!("{line} · 1 fix: {}", commits.join(", ")),
-            fixes => format!("{line} · {fixes} fixes: {}", commits.join(", ")),
+        match (dismissed, self.has_findings()) {
+            (0, _) => self.ai_review.line(),
+            (_, false) => format!("{dismissed} dismissed"),
+            (_, true) => format!("{} · {dismissed} dismissed", self.ai_review.line()),
         }
     }
 
