@@ -61,6 +61,15 @@ Decided by the maintainer the same day:
 
 The spec and tickets are GitHub issues linked from issue #139.
 
+## Language servers are opt-in per repo (2026-11-24)
+
+Issue #190, commit b50cc4e. `NameDesk` (`src/viewer/name_desk.rs`) holds the by-name navigator and, once `Review::use_language_servers(adapter, repo, answer)` is called, a `ServerOptIn` with the adapter, the repo and the reviewer's answer. A name is asked of the adapter only when the answer is yes and the line is a head line; otherwise the by-name navigator answers, so before a yes and after a no the adapter is never asked (tests/it/hover_cards.rs, through `FakeNavigator`).
+
+- The question is `FoundNames::question`, set on a found card of a head line in a language with a server (any file `Language::for_path` knows) while the repo has no answer. Base-side names are by name always, so they ask nothing. The by-name answer shows under it, so a hover is not blocked on the question.
+- `Review::answer_language_servers` returns the repo. No strips the question from the kept cards; yes forgets the cards and `ReviewSession::answer_language_servers` asks the hovered name again, now of the adapter. The app keeps the answer with `Settings::remember_language_servers`, which loads, sets and saves through Settings' rules (only changed keys, comments kept); a failed write is a toast.
+- `config.toml` holds `[language_servers]` with `"owner/repo" = true|false` (`Config::language_servers`; a value that is not a bool reads as not asked). Settings' Code page lists the rows and changes each (`Settings::change_language_servers`); there is no way to remove a row, so no repo can be asked again from the app.
+- Nothing in the app calls `use_language_servers` yet, since no language server adapter exists: no card asks the question until the adapter ticket wires it with `Config::language_servers(repo)` as the answer. The question names rust-analyzer whatever the repo's languages are.
+
 ## Code navigator port (2026-11-24)
 
 Issue #184. `CodeNavigator` (`src/navigation/navigator.rs`) is the one thing the viewer asks: `navigate(code, &NavigationRequest { sha, at, column, word }, waiting)` gives an `Answer { lookup, answered_by }`. `Lookups` implements it as the by-name adapter. `NameDesk` holds an `Arc<dyn CodeNavigator>`, and `NameWork::run_reporting` hands what the navigator waits on (`Waiting::Downloading`, `Starting`, `Indexing`) to `Review::name_waiting`, which turns the card into `DefinitionCard::Waiting`; the app sends these from the background thread over a channel (`ReviewSession::look_up_name`). `AnsweredBy::ByName { because: Some(..) }` adds `CardNote::AnsweredByName` ("Answered by name: ..."); with no reason, or from a language server, there is no note. Tests swap the adapter with `Review::use_navigator` and `FakeNavigator` (`tests/it/support/fake_ports.rs`). Nothing visible changes until the language server adapter lands. Cards are kept per `NameKey`, which carries the column (commit 8bd96a8); `Lookups` still keeps its by-name results per (sha, word).
