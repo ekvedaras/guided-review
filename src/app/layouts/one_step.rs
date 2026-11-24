@@ -215,7 +215,7 @@ pub struct OneStepLayout {
     /// When the Definition card of a name in a diff line is open.
     name_hover: NameHover,
     /// Where the card goes if the pointer rests on the name it is on now.
-    name_card_waits_at: gpui::Point<Pixels>,
+    name_card_waits_at: gpui::Bounds<Pixels>,
     name_card_place: Option<NameCardPlace>,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
@@ -354,16 +354,7 @@ impl OneStepLayout {
                     palette.update(cx, |palette, _| palette.set_groups(groups));
                 }
                 JumpEvent::Act(action) => this.act((*action).into(), window, cx),
-                JumpEvent::Picked(target) => {
-                    let row = this.session.update(cx, |session, cx| {
-                        session.change(cx, |review| review.jump_to(target));
-                        session.rows().row_of_jump(target)
-                    });
-                    this.screen_list.scroll_to(ListOffset {
-                        item_ix: row,
-                        offset_in_item: px(0.),
-                    });
-                }
+                JumpEvent::Picked(target) => this.jump_to(target, cx),
             },
         )
         .detach();
@@ -461,7 +452,7 @@ impl OneStepLayout {
             on_code_gesture,
             on_name_pointer,
             name_hover: NameHover::default(),
-            name_card_waits_at: gpui::Point::default(),
+            name_card_waits_at: gpui::Bounds::default(),
             name_card_place: None,
             selection_notice: None,
             page_drag: ScrollbarDrag::default(),
@@ -617,6 +608,18 @@ impl OneStepLayout {
                 });
             },
         ))
+    }
+
+    /// To the screen, scrolled to the row the jump lands on.
+    fn jump_to(&mut self, target: &crate::viewer::JumpTarget, cx: &mut Context<Self>) {
+        let row = self.session.update(cx, |session, cx| {
+            session.change(cx, |review| review.jump_to(target));
+            session.rows().row_of_jump(target)
+        });
+        self.screen_list.scroll_to(ListOffset {
+            item_ix: row,
+            offset_in_item: px(0.),
+        });
     }
 
     fn on_row_gesture(&mut self, gesture: RowGesture, at: &LineLocation, cx: &mut Context<Self>) {

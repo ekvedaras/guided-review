@@ -10,10 +10,11 @@ The app already parses these languages with tree-sitter to cut files into pieces
 
 - Commit: the review's head for added and context lines, the base for removed lines (`NameKey` in `src/viewer/name_desk.rs`).
 - Files: with a local clone, `git grep -w -l <word> <sha>` over the three languages' globs (`src/navigation/git_grep.rs`); at most 300 files are parsed, and the card says when more hold the name. Without a clone (code read from GitHub) only the review's changed files are searched, and the card says "Usages from the PR's files only".
-- Definitions and usages come from `queries/<language>/tags.scm` (`@definition.<kind>`, `@reference.<kind>`). Definitions rank: the hovered file first, then files it imports (`Language::imported_names`), then the rest, ties by path.
+- Definitions and usages come from `queries/<language>/tags.scm` (`@definition.<kind>`, `@reference.<kind>`). Definitions rank: the hovered file first, then those in the module the hovered file imports the name itself from (`Import::leads_to` in `src/navigation/import.rs`: a Rust `use` path resolved through `crate`/`super`, `mod.rs` and the file stem; a PHP namespace's tail against the folders; a TypeScript module path resolved against the hovered file), then the rest, ties by path. A file that cannot be read is skipped, and an unreadable hovered file only loses the import ranking.
 - One lookup per (sha, word) is kept for the review's life: a commit never changes. It runs on a background thread (`NameWork::run`) and its card reads "Looking up" until it lands. A failed lookup is asked again on the next hover.
 - The card lists up to 20 usages, those in the PR's files first, and counts the rest.
-- A click on a row jumps there in the tour when the line is in a changed file the tour shows (`NameTarget::Tour`), else opens the code through the `CodeOpener` (`NameTarget::Code`).
+- A click on a row jumps to the line's own row (`JumpPlace::Line`) on the first screen that shows it, base or head side, removed lines included; any other line, also one in a changed file outside every shown hunk, opens through the `CodeOpener` (`NameTarget::Code`). A context line is shown only once the files at head are read, so before that it opens as code.
+- A word is a name unless the line's highlights call it a keyword, literal, comment or built-in; before the highlights are ready, unless the grammar spells it as one of its own tokens (`Language::is_keyword`).
 
 ## Rust is parsed, not cut into pieces
 

@@ -14,6 +14,7 @@ use crate::line_number::LineNumber;
 use crate::navigation::{FileSearch, Lookup, Lookups, Word};
 use crate::pull_request::Sha;
 
+use super::highlight::Capture;
 use super::name_card::DefinitionCard;
 use super::step_page::{LineLocation, Side};
 
@@ -34,10 +35,28 @@ pub struct NameUnderPointer {
 }
 
 impl HoveredName {
-    pub fn under_pointer(at: LineLocation, code: &str, byte: usize) -> Option<NameUnderPointer> {
-        Language::for_path(at.path.as_str())?;
+    /// `highlights` are the line's, from tree-sitter over the whole file; while they are not ready
+    /// a word the language spells as a keyword is no name.
+    pub fn under_pointer(
+        at: LineLocation,
+        code: &str,
+        highlights: &[(Range<usize>, Capture)],
+        byte: usize,
+    ) -> Option<NameUnderPointer> {
+        let language = Language::for_path(at.path.as_str())?;
         let range = name_range(code, byte)?;
-        let word = Word::new(code.get(range.clone())?)?;
+        let text = code.get(range.clone())?;
+        let covering = highlights
+            .iter()
+            .find(|(span, _)| span.start <= range.start && range.end <= span.end);
+        let is_name = match covering {
+            Some((_, capture)) => can_be_a_name(*capture),
+            None => !language.is_keyword(text),
+        };
+        if !is_name {
+            return None;
+        }
+        let word = Word::new(text)?;
         Some(NameUnderPointer {
             name: Self { at, word },
             range,
@@ -45,35 +64,52 @@ impl HoveredName {
     }
 }
 
+/// What tree-sitter calls a keyword, literal, comment or built-in is nothing a lookup can find.
+fn can_be_a_name(capture: Capture) -> bool {
+    !matches!(
+        capture,
+        Capture::Keyword
+            | Capture::Comment
+            | Capture::String
+            | Capture::StringSpecial
+            | Capture::Number
+            | Capture::TypeBuiltin
+            | Capture::ConstantBuiltin
+            | Capture::VariableBuiltin
+    )
+}
+
 /// The run of letters, digits and `_` the byte is on, or ends. A `$`, `->` or `::` is not part of it.
 fn name_range(code: &str, byte: usize) -> Option<Range<usize>> {
-    let is_name = |(_, c): &(usize, char)| c.is_alphanumeric() || *c == '_';
+    let is_name = |c: char| c.is_alphanumeric() || c == '_';
     if byte > code.len() {
         return None;
     }
-    let chars: Vec<(usize, char)> = code.char_indices().collect();
-    let under = chars.iter().rposition(|(start, _)| *start <= byte)?;
-    let at = chars
-        .get(under)
-        .filter(|char| is_name(char))
-        .map(|_| under)
-        .or_else(|| {
-            under
-                .checked_sub(1)
-                .filter(|before| chars.get(*before).is_some_and(is_name))
-        })?;
-    let first = chars
-        .get(..=at)?
-        .iter()
-        .rposition(|char| !is_name(char))
-        .map_or(0, |gap| gap + 1);
-    let after = chars
+    let at = (0..=byte).rev().find(|at| code.is_char_boundary(*at))?;
+    let on_name = code
         .get(at..)?
-        .iter()
-        .position(|char| !is_name(char))
-        .map_or(chars.len(), |gap| at + gap);
-    let start = chars.get(first)?.0;
-    let end = chars.get(after).map_or(code.len(), |(end, _)| *end);
+        .chars()
+        .next()
+        .filter(|c| is_name(*c))
+        .map(|_| at);
+    let under = if let Some(under) = on_name {
+        under
+    } else {
+        let (before, c) = code.get(..at)?.char_indices().next_back()?;
+        is_name(c).then_some(before)?
+    };
+    let start = code
+        .get(..under)?
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| is_name(*c))
+        .last()
+        .map_or(under, |(start, _)| start);
+    let end = code
+        .get(under..)?
+        .char_indices()
+        .find(|(_, c)| !is_name(*c))
+        .map_or(code.len(), |(after, _)| under + after);
     Some(start..end)
 }
 
@@ -139,9 +175,7 @@ impl NameDesk {
         }
         self.cards.insert(
             key.clone(),
-            Arc::new(DefinitionCard::Loading {
-                word: key.word.clone(),
-            }),
+            Arc::new(DefinitionCard::loading(key.word.clone())),
         );
         Some(NameWork {
             lookups: Arc::clone(&self.lookups),

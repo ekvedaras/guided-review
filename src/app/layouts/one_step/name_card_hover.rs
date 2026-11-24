@@ -6,14 +6,14 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, Pixels, Point,
+    AnyElement, Bounds, Context, InteractiveElement, IntoElement, ParentElement, Pixels,
     StatefulInteractiveElement, Styled, div,
 };
 
 use crate::app::code_links::open_code;
 use crate::app::components::diff_view::NamePointer;
 use crate::app::components::name_card::{OnNameTarget, name_card};
-use crate::app::components::overlay::popover_at;
+use crate::app::components::overlay::popover_by;
 use crate::app::components::palette::Colors;
 use crate::viewer::{HoverTicket, NameTarget, Screen};
 
@@ -27,7 +27,8 @@ const GRACE: Duration = Duration::from_millis(150);
 /// Where the open card is, and what the page looked like then: a card does not follow a page that
 /// moved under it.
 pub(super) struct NameCardPlace {
-    at: Point<Pixels>,
+    /// The name's bounds in the window.
+    word: Bounds<Pixels>,
     screen: Screen,
     scrolled_to: (usize, Pixels),
 }
@@ -35,10 +36,10 @@ pub(super) struct NameCardPlace {
 impl OneStepLayout {
     pub(super) fn on_name_pointer(&mut self, pointer: NamePointer, cx: &mut Context<Self>) {
         match pointer {
-            NamePointer::On { under, card_at } => {
+            NamePointer::On { under, word } => {
                 let shown_before = self.name_hover.shown().cloned();
                 if let Some(ticket) = self.name_hover.pointer_on(under) {
-                    self.name_card_waits_at = card_at;
+                    self.name_card_waits_at = word;
                     self.wait(REST, ticket, Self::name_rested, cx);
                 }
                 if shown_before.as_ref() != self.name_hover.shown() {
@@ -53,19 +54,19 @@ impl OneStepLayout {
         }
     }
 
-    /// Opens the card at once at `at`, for a snapshot scene.
+    /// Opens the card at once by `word`, for a snapshot scene.
     #[cfg(feature = "snapshots")]
     pub(super) fn show_staged_name_card(
         &mut self,
         under: crate::viewer::NameUnderPointer,
-        at: Point<Pixels>,
+        word: Bounds<Pixels>,
         cx: &mut Context<Self>,
     ) {
         if let Some(ticket) = self.name_hover.pointer_on(under) {
             self.name_hover.rested(ticket);
         }
         self.name_card_place = Some(NameCardPlace {
-            at,
+            word,
             screen: self.session.read(cx).review().screen().clone(),
             scrolled_to: self.scrolled_to(),
         });
@@ -98,7 +99,7 @@ impl OneStepLayout {
             return;
         };
         self.name_card_place = Some(NameCardPlace {
-            at: self.name_card_waits_at,
+            word: self.name_card_waits_at,
             screen: self.session.read(cx).review().screen().clone(),
             scrolled_to: self.scrolled_to(),
         });
@@ -122,7 +123,7 @@ impl OneStepLayout {
 
     fn open_name_target(&mut self, target: &NameTarget, cx: &mut Context<Self>) {
         match target {
-            NameTarget::Tour(target) => self.change_review(cx, |review| review.jump_to(target)),
+            NameTarget::Tour(target) => self.jump_to(target, cx),
             NameTarget::Code(link) => open_code(link, cx),
         }
         self.dismiss_name_card(cx);
@@ -144,7 +145,7 @@ impl OneStepLayout {
     pub(super) fn name_card_layer(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let name = self.name_hover.shown()?.clone();
         let place = self.name_card_place.as_ref()?;
-        let at = place.at;
+        let word = place.word;
         let page_moved = place.screen != *self.session.read(cx).review().screen()
             || place.scrolled_to != self.scrolled_to();
         if page_moved {
@@ -161,11 +162,11 @@ impl OneStepLayout {
         });
         let colors = Colors::active(cx);
         Some(
-            popover_at(
-                at,
+            popover_by(
+                word,
                 div()
                     .id("name-card")
-                    .pt_1()
+                    .py_1()
                     .on_hover(cx.listener(|this, is_hovered: &bool, _, cx| {
                         if *is_hovered {
                             this.name_hover.card_entered();

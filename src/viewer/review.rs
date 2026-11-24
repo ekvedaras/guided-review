@@ -672,7 +672,12 @@ impl ReviewCore {
         let pr_controls = PrControls::of(&subject);
         let names = NameDesk::new(FileSearch::for_source(
             source,
-            files.iter().map(|file| file.path.clone()).collect(),
+            files
+                .iter()
+                .flat_map(|file| [Some(&file.path), file.old_path.as_ref()])
+                .flatten()
+                .cloned()
+                .collect(),
         ));
         Ok(Self {
             tour,

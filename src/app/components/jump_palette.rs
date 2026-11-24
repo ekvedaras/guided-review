@@ -84,6 +84,9 @@ impl ShownEntry {
                     JumpPlace::File(path) => {
                         ShownLabel::Piece(PieceLabel::of(&PieceId::whole_file(path.clone())))
                     }
+                    JumpPlace::Line(line) => {
+                        ShownLabel::Piece(PieceLabel::of(&PieceId::whole_file(line.path.clone())))
+                    }
                     JumpPlace::Piece(id) => ShownLabel::Piece(PieceLabel::of(id)),
                 },
                 target.detail().map(|detail| detail.to_owned().into()),
@@ -101,7 +104,7 @@ impl ShownEntry {
         match &self.entry {
             PaletteEntry::Place(target) => match target.place {
                 JumpPlace::StepTop | JumpPlace::Overview => Icon::Milestone,
-                JumpPlace::File(_) => Icon::FileText,
+                JumpPlace::File(_) | JumpPlace::Line(_) => Icon::FileText,
                 JumpPlace::Piece(_) => Icon::Braces,
             },
             PaletteEntry::Action(action) => action_icon(*action),

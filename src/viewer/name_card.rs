@@ -45,7 +45,7 @@ pub struct DefinitionRow {
     pub signature: Arc<str>,
     pub doc: Option<Arc<str>>,
     /// `src/cart.ts:4`
-    pub place: String,
+    pub place: Arc<str>,
     /// The definition sits in a file the review changes.
     pub in_pr: bool,
     pub target: NameTarget,
@@ -53,11 +53,12 @@ pub struct DefinitionRow {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageRow {
-    pub place: String,
+    pub place: Arc<str>,
     pub text: Arc<str>,
     pub target: NameTarget,
 }
 
+/// Its texts are cut when the lookup lands, so drawing the card builds none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundNames {
     pub word: Word,
@@ -67,31 +68,27 @@ pub struct FoundNames {
     pub usages: Vec<UsageRow>,
     pub usages_not_shown: usize,
     pub notes: Vec<CardNote>,
-}
-
-impl FoundNames {
-    /// Said only when several definitions match, so the reader knows the best one may be wrong.
-    pub fn definitions_label(&self) -> Option<String> {
-        (self.definitions.len() > 1).then(|| format!("{} definitions", self.definitions.len()))
-    }
-
-    pub fn usages_label(&self) -> Option<String> {
-        match self.usages.len() + self.usages_not_shown {
-            0 => None,
-            1 => Some("1 usage".to_owned()),
-            count => Some(format!("{count} usages")),
-        }
-    }
-
-    pub fn more_usages_label(&self) -> Option<String> {
-        (self.usages_not_shown > 0).then(|| format!("and {} more", self.usages_not_shown))
-    }
+    /// "DEFINITION", or "2 DEFINITIONS" when several match, so the reader knows the best one may be wrong.
+    pub definitions_heading: Arc<str>,
+    /// "3 USAGES"; `None` when there are none.
+    pub usages_heading: Option<Arc<str>>,
+    /// "and 6 more"
+    pub more_usages: Option<Arc<str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefinitionCard {
-    Loading { word: Word },
-    Failed { word: Word, because: String },
+    Loading {
+        word: Word,
+        /// "Looking up total…"
+        says: Arc<str>,
+    },
+    Failed {
+        word: Word,
+        because: String,
+        /// "Could not look up total: …"
+        says: Arc<str>,
+    },
     Found(FoundNames),
 }
 
@@ -102,6 +99,20 @@ pub(super) trait PlacesOfReview {
 }
 
 impl DefinitionCard {
+    pub(super) fn loading(word: Word) -> Self {
+        let says = format!("Looking up {word}…").into();
+        Self::Loading { word, says }
+    }
+
+    pub(super) fn failed(word: Word, because: String) -> Self {
+        let says = format!("Could not look up {word}: {because}").into();
+        Self::Failed {
+            word,
+            because,
+            says,
+        }
+    }
+
     pub(super) fn of(lookup: &Lookup, hovered: &Place, review: &dyn PlacesOfReview) -> Self {
         let definitions = lookup
             .definitions
@@ -114,7 +125,8 @@ impl DefinitionCard {
             .filter(|usage| usage.place != *hovered)
             .collect();
         usages.sort_by_key(|usage| !review.is_changed(&usage.place.path));
-        let usages_not_shown = usages.len().saturating_sub(USAGES_SHOWN);
+        let usages_found = usages.len();
+        let usages_not_shown = usages_found.saturating_sub(USAGES_SHOWN);
         let usages = usages
             .into_iter()
             .take(USAGES_SHOWN)
@@ -131,12 +143,25 @@ impl DefinitionCard {
         if lookup.cut_short {
             notes.push(CardNote::SearchCutShort);
         }
+        let definitions_heading = match lookup.definitions.len() {
+            0 | 1 => "DEFINITION".into(),
+            count => format!("{count} DEFINITIONS").into(),
+        };
+        let usages_heading = match usages_found {
+            0 => None,
+            1 => Some("1 USAGE".into()),
+            count => Some(format!("{count} USAGES").into()),
+        };
         Self::Found(FoundNames {
             word: lookup.word.clone(),
             definitions,
             usages,
             usages_not_shown,
             notes,
+            definitions_heading,
+            usages_heading,
+            more_usages: (usages_not_shown > 0)
+                .then(|| format!("and {usages_not_shown} more").into()),
         })
     }
 }
@@ -152,6 +177,6 @@ fn definition_row(definition: &Definition, review: &dyn PlacesOfReview) -> Defin
     }
 }
 
-fn place_label(place: &Place) -> String {
-    format!("{}:{}", place.path, place.line.get())
+fn place_label(place: &Place) -> Arc<str> {
+    format!("{}:{}", place.path, place.line.get()).into()
 }

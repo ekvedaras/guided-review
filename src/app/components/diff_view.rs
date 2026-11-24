@@ -1,10 +1,11 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Div, FontWeight, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
+    App, Bounds, Div, FontWeight, HighlightStyle, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Pixels, RenderOnce, Rgba, SharedString, Stateful, StatefulInteractiveElement,
     Styled, StyledText, TextLayout, Window, div, px,
 };
@@ -56,8 +57,8 @@ pub type OnScrollX = Rc<dyn Fn(Pixels, &mut Window, &mut App)>;
 pub enum NamePointer {
     On {
         under: NameUnderPointer,
-        /// Where the card's top left goes: under the start of the name.
-        card_at: gpui::Point<Pixels>,
+        /// Where the name is drawn, in the window: the card goes under it, or over it.
+        word: Bounds<Pixels>,
     },
     Off,
 }
@@ -224,8 +225,9 @@ impl RenderOnce for DiffRow {
             None => code,
         };
         let code = match self.on_name_pointer {
-            Some(on_pointer) => name_pointer(code, &location, &line.code, name_layout, on_pointer)
-                .into_any_element(),
+            Some(on_pointer) => {
+                name_pointer(code, &line, name_layout, on_pointer).into_any_element()
+            }
             None => code.into_any_element(),
         };
         let link = line.code_link.clone();
@@ -321,27 +323,20 @@ impl RenderOnce for DiffRow {
 
 fn name_pointer(
     code: Div,
-    location: &LineLocation,
-    text: &Arc<str>,
+    line: &Arc<ShownLine>,
     layout: TextLayout,
     on_pointer: OnNamePointer,
 ) -> Stateful<Div> {
-    let id = SharedString::from(format!(
-        "code-{}-{:?}-{}",
-        location.path, location.side, location.line
-    ));
+    let mut hasher = DefaultHasher::new();
+    line.location.hash(&mut hasher);
     let (on_move, on_leave) = (Rc::clone(&on_pointer), on_pointer);
-    let (location, text) = (location.clone(), Arc::clone(text));
-    code.id(id)
+    let line = Arc::clone(line);
+    code.id(("name-code", hasher.finish()))
         .on_mouse_move(move |event, window, cx| {
             if event.pressed_button.is_some() {
                 return;
             }
-            on_move(
-                name_under(&layout, &location, &text, event.position),
-                window,
-                cx,
-            );
+            on_move(name_under(&layout, &line, event.position), window, cx);
         })
         .on_hover(move |is_hovered, window, cx| {
             if !*is_hovered {
@@ -350,23 +345,24 @@ fn name_pointer(
         })
 }
 
-fn name_under(
-    layout: &TextLayout,
-    location: &LineLocation,
-    text: &str,
-    position: gpui::Point<Pixels>,
-) -> NamePointer {
+fn name_under(layout: &TextLayout, line: &ShownLine, position: gpui::Point<Pixels>) -> NamePointer {
     let Ok(byte) = layout.index_for_position(position) else {
         return NamePointer::Off;
     };
-    let Some(under) = HoveredName::under_pointer(location.clone(), text, byte) else {
+    let Some(under) =
+        HoveredName::under_pointer(line.location.clone(), &line.code, &line.highlights, byte)
+    else {
         return NamePointer::Off;
     };
     let Some(start) = layout.position_for_index(under.range.start) else {
         return NamePointer::Off;
     };
+    let end = layout
+        .position_for_index(under.range.end)
+        .filter(|end| end.y == start.y && end.x > start.x)
+        .unwrap_or(start);
     NamePointer::On {
-        card_at: gpui::point(start.x, start.y + layout.line_height()),
+        word: Bounds::from_corners(start, gpui::point(end.x, start.y + layout.line_height())),
         under,
     }
 }

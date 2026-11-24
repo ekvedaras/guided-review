@@ -7,7 +7,7 @@ use crate::pieces::{ChangedFile, PieceId};
 use crate::tour::GuidedTour;
 
 use super::review::Screen;
-use super::step_page::pieces_of;
+use super::step_page::{LineLocation, pieces_of};
 
 /// Where on its screen a jump lands.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +17,8 @@ pub enum JumpPlace {
     Overview,
     File(FilePath),
     Piece(PieceId),
+    /// A line a Definition card points at, as the page shows it: a row's own location.
+    Line(LineLocation),
 }
 
 /// One row of the cmd+k list: a place the reviewer can jump to.
@@ -34,7 +36,16 @@ impl JumpTarget {
         match &self.place {
             JumpPlace::StepTop | JumpPlace::Overview => Cow::Borrowed(&self.screen_title),
             JumpPlace::File(path) => Cow::Borrowed(path.as_str()),
+            JumpPlace::Line(line) => Cow::Borrowed(line.path.as_str()),
             JumpPlace::Piece(id) => Cow::Owned(id.to_string()),
+        }
+    }
+
+    /// The same screen, landing on `line`.
+    pub(super) fn at_line(&self, line: LineLocation) -> Self {
+        Self {
+            place: JumpPlace::Line(line),
+            ..self.clone()
         }
     }
 
@@ -42,7 +53,9 @@ impl JumpTarget {
     pub fn detail(&self) -> Option<&str> {
         match (&self.place, &self.screen) {
             (JumpPlace::StepTop | JumpPlace::Overview, _) | (_, Screen::File(_)) => None,
-            (JumpPlace::File(_) | JumpPlace::Piece(_), _) => Some(&self.screen_title),
+            (JumpPlace::File(_) | JumpPlace::Line(_) | JumpPlace::Piece(_), _) => {
+                Some(&self.screen_title)
+            }
         }
     }
 }
@@ -372,7 +385,7 @@ pub(super) fn palette(
             let kind = match target.place {
                 JumpPlace::Overview => PaletteGroupKind::Overview,
                 JumpPlace::StepTop => PaletteGroupKind::Steps,
-                JumpPlace::File(_) => PaletteGroupKind::Files,
+                JumpPlace::File(_) | JumpPlace::Line(_) => PaletteGroupKind::Files,
                 JumpPlace::Piece(_) => PaletteGroupKind::Symbols,
             };
             let entry = PaletteEntry::Place(target);

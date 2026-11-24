@@ -29,14 +29,13 @@ pub type OnNameTarget = Rc<dyn Fn(&NameTarget, &mut Window, &mut App)>;
 pub fn name_card(colors: &Colors, card: &DefinitionCard, on_open: &OnNameTarget) -> Div {
     let panel = overlay_panel(colors).w(px(NAME_CARD_WIDTH));
     match card {
-        DefinitionCard::Loading { word } => panel.child(line(
+        DefinitionCard::Loading { says, .. } => panel.child(line(
             colors.muted_text,
-            SharedString::from(format!("Looking up {word}…")),
+            SharedString::from(Arc::clone(says)),
         )),
-        DefinitionCard::Failed { word, because } => panel.child(line(
-            colors.danger,
-            SharedString::from(format!("Could not look up {word}: {because}")),
-        )),
+        DefinitionCard::Failed { says, .. } => {
+            panel.child(line(colors.danger, SharedString::from(Arc::clone(says))))
+        }
         DefinitionCard::Found(found) => panel.child(found_lists(colors, found, on_open)),
     }
 }
@@ -46,11 +45,6 @@ fn line(color: gpui::Rgba, text: SharedString) -> Div {
 }
 
 fn found_lists(colors: &Colors, found: &FoundNames, on_open: &OnNameTarget) -> Div {
-    let definitions_label = found
-        .definitions_label()
-        .unwrap_or_else(|| "DEFINITION".to_owned())
-        .to_uppercase();
-    let usages_label = found.usages_label().map(|label| label.to_uppercase());
     let nothing_found = found.definitions.is_empty() && found.usages.is_empty();
     let notes = (!found.notes.is_empty()).then(|| {
         div()
@@ -77,7 +71,7 @@ fn found_lists(colors: &Colors, found: &FoundNames, on_open: &OnNameTarget) -> D
                 .py_2()
                 .flex()
                 .flex_col()
-                .child(heading(colors, definitions_label))
+                .child(heading(colors, &found.definitions_heading))
                 .when(found.definitions.is_empty(), |lists| {
                     lists.child(
                         div()
@@ -99,7 +93,12 @@ fn found_lists(colors: &Colors, found: &FoundNames, on_open: &OnNameTarget) -> D
                         .enumerate()
                         .map(|(index, row)| definition_row(colors, index, row, on_open)),
                 )
-                .children(usages_label.map(|label| heading(colors, label).pt_3()))
+                .children(
+                    found
+                        .usages_heading
+                        .as_ref()
+                        .map(|label| heading(colors, label).pt_3()),
+                )
                 .children(
                     found
                         .usages
@@ -107,20 +106,20 @@ fn found_lists(colors: &Colors, found: &FoundNames, on_open: &OnNameTarget) -> D
                         .enumerate()
                         .map(|(index, row)| usage_row(colors, index, row, on_open)),
                 )
-                .children(found.more_usages_label().map(|label| {
+                .children(found.more_usages.as_ref().map(|label| {
                     div()
                         .px_4()
                         .py_1()
                         .text_xs()
                         .text_color(colors.muted_text)
-                        .child(label)
+                        .child(SharedString::from(Arc::clone(label)))
                 })),
         )
         .children(notes)
 }
 
-fn heading(colors: &Colors, label: String) -> Div {
-    note_label(label)
+fn heading(colors: &Colors, label: &Arc<str>) -> Div {
+    note_label(SharedString::from(Arc::clone(label)))
         .px_4()
         .pb_1()
         .text_color(colors.muted_text)
@@ -133,57 +132,54 @@ fn definition_row(
     on_open: &OnNameTarget,
 ) -> impl IntoElement {
     let (target, on_open) = (row.target.clone(), Rc::clone(on_open));
-    picker_row_at(
-        colors,
-        SharedString::from(format!("name-definition-{index}")),
-        RowPlace::Apart,
-        None,
-    )
-    .py_1()
-    .flex_col()
-    .items_stretch()
-    .gap_0p5()
-    .on_click(move |_, window, cx| on_open(&target, window, cx))
-    .child(
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(
-                div()
-                    .flex_none()
-                    .text_xs()
-                    .text_color(colors.muted_text)
-                    .child(row.kind.label()),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .font_family(*CODE_FONT)
-                    .text_sm()
-                    .child(SharedString::from(Arc::clone(&row.signature))),
-            )
-            .when(row.in_pr, |top| {
-                top.child(chip(colors, Tone::Accent).child("in this PR"))
-            }),
-    )
-    .children(row.doc.clone().map(|doc| {
-        div()
-            .text_xs()
-            .text_color(colors.muted_text)
-            .line_clamp(DOC_LINES)
-            .child(SharedString::from(doc))
-    }))
-    .child(
-        div()
-            .truncate()
-            .font_family(*CODE_FONT)
-            .text_xs()
-            .text_color(colors.muted_text)
-            .child(SharedString::from(row.place.clone())),
-    )
+    picker_row_at(colors, ("name-definition", index), RowPlace::Apart, None)
+        .py_1()
+        .flex_col()
+        .items_stretch()
+        .gap_0p5()
+        .on_click(move |_, window, cx| on_open(&target, window, cx))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(row.kind.label()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .font_family(*CODE_FONT)
+                        .text_sm()
+                        .child(SharedString::from(Arc::clone(&row.signature))),
+                )
+                .when(row.in_pr, |top| {
+                    top.child(chip(colors, Tone::Accent).child("in this PR"))
+                }),
+        )
+        .children(row.doc.clone().map(|doc| {
+            div()
+                .text_xs()
+                .text_color(colors.muted_text)
+                .line_clamp(DOC_LINES)
+                .child(SharedString::from(doc))
+        }))
+        .child(
+            div()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis_start()
+                .font_family(*CODE_FONT)
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(SharedString::from(Arc::clone(&row.place))),
+        )
 }
 
 fn usage_row(
@@ -193,30 +189,27 @@ fn usage_row(
     on_open: &OnNameTarget,
 ) -> impl IntoElement {
     let (target, on_open) = (row.target.clone(), Rc::clone(on_open));
-    picker_row_at(
-        colors,
-        SharedString::from(format!("name-usage-{index}")),
-        RowPlace::Apart,
-        None,
-    )
-    .py_1()
-    .gap_2()
-    .font_family(*CODE_FONT)
-    .text_xs()
-    .on_click(move |_, window, cx| on_open(&target, window, cx))
-    .child(
-        div()
-            .flex_none()
-            .max_w(px(200.))
-            .truncate()
-            .text_color(colors.muted_text)
-            .child(SharedString::from(row.place.clone())),
-    )
-    .child(
-        div()
-            .flex_1()
-            .min_w_0()
-            .truncate()
-            .child(SharedString::from(Arc::clone(&row.text))),
-    )
+    picker_row_at(colors, ("name-usage", index), RowPlace::Apart, None)
+        .py_1()
+        .gap_2()
+        .font_family(*CODE_FONT)
+        .text_xs()
+        .on_click(move |_, window, cx| on_open(&target, window, cx))
+        .child(
+            div()
+                .flex_none()
+                .max_w(px(200.))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis_start()
+                .text_color(colors.muted_text)
+                .child(SharedString::from(Arc::clone(&row.place))),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .child(SharedString::from(Arc::clone(&row.text))),
+        )
 }

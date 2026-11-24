@@ -1,4 +1,6 @@
-use guided_review::viewer::{HoveredName, LineLocation, Side};
+use std::ops::Range;
+
+use guided_review::viewer::{Capture, HoveredName, LineLocation, Side};
 
 use crate::support::{file_path, line};
 
@@ -10,8 +12,17 @@ fn at(path: &str) -> LineLocation {
     }
 }
 
-fn name_at(path: &str, code: &str, byte: usize) -> Option<(String, std::ops::Range<usize>)> {
-    HoveredName::under_pointer(at(path), code, byte)
+fn name_at(path: &str, code: &str, byte: usize) -> Option<(String, Range<usize>)> {
+    name_in_highlighted(path, code, &[], byte)
+}
+
+fn name_in_highlighted(
+    path: &str,
+    code: &str,
+    highlights: &[(Range<usize>, Capture)],
+    byte: usize,
+) -> Option<(String, Range<usize>)> {
+    HoveredName::under_pointer(at(path), code, highlights, byte)
         .map(|found| (found.name.word.to_string(), found.range))
 }
 
@@ -71,5 +82,46 @@ fn a_byte_inside_a_multibyte_char_is_cut_on_char_boundaries() {
     assert_eq!(
         name_at("src/a.ts", code, 6),
         Some(("cart".to_owned(), 5..9))
+    );
+}
+
+#[test]
+fn a_keyword_of_the_lines_language_is_no_name() {
+    let rust = "pub fn total(&self) -> u32 {";
+    assert_eq!(name_at("src/cart.rs", rust, 1), None);
+    assert_eq!(name_at("src/cart.rs", rust, 5), None);
+    assert_eq!(
+        name_at("src/cart.rs", rust, 8),
+        Some(("total".to_owned(), 7..12))
+    );
+    let php = "    public function total(): int";
+    assert_eq!(name_at("src/Cart.php", php, 6), None);
+    assert_eq!(name_at("src/Cart.php", php, 13), None);
+    let typescript = "export const total = () => cart;";
+    assert_eq!(name_at("src/cart.ts", typescript, 2), None);
+    assert_eq!(name_at("src/cart.ts", typescript, 8), None);
+    assert_eq!(
+        name_at("src/cart.ts", typescript, 28).map(|found| found.0),
+        Some("cart".to_owned())
+    );
+}
+
+#[test]
+fn the_lines_highlights_say_what_a_word_is_once_they_are_ready() {
+    let code = "map.get(key) // cart";
+    let highlights = [
+        (0..3, Capture::Variable),
+        (4..7, Capture::FunctionMethod),
+        (13..20, Capture::Comment),
+    ];
+    assert_eq!(
+        name_in_highlighted("src/a.ts", code, &highlights, 5),
+        Some(("get".to_owned(), 4..7)),
+        "a method named like a keyword is a name"
+    );
+    assert_eq!(name_in_highlighted("src/a.ts", code, &highlights, 17), None);
+    assert_eq!(
+        name_in_highlighted("src/a.ts", "return x", &[(0..6, Capture::Keyword)], 2),
+        None
     );
 }

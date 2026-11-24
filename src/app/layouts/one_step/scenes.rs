@@ -5,9 +5,9 @@
 use std::sync::Arc;
 
 use gpui::{
-    App, AsyncWindowContext, Context, Keystroke, ListOffset, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput, Task, WeakEntity, Window, point,
-    px,
+    App, AsyncWindowContext, Bounds, Context, Keystroke, ListOffset, Modifiers, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Task, WeakEntity, Window,
+    point, px,
 };
 
 use super::OneStepLayout;
@@ -30,8 +30,8 @@ use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, 
 use crate::viewer::{
     AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
     HoveredName, LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability,
-    Merging, OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind, Readiness,
-    TerminalId, TextBox,
+    Merging, NameUnderPointer, OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind,
+    Readiness, TerminalId, TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue, Station, StationHealth, StationKind};
@@ -39,8 +39,6 @@ use crate::viewer::{IssueDetails, IssueState, RelatedIssue, Station, StationHeal
 const MAX_SCREENS: usize = 16;
 /// Rows the name card's line is scrolled below the top of the list, so the sticky bar leaves it free.
 const ROWS_ABOVE: usize = 3;
-/// The bottom of that row under the top of the list, about 19 px a row.
-const ROW_BOTTOM: f32 = 76.;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
 const OTHER_PR: u32 = 14;
 
@@ -119,11 +117,10 @@ enum Scene {
     TitleBarMerging,
     FoldedMarkdownParts,
     StationsBusy,
-    NameCard,
 }
 
 impl Scene {
-    const ALL: [Self; 74] = [
+    const ALL: [Self; 73] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -197,7 +194,6 @@ impl Scene {
         Self::TitleBarMerging,
         Self::FoldedMarkdownParts,
         Self::StationsBusy,
-        Self::NameCard,
     ];
 
     fn file_name(self) -> &'static str {
@@ -275,7 +271,6 @@ impl Scene {
             Self::TitleBarMerging => "92-title-bar-merging",
             Self::FoldedMarkdownParts => "93-folded-markdown-parts",
             Self::StationsBusy => "95-sidebar-stations-busy",
-            Self::NameCard => "96-name-card",
         }
     }
 
@@ -436,6 +431,7 @@ async fn shoot(
         }
     }
     camera.wait_for_loading(cx).await?;
+    hover_a_name(camera, layout, cx).await?;
     layout.update(cx, OneStepLayout::go_to_first_open_code)?;
     for scene in Scene::ALL {
         layout.update_in(cx, |layout, window, cx| layout.stage(scene, window, cx))?;
@@ -444,6 +440,70 @@ async fn shoot(
     }
     drag_the_issue_cards_scrollbar(camera, layout, cx).await?;
     pick_a_word_and_copy(camera, layout, cx).await
+}
+
+/// The pointer moved along a line, as the mouse gives it, until it rests on the line's longest
+/// name; the card opens where that name is drawn.
+async fn hover_a_name(
+    camera: &Camera,
+    layout: &WeakEntity<OneStepLayout>,
+    cx: &mut AsyncWindowContext,
+) -> anyhow::Result<()> {
+    let Some((row, wanted)) = layout.update(cx, OneStepLayout::scroll_to_a_name)? else {
+        eprintln!("no added line of a known language on this screen to hover");
+        return Ok(());
+    };
+    let move_to = |position: gpui::Point<Pixels>| {
+        PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
+        })
+    };
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+    })?;
+    let (line, viewport) = layout.update(cx, |layout, _| {
+        (
+            layout.screen_list.bounds_for_item(row),
+            layout.screen_list.viewport_bounds(),
+        )
+    })?;
+    let line = line.ok_or_else(|| anyhow::anyhow!("the line to hover is not on screen"))?;
+    // The line is looked for around where the list says it is, since a pinned header may lie over it.
+    let mut ys = vec![line.center().y];
+    for step in 1..60_u8 {
+        let off = px(f32::from(step) * 11.);
+        ys.extend([line.center().y + off, line.center().y - off]);
+    }
+    ys.retain(|y| viewport.top() < *y && *y < viewport.bottom());
+    let mut on_name = None;
+    'search: for y in ys {
+        let mut x = viewport.left();
+        while x < viewport.right() {
+            let spot = point(x, y);
+            cx.update(|window, cx| window.dispatch_event(move_to(spot), cx))?;
+            on_name = layout.update(cx, |layout, _| {
+                layout
+                    .name_hover
+                    .pointer()
+                    .filter(|under| under.name == wanted.name)
+                    .map(|under| (under.clone(), layout.name_card_waits_at))
+            })?;
+            if on_name.is_some() {
+                break 'search;
+            }
+            x += px(4.);
+        }
+    }
+    let (under, word) = on_name
+        .ok_or_else(|| anyhow::anyhow!("the pointer found no {} on screen", wanted.name.word))?;
+    // Off the window, so the pointer's rest opens no card of its own over the staged one.
+    cx.update(|window, cx| window.dispatch_event(move_to(point(px(-1000.), px(-1000.))), cx))?;
+    layout.update(cx, |layout, cx| layout.stage_name_card(under, word, cx))?;
+    camera.take("96-name-card", cx).await?;
+    layout.update(cx, OneStepLayout::dismiss_name_card)
 }
 
 /// The issue card's description dragged down by its scrollbar, as the mouse gives it: pressed on the
@@ -735,45 +795,50 @@ impl OneStepLayout {
             .collect()
     }
 
-    /// A hovered name on the first added line of a language the card knows, with a lookup that
-    /// found two definitions, some usages and a note, so the card has all its parts.
-    fn stage_name_card(&mut self, cx: &mut Context<Self>) {
+    /// The first added line of a language the card knows, scrolled into view, and its longest name.
+    fn scroll_to_a_name(&mut self, cx: &mut Context<Self>) -> Option<(usize, NameUnderPointer)> {
         self.go_to_first_open_code(cx);
         let rows = self.session.read(cx).rows();
-        let staged = self
-            .added_lines(usize::MAX, cx)
-            .into_iter()
-            .find_map(|(row, location)| {
-                let code = Arc::clone(&rows.line(row)?.code);
-                let under = code
-                    .char_indices()
-                    .filter_map(|(byte, _)| {
-                        HoveredName::under_pointer(location.clone(), &code, byte)
-                    })
-                    .max_by_key(|under| under.range.len())?;
-                Some((row, under))
-            });
-        let Some((row, under)) = staged else {
-            eprintln!("no added line of a known language on this screen to hover");
-            return;
-        };
+        let (row, under) =
+            self.added_lines(usize::MAX, cx)
+                .into_iter()
+                .find_map(|(row, location)| {
+                    let line = rows.line(row)?;
+                    let under = line
+                        .code
+                        .char_indices()
+                        .filter_map(|(byte, _)| {
+                            HoveredName::under_pointer(
+                                location.clone(),
+                                &line.code,
+                                &line.highlights,
+                                byte,
+                            )
+                        })
+                        .max_by_key(|under| under.range.len())?;
+                    Some((row, under))
+                })?;
         self.scroll_to_row(row.saturating_sub(ROWS_ABOVE));
-        let viewport = self.screen_list.viewport_bounds();
-        let at = point(
-            viewport.left()
-                + px(134. + 7. * f32::from(u16::try_from(under.range.start).unwrap_or(0))),
-            viewport.top() + px(ROW_BOTTOM),
-        );
+        Some((row, under))
+    }
+
+    /// The card by `word`, with a lookup that found two definitions, some usages and a note, so
+    /// the card has all its parts.
+    fn stage_name_card(
+        &mut self,
+        under: NameUnderPointer,
+        word: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
         let lookup = staged_lookup(&under.name);
         self.session.update(cx, |session, cx| {
             session.stage_name_card(&under.name, lookup, cx);
         });
-        self.show_staged_name_card(under, at, cx);
+        self.show_staged_name_card(under, word, cx);
     }
 
     fn stage(&mut self, scene: Scene, window: &mut Window, cx: &mut Context<Self>) {
         match scene {
-            Scene::NameCard => self.stage_name_card(cx),
             Scene::Settings => self
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
@@ -1249,7 +1314,6 @@ impl OneStepLayout {
                     toaster.0.update(cx, ToastShelf::clear);
                 }
             }
-            Scene::NameCard => self.dismiss_name_card(cx),
             Scene::StationsBusy => {
                 self.session
                     .update(cx, |session, cx| session.stage_viewed_wait(false, cx));
@@ -1474,6 +1538,11 @@ fn staged_lookup(hovered: &HoveredName) -> Lookup {
                 format!("let amount = cart.{word}();"),
             ),
             usage("src/checkout.rs", 21, format!("charge(order.{word}())?;")),
+            usage(
+                "src/app/layouts/one_step/settings_panel.rs",
+                12,
+                format!("total += line.{word}();"),
+            ),
             usage("src/billing/invoice.rs", 77, format!("self.{word}() + tax")),
             usage(
                 "tests/cart.rs",

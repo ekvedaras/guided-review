@@ -20,6 +20,11 @@ impl NameHover {
         self.open.as_ref()
     }
 
+    /// The name the pointer is on, open or not.
+    pub fn pointer(&self) -> Option<&NameUnderPointer> {
+        self.pointer.as_ref()
+    }
+
     /// A ticket for the rest to wait out, unless the pointer is on this name already.
     pub fn pointer_on(&mut self, under: NameUnderPointer) -> Option<HoverTicket> {
         if self.pointer.as_ref() == Some(&under) {

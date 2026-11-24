@@ -315,10 +315,7 @@ impl CodeLinks<'_> {
     pub fn to_line(&self, file: &ChangedFile, location: &LineLocation) -> CodeLink {
         let (on_github, in_working_copy) = match location.side {
             Side::Base => (
-                self.blob(
-                    self.base,
-                    file.old_path.as_ref().unwrap_or(&file.path).as_str(),
-                ),
+                self.blob(self.base, file.path_on(Side::Base).as_str()),
                 Err(self.removed_line()),
             ),
             Side::Head => (

@@ -1,13 +1,10 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
-use guided_review::local_work_tree::OnDisk;
 use guided_review::navigation::Word;
 use guided_review::pull_request::{RepoName, Sha};
-use guided_review::review_subject::LocalChangeSet;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     CardNote, DefinitionCard, HoveredName, JumpPlace, LineLocation, NameTarget, Review,
@@ -31,6 +28,11 @@ impl Shop {
     }
 
     fn with_files(extra: &[(String, String)]) -> Self {
+        Self::with_changes(extra, |_| {})
+    }
+
+    /// `extra` is written at base, `change` runs before head is committed.
+    fn with_changes(extra: &[(String, String)], change: impl FnOnce(&FixtureRepo)) -> Self {
         let repo = FixtureRepo::cloned_from("acme/shop");
         for (path, text) in extra {
             repo.write(path, text);
@@ -54,6 +56,7 @@ impl Shop {
         repo.write("src/pricing.ts", "export function price() { return 2; }\n");
         repo.write("src/report.ts", "export const report = 1;\n");
         repo.git(&["rm", "-q", "legacy/old.ts"]);
+        change(&repo);
         let head = repo.commit("head");
         Self { repo, base, head }
     }
@@ -130,7 +133,7 @@ fn a_context_line_is_looked_up_at_head_and_its_definition_outside_the_pr_opens_a
     let [definition] = card.definitions.as_slice() else {
         panic!("one definition expected: {:?}", card.definitions);
     };
-    assert_eq!(definition.place, "src/cart.ts:1");
+    assert_eq!(&*definition.place, "src/cart.ts:1");
     assert!(!definition.in_pr);
     assert!(definition.signature.contains("class Cart"));
     let NameTarget::Code(link) = &definition.target else {
@@ -157,13 +160,9 @@ fn the_hovered_line_is_left_out_of_the_usages() {
         &hover("src/checkout.ts", Side::Head, 4, "Cart"),
     ));
 
-    let places: Vec<&str> = card
-        .usages
-        .iter()
-        .map(|usage| usage.place.as_str())
-        .collect();
+    let places: Vec<&str> = card.usages.iter().map(|usage| &*usage.place).collect();
     assert_eq!(places, ["src/checkout.ts:1"]);
-    assert_eq!(card.usages_label().as_deref(), Some("1 usage"));
+    assert_eq!(card.usages_heading.as_deref(), Some("1 USAGE"));
 }
 
 #[test]
@@ -185,11 +184,18 @@ fn a_definition_in_a_changed_file_the_tour_shows_jumps_in_the_tour() {
     let NameTarget::Tour(target) = &definition.target else {
         panic!("shown in the tour, so a jump: {:?}", definition.target);
     };
-    assert_eq!(
-        target.place,
-        JumpPlace::Piece("src/pricing.ts#price".parse().unwrap())
-    );
+    let line = LineLocation {
+        path: file_path("src/pricing.ts"),
+        side: Side::Head,
+        line: line(1),
+    };
+    assert_eq!(target.place, JumpPlace::Line(line.clone()));
     review.jump_to(target);
+    assert_eq!(
+        Some(review.page().row_of_jump(target)),
+        review.page().row_of_line(&line),
+        "the page scrolls to the line itself"
+    );
 }
 
 #[test]
@@ -210,7 +216,7 @@ fn a_removed_line_is_looked_up_at_base() {
             card.definitions
         );
     };
-    assert_eq!(definition.place, "legacy/old.ts:1");
+    assert_eq!(&*definition.place, "legacy/old.ts:1");
     assert!(definition.in_pr);
     let NameTarget::Tour(target) = &definition.target else {
         panic!(
@@ -218,7 +224,14 @@ fn a_removed_line_is_looked_up_at_base() {
             definition.target
         );
     };
-    assert_eq!(target.place, JumpPlace::File(file_path("legacy/old.ts")));
+    assert_eq!(
+        target.place,
+        JumpPlace::Line(LineLocation {
+            path: file_path("legacy/old.ts"),
+            side: Side::Base,
+            line: line(1),
+        })
+    );
     let cart = found(card_of(
         &mut review,
         &source,
@@ -243,6 +256,116 @@ fn a_removed_line_is_looked_up_at_base() {
         &hover("src/checkout.ts", Side::Head, 1, "Legacy"),
     ));
     assert_eq!(at_head.definitions.len(), 0);
+}
+
+#[test]
+fn a_place_in_a_changed_file_outside_every_shown_hunk_opens_as_a_code_link() {
+    let far_at_base = format!("export function far() {{}}\n{}far();\n", "//\n".repeat(20));
+    let shop = Shop::with_changes(&[("src/far.ts".to_owned(), far_at_base)], |repo| {
+        repo.write(
+            "src/far.ts",
+            &format!(
+                "export function far() {{}}\n{}far(); far();\n",
+                "//\n".repeat(20)
+            ),
+        );
+    });
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/far.ts", Side::Head, 22, "far"),
+    ));
+
+    let [definition] = card.definitions.as_slice() else {
+        panic!("one definition expected: {:?}", card.definitions);
+    };
+    assert!(definition.in_pr);
+    let NameTarget::Code(link) = &definition.target else {
+        panic!(
+            "line 1 is far from the change, so no page shows it: {:?}",
+            definition.target
+        );
+    };
+    assert_eq!(
+        on_github(&review, link),
+        format!(
+            "https://github.com/acme/shop/blob/{}/src/far.ts#L1",
+            shop.head
+        )
+    );
+}
+
+#[test]
+fn an_unchanged_line_found_at_base_jumps_to_the_row_that_shows_it() {
+    let shop = Shop::with_changes(
+        &[(
+            "src/use.ts".to_owned(),
+            "price();\nprice();\nprice();\n".to_owned(),
+        )],
+        |repo| repo.write("src/use.ts", "price();\nprice();\nprice(); price();\n"),
+    );
+    let source = shop.source();
+    let mut review = shop.open(&source);
+    let files_at_head = review.files_at_head_request().read(&source);
+    review.set_files_at_head(files_at_head);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/use.ts", Side::Base, 3, "price"),
+    ));
+
+    let usage = card
+        .usages
+        .iter()
+        .find(|usage| &*usage.place == "src/use.ts:1")
+        .expect("line 1 uses price at base");
+    let NameTarget::Tour(target) = &usage.target else {
+        panic!("the safety net shows line 1: {:?}", usage.target);
+    };
+    assert_eq!(
+        target.place,
+        JumpPlace::Line(LineLocation {
+            path: file_path("src/use.ts"),
+            side: Side::Head,
+            line: line(1),
+        }),
+        "an unchanged row is shown at its head line"
+    );
+}
+
+#[test]
+fn without_a_clone_a_removed_line_reads_the_old_path_of_a_renamed_file() {
+    let basket = "export class Basket {}\n// a\n// b\n// c\n// d\n";
+    let shop = Shop::with_changes(
+        &[
+            ("src/old_name.ts".to_owned(), basket.to_owned()),
+            ("src/buy.ts".to_owned(), "new Basket();\n".to_owned()),
+        ],
+        |repo| {
+            repo.git(&["mv", "src/old_name.ts", "src/new_name.ts"]);
+            repo.write("src/new_name.ts", &format!("{basket}// e\n"));
+            repo.write("src/buy.ts", "new Thing();\n");
+        },
+    );
+    let source = NoClone(shop.source());
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/buy.ts", Side::Base, 1, "Basket"),
+    ));
+
+    let places: Vec<&str> = card
+        .definitions
+        .iter()
+        .map(|definition| &*definition.place)
+        .collect();
+    assert_eq!(places, ["src/old_name.ts:1"]);
 }
 
 #[test]
@@ -276,15 +399,19 @@ fn a_failed_lookup_shows_why_and_is_asked_again_on_the_next_hover() {
     let source = shop.source();
     let mut review = shop.open(&source);
     let hovered = hover("src/checkout.ts", Side::Head, 4, "Cart");
+    let git = shop.repo.path().join(".git");
+    let git_away = shop.repo.path().join(".git-away");
 
+    std::fs::rename(&git, &git_away).unwrap();
     let work = review.look_up_name(&hovered).unwrap();
-    review.name_looked_up(work.run(&Unreadable(shop.source())));
+    review.name_looked_up(work.run(&source));
+    std::fs::rename(&git_away, &git).unwrap();
 
     let card = review.definition_card(&hovered);
-    let Some(DefinitionCard::Failed { because, .. }) = card.as_deref() else {
-        panic!("expected a failed card");
+    let Some(DefinitionCard::Failed { says, .. }) = card.as_deref() else {
+        panic!("git grep cannot run, so the lookup fails: {card:?}");
     };
-    assert!(because.contains("cannot read"), "{because}");
+    assert!(says.starts_with("Could not look up Cart: "), "{says}");
     let again = review
         .look_up_name(&hovered)
         .expect("a failure is tried again");
@@ -310,10 +437,10 @@ fn more_than_twenty_usages_show_twenty_and_count_the_rest() {
 
     assert_eq!(card.usages.len(), 20);
     assert_eq!(card.usages_not_shown, 6);
-    assert_eq!(card.usages_label().as_deref(), Some("26 usages"));
-    assert_eq!(card.more_usages_label().as_deref(), Some("and 6 more"));
+    assert_eq!(card.usages_heading.as_deref(), Some("26 USAGES"));
+    assert_eq!(card.more_usages.as_deref(), Some("and 6 more"));
     assert_eq!(
-        card.usages.first().map(|usage| usage.place.as_str()),
+        card.usages.first().map(|usage| &*usage.place),
         Some("src/checkout.ts:2"),
         "usages in the PR's files come first"
     );
@@ -359,39 +486,6 @@ fn a_word_in_too_many_files_says_the_search_was_cut_short() {
     ));
 
     assert_eq!(card.notes, [CardNote::SearchCutShort]);
-}
-
-struct Unreadable(LocalGit);
-
-impl CodeSource for Unreadable {
-    fn file_at(&self, _sha: &Sha, path: &FilePath) -> anyhow::Result<String> {
-        anyhow::bail!("cannot read {path}")
-    }
-    fn blob_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<Arc<[u8]>> {
-        self.0.blob_at(sha, path)
-    }
-    fn blob_info_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<BlobInfo> {
-        self.0.blob_info_at(sha, path)
-    }
-    fn diff(&self, base: &Sha, head: &Sha) -> anyhow::Result<Vec<FileDiff>> {
-        self.0.diff(base, head)
-    }
-    fn merge_base(&self, a: &Sha, b: &Sha) -> anyhow::Result<Sha> {
-        self.0.merge_base(a, b)
-    }
-    fn working_tree_is_at(&self, head: &Sha) -> bool {
-        self.0.working_tree_is_at(head)
-    }
-    fn change_set_on_disk(
-        &self,
-        change_set: &LocalChangeSet,
-        snapshot: &Sha,
-    ) -> anyhow::Result<OnDisk> {
-        self.0.change_set_on_disk(change_set, snapshot)
-    }
-    fn local_clone(&self) -> Option<&Path> {
-        self.0.local_clone()
-    }
 }
 
 struct NoClone(LocalGit);

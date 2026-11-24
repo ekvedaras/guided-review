@@ -1,17 +1,19 @@
 //! The Definition card of a name hovered in a diff line: which commit it is read at, who answers,
 //! and where a click on what the card lists goes.
 
+use std::cell::OnceCell;
+use std::sync::Arc;
+
+use crate::file_path::FilePath;
 use crate::navigation::{Lookup, Place};
 use crate::pieces::ChangedFile;
 use crate::viewer::code_link::CodeLinks;
 use crate::viewer::jump::{JumpPlace, JumpTarget};
 use crate::viewer::name_card::{DefinitionCard, NameTarget, PlacesOfReview};
 use crate::viewer::name_desk::{HoveredName, NameKey, NameOutcome, NameWork};
-use crate::viewer::step_page::Side;
+use crate::viewer::step_page::{LineLocation, PieceDiff, Side};
 
-use std::sync::Arc;
-
-use super::ReviewCore;
+use super::{ReviewCore, Screen};
 
 impl ReviewCore {
     /// The lookup to run off the UI thread for a name under the pointer, or `None` when it is on
@@ -45,10 +47,7 @@ impl ReviewCore {
                 let places = ReviewPlaces::of(self, key.side);
                 DefinitionCard::of(&lookup, &hovered, &places)
             }
-            Err(because) => DefinitionCard::Failed {
-                word: key.word.clone(),
-                because,
-            },
+            Err(because) => DefinitionCard::failed(key.word.clone(), because),
         };
         self.names.keep(key, card);
     }
@@ -63,17 +62,14 @@ impl ReviewCore {
             .files
             .iter()
             .find(|file| file.path == hovered.at.path)?;
-        let (sha, path) = match hovered.at.side {
-            Side::Head => (self.head.clone(), file.path.clone()),
-            Side::Base => (
-                self.base.clone(),
-                file.old_path.clone().unwrap_or_else(|| file.path.clone()),
-            ),
+        let sha = match hovered.at.side {
+            Side::Head => self.head.clone(),
+            Side::Base => self.base.clone(),
         };
         Some(NameKey {
             side: hovered.at.side,
             sha,
-            path,
+            path: file.path_on(hovered.at.side).clone(),
             line: hovered.at.line,
             word: hovered.word.clone(),
         })
@@ -85,6 +81,8 @@ struct ReviewPlaces<'a> {
     core: &'a ReviewCore,
     side: Side,
     tour_places: Vec<JumpTarget>,
+    /// What each screen shows, in reading order; built on the first place in a changed file.
+    screens: OnceCell<Vec<(Screen, Vec<PieceDiff>)>>,
 }
 
 impl<'a> ReviewPlaces<'a> {
@@ -93,44 +91,63 @@ impl<'a> ReviewPlaces<'a> {
             core,
             side,
             tour_places: core.jump_targets(""),
+            screens: OnceCell::new(),
         }
     }
 
     /// The changed file that is at `path` on this side of the review.
-    fn changed_file_at(&self, path: &crate::file_path::FilePath) -> Option<&'a ChangedFile> {
-        self.core.files.iter().find(|file| match self.side {
-            Side::Head => file.path == *path,
-            Side::Base => file.old_path.as_ref().unwrap_or(&file.path) == path,
+    fn changed_file_at(&self, path: &FilePath) -> Option<&'a ChangedFile> {
+        self.core
+            .files
+            .iter()
+            .find(|file| file.path_on(self.side) == path)
+    }
+
+    fn screens(&self) -> &[(Screen, Vec<PieceDiff>)] {
+        self.screens.get_or_init(|| {
+            let mut screens: Vec<(Screen, Vec<PieceDiff>)> = Vec::new();
+            for target in &self.tour_places {
+                if screens.iter().any(|(screen, _)| *screen == target.screen) {
+                    continue;
+                }
+                let pieces = target
+                    .screen
+                    .shown_on()
+                    .and_then(|shown_on| self.core.pieces_shown_on(shown_on));
+                if let Some(pieces) = pieces {
+                    screens.push((target.screen.clone(), pieces));
+                }
+            }
+            screens
         })
     }
 
+    /// The first screen that shows the line, landing on its row; `None` for a line no page shows.
     fn tour_target(&self, place: &Place) -> Option<JumpTarget> {
         let file = self.changed_file_at(&place.path)?;
-        let line = usize::try_from(place.line.get()).ok()?;
-        let in_piece = (self.side == Side::Head)
-            .then(|| {
-                file.pieces.iter().find(|piece| {
-                    piece
-                        .head_lines
-                        .as_ref()
-                        .is_some_and(|lines| lines.contains(&line))
-                })
-            })
-            .flatten();
-        let shown = |wanted: JumpPlace| {
+        let wanted = LineLocation {
+            path: file.path.clone(),
+            side: self.side,
+            line: place.line,
+        };
+        self.screens().iter().find_map(|(screen, pieces)| {
+            let row = pieces
+                .iter()
+                .flat_map(PieceDiff::lines)
+                .find(|row| row.shows(&wanted))?;
             self.tour_places
                 .iter()
-                .find(|target| target.place == wanted)
-                .cloned()
-        };
-        in_piece
-            .and_then(|piece| shown(JumpPlace::Piece(piece.id.clone())))
-            .or_else(|| shown(JumpPlace::File(file.path.clone())))
+                .find(|target| {
+                    target.screen == *screen
+                        && matches!(&target.place, JumpPlace::File(path) if *path == file.path)
+                })
+                .map(|target| target.at_line(row.location.clone()))
+        })
     }
 }
 
 impl PlacesOfReview for ReviewPlaces<'_> {
-    fn is_changed(&self, path: &crate::file_path::FilePath) -> bool {
+    fn is_changed(&self, path: &FilePath) -> bool {
         self.changed_file_at(path).is_some()
     }
 

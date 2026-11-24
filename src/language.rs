@@ -101,6 +101,11 @@ impl Language {
         compiled.get_or_init(|| Query::new(&self.grammar(), text).expect("valid tags query"))
     }
 
+    /// Whether the grammar spells `word` as one of its own tokens: `fn`, `function`, `const`.
+    pub fn is_keyword(self, word: &str) -> bool {
+        self.grammar().id_for_node_kind(word, false) != 0
+    }
+
     /// Statements that only bring names into the file: they make up the `imports` piece.
     pub fn is_import(self, node: Node) -> bool {
         match self {
