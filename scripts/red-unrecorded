@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Warns about #[test] functions the change adds that scripts/red never recorded as red. A warning, not a failure: a human judges.
+# Usage: scripts/red-unrecorded <base-ref>   (compares the base's fork point with HEAD plus everything on disk)
+set -euo pipefail
+
+base="${1:?usage: scripts/red-unrecorded <base-ref>}"
+
+cd "$(dirname "$0")/.."
+
+index=$(mktemp)
+trap 'rm -f "$index"' EXIT
+export GIT_INDEX_FILE="$index"
+rm -f "$index"
+git add -A
+head=$(git write-tree)
+unset GIT_INDEX_FILE
+fork=$(git merge-base "$base" HEAD)
+
+added=$(git diff -U0 "$fork" "$head" -- '*.rs' | awk '
+    /^\+\+\+ / { next }
+    /^\+[[:space:]]*#\[test\]/ { pending = 1; next }
+    pending && /^\+/ && match($0, /fn [A-Za-z0-9_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0; next }
+    /^[^+]/ { pending = 0 }
+')
+
+log=$(git rev-parse --git-path red-log)
+recorded=""
+[ -f "$log" ] && recorded=$(cut -f1 "$log")
+
+missing=""
+for name in $added; do
+    if ! printf '%s\n' "$recorded" | grep -qE "(^|::)$name\$"; then
+        missing="$missing $name"
+    fi
+done
+
+if [ -n "$missing" ]; then
+    echo "warning: tests added with no red run recorded (scripts/red <test>):"
+    for name in $missing; do echo "  $name"; done
+else
+    echo "every added test has a recorded red run"
+fi
