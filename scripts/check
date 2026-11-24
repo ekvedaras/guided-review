@@ -44,6 +44,8 @@ else
         fi
     fi
     scripts/changes-check "${changes_base:-origin/main}" --worktree
+    echo "== tests seen red (a warning only)"
+    scripts/red-unrecorded "${changes_base:-origin/main}"
 fi
 echo "== fmt"
 cargo fmt --all -- --check

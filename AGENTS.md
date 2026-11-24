@@ -17,7 +17,9 @@ Rust 2024 gpui app.
 - All integration tests are one crate, `tests/it/main.rs`, one module per topic. A new file needs a `mod` line there.
 - `tests/it/support/` holds the fixture repo, CLI runner and fake ports (`fake_ports.rs`). `tests/fixtures/` holds recorded data.
 - `src/viewer/` is the window-free core and is tested through those fakes. `src/app/` is gpui with no window tests, so put logic behind a viewer method.
-- New behaviour is test-first, one slice at a time: write the test, stub the new code with `todo!()`, see `cargo test <filter>` fail on that test, then implement. A test that was never red proves nothing.
+- New behaviour is test-first, one test at a time: write the test, stub the new code so it returns a wrong but plausible value (not `todo!()`: a panic is not an assertion failing, and one `todo!()` in a shared function fails every test that reaches it), run `scripts/red <full test name>` to see it fail on its assertion and record that in `.git/red-log`, then implement. A test that was never red proves nothing.
+- A test that passes on the first run is broken on purpose, seen red with `scripts/red`, then restored. A "nothing happens" test (no event, no change) is red only after you make it happen in the code.
+- `scripts/check` warns, without failing, about `#[test]` functions the change adds that `.git/red-log` lacks (not in CI). Judge each one; do not record a red you did not see.
 
 ## Install
 

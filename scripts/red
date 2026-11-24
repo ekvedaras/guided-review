@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Runs exact tests and records each one that failed on an assertion, so a test seen red leaves a trace.
+# A panic from todo!() or unimplemented!() is not red: the stub should return a wrong but plausible value (AGENTS.md, Tests).
+# Usage: scripts/red <exact-test-name>...   (the full name, module path included, as `cargo test -- --list` prints it)
+# Appends "name<TAB>reason<TAB>date<TAB>HEAD" to the git dir's red-log, which scripts/check reads.
+set -uo pipefail
+
+cd "$(dirname "$0")/.."
+
+[ "$#" -gt 0 ] || { echo "usage: scripts/red <exact-test-name>..." >&2; exit 2; }
+
+if [ -x "$HOME/.cargo/bin/cargo" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+command -v cargo >/dev/null 2>&1 || { echo "cargo not found" >&2; exit 127; }
+
+if ! cargo test --all-features --no-run; then
+    echo "the build fails: that is not red, fix the build first" >&2
+    exit 1
+fi
+
+out=$(mktemp)
+trap 'rm -f "$out"' EXIT
+cargo test --all-features --no-fail-fast -- --exact "$@" >"$out" 2>&1
+
+verdicts=$(WANTED=$(printf '%s\n' "$@") awk '
+    BEGIN { n = split(ENVIRON["WANTED"], w, "\n"); for (i = 1; i <= n; i++) want[w[i]] = 1 }
+    /^---- .* stdout ----$/ { current = $2; state = "section"; next }
+    state == "section" && /panicked at/ { state = "message"; next }
+    state == "message" {
+        message[current] = $0
+        stub[current] = ($0 ~ /^(not yet implemented|not implemented)(:|$)/)
+        state = ""
+        next
+    }
+    /^test .* \.\.\. (ok|FAILED)$/ { status[$2] = $NF }
+    END {
+        for (name in want) {
+            if (!(name in status)) print "MISSING\t" name
+            else if (status[name] == "ok") print "PASSED\t" name
+            else if (stub[name]) print "STUB\t" name "\t" message[name]
+            else print "RED\t" name "\t" message[name]
+        }
+    }
+' "$out" | sort)
+
+log=$(git rev-parse --git-path red-log)
+head=$(git rev-parse --short HEAD)
+today=$(date +%F)
+bad=0
+while IFS=$'\t' read -r verdict name reason; do
+    [ -n "$verdict" ] || continue
+    case "$verdict" in
+        RED)
+            printf '%s\t%s\t%s\t%s\n' "$name" "$reason" "$today" "$head" >>"$log"
+            echo "red: $name ($reason)" ;;
+        STUB)
+            echo "not red: $name panicked in todo!()/unimplemented!(): $reason. Make the stub return a wrong but plausible value." >&2
+            bad=1 ;;
+        PASSED)
+            echo "not red: $name passed: break the code and run again" >&2
+            bad=1 ;;
+        MISSING)
+            echo "not run: $name matched no test; give the full name with its module path" >&2
+            bad=1 ;;
+    esac
+done <<<"$verdicts"
+exit "$bad"
