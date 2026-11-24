@@ -7,8 +7,8 @@ use guided_review::navigation::Word;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    CardNote, DefinitionCard, HoveredName, JumpPlace, LineLocation, NameTarget, Review,
-    ReviewStateFile, Side, Snippet,
+    Capture, CardNote, CodeRun, DefinitionCard, HoveredName, JumpPlace, LineLocation, NameTarget,
+    Review, ReviewStateFile, Side, Snippet,
 };
 use serde_json::{Value, json};
 
@@ -583,4 +583,145 @@ impl CodeSource for NoClone {
     fn working_tree_is_at(&self, head: &Sha) -> bool {
         self.0.working_tree_is_at(head)
     }
+}
+
+/// The text of each run with its capture, so a test reads the colours as a reviewer sees them.
+fn painted<'a>(text: &'a str, runs: &[CodeRun]) -> Vec<(&'a str, Option<Capture>, bool)> {
+    runs.iter()
+        .map(|run| {
+            (
+                text.get(run.range.clone()).unwrap(),
+                run.capture,
+                run.is_name,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_php_usage_is_coloured_by_its_file_and_not_as_a_lone_line() {
+    let shop = Shop::with_files(&[(
+        "app/Orders.php".to_owned(),
+        "<?php\n\nclass Orders\n{\n    public function make()\n    {\n        return new Cart('x');\n    }\n}\n"
+            .to_owned(),
+    )]);
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+
+    let php = card
+        .usages
+        .iter()
+        .find(|file| &*file.path == "app/Orders.php")
+        .unwrap();
+    let snippet = &php.lines[0].snippet;
+    assert_eq!(&*snippet.text, "return new Cart('x');");
+    let painted = painted(&snippet.text, &snippet.runs);
+    assert!(
+        painted.contains(&("return", Some(Capture::Keyword), false)),
+        "{painted:?}"
+    );
+    assert!(
+        painted.contains(&("new", Some(Capture::Keyword), false)),
+        "{painted:?}"
+    );
+    assert!(
+        painted.contains(&("Cart", Some(Capture::Constructor), true)),
+        "{painted:?}"
+    );
+    assert!(
+        painted.contains(&("x", Some(Capture::String), false)),
+        "{painted:?}"
+    );
+}
+
+#[test]
+fn a_rust_signature_is_coloured_where_its_lines_were_joined() {
+    let shop = Shop::with_files(&[(
+        "src/cart.rs".to_owned(),
+        "pub fn total(\n    cart: &Cart, // what is bought\n    tax: u32,\n) -> u32 {\n    1\n}\n"
+            .to_owned(),
+    )]);
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 5, "total"),
+    ));
+
+    let rust = card
+        .definitions
+        .iter()
+        .find(|row| row.place.starts_with("src/cart.rs"))
+        .unwrap();
+    assert_eq!(
+        &*rust.signature,
+        "pub fn total( cart: &Cart, // what is bought tax: u32, ) -> u32"
+    );
+    let painted = painted(&rust.signature, &rust.signature_runs);
+    assert!(
+        painted.contains(&("fn", Some(Capture::Keyword), false)),
+        "{painted:?}"
+    );
+    assert!(
+        painted.contains(&("total", Some(Capture::Function), false)),
+        "{painted:?}"
+    );
+    assert!(
+        painted.contains(&("Cart", Some(Capture::Type), false)),
+        "{painted:?}"
+    );
+    assert!(
+        painted.contains(&("u32", Some(Capture::TypeBuiltin), false)),
+        "{painted:?}"
+    );
+    assert!(
+        painted.contains(&("bought", Some(Capture::Comment), false)),
+        "{painted:?}"
+    );
+}
+
+#[test]
+fn a_snippet_cut_at_the_start_keeps_its_colours_on_the_same_text() {
+    let line = "const aVeryLongVariableNameThatPushesTheCallFarRight = total + price();";
+    let captures = [
+        (0..5, Capture::Keyword),
+        (6..58, Capture::Variable),
+        (63..68, Capture::Function),
+    ];
+
+    let snippet = Snippet::highlighted(line, "price", &captures);
+
+    assert!(snippet.text.starts_with('…'), "{}", snippet.text);
+    let painted = painted(&snippet.text, &snippet.runs);
+    assert_eq!(
+        painted.last(),
+        Some(&("price", Some(Capture::Function), true))
+    );
+    assert_eq!(snippet.name_text(), Some("price"));
+    assert!(
+        !painted.iter().any(|(text, ..)| *text == "const"),
+        "cut away: {painted:?}"
+    );
+    assert!(
+        painted.contains(&(line.get(55..58).unwrap(), Some(Capture::Variable), false)),
+        "{painted:?}"
+    );
+}
+
+#[test]
+fn the_name_stays_marked_without_any_colours() {
+    let snippet = Snippet::of("  total + price();", "price");
+
+    assert_eq!(
+        painted(&snippet.text, &snippet.runs),
+        [("price", None, true)]
+    );
 }

@@ -11,7 +11,7 @@ use gpui::{
 };
 
 use crate::viewer::{
-    DefinitionCard, DefinitionRow, FoundNames, NameTarget, Snippet, UsageFile, UsageLine,
+    CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, UsageFile, UsageLine,
 };
 
 use super::chip::chip;
@@ -193,7 +193,7 @@ fn definition_row(
                         .truncate()
                         .font_family(*CODE_FONT)
                         .text_sm()
-                        .child(SharedString::from(Arc::clone(&row.signature))),
+                        .child(code_text(colors, &row.signature, &row.signature_runs)),
                 )
                 .when(row.in_pr, |top| {
                     top.child(chip(colors, Tone::Accent).child("in this PR"))
@@ -292,26 +292,26 @@ fn usage_line(
             .text_color(colors.muted_text)
             .child(SharedString::from(Arc::clone(&row.number))),
     )
-    .child(
-        div()
-            .flex_1()
-            .min_w_0()
-            .truncate()
-            .text_color(colors.muted_text)
-            .child(snippet_text(colors, &row.snippet)),
-    )
+    .child(div().flex_1().min_w_0().truncate().child(code_text(
+        colors,
+        &row.snippet.text,
+        &row.snippet.runs,
+    )))
 }
 
-fn snippet_text(colors: &Colors, snippet: &Snippet) -> StyledText {
-    let marked = snippet.name.clone().map(|name| {
+/// The text coloured like the diff's code; the hovered name is semibold in its own colour.
+fn code_text(colors: &Colors, text: &Arc<str>, runs: &[CodeRun]) -> StyledText {
+    StyledText::new(SharedString::from(Arc::clone(text))).with_highlights(runs.iter().map(|run| {
+        let color = run
+            .capture
+            .map_or(colors.text, |capture| colors.code(capture));
         (
-            name,
+            run.range.clone(),
             HighlightStyle {
-                color: Some(colors.text.into()),
-                font_weight: Some(FontWeight::SEMIBOLD),
+                color: Some(color.into()),
+                font_weight: run.is_name.then_some(FontWeight::SEMIBOLD),
                 ..HighlightStyle::default()
             },
         )
-    });
-    StyledText::new(SharedString::from(Arc::clone(&snippet.text))).with_highlights(marked)
+    }))
 }

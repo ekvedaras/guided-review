@@ -52,6 +52,7 @@ mod move_offer;
 mod move_to_pr;
 mod name_card;
 mod name_desk;
+mod name_highlights;
 mod name_hover;
 mod new_commits;
 mod no_github;
@@ -169,7 +170,9 @@ pub use hand_offs::{
     ReplyPlacement, Reviewed, SeenMark, ThreadMessage,
 };
 pub use hidden_text::{HiddenPart, HiddenText};
-pub use highlight::{Capture, HighlightRequest, Highlights, Span, highlight_snippet};
+pub use highlight::{
+    Capture, HighlightRequest, Highlights, Span, highlight_file_lines, highlight_snippet,
+};
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,
 };
@@ -192,10 +195,11 @@ pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 pub use move_to_pr::{PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
 pub use name_card::{
-    CardNote, DefinitionCard, DefinitionRow, FoundNames, NameTarget, Snippet, USAGES_SHOWN,
-    UsageFile, UsageLine,
+    CardNote, CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, Snippet,
+    USAGES_SHOWN, UsageFile, UsageLine,
 };
 pub use name_desk::{HoveredName, NameOutcome, NameUnderPointer, NameWork};
+pub use name_highlights::NameHighlights;
 pub use name_hover::{HoverTicket, NameHover};
 pub use new_commits::{
     PickCodeSource, RepinnedTour, TourReloader, TourRepinner, catch_up_findings, repin_tour,

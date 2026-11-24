@@ -169,6 +169,7 @@ pub fn popover_by(word: Bounds<Pixels>, panel: impl IntoElement) -> Deferred {
         anchored()
             .position(word.origin)
             .offset(point(px(0.), word.size.height))
+            .snap_to_window_with_margin(px(8.))
             .child(div().occlude().child(panel)),
     )
 }

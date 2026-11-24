@@ -10,7 +10,8 @@ use crate::pieces::ChangedFile;
 use crate::viewer::code_link::CodeLinks;
 use crate::viewer::jump::{JumpPlace, JumpTarget};
 use crate::viewer::name_card::{DefinitionCard, NameTarget, PlacesOfReview};
-use crate::viewer::name_desk::{HoveredName, NameKey, NameOutcome, NameWork};
+use crate::viewer::name_desk::{HoveredName, Looked, NameKey, NameOutcome, NameWork};
+use crate::viewer::name_highlights::NameHighlights;
 use crate::viewer::step_page::{LineLocation, PieceDiff, Side};
 
 use super::{ReviewCore, Screen};
@@ -20,7 +21,12 @@ impl ReviewCore {
     /// its way or known, or the line is in no changed file. The card reads `Loading` from now on.
     pub fn look_up_name(&mut self, hovered: &HoveredName) -> Option<NameWork> {
         let key = self.name_key(hovered)?;
-        self.names.ask(key)
+        let changed = self
+            .files
+            .iter()
+            .map(|file| file.path_on(hovered.at.side).clone())
+            .collect();
+        self.names.ask(key, changed)
     }
 
     /// Takes in what a `NameWork` brought back and makes the card of it.
@@ -33,19 +39,20 @@ impl ReviewCore {
     /// hold in a real file.
     pub fn stage_looked_up_name(&mut self, hovered: &HoveredName, lookup: Lookup) {
         if let Some(key) = self.name_key(hovered) {
-            self.keep_card_of(key, Ok(lookup));
+            let highlights = NameHighlights::staged(&lookup);
+            self.keep_card_of(key, Ok(Looked { lookup, highlights }));
         }
     }
 
-    fn keep_card_of(&mut self, key: NameKey, result: Result<Lookup, String>) {
+    fn keep_card_of(&mut self, key: NameKey, result: Result<Looked, String>) {
         let card = match result {
-            Ok(lookup) => {
+            Ok(Looked { lookup, highlights }) => {
                 let hovered = Place {
                     path: key.path.clone(),
                     line: key.line,
                 };
                 let places = ReviewPlaces::of(self, key.side);
-                DefinitionCard::of(&lookup, &hovered, &places)
+                DefinitionCard::of(&lookup, &hovered, &places, &highlights)
             }
             Err(because) => DefinitionCard::failed(key.word.clone(), because),
         };

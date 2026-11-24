@@ -11,11 +11,12 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::line_number::LineNumber;
-use crate::navigation::{FileSearch, Lookup, Lookups, Word};
+use crate::navigation::{FileSearch, Lookup, Lookups, Place, Word};
 use crate::pull_request::Sha;
 
 use super::highlight::Capture;
 use super::name_card::DefinitionCard;
+use super::name_highlights::NameHighlights;
 use super::step_page::{LineLocation, Side};
 
 /// A name under the pointer in a shown diff line. The location's path is the file's new path, as
@@ -130,6 +131,8 @@ pub(super) struct NameKey {
 pub struct NameWork {
     lookups: Arc<Lookups>,
     key: NameKey,
+    /// The review's files as the key's commit names them, to rank the shown usages.
+    changed: Arc<[FilePath]>,
 }
 
 impl NameWork {
@@ -137,6 +140,20 @@ impl NameWork {
         let result = self
             .lookups
             .look_up(source, &self.key.sha, &self.key.word, &self.key.path)
+            .map(|lookup| {
+                let hovered = Place {
+                    path: self.key.path.clone(),
+                    line: self.key.line,
+                };
+                let highlights = NameHighlights::of(
+                    &lookup,
+                    &hovered,
+                    &|path| self.changed.contains(path),
+                    source,
+                    &self.key.sha,
+                );
+                Looked { lookup, highlights }
+            })
             .map_err(|error| format!("{error:#}"));
         NameOutcome {
             key: self.key,
@@ -145,10 +162,16 @@ impl NameWork {
     }
 }
 
+/// A lookup and the colours of what the card will show of it.
+pub struct Looked {
+    pub(super) lookup: Lookup,
+    pub(super) highlights: NameHighlights,
+}
+
 /// What a `NameWork` brought back, for `Review::name_looked_up`.
 pub struct NameOutcome {
     pub(super) key: NameKey,
-    pub(super) result: Result<Lookup, String>,
+    pub(super) result: Result<Looked, String>,
 }
 
 pub(super) struct NameDesk {
@@ -165,7 +188,7 @@ impl NameDesk {
     }
 
     /// Work to run unless the name is on its way or known. A failed lookup is asked again.
-    pub(super) fn ask(&mut self, key: NameKey) -> Option<NameWork> {
+    pub(super) fn ask(&mut self, key: NameKey, changed: Arc<[FilePath]>) -> Option<NameWork> {
         if self
             .cards
             .get(&key)
@@ -180,6 +203,7 @@ impl NameDesk {
         Some(NameWork {
             lookups: Arc::clone(&self.lookups),
             key,
+            changed,
         })
     }
 

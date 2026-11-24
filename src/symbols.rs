@@ -338,23 +338,80 @@ fn kind_of(capture: &str) -> Option<PieceKind> {
 
 /// The declaration without attributes and body: `public function total(): int`
 pub(crate) fn signature_of(node: Node, source: &str) -> String {
+    signature_with_origin(node, source).text
+}
+
+/// A declaration as one line, and where each of its bytes sits in the source.
+pub(crate) struct Signature {
+    pub text: String,
+    /// The source byte each byte of `text` came from; `NO_ORIGIN` for the single space that
+    /// stands for a run of whitespace.
+    pub origin: Vec<u32>,
+    space_pending: bool,
+}
+
+pub(crate) const NO_ORIGIN: u32 = u32::MAX;
+
+impl Signature {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            text: String::new(),
+            origin: Vec::new(),
+            space_pending: false,
+        }
+    }
+
+    /// Adds `range` of `source`, whitespace runs collapsed to one space and none at the start.
+    pub(crate) fn push(&mut self, source: &str, range: Range<usize>) {
+        for (at, c) in source.get(range.clone()).unwrap_or_default().char_indices() {
+            if c.is_whitespace() {
+                self.space_pending = true;
+                continue;
+            }
+            if self.space_pending && !self.text.is_empty() {
+                self.text.push(' ');
+                self.origin.push(NO_ORIGIN);
+            }
+            self.space_pending = false;
+            self.text.push(c);
+            for byte in 0..c.len_utf8() {
+                let from = range.start + at + byte;
+                self.origin.push(u32::try_from(from).unwrap_or(NO_ORIGIN));
+            }
+        }
+    }
+
+    /// Without the semicolons that end it.
+    pub(crate) fn finished(mut self) -> Self {
+        while self.text.ends_with([';', ' ']) {
+            self.text.pop();
+            self.origin.pop();
+        }
+        self
+    }
+}
+
+pub(crate) fn signature_with_origin(node: Node, source: &str) -> Signature {
+    let mut signature = Signature::empty();
+    push_signature(&mut signature, node, source);
+    signature.finished()
+}
+
+pub(crate) fn push_signature(signature: &mut Signature, node: Node, source: &str) {
     let mut children = node.walk();
     let start = node
         .children(&mut children)
         .find(|child| !matches!(child.kind(), "attribute_list" | "decorator" | "comment"))
         .map_or_else(|| node.start_byte(), |child| child.start_byte());
     let end = body_of(node).map_or_else(|| node.end_byte(), |body| body.start_byte());
-    let mut declaration = String::new();
     let mut from = start;
     for comment in comments_inside(node) {
         if comment.start >= from && comment.end <= end {
-            declaration.push_str(source.get(from..comment.start).unwrap_or_default());
+            signature.push(source, from..comment.start);
             from = comment.end;
         }
     }
-    declaration.push_str(source.get(from..end.max(from)).unwrap_or_default());
-    let declaration = declaration.trim_end().trim_end_matches(';');
-    declaration.split_whitespace().collect::<Vec<_>>().join(" ")
+    signature.push(source, from..end.max(from));
 }
 
 /// Arrow functions and test callbacks keep their body further down:

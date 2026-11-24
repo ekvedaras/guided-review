@@ -5,7 +5,7 @@ use tree_sitter::{Node, QueryCursor, StreamingIterator};
 use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::line_number::LineNumber;
-use crate::symbols::signature_of;
+use crate::symbols::{Signature, push_signature};
 
 use super::Word;
 
@@ -85,6 +85,9 @@ pub struct Definition {
     pub place: Place,
     /// The declaration without its body: `pub fn total(&self) -> u32`
     pub signature: Arc<str>,
+    /// The source byte each byte of `signature` came from, `u32::MAX` for the space that joins
+    /// lines; empty when the signature was not cut from a file.
+    pub signature_origin: Arc<[u32]>,
     pub doc: Option<Arc<str>>,
 }
 
@@ -153,11 +156,13 @@ impl WordInFile {
         let mut definitions: Vec<Definition> = tagged
             .iter()
             .filter_map(|tagged| {
+                let signature = signature_with_export(tagged.node, source);
                 Some(Definition {
                     name: word.clone(),
                     kind: tagged.kind,
                     place: place_of(path, tagged.name)?,
-                    signature: signature_with_export(tagged.node, source).into(),
+                    signature: signature.text.into(),
+                    signature_origin: signature.origin.into(),
                     doc: doc_comment_above(tagged.node, source).map(Into::into),
                 })
             })
@@ -232,19 +237,14 @@ fn outermost(node: Node) -> Node {
 }
 
 /// `export const total = (cart: Cart): number =>`
-fn signature_with_export(node: Node, source: &str) -> String {
-    let signature = signature_of(node, source);
+fn signature_with_export(node: Node, source: &str) -> Signature {
+    let mut signature = Signature::empty();
     let outer = outermost(node);
-    if outer.id() == node.id() {
-        return signature;
+    if outer.id() != node.id() {
+        signature.push(source, outer.start_byte()..node.start_byte());
     }
-    let export = source
-        .get(outer.start_byte()..node.start_byte())
-        .unwrap_or_default()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!("{export} {signature}")
+    push_signature(&mut signature, node, source);
+    signature.finished()
 }
 
 /// The `///` or `/** */` comments right above a definition, past its Rust attributes.

@@ -8,7 +8,9 @@ use crate::file_path::FilePath;
 use crate::navigation::{Definition, Lookup, Place, Reach, Usage, Word};
 
 use super::code_link::CodeLink;
+use super::highlight::Capture;
 use super::jump::JumpTarget;
+use super::name_highlights::NameHighlights;
 
 /// How many usages the card lists; the rest are counted.
 pub const USAGES_SHOWN: usize = 20;
@@ -40,9 +42,60 @@ impl CardNote {
     }
 }
 
+/// A stretch of a card's code text: what it is, for the colour, and whether it is the hovered name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeRun {
+    pub range: Range<usize>,
+    pub capture: Option<Capture>,
+    pub is_name: bool,
+}
+
+impl CodeRun {
+    /// The captures cut around `name`, which gets a run of its own that keeps the capture it sat in.
+    /// `captures` are in text order and do not overlap.
+    pub fn compose(
+        captures: &[(Range<usize>, Capture)],
+        name: Option<&Range<usize>>,
+    ) -> Arc<[Self]> {
+        let mut runs: Vec<Self> = Vec::new();
+        for (range, capture) in captures {
+            let pieces = match name {
+                Some(name) => vec![
+                    range.start..range.end.min(name.start),
+                    range.start.max(name.end)..range.end,
+                ],
+                None => vec![range.clone()],
+            };
+            runs.extend(
+                pieces
+                    .into_iter()
+                    .filter(|piece| piece.start < piece.end)
+                    .map(|range| Self {
+                        range,
+                        capture: Some(*capture),
+                        is_name: false,
+                    }),
+            );
+        }
+        if let Some(name) = name {
+            runs.push(Self {
+                range: name.clone(),
+                capture: captures
+                    .iter()
+                    .find(|(range, _)| range.start <= name.start && name.start < range.end)
+                    .map(|(_, capture)| *capture),
+                is_name: true,
+            });
+        }
+        runs.sort_by_key(|run| run.range.start);
+        runs.into()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefinitionRow {
     pub signature: Arc<str>,
+    pub signature_runs: Arc<[CodeRun]>,
     pub doc: Option<Arc<str>>,
     /// `src/cart.ts:4`
     pub place: Arc<str>,
@@ -57,6 +110,8 @@ pub struct Snippet {
     pub text: Arc<str>,
     /// Where the name sits in `text`; `None` when the line does not hold it as a whole word.
     pub name: Option<Range<usize>>,
+    /// The colours of `text` and the name's mark, in text order.
+    pub runs: Arc<[CodeRun]>,
 }
 
 /// A name that starts past this many characters is shown from a few characters before it.
@@ -67,10 +122,20 @@ const CUT: char = '…';
 
 impl Snippet {
     pub fn of(line: &str, word: &str) -> Self {
-        let line = line.trim();
+        Self::built(line.trim(), word, &[])
+    }
+
+    /// `line` is trimmed, and `captures` are byte ranges into it, in order.
+    pub fn highlighted(line: &str, word: &str, captures: &[(Range<usize>, Capture)]) -> Self {
+        Self::built(line, word, captures)
+    }
+
+    fn built(line: &str, word: &str, captures: &[(Range<usize>, Capture)]) -> Self {
         let Some(at) = whole_word_at(line, word) else {
+            let text = first_chars(line, SNIPPET_CHARS_AT_MOST);
             return Self {
-                text: first_chars(line, SNIPPET_CHARS_AT_MOST).into(),
+                runs: CodeRun::compose(&cut_captures(captures, 0, text.len(), 0), None),
+                text: text.into(),
                 name: None,
             };
         };
@@ -88,8 +153,11 @@ impl Snippet {
         };
         let shown = first_chars(line.get(start..).unwrap_or_default(), SNIPPET_CHARS_AT_MOST);
         let name_at = lead.len() + at - start;
+        let name = name_at..name_at + word.len();
+        let captures = cut_captures(captures, start, shown.len(), lead.len());
         Self {
-            name: Some(name_at..name_at + word.len()),
+            runs: CodeRun::compose(&captures, Some(&name)),
+            name: Some(name),
             text: format!("{lead}{shown}").into(),
         }
     }
@@ -97,6 +165,27 @@ impl Snippet {
     pub fn name_text(&self) -> Option<&str> {
         self.name.clone().and_then(|name| self.text.get(name))
     }
+}
+
+/// The captures that fall in `len` bytes from `start`, moved to where those bytes are shown after
+/// `lead` bytes of text.
+fn cut_captures(
+    captures: &[(Range<usize>, Capture)],
+    start: usize,
+    len: usize,
+    lead: usize,
+) -> Vec<(Range<usize>, Capture)> {
+    let end = start + len;
+    captures
+        .iter()
+        .filter(|(range, _)| range.end > start && range.start < end)
+        .map(|(range, capture)| {
+            (
+                range.start.max(start) - start + lead..range.end.min(end) - start + lead,
+                *capture,
+            )
+        })
+        .collect()
 }
 
 fn first_chars(text: &str, count: usize) -> &str {
@@ -194,24 +283,18 @@ impl DefinitionCard {
         }
     }
 
-    pub(super) fn of(lookup: &Lookup, hovered: &Place, review: &dyn PlacesOfReview) -> Self {
+    pub(super) fn of(
+        lookup: &Lookup,
+        hovered: &Place,
+        review: &dyn PlacesOfReview,
+        highlights: &NameHighlights,
+    ) -> Self {
         let definitions: Vec<DefinitionRow> = lookup
             .definitions
             .iter()
-            .map(|definition| definition_row(definition, review))
+            .map(|definition| definition_row(definition, review, highlights))
             .collect();
-        let mut usages: Vec<&Usage> = lookup
-            .usages
-            .iter()
-            .filter(|usage| usage.place != *hovered)
-            .collect();
-        usages.sort_by_key(|usage| {
-            (
-                !review.is_changed(&usage.place.path),
-                usage.place.path.as_str(),
-                usage.place.line.get(),
-            )
-        });
+        let usages = usages_in_card_order(lookup, hovered, &|path| review.is_changed(path));
         let usages_found = usages.len();
         let by_file = by_file(&usages);
         let mut budget = USAGES_SHOWN;
@@ -221,7 +304,7 @@ impl DefinitionCard {
             let shown = group.len().min(budget);
             budget -= shown;
             files_not_shown += usize::from(shown < group.len());
-            if let Some(file) = usage_file(group, shown, &lookup.word, review) {
+            if let Some(file) = usage_file(group, shown, &lookup.word, review, highlights) {
                 files.push(file);
             }
         }
@@ -251,6 +334,28 @@ impl DefinitionCard {
     }
 }
 
+/// The usages the card counts: those in the review's files first, then by path and line; the
+/// hovered line is left out.
+pub(super) fn usages_in_card_order<'a>(
+    lookup: &'a Lookup,
+    hovered: &Place,
+    is_changed: &dyn Fn(&FilePath) -> bool,
+) -> Vec<&'a Usage> {
+    let mut usages: Vec<&Usage> = lookup
+        .usages
+        .iter()
+        .filter(|usage| usage.place != *hovered)
+        .collect();
+    usages.sort_by_key(|usage| {
+        (
+            !is_changed(&usage.place.path),
+            usage.place.path.as_str(),
+            usage.place.line.get(),
+        )
+    });
+    usages
+}
+
 fn by_file<'a>(sorted: &[&'a Usage]) -> Vec<Vec<&'a Usage>> {
     let mut groups: Vec<Vec<&Usage>> = Vec::new();
     for usage in sorted {
@@ -273,6 +378,7 @@ fn usage_file(
     shown: usize,
     word: &Word,
     review: &dyn PlacesOfReview,
+    highlights: &NameHighlights,
 ) -> Option<UsageFile> {
     let first = group.first()?;
     if shown == 0 {
@@ -291,7 +397,11 @@ fn usage_file(
             .take(shown)
             .map(|usage| UsageLine {
                 number: usage.place.line.get().to_string().into(),
-                snippet: Snippet::of(&usage.text, word.as_str()),
+                snippet: Snippet::highlighted(
+                    &usage.text,
+                    word.as_str(),
+                    highlights.usage(&usage.place),
+                ),
                 target: review.target_of(&usage.place),
             })
             .collect(),
@@ -317,9 +427,14 @@ fn counts(definitions: usize, usages: usize, files: usize) -> String {
     parts.join(" · ")
 }
 
-fn definition_row(definition: &Definition, review: &dyn PlacesOfReview) -> DefinitionRow {
+fn definition_row(
+    definition: &Definition,
+    review: &dyn PlacesOfReview,
+    highlights: &NameHighlights,
+) -> DefinitionRow {
     DefinitionRow {
         signature: Arc::clone(&definition.signature),
+        signature_runs: CodeRun::compose(highlights.definition(&definition.place), None),
         doc: definition.doc.clone(),
         place: place_label(&definition.place),
         in_pr: review.is_changed(&definition.place.path),

@@ -1558,6 +1558,7 @@ fn staged_lookup(hovered: &HoveredName) -> Lookup {
                     "enum {word}: string implements HasLabel, HasColor, JsonSerializable"
                 )
                 .into(),
+                signature_origin: Arc::from([]),
                 doc: Some(
                     "Where a scheduled delivery is in its life, from the week it is planned to the day it is delivered or called off. Drives the badge in the schedule."
                         .into(),
@@ -1568,6 +1569,7 @@ fn staged_lookup(hovered: &HoveredName) -> Lookup {
                 kind: DefinitionKind::Enum,
                 place: place("resources/js/features/standing-orders/types/standing-order-schedule-item-status.ts", 3),
                 signature: format!("export enum {word}").into(),
+                signature_origin: Arc::from([]),
                 doc: None,
             },
         ],
