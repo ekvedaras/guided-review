@@ -6,6 +6,7 @@ use guided_review::app_folders::AppFolders;
 use guided_review::github::GitHub;
 use guided_review::language::Language;
 use guided_review::local_git::LocalGit;
+use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, DefinitionKind, FallbackReason, FileSearch,
     LanguageServers, Lookups, ManagedServers, NavigationRequest, Place, ServerCatalog,
@@ -795,4 +796,55 @@ fn a_question_the_server_cancels_because_files_changed_is_asked_again() {
     );
     assert_eq!(answer.lookup.definitions.len(), 1);
     assert_eq!(rig.params_of("textDocument/definition").len(), 2);
+}
+
+#[test]
+fn a_local_review_is_answered_in_the_server_checkout_at_its_snapshot_and_update_moves_it_to_the_next()
+ {
+    let rig = Rig::answering_add();
+    rig.repo
+        .write("src/lib.rs", &format!("{LIB}pub fn first_draft() {{}}\n"));
+    let work_tree = LocalWorkTree::containing(rig.repo.path()).unwrap();
+    let first = work_tree.make_snapshot().unwrap().head;
+    rig.repo
+        .write("src/lib.rs", &format!("{LIB}pub fn second_draft() {{}}\n"));
+    let second = work_tree.make_snapshot().unwrap().head;
+    let code = LocalGit::at_worktree(work_tree.change_set().unwrap().folder());
+    let local_review_of = |snapshot: Sha| {
+        rig.servers
+            .navigator(RepoName::new("acme", "shop"), rig.by_name())
+            .navigate(
+                &code,
+                &NavigationRequest {
+                    sha: snapshot,
+                    at: Place {
+                        path: file_path("src/lib.rs"),
+                        line: line(6),
+                    },
+                    column: Column::try_from(23).unwrap(),
+                    word: Word::new("add").unwrap(),
+                },
+                &|_| {},
+            )
+            .unwrap()
+    };
+
+    let answer = local_review_of(first);
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(rust_analyzer())
+    );
+    assert!(read_checkout(&rig, "src/lib.rs").contains("first_draft"));
+
+    local_review_of(second);
+
+    assert!(read_checkout(&rig, "src/lib.rs").contains("second_draft"));
+    assert_eq!(
+        rig.methods().iter().filter(|m| *m == "initialize").count(),
+        1
+    );
+}
+
+fn read_checkout(rig: &Rig, file: &str) -> String {
+    std::fs::read_to_string(rig.checkout.join(file)).unwrap()
 }

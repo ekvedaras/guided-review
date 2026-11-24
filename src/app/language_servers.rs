@@ -17,16 +17,14 @@ struct ActiveLanguageServers(Arc<LanguageServers>);
 
 impl Global for ActiveLanguageServers {}
 
-/// Lets the review ask language servers once its reviewer says yes for the repo. A review with no
-/// GitHub repo has none to ask about.
+/// Lets the review ask language servers once its reviewer says yes for the repo, which a local review
+/// names by its `origin` or else by its folder.
 pub fn use_language_servers(review: &mut Review, folders: &AppFolders, cx: &mut App) {
     // A snapshot scene stages its own cards; a question on them would change the pictures.
     if cfg!(feature = "snapshots") {
         return;
     }
-    let Some(repo) = review.subject().pull_request().map(|pr| pr.repo.clone()) else {
-        return;
-    };
+    let repo = review.subject().language_server_repo();
     if !cx.has_global::<ActiveLanguageServers>() {
         let managed = ManagedServers::new(
             ServerFolders {

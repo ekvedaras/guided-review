@@ -88,6 +88,7 @@ mod language_server_downloads;
 mod line_number;
 mod local_guided_tour;
 mod local_key_commands;
+mod local_language_servers;
 mod local_names;
 mod local_open;
 mod local_review;
