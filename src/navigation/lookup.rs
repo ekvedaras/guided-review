@@ -8,7 +8,10 @@ use crate::language::Language;
 use crate::pull_request::Sha;
 
 use super::local::Local;
-use super::{Column, Definition, GitGrep, Import, Place, Usage, Word, WordInFile};
+use super::{
+    Answer, AnsweredBy, CodeNavigator, Column, Definition, GitGrep, Import, NavigationRequest,
+    Place, Usage, Waiting, Word, WordInFile,
+};
 
 /// Finds the files at a commit that hold a word, so only those are parsed.
 pub trait FilesWithWord: Send + Sync {
@@ -245,6 +248,28 @@ impl Lookups {
         };
         code.file_at(sha, from)
             .map_or_else(|_| Vec::new(), |source| Import::all_in(language, &source))
+    }
+}
+
+/// The by-name lookup is the first adapter of the code navigator port; it never waits.
+impl CodeNavigator for Lookups {
+    fn navigate(
+        &self,
+        code: &dyn CodeSource,
+        request: &NavigationRequest,
+        _waiting: &dyn Fn(Waiting),
+    ) -> anyhow::Result<Answer> {
+        let lookup = self.look_up_at(
+            code,
+            &request.sha,
+            &request.word,
+            &request.at,
+            request.column,
+        )?;
+        Ok(Answer {
+            lookup,
+            answered_by: AnsweredBy::ByName { because: None },
+        })
     }
 }
 

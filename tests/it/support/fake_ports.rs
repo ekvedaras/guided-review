@@ -1081,3 +1081,61 @@ impl guided_review::navigation::FilesWithWord for FakeFilesWithWord {
         Ok(self.files.get(word.as_str()).cloned().unwrap_or_default())
     }
 }
+
+/// Stands in for a code navigator adapter: reports the states it was told to wait in, then gives
+/// the answer it was given, and keeps what it was asked.
+#[derive(Clone)]
+pub struct FakeNavigator {
+    waits: Vec<guided_review::navigation::Waiting>,
+    answered_by: guided_review::navigation::AnsweredBy,
+    asked: Arc<Mutex<Vec<guided_review::navigation::NavigationRequest>>>,
+}
+
+impl FakeNavigator {
+    pub fn answering_by(answered_by: guided_review::navigation::AnsweredBy) -> Self {
+        Self {
+            waits: Vec::new(),
+            answered_by,
+            asked: Arc::default(),
+        }
+    }
+
+    pub fn waiting(mut self, states: &[guided_review::navigation::Waiting]) -> Self {
+        self.waits = states.to_vec();
+        self
+    }
+
+    pub fn asked(&self) -> Vec<guided_review::navigation::NavigationRequest> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+impl guided_review::navigation::CodeNavigator for FakeNavigator {
+    fn navigate(
+        &self,
+        _code: &dyn guided_review::code_source::CodeSource,
+        request: &guided_review::navigation::NavigationRequest,
+        waiting: &dyn Fn(guided_review::navigation::Waiting),
+    ) -> anyhow::Result<guided_review::navigation::Answer> {
+        self.asked.lock().unwrap().push(request.clone());
+        for state in &self.waits {
+            waiting(state.clone());
+        }
+        Ok(guided_review::navigation::Answer {
+            lookup: guided_review::navigation::Lookup {
+                word: request.word.clone(),
+                definitions: Vec::new(),
+                usages: Arc::new([guided_review::navigation::Usage {
+                    place: guided_review::navigation::Place {
+                        path: file_path("src/checkout.ts"),
+                        line: crate::support::line(5),
+                    },
+                    text: "return cart.total() + price();".into(),
+                }]),
+                reach: guided_review::navigation::Reach::WholeRepo,
+                cut_short: false,
+            },
+            answered_by: self.answered_by.clone(),
+        })
+    }
+}

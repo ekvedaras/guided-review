@@ -930,9 +930,25 @@ impl ReviewSession {
             return;
         };
         let source = Arc::clone(&self.source);
+        let (waits, mut arrived) = futures::channel::mpsc::unbounded();
+        cx.spawn(async move |this, cx| {
+            while let Some(waiting) = futures::StreamExt::next(&mut arrived).await {
+                this.update(cx, |this, cx| {
+                    this.review.name_waiting(waiting);
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
         self.run_off_thread(
             cx,
-            move || work.run(source.as_ref()),
+            move || {
+                work.run_reporting(source.as_ref(), &|waiting| {
+                    // The reader ends when the lookup does, so a send that fails has nobody to tell.
+                    waits.unbounded_send(waiting).ok();
+                })
+            },
             |this, outcome, cx| {
                 this.review.name_looked_up(outcome);
                 cx.notify();

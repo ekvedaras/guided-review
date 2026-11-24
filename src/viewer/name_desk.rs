@@ -11,7 +11,9 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::line_number::LineNumber;
-use crate::navigation::{Column, FileSearch, Lookup, Lookups, Place, Word};
+use crate::navigation::{
+    AnsweredBy, CodeNavigator, Column, Lookup, NavigationRequest, Place, Waiting, Word,
+};
 use crate::pull_request::Sha;
 
 use super::highlight::Capture;
@@ -133,7 +135,7 @@ pub(super) struct NameKey {
 
 /// A lookup to run on a background thread.
 pub struct NameWork {
-    lookups: Arc<Lookups>,
+    navigator: Arc<dyn CodeNavigator>,
     key: NameKey,
     /// The review's files as the key's commit names them, to rank the shown usages.
     changed: Arc<[FilePath]>,
@@ -141,20 +143,36 @@ pub struct NameWork {
 
 impl NameWork {
     pub fn run(self, source: &dyn CodeSource) -> NameOutcome {
+        self.run_reporting(source, &|_| {})
+    }
+
+    /// `waiting` hears what the navigator waits on, for `Review::name_waiting`, before the
+    /// outcome lands.
+    pub fn run_reporting(
+        self,
+        source: &dyn CodeSource,
+        waiting: &dyn Fn(NameWaiting),
+    ) -> NameOutcome {
         let hovered = Place {
             path: self.key.path.clone(),
             line: self.key.line,
         };
+        let request = NavigationRequest {
+            sha: self.key.sha.clone(),
+            at: hovered.clone(),
+            column: self.key.column,
+            word: self.key.word.clone(),
+        };
         let result = self
-            .lookups
-            .look_up_at(
-                source,
-                &self.key.sha,
-                &self.key.word,
-                &hovered,
-                self.key.column,
-            )
-            .map(|lookup| {
+            .navigator
+            .navigate(source, &request, &|state| {
+                waiting(NameWaiting {
+                    key: self.key.clone(),
+                    state,
+                });
+            })
+            .map(|answer| {
+                let lookup = answer.lookup;
                 let highlights = NameHighlights::of(
                     &lookup,
                     &hovered,
@@ -162,7 +180,11 @@ impl NameWork {
                     source,
                     &self.key.sha,
                 );
-                Looked { lookup, highlights }
+                Looked {
+                    lookup,
+                    answered_by: answer.answered_by,
+                    highlights,
+                }
             })
             .map_err(|error| format!("{error:#}"));
         NameOutcome {
@@ -175,7 +197,15 @@ impl NameWork {
 /// A lookup and the colours of what the card will show of it.
 pub struct Looked {
     pub(super) lookup: Lookup,
+    pub(super) answered_by: AnsweredBy,
     pub(super) highlights: NameHighlights,
+}
+
+/// What a name's lookup waits on, for `Review::name_waiting`.
+#[derive(Debug, Clone)]
+pub struct NameWaiting {
+    pub(super) key: NameKey,
+    pub(super) state: Waiting,
 }
 
 /// What a `NameWork` brought back, for `Review::name_looked_up`.
@@ -185,14 +215,14 @@ pub struct NameOutcome {
 }
 
 pub(super) struct NameDesk {
-    lookups: Arc<Lookups>,
+    navigator: Arc<dyn CodeNavigator>,
     cards: HashMap<NameKey, Arc<DefinitionCard>>,
 }
 
 impl NameDesk {
-    pub(super) fn new(search: FileSearch) -> Self {
+    pub(super) fn new(navigator: Arc<dyn CodeNavigator>) -> Self {
         Self {
-            lookups: Arc::new(Lookups::new(search)),
+            navigator,
             cards: HashMap::new(),
         }
     }
@@ -211,9 +241,19 @@ impl NameDesk {
             Arc::new(DefinitionCard::loading(key.word.clone())),
         );
         Some(NameWork {
-            lookups: Arc::clone(&self.lookups),
+            navigator: Arc::clone(&self.navigator),
             key,
             changed,
+        })
+    }
+
+    /// Asked and not answered yet: a waiting state is no news to a card that has landed.
+    pub(super) fn is_on_its_way(&self, key: &NameKey) -> bool {
+        self.cards.get(key).is_some_and(|card| {
+            matches!(
+                **card,
+                DefinitionCard::Loading { .. } | DefinitionCard::Waiting { .. }
+            )
         })
     }
 

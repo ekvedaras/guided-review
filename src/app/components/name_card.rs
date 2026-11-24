@@ -38,10 +38,9 @@ pub fn name_card(
 ) -> Div {
     let panel = overlay_panel(colors).w(px(NAME_CARD_WIDTH)).max_w(room);
     match card {
-        DefinitionCard::Loading { says, .. } => panel.child(line(
-            colors.muted_text,
-            SharedString::from(Arc::clone(says)),
-        )),
+        DefinitionCard::Loading { says, .. } | DefinitionCard::Waiting { says, .. } => panel.child(
+            line(colors.muted_text, SharedString::from(Arc::clone(says))),
+        ),
         DefinitionCard::Failed { says, .. } => {
             panel.child(line(colors.danger, SharedString::from(Arc::clone(says))))
         }

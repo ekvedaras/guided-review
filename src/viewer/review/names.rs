@@ -5,12 +5,14 @@ use std::cell::OnceCell;
 use std::sync::Arc;
 
 use crate::file_path::FilePath;
-use crate::navigation::{Lookup, Place};
+use crate::navigation::{AnsweredBy, CodeNavigator, Lookup, Place};
 use crate::pieces::ChangedFile;
 use crate::viewer::code_link::CodeLinks;
 use crate::viewer::jump::{JumpPlace, JumpTarget};
 use crate::viewer::name_card::{DefinitionCard, NameTarget, PlacesOfReview};
-use crate::viewer::name_desk::{HoveredName, Looked, NameKey, NameOutcome, NameWork};
+use crate::viewer::name_desk::{
+    HoveredName, Looked, NameDesk, NameKey, NameOutcome, NameWaiting, NameWork,
+};
 use crate::viewer::name_highlights::NameHighlights;
 use crate::viewer::step_page::{LineLocation, PieceDiff, Side};
 
@@ -29,6 +31,20 @@ impl ReviewCore {
         self.names.ask(key, changed)
     }
 
+    /// Answers names through `navigator` from now on, with nothing kept of what was asked before.
+    pub fn use_navigator(&mut self, navigator: Arc<dyn CodeNavigator>) {
+        self.names = NameDesk::new(navigator);
+    }
+
+    /// The card of a name that is still on its way says what the navigator waits on.
+    pub fn name_waiting(&mut self, waiting: NameWaiting) {
+        let NameWaiting { key, state } = waiting;
+        if self.names.is_on_its_way(&key) {
+            let card = DefinitionCard::waiting(key.word.clone(), &state);
+            self.names.keep(key, card);
+        }
+    }
+
     /// Takes in what a `NameWork` brought back and makes the card of it.
     pub fn name_looked_up(&mut self, outcome: NameOutcome) {
         let NameOutcome { key, result } = outcome;
@@ -40,19 +56,31 @@ impl ReviewCore {
     pub fn stage_looked_up_name(&mut self, hovered: &HoveredName, lookup: Lookup) {
         if let Some(key) = self.name_key(hovered) {
             let highlights = NameHighlights::staged(&lookup);
-            self.keep_card_of(key, Ok(Looked { lookup, highlights }));
+            let answered_by = AnsweredBy::ByName { because: None };
+            self.keep_card_of(
+                key,
+                Ok(Looked {
+                    lookup,
+                    answered_by,
+                    highlights,
+                }),
+            );
         }
     }
 
     fn keep_card_of(&mut self, key: NameKey, result: Result<Looked, String>) {
         let card = match result {
-            Ok(Looked { lookup, highlights }) => {
+            Ok(Looked {
+                lookup,
+                answered_by,
+                highlights,
+            }) => {
                 let hovered = Place {
                     path: key.path.clone(),
                     line: key.line,
                 };
                 let places = ReviewPlaces::of(self, key.side);
-                DefinitionCard::of(&lookup, &hovered, &places, &highlights)
+                DefinitionCard::of(&lookup, &hovered, &places, &highlights, &answered_by)
             }
             Err(because) => DefinitionCard::failed(key.word.clone(), because),
         };

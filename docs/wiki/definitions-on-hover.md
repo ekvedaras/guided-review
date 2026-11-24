@@ -60,3 +60,7 @@ Decided by the maintainer the same day:
 - Same branch (`139-symbol-hover`) and one PR for all of it.
 
 The spec and tickets are GitHub issues linked from issue #139.
+
+## Code navigator port (2026-11-24)
+
+Issue #184. `CodeNavigator` (`src/navigation/navigator.rs`) is the one thing the viewer asks: `navigate(code, &NavigationRequest { sha, at, column, word }, waiting)` gives an `Answer { lookup, answered_by }`. `Lookups` implements it as the by-name adapter. `NameDesk` holds an `Arc<dyn CodeNavigator>`, and `NameWork::run_reporting` hands what the navigator waits on (`Waiting::Downloading`, `Starting`, `Indexing`) to `Review::name_waiting`, which turns the card into `DefinitionCard::Waiting`; the app sends these from the background thread over a channel (`ReviewSession::look_up_name`). `AnsweredBy::ByName { because: Some(..) }` adds `CardNote::AnsweredByName` ("Answered by name: ..."); with no reason, or from a language server, there is no note. Tests swap the adapter with `Review::use_navigator` and `FakeNavigator` (`tests/it/support/fake_ports.rs`). Nothing visible changes until the language server adapter lands. Cards are kept per `NameKey`, which carries the column (commit 8bd96a8); `Lookups` still keeps its by-name results per (sha, word).

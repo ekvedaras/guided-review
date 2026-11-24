@@ -198,7 +198,7 @@ pub use name_card::{
     CardNote, CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, Snippet,
     USAGES_SHOWN, UsageFile, UsageLine,
 };
-pub use name_desk::{HoveredName, NameOutcome, NameUnderPointer, NameWork};
+pub use name_desk::{HoveredName, NameOutcome, NameUnderPointer, NameWaiting, NameWork};
 pub use name_highlights::NameHighlights;
 pub use name_hover::{HoverTicket, NameHover};
 pub use new_commits::{

@@ -25,7 +25,7 @@ use crate::coverage::{self, PiecePart};
 use crate::issue::IssueLink;
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
-use crate::navigation::FileSearch;
+use crate::navigation::{FileSearch, Lookups};
 use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::{ChangeTips, Sha};
 use crate::review_subject::ReviewSubject;
@@ -670,7 +670,7 @@ impl ReviewCore {
         let branch_link = BranchLink::of(&subject);
         let related_issues = RelatedIssues::of(&subject, &tour, state.pr_description());
         let pr_controls = PrControls::of(&subject);
-        let names = NameDesk::new(FileSearch::for_source(
+        let names = NameDesk::new(Arc::new(Lookups::new(FileSearch::for_source(
             source,
             files
                 .iter()
@@ -678,7 +678,7 @@ impl ReviewCore {
                 .flatten()
                 .cloned()
                 .collect(),
-        ));
+        ))));
         Ok(Self {
             tour,
             file_tree,

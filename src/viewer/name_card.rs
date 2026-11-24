@@ -5,7 +5,11 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::file_path::FilePath;
-use crate::navigation::{Definition, Lookup, Place, Reach, Usage, Word};
+use std::borrow::Cow;
+
+use crate::navigation::{
+    AnsweredBy, Definition, FallbackReason, Lookup, Place, Reach, Usage, Waiting, Word,
+};
 
 use super::code_link::CodeLink;
 use super::highlight::Capture;
@@ -25,19 +29,27 @@ pub enum NameTarget {
 }
 
 /// Why the card may show less than the repo holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CardNote {
     /// The code is read from GitHub, so only the review's changed files were searched.
     UsagesFromChangedFilesOnly,
     /// More files hold the name than are parsed.
     SearchCutShort,
+    /// A language server would have answered but did not, so the answer is by name and can include
+    /// other things of the same name.
+    AnsweredByName(FallbackReason),
 }
 
 impl CardNote {
-    pub const fn text(self) -> &'static str {
+    pub fn text(&self) -> Cow<'static, str> {
         match self {
-            Self::UsagesFromChangedFilesOnly => "Usages from the PR's files only",
-            Self::SearchCutShort => "Search cut short: too many files hold this name",
+            Self::UsagesFromChangedFilesOnly => Cow::Borrowed("Usages from the PR's files only"),
+            Self::SearchCutShort => {
+                Cow::Borrowed("Search cut short: too many files hold this name")
+            }
+            Self::AnsweredByName(because) => {
+                Cow::Owned(format!("Answered by name: {}", because.as_str()))
+            }
         }
     }
 }
@@ -253,6 +265,12 @@ pub enum DefinitionCard {
         /// "Looking up total…"
         says: Arc<str>,
     },
+    /// The navigator waits on something before it can answer.
+    Waiting {
+        word: Word,
+        /// "Downloading rust-analyzer…"
+        says: Arc<str>,
+    },
     Failed {
         word: Word,
         because: String,
@@ -274,6 +292,13 @@ impl DefinitionCard {
         Self::Loading { word, says }
     }
 
+    pub(super) fn waiting(word: Word, state: &Waiting) -> Self {
+        Self::Waiting {
+            word,
+            says: state.text().into(),
+        }
+    }
+
     pub(super) fn failed(word: Word, because: String) -> Self {
         let says = format!("Could not look up {word}: {because}").into();
         Self::Failed {
@@ -288,6 +313,7 @@ impl DefinitionCard {
         hovered: &Place,
         review: &dyn PlacesOfReview,
         highlights: &NameHighlights,
+        answered_by: &AnsweredBy,
     ) -> Self {
         let definitions: Vec<DefinitionRow> = lookup
             .definitions
@@ -315,6 +341,12 @@ impl DefinitionCard {
         }
         if lookup.cut_short {
             notes.push(CardNote::SearchCutShort);
+        }
+        if let AnsweredBy::ByName {
+            because: Some(because),
+        } = answered_by
+        {
+            notes.push(CardNote::AnsweredByName(because.clone()));
         }
         Self::Found(FoundNames {
             word: lookup.word.clone(),

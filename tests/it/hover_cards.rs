@@ -3,7 +3,7 @@ use std::sync::Arc;
 use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
-use guided_review::navigation::{Column, Word};
+use guided_review::navigation::{AnsweredBy, Column, FallbackReason, ServerName, Waiting, Word};
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -12,6 +12,7 @@ use guided_review::viewer::{
 };
 use serde_json::{Value, json};
 
+use crate::support::fake_ports::FakeNavigator;
 use crate::support::{FixtureRepo, file_path, line, on_github};
 
 struct Shop {
@@ -750,4 +751,116 @@ fn the_name_stays_marked_without_any_colours() {
         painted(&snippet.text, &snippet.runs),
         [("price", None, true)]
     );
+}
+
+fn rust_analyzer() -> ServerName {
+    ServerName::new("rust-analyzer")
+}
+
+#[test]
+fn the_card_asks_the_navigator_for_the_name_at_its_place_and_column() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let mut review = shop.open(&source);
+    let navigator = FakeNavigator::answering_by(AnsweredBy::LanguageServer(rust_analyzer()));
+    review.use_navigator(Arc::new(navigator.clone()));
+
+    let hovered = hover_at("src/checkout.ts", Side::Head, 5, 9, "cart");
+    found(card_of(&mut review, &source, &hovered));
+
+    let [asked] = navigator.asked().try_into().expect("one request");
+    assert_eq!(asked.sha, Sha::new(&shop.head));
+    assert_eq!(asked.at.path, file_path("src/checkout.ts"));
+    assert_eq!(asked.at.line, line(5));
+    assert_eq!(asked.column, Column::try_from(9).unwrap());
+    assert_eq!(asked.word, Word::new("cart").unwrap());
+}
+
+#[test]
+fn the_card_shows_each_state_the_navigator_waits_in_then_the_answer() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let mut review = shop.open(&source);
+    review.use_navigator(Arc::new(
+        FakeNavigator::answering_by(AnsweredBy::LanguageServer(rust_analyzer())).waiting(&[
+            Waiting::Downloading(rust_analyzer()),
+            Waiting::Starting(rust_analyzer()),
+            Waiting::Indexing,
+        ]),
+    ));
+    let hovered = hover("src/checkout.ts", Side::Head, 4, "Cart");
+    let work = review.look_up_name(&hovered).unwrap();
+
+    let review = std::cell::RefCell::new(review);
+    let seen = std::cell::RefCell::new(Vec::new());
+    let outcome = work.run_reporting(&source, &|waiting| {
+        let mut review = review.borrow_mut();
+        review.name_waiting(waiting);
+        let card = review.definition_card(&hovered).unwrap();
+        let DefinitionCard::Waiting { says, .. } = &*card else {
+            panic!("a waiting card expected, got {card:?}");
+        };
+        seen.borrow_mut().push(says.to_string());
+    });
+    let mut review = review.into_inner();
+    review.name_looked_up(outcome);
+
+    assert_eq!(
+        seen.into_inner(),
+        [
+            "Downloading rust-analyzer…",
+            "Starting rust-analyzer…",
+            "Indexing…"
+        ]
+    );
+    assert!(matches!(
+        review.definition_card(&hovered).as_deref(),
+        Some(DefinitionCard::Found(_))
+    ));
+}
+
+#[test]
+fn an_answer_by_name_with_a_reason_carries_a_note_naming_it() {
+    let shop = Shop::new();
+    let source = shop.source();
+    let mut review = shop.open(&source);
+    review.use_navigator(Arc::new(FakeNavigator::answering_by(AnsweredBy::ByName {
+        because: Some(FallbackReason::new("rust-analyzer did not answer in time")),
+    })));
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+
+    assert_eq!(
+        card.notes,
+        [CardNote::AnsweredByName(FallbackReason::new(
+            "rust-analyzer did not answer in time"
+        ))]
+    );
+    assert_eq!(
+        card.notes[0].text(),
+        "Answered by name: rust-analyzer did not answer in time"
+    );
+}
+
+#[test]
+fn an_answer_by_name_with_no_reason_and_a_language_server_answer_carry_no_note() {
+    let shop = Shop::new();
+    let source = shop.source();
+    for answered_by in [
+        AnsweredBy::ByName { because: None },
+        AnsweredBy::LanguageServer(rust_analyzer()),
+    ] {
+        let mut review = shop.open(&source);
+        review.use_navigator(Arc::new(FakeNavigator::answering_by(answered_by)));
+        let card = found(card_of(
+            &mut review,
+            &source,
+            &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+        ));
+        assert_eq!(card.notes, []);
+    }
 }
