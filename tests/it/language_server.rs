@@ -48,22 +48,36 @@ Adds two numbers.
 
 struct FakeCatalog {
     script: PathBuf,
+    servers: FakeServers,
+}
+
+/// Whether every language gets the one fake server, or each its own, named and logged by language.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FakeServers {
+    One,
+    PerLanguage,
 }
 
 impl ServerCatalog for FakeCatalog {
     fn launch_for(
         &self,
-        _language: Language,
+        language: Language,
         _codebase: &Codebase,
         _waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
         let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
         let script: Value =
             serde_json::from_str(&std::fs::read_to_string(&self.script).unwrap()).unwrap();
-        let launch = ServerLaunch::rust_analyzer(PathBuf::from("python3")).with_args(vec![
+        let mut args = vec![
             fake.to_string_lossy().into_owned(),
             self.script.to_string_lossy().into_owned(),
-        ]);
+        ];
+        let mut launch = ServerLaunch::rust_analyzer(PathBuf::from("python3"));
+        if self.servers == FakeServers::PerLanguage {
+            launch.name = ServerName::of(language);
+            args.push(format!("{language:?}"));
+        }
+        let launch = launch.with_args(args);
         Ok(if script["reports_status"] == json!(true) {
             launch.reporting_status()
         } else {
@@ -117,6 +131,7 @@ impl Rig {
         let servers = LanguageServers::new(
             Arc::new(FakeCatalog {
                 script: script_file,
+                servers: FakeServers::One,
             }),
             ServerCheckouts::new(scratch.path().join("checkouts")),
             timeouts,
@@ -1035,4 +1050,76 @@ fn a_local_review_is_answered_in_the_server_checkout_at_its_snapshot_and_update_
 
 fn read_checkout(rig: &Rig, file: &str) -> String {
     std::fs::read_to_string(rig.checkout.join(file)).unwrap()
+}
+
+#[test]
+fn a_server_hears_every_change_since_its_own_head_when_another_servers_review_moved_the_checkout() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("src/lib.rs", LIB);
+    repo.write("app/Billing.php", BILLING);
+    let first = Sha::new(&repo.commit("first"));
+    let scratch = TempDir::new().unwrap();
+    let script_file = scratch.path().join("script.json");
+    let log = scratch.path().join("log");
+    std::fs::write(
+        &script_file,
+        json!({"log": log.to_string_lossy(), "answers": {}}).to_string(),
+    )
+    .unwrap();
+    let servers = LanguageServers::new(
+        Arc::new(FakeCatalog {
+            script: script_file,
+            servers: FakeServers::PerLanguage,
+        }),
+        ServerCheckouts::new(scratch.path().join("checkouts")),
+        Timeouts::default(),
+    );
+    let checkout = scratch.path().join("checkouts/acme/shop");
+    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let by_name: Arc<dyn CodeNavigator> =
+        Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
+            file_path("src/lib.rs"),
+            file_path("app/Billing.php"),
+        ]))));
+    let navigator = servers.navigator(shop_codebase(), by_name);
+    let hover = |sha: &Sha, path: &str, number: usize, column: usize, word: &str| {
+        navigator
+            .navigate(
+                &code,
+                &NavigationRequest {
+                    sha: sha.clone(),
+                    at: Place {
+                        path: file_path(path),
+                        line: line(number),
+                    },
+                    column: Column::try_from(column).unwrap(),
+                    word: Word::new(word).unwrap(),
+                },
+                &|_| {},
+            )
+            .unwrap()
+    };
+    hover(&first, "src/lib.rs", 6, 23, "add");
+    repo.write("src/lib.rs", &format!("{LIB}// later\n"));
+    repo.write("app/Billing.php", &format!("{BILLING}// later\n"));
+    let second = Sha::new(&repo.commit("second"));
+    hover(&second, "app/Billing.php", 19, 15, "schedule");
+
+    hover(&second, "src/lib.rs", 6, 23, "add");
+
+    let rust_heard: Vec<Value> = std::fs::read_to_string(format!("{}.Rust", log.display()))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|m| m["method"] == "workspace/didChangeWatchedFiles")
+        .map(|m| m["params"]["changes"].clone())
+        .collect();
+    let uri = |path: &str| format!("file://{}", checkout.join(path).display());
+    assert_eq!(
+        rust_heard,
+        [json!([
+            {"uri": uri("app/Billing.php"), "type": 2},
+            {"uri": uri("src/lib.rs"), "type": 2},
+        ])]
+    );
 }

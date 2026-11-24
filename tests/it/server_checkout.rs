@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use guided_review::codebase::Codebase;
-use guided_review::navigation::{Change, ServerCheckouts};
+use guided_review::navigation::{Change, ChangedFile, ServerCheckouts};
 use guided_review::pull_request::{RepoName, Sha};
 use tempfile::TempDir;
 
@@ -113,42 +113,45 @@ fn a_head_that_tracks_a_dependency_folder_replaces_the_link_with_its_files() {
     );
 }
 
+fn listed(changes: Vec<ChangedFile>) -> Vec<(String, Change)> {
+    changes
+        .into_iter()
+        .map(|file| (file.path.as_str().to_owned(), file.change))
+        .collect()
+}
+
+fn files(changes: &[(&str, Change)]) -> Vec<(String, Change)> {
+    changes
+        .iter()
+        .map(|(path, change)| ((*path).to_owned(), *change))
+        .collect()
+}
+
 #[test]
-fn a_second_review_moves_the_same_checkout_and_says_which_files_changed() {
+fn a_second_review_moves_the_same_checkout_and_says_which_files_changed_since_a_head() {
     let rig = Rig::with_a_dirty_clone();
     let first = rig.move_to(&rig.first);
-    assert_eq!(first.changed, []);
+    assert_eq!(first.changes_since(&rig.first).unwrap(), []);
 
     let second = rig.move_to(&rig.second);
 
     assert_eq!(second.folder, first.folder);
     assert_eq!(read(&second.folder, "src/lib.rs"), "pub fn second() {}\n");
-    let changed: Vec<(&str, Change)> = second
-        .changed
-        .iter()
-        .map(|file| (file.path.as_str(), file.change))
-        .collect();
     assert_eq!(
-        changed,
-        [
+        listed(second.changes_since(&rig.first).unwrap()),
+        files(&[
             ("src/lib.rs", Change::Changed),
             ("src/new.rs", Change::Created)
-        ]
+        ])
     );
     let back = rig.move_to(&rig.first);
-    let changed: Vec<(&str, Change)> = back
-        .changed
-        .iter()
-        .map(|file| (file.path.as_str(), file.change))
-        .collect();
     assert_eq!(
-        changed,
-        [
+        listed(back.changes_since(&rig.second).unwrap()),
+        files(&[
             ("src/lib.rs", Change::Changed),
             ("src/new.rs", Change::Deleted)
-        ]
+        ])
     );
-    assert_eq!(rig.move_to(&rig.first).changed, []);
 }
 
 #[test]
@@ -168,4 +171,210 @@ fn moving_the_checkout_runs_no_git_hook_from_the_prs_files() {
     rig.move_to(&with_hook);
 
     assert!(!marker.exists(), "a hook ran");
+}
+
+#[test]
+fn moving_the_checkout_records_nothing_in_the_clone() {
+    let rig = Rig::with_a_dirty_clone();
+    let refs_before = rig.clone.git(&["for-each-ref"]);
+
+    rig.move_to(&rig.first);
+    rig.move_to(&rig.second);
+
+    assert!(!rig.clone.path().join(".git/worktrees").exists());
+    assert_eq!(
+        rig.clone
+            .git(&["worktree", "list", "--porcelain"])
+            .lines()
+            .count(),
+        3
+    );
+    assert_eq!(rig.clone.git(&["for-each-ref"]), refs_before);
+}
+
+/// Another clone of the repo, with one more commit than `clone`'s head.
+fn another_clone_with_a_commit(clone: &FixtureRepo) -> (TempDir, Sha) {
+    let other = TempDir::new().unwrap();
+    git_in(
+        other.path(),
+        &["clone", "-q", &clone.path().to_string_lossy(), "."],
+    );
+    std::fs::write(other.path().join("src/other.rs"), "pub fn other() {}\n").unwrap();
+    git_in(other.path(), &["add", "-A"]);
+    git_in(other.path(), &["commit", "-q", "-m", "in the other clone"]);
+    let head = Sha::new(&git_in(other.path(), &["rev-parse", "HEAD"]));
+    (other, head)
+}
+
+fn git_in(folder: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(folder)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_NAME", "Fixture")
+        .env("GIT_AUTHOR_EMAIL", "fixture@example.com")
+        .env("GIT_COMMITTER_NAME", "Fixture")
+        .env("GIT_COMMITTER_EMAIL", "fixture@example.com")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+#[test]
+fn a_move_from_another_clone_works_after_the_first_clone_is_gone() {
+    let rig = Rig::with_a_dirty_clone();
+    let (other, head) = another_clone_with_a_commit(&rig.clone);
+    rig.clone
+        .write("src/only_here.rs", "pub fn only_here() {}\n");
+    let only_in_the_first_clone = Sha::new(&rig.clone.commit("only in the first clone"));
+    rig.move_to(&only_in_the_first_clone);
+    std::fs::remove_dir_all(rig.clone.path()).unwrap();
+
+    let checkout = rig
+        .checkouts
+        .moved_to(other.path(), &shop(), &head)
+        .unwrap();
+
+    assert_eq!(
+        read(&checkout.folder, "src/other.rs"),
+        "pub fn other() {}\n"
+    );
+    assert_eq!(read(&checkout.folder, "src/lib.rs"), "pub fn second() {}\n");
+    assert!(!checkout.folder.join("src/only_here.rs").exists());
+    let moved_back = rig
+        .checkouts
+        .moved_to(other.path(), &shop(), &rig.first)
+        .unwrap();
+    assert_eq!(
+        read(&moved_back.folder, "src/lib.rs"),
+        "pub fn first() {}\n"
+    );
+}
+
+#[test]
+fn links_to_installed_dependencies_point_at_the_folder_the_review_reads() {
+    let rig = Rig::with_a_dirty_clone();
+    rig.clone.write("vendor/installed.php", "<?php // clone\n");
+    rig.clone
+        .write("node_modules/left-pad/index.js", "module.exports = 1;\n");
+    rig.move_to(&rig.first);
+    let agent_folder = TempDir::new().unwrap();
+    let agent_worktree = agent_folder.path().join("agent");
+    rig.clone.git(&[
+        "worktree",
+        "add",
+        "-q",
+        "--detach",
+        &agent_worktree.to_string_lossy(),
+        rig.second.as_str(),
+    ]);
+    std::fs::create_dir_all(agent_worktree.join("vendor")).unwrap();
+    std::fs::write(
+        agent_worktree.join("vendor/installed.php"),
+        "<?php // agent\n",
+    )
+    .unwrap();
+
+    let checkout = rig
+        .checkouts
+        .moved_to(&agent_worktree, &shop(), &rig.second)
+        .unwrap();
+
+    assert_eq!(
+        std::fs::read_link(checkout.folder.join("vendor")).unwrap(),
+        agent_worktree.join("vendor")
+    );
+    assert_eq!(
+        read(&checkout.folder, "vendor/installed.php"),
+        "<?php // agent\n"
+    );
+    assert!(
+        checkout
+            .folder
+            .join("node_modules")
+            .symlink_metadata()
+            .is_err()
+    );
+}
+
+#[test]
+fn a_worktree_checkout_an_earlier_build_made_is_replaced_and_its_entry_in_the_clone_removed() {
+    let rig = Rig::with_a_dirty_clone();
+    rig.clone
+        .write("vendor/installed.php", "<?php // installed\n");
+    let earlier = rig.state.path().join("server-checkouts/acme/shop");
+    std::fs::create_dir_all(earlier.parent().unwrap()).unwrap();
+    rig.clone.git(&[
+        "worktree",
+        "add",
+        "-q",
+        "--detach",
+        &earlier.to_string_lossy(),
+        rig.first.as_str(),
+    ]);
+    std::os::unix::fs::symlink(rig.clone.path().join("vendor"), earlier.join("vendor")).unwrap();
+
+    let checkout = rig.move_to(&rig.second);
+
+    assert_eq!(checkout.folder, earlier);
+    assert!(checkout.folder.join(".git").is_dir());
+    assert_eq!(read(&checkout.folder, "src/new.rs"), "pub fn added() {}\n");
+    assert_eq!(
+        rig.clone
+            .git(&["worktree", "list", "--porcelain"])
+            .lines()
+            .count(),
+        3
+    );
+    assert_eq!(
+        read(rig.clone.path(), "vendor/installed.php"),
+        "<?php // installed\n"
+    );
+}
+
+#[test]
+fn checkouts_and_indexes_earlier_builds_kept_under_local_folder_are_removed() {
+    let rig = Rig::with_a_dirty_clone();
+    let leftover = rig
+        .state
+        .path()
+        .join("server-checkouts/local folder/shop-1234abcd");
+    std::fs::create_dir_all(leftover.parent().unwrap()).unwrap();
+    rig.clone.git(&[
+        "worktree",
+        "add",
+        "-q",
+        "--detach",
+        &leftover.to_string_lossy(),
+        rig.first.as_str(),
+    ]);
+    let indexes = rig.state.path().join("server-indexes");
+    std::fs::create_dir_all(indexes.join("local folder/shop-1234abcd")).unwrap();
+    std::fs::create_dir_all(indexes.join("acme/shop")).unwrap();
+
+    rig.checkouts
+        .remove_local_folder_leftovers(&indexes)
+        .unwrap();
+
+    assert!(
+        !rig.state
+            .path()
+            .join("server-checkouts/local folder")
+            .exists()
+    );
+    assert!(!indexes.join("local folder").exists());
+    assert!(indexes.join("acme/shop").exists());
+    assert_eq!(
+        rig.clone
+            .git(&["worktree", "list", "--porcelain"])
+            .lines()
+            .count(),
+        3
+    );
 }

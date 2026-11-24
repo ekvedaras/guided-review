@@ -1,7 +1,8 @@
 import json, sys, threading
 
 script = json.load(open(sys.argv[1]))
-log = open(script["log"], "a")
+# A second argument names the server, which then logs to a file of its own.
+log = open(script["log"] + ("." + sys.argv[2] if len(sys.argv) > 2 else ""), "a")
 lock = threading.Lock()
 modified = set()
 

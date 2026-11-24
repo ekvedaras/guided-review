@@ -156,10 +156,17 @@ struct Running {
     encoding: Encoding,
     opened: Mutex<HashSet<PathBuf>>,
     last_used: Mutex<Instant>,
+    /// The head of the checkout the server last heard of: what the next move is told against.
+    heard: Mutex<Sha>,
 }
 
 impl Running {
-    fn start(launch: &ServerLaunch, folder: &Path, timeouts: &Timeouts) -> Result<Self, String> {
+    fn start(
+        launch: &ServerLaunch,
+        checkout: &Checkout,
+        timeouts: &Timeouts,
+    ) -> Result<Self, String> {
+        let folder = checkout.folder.as_path();
         let connection = Connection::spawn(
             &launch.program,
             &launch.args,
@@ -217,6 +224,7 @@ impl Running {
             encoding,
             opened: Mutex::default(),
             last_used: Mutex::new(Instant::now()),
+            heard: Mutex::new(checkout.head.clone()),
         })
     }
 
@@ -243,9 +251,19 @@ impl Running {
         )
     }
 
-    /// The checkout moved to another head: files the server has open are opened again from their new
-    /// text, and the server hears which files changed on disk so it re-indexes those only. A server
-    /// that does not hear is stale until it is restarted, so the failure is not an answer's.
+    /// The checkout is at another head than the server last heard of: files the server has open are
+    /// opened again from their new text, and the server hears which files changed on disk since its own
+    /// head so it re-indexes those only. Fails when that head can no longer be compared.
+    fn catch_up(&self, checkout: &Checkout) -> anyhow::Result<()> {
+        let mut heard = locked(&self.heard);
+        if *heard != checkout.head {
+            self.hear_of(&checkout.folder, &checkout.changes_since(&heard)?);
+            *heard = checkout.head.clone();
+        }
+        Ok(())
+    }
+
+    /// A server that does not hear is stale until it is restarted, so the failure is not an answer's.
     fn hear_of(&self, folder: &Path, changed: &[ChangedFile]) {
         if changed.is_empty() {
             return;
@@ -494,11 +512,14 @@ impl ServerNavigator {
         let slot = self.pool.slot(folder, &launch.name);
         let mut held = locked(&slot);
         if let Some(server) = held.as_ref().filter(|server| server.connection.is_alive()) {
-            server.hear_of(folder, &checkout.changed);
-            return Ok((Arc::clone(&slot), Arc::clone(server)));
+            if server.catch_up(checkout).is_ok() {
+                return Ok((Arc::clone(&slot), Arc::clone(server)));
+            }
+            // A head the checkout can no longer compare leaves no way to tell the server what changed.
+            server.connection.stop();
         }
         waiting(Waiting::Starting(launch.name.clone()));
-        let server = Arc::new(Running::start(launch, folder, &self.pool.timeouts)?);
+        let server = Arc::new(Running::start(launch, checkout, &self.pool.timeouts)?);
         *held = Some(Arc::clone(&server));
         drop(held);
         Ok((slot, server))
