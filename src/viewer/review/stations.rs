@@ -64,7 +64,9 @@ impl Review {
                     (_, Some(AgentStatus::WaitingForYou)) => {
                         station(Waiting, "agent waits for you")
                     }
-                    (WritingStage::Starting, _) => station(Working, "starting"),
+                    (WritingStage::Starting, _) if writing.latest_step().is_none() => {
+                        station(Working, "starting")
+                    }
                     _ => station(Working, "being written"),
                 },
                 GuidedTourProgress::Ready => station(Waiting, "ready to switch to"),
@@ -99,7 +101,7 @@ impl Review {
                 AiReview::Unreadable(_) => station(Failed, "findings not read"),
                 AiReview::Findings(_) => match self.ai_review.counts().total() {
                     0 => station(Done, "no findings"),
-                    count => station(Done, &counted(count, "finding", "findings")),
+                    count => station(Waiting, &counted(count, "finding", "findings")),
                 },
             },
         }
@@ -148,7 +150,7 @@ impl Review {
         match self.your_review() {
             Some(yours) if yours.is_marked_done => station(Done, "marked done".to_owned()),
             Some(yours) if yours.age == StanceAge::BeforeNewCommits => {
-                station(Waiting, "new commits since".to_owned())
+                station(Waiting, "new commits".to_owned())
             }
             Some(yours) => station(Done, yours.title().to_owned()),
             None if !self.can_finish_review() => station(NotStarted, "nothing to send".to_owned()),

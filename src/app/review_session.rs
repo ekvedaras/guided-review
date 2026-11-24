@@ -1043,7 +1043,7 @@ impl ReviewSession {
                 since: if is_marked_done {
                     "Last review 2026-11-18 · new commits checked"
                 } else {
-                    "Last review 2026-11-18 · PR has new commits since"
+                    "Last review 2026-11-18"
                 }
                 .into(),
                 body: "Reads well. One naming nit inline, nothing blocking.".into(),
@@ -1096,7 +1096,7 @@ impl ReviewSession {
             Station::new(
                 StationKind::YourReview,
                 StationHealth::Waiting,
-                "new commits since",
+                "new commits",
             )
         });
     }

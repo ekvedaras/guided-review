@@ -3,25 +3,30 @@
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Rgba,
-    SharedString, StatefulInteractiveElement, Styled, div, px,
+    AnyElement, Context, Div, ElementId, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Rgba, SharedString, StatefulInteractiveElement, Styled, div, px,
 };
 
 use super::OneStepLayout;
 use crate::app::components::button::{ButtonKind, ButtonSize, icon_button};
 use crate::app::components::icon::{Icon, sized_icon};
+use crate::app::components::motion::{pulse, shimmer_text};
 use crate::app::components::palette::{CARD_RADIUS, Colors, INNER_RADIUS, Tone};
 use crate::app::components::reviews_block::ReviewsBlock;
 use crate::app::components::tooltip::tooltip;
 use crate::app::review_session::ReviewSession;
 use crate::app::sidebar_rows::{SidebarProblem, SidebarRows};
-use crate::viewer::{Station, StationHealth, StationKind};
+use crate::viewer::{AiReviewAction, Intent, Station, StationHealth, StationKind};
 
 /// The round icon of a station in the stepper.
 const NODE_SIZE: f32 = 32.;
 /// The square behind the icon at the head of a card, and the room the icon of a line under it takes,
 /// so the icons of both stand in one column.
 const TILE_SIZE: f32 = 22.;
+/// The space between the tile and the name.
+const TILE_GAP: f32 = 8.;
+/// One line of the small text the rows are set in, so a row's icon stands beside its first line.
+const LINE_HEIGHT: f32 = 16.;
 
 const fn icon_of(kind: StationKind) -> Icon {
     match kind {
@@ -51,24 +56,28 @@ fn ink(colors: &Colors, health: StationHealth) -> Rgba {
 /// quiet hover ground, as the neutral tone's ground is the card's own.
 fn ground(colors: &Colors, health: StationHealth) -> Rgba {
     match health {
-        StationHealth::NotStarted => colors.hover,
+        StationHealth::NotStarted => colors.border,
         health => colors.tone(tone_of(health)).background,
     }
 }
 
-pub(super) fn problem_line(colors: &Colors, problem: &SidebarProblem) -> Div {
+/// A problem's headline and its detail under it. In a station's card the head already shows the
+/// station failed in red, so only a problem above the stepper has the alert icon and a red headline.
+fn problem_line(colors: &Colors, problem: &SidebarProblem, is_above_stepper: bool) -> Div {
     div()
         .flex()
         .gap_2()
         .text_xs()
-        .child(
-            div()
-                .flex_none()
-                .h(px(16.))
-                .flex()
-                .items_center()
-                .child(sized_icon(Icon::CircleAlert, colors.danger, px(12.))),
-        )
+        .when(is_above_stepper, |line| {
+            line.child(
+                div()
+                    .flex_none()
+                    .h(px(16.))
+                    .flex()
+                    .items_center()
+                    .child(sized_icon(Icon::CircleAlert, colors.danger, px(12.))),
+            )
+        })
         .child(
             div()
                 .flex_1()
@@ -78,7 +87,11 @@ pub(super) fn problem_line(colors: &Colors, problem: &SidebarProblem) -> Div {
                 .gap_0p5()
                 .child(
                     div()
-                        .text_color(colors.danger)
+                        .text_color(if is_above_stepper {
+                            colors.danger
+                        } else {
+                            colors.text
+                        })
                         .child(problem.headline.clone()),
                 )
                 .children(
@@ -88,6 +101,30 @@ pub(super) fn problem_line(colors: &Colors, problem: &SidebarProblem) -> Div {
                         .map(|detail| div().text_color(colors.muted_text).child(detail)),
                 ),
         )
+}
+
+/// The ground of a station at work, under its icon: it breathes, so the stepper shows something
+/// is moving even when that station's card is not the one open.
+fn busy_ground(colors: &Colors, radius: Pixels, id: impl Into<ElementId>) -> impl IntoElement {
+    pulse(
+        div()
+            .absolute()
+            .inset_0()
+            .rounded(radius)
+            .bg(ground(colors, StationHealth::Working)),
+        id,
+    )
+}
+
+/// A station's state in its tone; a station at work has a shine running over it.
+fn state_text(colors: &Colors, station: &Station, id: impl Into<ElementId>) -> AnyElement {
+    let state = SharedString::from(station.state.clone());
+    let color = ink(colors, station.health);
+    if station.health == StationHealth::Working {
+        shimmer_text(state, color, colors.text, id).into_any_element()
+    } else {
+        div().text_color(color).child(state).into_any_element()
+    }
 }
 
 fn quiet(colors: &Colors, text: impl Into<SharedString>) -> Div {
@@ -125,6 +162,7 @@ impl OneStepLayout {
             .when(!mac_problems.is_empty(), |section| {
                 section.child(
                     div()
+                        .mb_1()
                         .p_3()
                         .rounded(px(CARD_RADIUS))
                         .bg(colors.danger_background)
@@ -134,7 +172,7 @@ impl OneStepLayout {
                         .children(
                             mac_problems
                                 .into_iter()
-                                .map(|problem| problem_line(colors, problem)),
+                                .map(|problem| problem_line(colors, problem, true)),
                         ),
                 )
             })
@@ -187,14 +225,21 @@ impl OneStepLayout {
                             .child(
                                 div()
                                     .flex_none()
-                                    .mx_1()
+                                    .mx(px(8.))
                                     .size(px(NODE_SIZE))
                                     .rounded_full()
                                     .flex()
                                     .items_center()
                                     .justify_center()
+                                    .relative()
                                     .map(|node| {
-                                        if is_open {
+                                        if station.health == StationHealth::Working {
+                                            node.child(busy_ground(
+                                                colors,
+                                                px(NODE_SIZE / 2.),
+                                                format!("station-node-busy-{}", kind.short_name()),
+                                            ))
+                                        } else if is_open {
                                             node.bg(ground(colors, station.health))
                                         } else {
                                             node.group_hover("station", |node| {
@@ -231,8 +276,8 @@ impl OneStepLayout {
             }))
     }
 
-    /// The open station: its icon, name and state, the button that shows its agent, then what it
-    /// holds.
+    /// The open station: its icon and name, its state and its agent's buttons at the right, then what
+    /// it holds, in line with the name.
     fn station_card(
         &self,
         colors: &Colors,
@@ -245,12 +290,13 @@ impl OneStepLayout {
             .problems
             .iter()
             .filter(|problem| problem.home == Some(station.kind))
-            .map(|problem| problem_line(colors, problem).into_any_element());
+            .map(|problem| problem_line(colors, problem, false).into_any_element());
         let body: Vec<AnyElement> = self
             .station_body(colors, sidebar, station, is_everything_read, cx)
             .into_iter()
             .chain(problems)
             .collect();
+        let head_buttons = Self::head_buttons(colors, sidebar, station.kind, cx);
         div()
             .p_3()
             .rounded(px(CARD_RADIUS))
@@ -261,17 +307,28 @@ impl OneStepLayout {
             .gap_2()
             .child(
                 div()
-                    .h(px(TILE_SIZE))
+                    .min_h(px(TILE_SIZE))
                     .flex()
                     .items_center()
-                    .gap_2()
+                    .gap(px(TILE_GAP))
                     .text_xs()
                     .child(
                         div()
                             .flex_none()
                             .size(px(TILE_SIZE))
                             .rounded(px(INNER_RADIUS))
-                            .bg(ground(colors, station.health))
+                            .relative()
+                            .map(|tile| {
+                                if station.health == StationHealth::Working {
+                                    tile.child(busy_ground(
+                                        colors,
+                                        px(INNER_RADIUS),
+                                        "station-tile-busy",
+                                    ))
+                                } else {
+                                    tile.bg(ground(colors, station.health))
+                                }
+                            })
                             .flex()
                             .items_center()
                             .justify_center()
@@ -291,15 +348,62 @@ impl OneStepLayout {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .truncate()
-                            .text_color(ink(colors, station.health))
-                            .child(SharedString::from(station.state.clone())),
+                            .flex()
+                            .justify_end()
+                            .text_right()
+                            .child(state_text(colors, station, "station-card-state")),
                     )
-                    .children(Self::show_agent(colors, sidebar, station.kind, cx)),
+                    .when(!head_buttons.is_empty(), |head| {
+                        head.child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .my(px(-2.))
+                                .mr(px(-6.))
+                                .children(head_buttons),
+                        )
+                    }),
             )
             .when(!body.is_empty(), |card| {
-                card.child(div().flex().flex_col().gap_2().children(body))
+                card.child(
+                    div()
+                        .pl(px(TILE_SIZE + TILE_GAP))
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .children(body),
+                )
             })
+    }
+
+    /// Run again and Show agent: quiet icons, as they act on the station's agent, not on the review.
+    fn head_buttons(
+        colors: &Colors,
+        sidebar: &SidebarRows,
+        kind: StationKind,
+        cx: &Context<Self>,
+    ) -> Vec<AnyElement> {
+        let run_again = (kind == StationKind::AiReview
+            && sidebar.ai_review.action == Some(AiReviewAction::RunAgain))
+        .then(|| {
+            icon_button(
+                colors,
+                "sidebar-run-ai-review-again",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::Refresh,
+                "Run again",
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::RunAiReview, window, cx);
+            }))
+            .into_any_element()
+        });
+        run_again
+            .into_iter()
+            .chain(Self::show_agent(colors, sidebar, kind, cx))
+            .collect()
     }
 
     fn show_agent(
@@ -326,13 +430,17 @@ impl OneStepLayout {
                     }))
                     .into_any_element(),
             ),
-            StationKind::AiReview if sidebar.ai_review.can_show_agent => Some(
-                button("show-review-agent")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.session.update(cx, ReviewSession::show_review_agent);
-                    }))
-                    .into_any_element(),
-            ),
+            StationKind::AiReview
+                if sidebar.ai_review.can_show_agent && !sidebar.ai_review.is_failure =>
+            {
+                Some(
+                    button("show-review-agent")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.session.update(cx, ReviewSession::show_review_agent);
+                        }))
+                        .into_any_element(),
+                )
+            }
             _ => None,
         }
     }
@@ -356,7 +464,17 @@ impl OneStepLayout {
                     .collect::<Vec<_>>(),
             },
             StationKind::AiReview => {
-                vec![Self::ai_review_block(colors, &sidebar.ai_review, cx).into_any_element()]
+                let ai_review = &sidebar.ai_review;
+                let has_body = ai_review.is_failure
+                    || ai_review.has_findings
+                    || ai_review.has_dismissed_findings
+                    || ai_review
+                        .action
+                        .is_some_and(|action| action != AiReviewAction::RunAgain);
+                has_body
+                    .then(|| Self::ai_review_block(colors, ai_review, cx).into_any_element())
+                    .into_iter()
+                    .collect()
             }
             StationKind::Fixes => {
                 Self::send_fixes_button(colors, sidebar.ai_review.fixes_to_send, cx)
@@ -416,13 +534,12 @@ impl OneStepLayout {
                 "station-line-{}",
                 kind.short_name()
             )))
-            .min_h(px(28.))
-            .py_1()
+            .py(px(6.))
             .px_3()
             .rounded(px(INNER_RADIUS))
             .flex()
-            .items_center()
-            .gap_2()
+            .items_start()
+            .gap(px(TILE_GAP))
             .text_xs()
             .cursor_pointer()
             .hover(|line| line.bg(colors.hover))
@@ -430,22 +547,31 @@ impl OneStepLayout {
                 div()
                     .flex_none()
                     .w(px(TILE_SIZE))
+                    .h(px(LINE_HEIGHT))
                     .flex()
+                    .items_center()
                     .justify_center()
                     .child(sized_icon(icon_of(kind), color, px(12.))),
             )
             .child(
                 div()
-                    .flex_none()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(kind.name()),
-            )
-            .child(
-                div()
                     .flex_1()
                     .min_w_0()
-                    .text_color(color)
-                    .child(SharedString::from(station.state.clone())),
+                    .flex()
+                    .flex_wrap()
+                    .justify_between()
+                    .gap_x_3()
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(kind.name()),
+                    )
+                    .child(div().min_w_0().child(state_text(
+                        colors,
+                        station,
+                        format!("station-line-state-{}", kind.short_name()),
+                    ))),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.picked_station = Some(kind);

@@ -130,6 +130,31 @@ fn problems_sit_with_the_station_they_are_about() {
 }
 
 #[test]
+fn a_station_with_one_problem_names_it_and_with_more_counts_them() {
+    let stations = of(&[
+        (StationKind::Tour, StationHealth::Done),
+        (StationKind::GitHub, StationHealth::Done),
+    ]);
+
+    let one = stations
+        .clone()
+        .with_problems(&[Problem::ThreadsNotRead("503".to_owned())]);
+    let two = stations.with_problems(&[
+        Problem::ThreadsNotRead("503".to_owned()),
+        Problem::HandOffNotSent {
+            comment: "c".to_owned(),
+            reason: "r".to_owned(),
+        },
+    ]);
+
+    assert_eq!(
+        station(&one, StationKind::GitHub),
+        (StationHealth::Failed, "threads not read".to_owned())
+    );
+    assert_eq!(station(&two, StationKind::GitHub).1, "2 problems");
+}
+
+#[test]
 fn a_github_problem_of_a_review_with_no_github_station_sits_above_the_stepper() {
     let stations = of(&[(StationKind::Tour, StationHealth::Done)]);
 
@@ -203,6 +228,14 @@ fn an_agent_link_that_is_off_fails_the_tour() {
         station(&stations, StationKind::Tour),
         (StationHealth::Failed, "agent link off".to_owned())
     );
+}
+
+#[test]
+fn the_tour_card_says_why_the_agent_link_is_off_without_saying_again_that_it_is() {
+    let reason = AgentLinkOff::HerdrFailed("registry writer stopped".to_owned());
+    let off = TourAgentState::LinkOff(reason.clone());
+
+    assert_eq!(off.detail_for(&pr()), reason.to_string());
 }
 
 #[test]

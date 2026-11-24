@@ -6,8 +6,8 @@ use guided_review::tour::{BasicTour, GuidedTour, TourPin};
 use guided_review::update::Build;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, Effect, GuidedTourProgress, GuidedTourRefusal, Intent,
-    PaletteAction, Review, ReviewStateFile, Screen, TerminalId, TourAgentState, TourWriting,
-    WindowMoment,
+    PaletteAction, Review, ReviewStateFile, Screen, StationHealth, StationKind, TerminalId,
+    TourAgentState, TourWriting, WindowMoment,
 };
 use serde_json::json;
 
@@ -133,6 +133,23 @@ fn writing_with(status: AgentStatus, screen: &[&str]) -> GuidedTourProgress {
     writing.status_is(status);
     writing.screen_is(screen.iter().map(|line| (*line).to_owned()).collect());
     GuidedTourProgress::Writing(writing)
+}
+
+#[test]
+fn a_starting_agent_that_printed_a_step_is_writing_the_tour() {
+    let shop = Shop::new();
+    let mut review = shop.basic();
+    let mut writing = TourWriting::starting();
+    writing.screen_is(vec!["• Reading a.txt".to_owned()]);
+
+    review.guided_tour_is(GuidedTourProgress::Writing(writing));
+
+    let stations = review.stations(&TourAgentState::None, std::time::SystemTime::now());
+    let tour = stations.get(StationKind::Tour).unwrap();
+    assert_eq!(
+        (tour.health, tour.state.as_str()),
+        (StationHealth::Working, "being written")
+    );
 }
 
 #[test]

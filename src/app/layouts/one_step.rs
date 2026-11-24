@@ -1869,19 +1869,32 @@ impl OneStepLayout {
             icon_label_button(
                 colors,
                 "findings-list",
-                ButtonKind::Ghost,
+                ButtonKind::Secondary,
                 ButtonSize::Small,
                 Icon::ListChecks,
                 "Findings list",
             )
             .child(button_keys(
                 colors,
-                ButtonKind::Ghost,
+                ButtonKind::Secondary,
                 Command::FindingsList,
                 cx,
             ))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.act(Intent::ToggleFindingsList, window, cx);
+            }))
+        });
+        let show_agent = (ai_review.is_failure && ai_review.can_show_agent).then(|| {
+            icon_label_button(
+                colors,
+                "show-failed-review-agent",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Terminal,
+                "Show agent",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::show_review_agent);
             }))
         });
         let next = ai_review.has_findings.then(|| {
@@ -1897,23 +1910,22 @@ impl OneStepLayout {
                 this.act(Intent::NextFinding, window, cx);
             }))
         });
-        let action = ai_review.action.map(|action| {
-            icon_label_button(
-                colors,
-                "sidebar-run-ai-review",
-                if action == AiReviewAction::RunAgain {
-                    ButtonKind::Ghost
-                } else {
-                    ButtonKind::Secondary
-                },
-                ButtonSize::Small,
-                ai_review_icon(action),
-                action.label(),
-            )
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.act(Intent::RunAiReview, window, cx);
-            }))
-        });
+        let action = ai_review
+            .action
+            .filter(|action| *action != AiReviewAction::RunAgain)
+            .map(|action| {
+                icon_label_button(
+                    colors,
+                    "sidebar-run-ai-review",
+                    ButtonKind::Secondary,
+                    ButtonSize::Small,
+                    ai_review_icon(action),
+                    action.label(),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.act(Intent::RunAiReview, window, cx);
+                }))
+            });
         div()
             .id("ai-review")
             .flex()
@@ -1927,7 +1939,7 @@ impl OneStepLayout {
                     block.child(
                         div()
                             .text_color(if ai_review.is_failure {
-                                colors.danger
+                                colors.text
                             } else {
                                 colors.muted_text
                             })
@@ -1936,16 +1948,17 @@ impl OneStepLayout {
                 },
             )
             .when(
-                next.is_some() || list.is_some() || action.is_some(),
+                next.is_some() || list.is_some() || action.is_some() || show_agent.is_some(),
                 |block| {
                     block.child(
                         div()
                             .flex()
                             .flex_wrap()
-                            .gap_1()
+                            .gap_2()
+                            .children(action)
+                            .children(show_agent)
                             .children(next)
-                            .children(list)
-                            .children(action),
+                            .children(list),
                     )
                 },
             )
@@ -1967,7 +1980,7 @@ impl OneStepLayout {
                         ButtonKind::Primary,
                         ButtonSize::Small,
                         Icon::Zap,
-                        format!("Send fixes ({fixes_to_send})"),
+                        "Send fixes",
                     )
                     .on_click(cx.listener(|this, _, _, cx| {
                         let refused = this.session.update(cx, ReviewSession::send_fixes);
@@ -1997,7 +2010,7 @@ impl OneStepLayout {
                 ButtonKind::Secondary,
                 ButtonSize::Small,
                 Icon::Refresh,
-                "Retry",
+                "Try again",
             )
             .on_click(cx.listener(|this, _, _, cx| {
                 this.session.update(cx, ReviewSession::retry_agent_link);
@@ -2028,7 +2041,11 @@ impl OneStepLayout {
                 .child(
                     div()
                         .text_xs()
-                        .text_color(colors.muted_text)
+                        .text_color(if agent.can_retry {
+                            colors.text
+                        } else {
+                            colors.muted_text
+                        })
                         .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
                 )
                 .children(retry)
@@ -2096,16 +2113,15 @@ impl OneStepLayout {
                     block.child(
                         div()
                             .text_xs()
-                            .text_color(colors.danger)
+                            .text_color(colors.text)
                             .child(SharedString::from(stage.line.clone())),
                     )
                 })
                 .children(stage.activity.clone().map(|activity| {
                     div()
                         .text_xs()
-                        .font_family(*CODE_FONT)
                         .text_color(colors.muted_text)
-                        .truncate()
+                        .line_clamp(2)
                         .child(SharedString::from(activity))
                 }))
                 .children(try_again)

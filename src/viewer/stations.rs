@@ -28,7 +28,7 @@ impl StationKind {
     /// The name under the station's icon, where the row has room for one short word each.
     pub const fn short_name(self) -> &'static str {
         match self {
-            Self::AiReview => "Review",
+            Self::AiReview => "AI",
             Self::YourReview => "You",
             other => other.name(),
         }
@@ -50,7 +50,7 @@ pub enum StationHealth {
 pub struct Station {
     pub kind: StationKind,
     pub health: StationHealth,
-    /// A few words on how it stands, as "3 findings" or "new commits since".
+    /// A few words on how it stands, as "3 findings" or "new commits".
     pub state: String,
 }
 
@@ -140,23 +140,46 @@ impl Stations {
         self.get(home).map(|station| station.kind)
     }
 
-    /// A station with problems of its own failed, whatever it said before.
-    pub(super) fn with_problems(mut self, problems: &[Problem]) -> Self {
-        let homes: Vec<StationKind> = problems
+    /// A station with problems of its own failed, whatever it said before. One problem is named;
+    /// more are counted.
+    pub fn with_problems(mut self, problems: &[Problem]) -> Self {
+        let homed: Vec<(StationKind, ProblemKind)> = problems
             .iter()
-            .filter_map(|problem| self.home_of(problem))
+            .filter_map(|problem| Some((self.home_of(problem)?, problem.kind())))
             .collect();
         for station in &mut self.stations {
-            let count = homes.iter().filter(|home| **home == station.kind).count();
-            if count > 0 {
-                station.health = StationHealth::Failed;
-                station.state = match count {
-                    1 => "1 problem".to_owned(),
-                    count => format!("{count} problems"),
-                };
-            }
+            let own: Vec<ProblemKind> = homed
+                .iter()
+                .filter(|(home, _)| *home == station.kind)
+                .map(|(_, kind)| *kind)
+                .collect();
+            station.state = match own.as_slice() {
+                [] => continue,
+                [kind] => short_state(*kind).to_owned(),
+                many => format!("{} problems", many.len()),
+            };
+            station.health = StationHealth::Failed;
         }
         self
+    }
+}
+
+/// A station's state when one problem is its own, in a few words.
+const fn short_state(kind: ProblemKind) -> &'static str {
+    match kind {
+        ProblemKind::ThreadsNotRead => "threads not read",
+        ProblemKind::GitHubNotAnswering => "not answering",
+        ProblemKind::NotRead(_) => "read failed",
+        ProblemKind::ViewedNotSynced => "viewed marks not synced",
+        ProblemKind::HandOffNotSent => "comment not handed off",
+        ProblemKind::ReviewingMarkNotChanged => "👀 not changed",
+        ProblemKind::ReadinessNotChanged => "draft state not changed",
+        ProblemKind::MergingNotChanged => "merge not changed",
+        ProblemKind::TourNotRefreshed => "not refreshed",
+        ProblemKind::TourNotReloaded => "not reloaded",
+        ProblemKind::ShowAgentFailed => "agent not shown",
+        ProblemKind::UseAgentFailed => "agent not used",
+        _ => "1 problem",
     }
 }
 

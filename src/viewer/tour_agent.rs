@@ -341,6 +341,14 @@ impl TourAgentState {
         self.line_as(subject.agent_name())
     }
 
+    /// What the tour's card says under its head, which already says the link is off.
+    pub fn detail_for(&self, subject: &ReviewSubject) -> String {
+        match self {
+            Self::LinkOff(reason) => reason.to_string(),
+            _ => self.line_for(subject),
+        }
+    }
+
     fn line_as(&self, who: &str) -> String {
         match self {
             Self::Unknown => format!("{who}: looking"),

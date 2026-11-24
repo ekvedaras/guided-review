@@ -265,7 +265,7 @@ impl RenderOnce for FinishReviewDialog {
                 ButtonKind::Secondary
             };
             button(&colors, "finish-review", kind, ButtonSize::Regular)
-                .when(can_approve_again, Styled::flex_1)
+                .when(can_approve_again, |button| button.flex_grow(1.))
                 .when(!can_approve_again, |button| {
                     button.child(button_icon(
                         &colors,
@@ -295,7 +295,7 @@ impl RenderOnce for FinishReviewDialog {
                 ButtonKind::Secondary,
                 ButtonSize::Regular,
             )
-            .flex_1()
+            .flex_grow(1.)
             .child(if is_confirming_approve_again {
                 "Approve anyway"
             } else {
@@ -355,6 +355,7 @@ impl RenderOnce for FinishReviewDialog {
                 .child(
                     div()
                         .flex()
+                        .flex_wrap()
                         .gap_2()
                         .children(approve_again)
                         .child(open_button),

@@ -16,7 +16,8 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
     AgentStatus, FindingRefusal, FixNote, FixReply, FixState, FixTiming, FixesOffer, PageRow,
-    Review, TerminalId, TourAgentPort, TourAgents, WhyAuthor, WorkPorts,
+    Review, StationHealth, StationKind, TerminalId, TourAgentPort, TourAgentState, TourAgents,
+    WhyAuthor, WorkPorts,
 };
 use serde_json::{Value, json};
 
@@ -475,6 +476,20 @@ fn the_ai_review_card_leaves_the_commits_of_fixes_to_the_findings_list() {
     assert_eq!(
         review.findings_list().rows()[0].fix.as_deref(),
         Some("Fixed in abc1234")
+    );
+}
+
+#[test]
+fn open_findings_make_the_ai_review_wait_for_the_reviewer() {
+    let shop = Shop::with_findings(&[on_line("a", 1, "First."), on_line("b", 2, "Second.")]);
+    let review = shop.open();
+
+    let stations = review.stations(&TourAgentState::None, std::time::SystemTime::now());
+
+    let ai_review = stations.get(StationKind::AiReview).unwrap();
+    assert_eq!(
+        (ai_review.health, ai_review.state.as_str()),
+        (StationHealth::Waiting, "2 findings")
     );
 }
 

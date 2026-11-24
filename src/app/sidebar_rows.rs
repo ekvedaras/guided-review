@@ -246,7 +246,7 @@ impl SidebarRows {
             },
             tour_agent: SidebarTourAgent {
                 is_shown: review.shows_tour_agent_line(tour_agent) || review.show_agent_failed(),
-                line: tour_agent.line_for(review.subject()).into(),
+                line: tour_agent.detail_for(review.subject()).into(),
                 can_show: tour_agent.can_show(),
                 can_retry: tour_agent.can_retry(),
                 choices: tour_agent.choices().to_vec(),

@@ -120,7 +120,7 @@ fn an_agent_idle_after_working_stopped_without_findings() {
 
     review.ai_review_agent_status(AgentStatus::Idle);
 
-    assert!(failure(&review).contains("stopped without findings"));
+    assert!(failure(&review).contains("stopped before it reported"));
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn an_agent_found_again_after_a_restart_that_is_idle_has_stopped() {
 
     review.ai_review_agent_resumed(TerminalId::new("t9"), Some(AgentStatus::Idle));
 
-    assert!(failure(&review).contains("stopped without findings"));
+    assert!(failure(&review).contains("stopped before it reported"));
 }
 
 #[test]
