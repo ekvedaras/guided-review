@@ -674,6 +674,26 @@ fn an_idle_server_is_stopped() {
 }
 
 #[test]
+fn a_question_slower_than_the_idle_time_is_answered_by_the_server() {
+    let timeouts = Timeouts {
+        idle: Duration::from_millis(200),
+        ..Timeouts::default()
+    };
+    let rig = Rig::timed(
+        LIB,
+        |_| json!({"slow": {"method": "textDocument/definition", "ms": 1500}, "answers": {}}),
+        timeouts,
+    );
+
+    let answer = rig.hover_add().0.unwrap();
+
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(rust_analyzer())
+    );
+}
+
+#[test]
 fn hovers_that_get_no_answer_do_not_keep_an_idle_server_running() {
     let timeouts = Timeouts {
         indexing: Duration::from_millis(50),

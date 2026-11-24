@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -33,6 +34,8 @@ pub(super) struct Running {
     opened: Mutex<HashSet<PathBuf>>,
     /// Since the start, until the first answer.
     last_answered: Mutex<Instant>,
+    /// Questions sent and not yet answered or given up on: a server with one is not idle.
+    in_flight: AtomicUsize,
     /// The head of the checkout the server last heard of: what the next move is told against.
     heard: Mutex<Sha>,
 }
@@ -106,6 +109,7 @@ impl Running {
             encoding,
             opened: Mutex::default(),
             last_answered: Mutex::new(Instant::now()),
+            in_flight: AtomicUsize::new(0),
             heard: Mutex::new(checkout.head.clone()),
         })
     }
@@ -116,6 +120,9 @@ impl Running {
 
     /// Counted from the last answer, so questions that time out do not keep a server running.
     pub(super) fn idle_for(&self) -> Duration {
+        if self.in_flight.load(Ordering::SeqCst) > 0 {
+            return Duration::ZERO;
+        }
         locked(&self.last_answered).elapsed()
     }
 
@@ -197,7 +204,25 @@ impl Running {
     }
 
     pub(super) fn ask(&self, method: &str, params: &Value) -> Result<Value, Failure> {
+        let _in_flight: InFlight<'_> = InFlight::counted_in(&self.in_flight);
         self.connection
             .request(method, params, self.timeouts.answer)
+    }
+}
+
+/// One question on its way to the server, counted until it is answered or given up on.
+#[must_use = "the question counts as in flight only while this is held"]
+struct InFlight<'a>(&'a AtomicUsize);
+
+impl<'a> InFlight<'a> {
+    fn counted_in(in_flight: &'a AtomicUsize) -> Self {
+        in_flight.fetch_add(1, Ordering::SeqCst);
+        Self(in_flight)
+    }
+}
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
