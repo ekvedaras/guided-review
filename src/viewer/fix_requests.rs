@@ -222,12 +222,14 @@ impl FixRequests {
         self.state_of(id).is_some_and(FixState::is_in_progress)
     }
 
-    /// The commits of the fixes made, oldest first.
-    pub fn fixed_commits(&self) -> impl Iterator<Item = &str> {
-        self.0.iter().filter_map(|request| match &request.state {
-            FixState::Fixed { commit, .. } => Some(commit.as_str()),
-            _ => None,
-        })
+    /// Where each finding's fix is, by its latest request.
+    pub fn latest_states(&self) -> impl Iterator<Item = &FixState> {
+        let mut seen = std::collections::BTreeSet::new();
+        self.0
+            .iter()
+            .rev()
+            .filter(move |request| seen.insert(request.finding.id.clone()))
+            .map(|request| &request.state)
     }
 
     /// One batch, in the order given. An earlier answer for a finding is replaced; a note given when

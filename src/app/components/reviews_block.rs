@@ -8,7 +8,6 @@ use gpui::{
 use crate::app::sidebar_rows::{SidebarReviews, SidebarYourReview};
 use crate::viewer::{CLAMPED_BODY_LINES, ReviewerLine, ReviewerStatus, StanceAge};
 
-use super::chip::callout;
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
 use super::palette::{Colors, Tone};
@@ -16,7 +15,6 @@ use super::step_notes::note_label;
 use super::thread_view::avatar_circle;
 use super::tooltip::tooltip;
 
-const YOUR_AVATAR_SIZE: f32 = 20.;
 /// One line of the "Last review" text, so its icon centres on the first line however it wraps.
 const SINCE_LINE_HEIGHT: gpui::Pixels = px(16.);
 const REVIEWER_AVATAR_SIZE: f32 = 18.;
@@ -104,11 +102,8 @@ fn your_review(
     cx: &mut App,
 ) -> AnyElement {
     let tone = colors.tone(tone_of(yours.status));
-    let needs_a_look = yours.age == StanceAge::BeforeNewCommits && !yours.is_marked_done;
     let since = (!yours.since.is_empty()).then(|| {
-        let (icon, color) = if needs_a_look {
-            (Some(Icon::CircleAlert), colors.warning)
-        } else if yours.is_marked_done {
+        let (icon, color) = if yours.is_marked_done {
             (Some(Icon::Check), colors.muted_text)
         } else {
             (None, colors.muted_text)
@@ -167,10 +162,8 @@ fn your_review(
             ))
             .child(if is_open { "Show less" } else { "Show all" })
     });
-    callout(colors, tone_of(yours.status))
+    div()
         .id("your-review")
-        .px_3()
-        .py_2p5()
         .flex()
         .flex_col()
         .gap_1p5()
@@ -183,7 +176,7 @@ fn your_review(
                     colors,
                     "You",
                     yours.avatar_url.as_deref(),
-                    YOUR_AVATAR_SIZE,
+                    REVIEWER_AVATAR_SIZE,
                     cx,
                 ))
                 .child(
@@ -191,11 +184,11 @@ fn your_review(
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(tone.text)
                         .child(yours.title.clone()),
-                )
-                .child(sized_icon(icon_of(yours.status), tone.text, px(14.))),
+                ),
         )
         .children(since)
         .children(body)
@@ -234,6 +227,7 @@ fn reviewer_row(colors: &Colors, place: usize, line: &ReviewerLine, cx: &mut App
                 .flex_1()
                 .min_w_0()
                 .truncate()
+                .text_xs()
                 .text_color(colors.sidebar_text)
                 .child(SharedString::from(Arc::clone(&line.name))),
         )

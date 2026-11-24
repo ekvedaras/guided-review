@@ -4,12 +4,13 @@
 use crate::app::components::finish_review::Finishing;
 use gpui::SharedString;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use crate::viewer::{
     AiReviewAction, ApproveWarning, BranchOffer, DiskNews, DiskOffer, GuidedTourBanner,
     GuidedTourProgress, GuidedTourRefusal, GuidedTourStage, Problem, ReadProgress, ReadUnit,
-    Review, ReviewerLine, ReviewerStatus, Screen, StanceAge, StepId, TerminalId, TourAgentState,
-    TreeRow,
+    Review, ReviewerLine, ReviewerStatus, Screen, StanceAge, StationKind, Stations, StepId,
+    TerminalId, TourAgentState, TreeRow,
 };
 
 pub struct SidebarStep {
@@ -142,14 +143,17 @@ pub enum WriteOffer {
 pub struct SidebarProblem {
     pub headline: SharedString,
     pub detail: Option<SharedString>,
+    /// The station whose card names it; `None` when it is about this Mac.
+    pub home: Option<StationKind>,
     pub problem: Problem,
 }
 
 impl SidebarProblem {
-    fn of(problem: Problem) -> Self {
+    fn of(problem: Problem, stations: &Stations) -> Self {
         Self {
             headline: problem.to_string().into(),
             detail: problem.detail().map(SharedString::from),
+            home: stations.home_of(&problem),
             problem,
         }
     }
@@ -167,8 +171,10 @@ pub struct SidebarRows {
     /// Approve and Request changes show only on someone else's PR.
     pub finishing: Finishing,
     pub approve_warning: Option<ApproveWarning>,
-    pub sync_banner: Option<SharedString>,
-    pub not_synced: bool,
+    /// Why viewed marks are not synced with GitHub this session.
+    pub viewed_sync_off: Option<SharedString>,
+    /// The tour, the AI review, the fixes, your review and GitHub, as the stepper shows them.
+    pub stations: Stations,
     /// What went wrong that the reviewer must know about, until it is put right.
     pub problems: Vec<SidebarProblem>,
     /// Changed code no page shows, named so the reviewer reads it on GitHub.
@@ -218,6 +224,7 @@ impl SidebarRows {
                 is_skim: entry.is_skim,
             })
             .collect();
+        let stations = review.stations(tour_agent, SystemTime::now());
         let safety_net = review.safety_net_size().map(|size| SidebarSafetyNet {
             pieces: size.pieces,
             thread_count: size.threads,
@@ -239,7 +246,7 @@ impl SidebarRows {
             },
             tour_agent: SidebarTourAgent {
                 is_shown: review.shows_tour_agent_line(tour_agent) || review.show_agent_failed(),
-                line: tour_agent.line_for(review.subject()).into(),
+                line: tour_agent.detail_for(review.subject()).into(),
                 can_show: tour_agent.can_show(),
                 can_retry: tour_agent.can_retry(),
                 choices: tour_agent.choices().to_vec(),
@@ -265,16 +272,16 @@ impl SidebarRows {
             finishing: Finishing::of(review),
             approve_warning: review.approve_warning(),
             progress,
-            sync_banner: review
+            viewed_sync_off: review
                 .sync_banner()
-                .map(|reason| format!("Not syncing with GitHub: {reason}").into()),
-            not_synced: review.not_synced(),
+                .map(|reason| SharedString::from(reason.to_owned())),
             changes_not_shown: changes_not_shown_notice(&review.changes_not_shown()),
             problems: review
                 .problems()
                 .into_iter()
-                .map(SidebarProblem::of)
+                .map(|problem| SidebarProblem::of(problem, &stations))
                 .collect(),
+            stations,
             is_summary_current: review.screen() == &Screen::Summary,
             steps,
             safety_net,

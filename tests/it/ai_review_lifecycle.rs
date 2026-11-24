@@ -235,7 +235,7 @@ fn the_sidebar_offers_run_before_a_run_and_run_again_after_findings() {
     desk.findings_done(&[a_nit()]);
 
     let stage = desk.review.ai_review_stage();
-    assert_eq!(stage.line, "1 finding: 1 nit");
+    assert_eq!(stage.line, "1 nit");
     assert_eq!(stage.action, Some(AiReviewAction::RunAgain));
 }
 

@@ -27,7 +27,7 @@ impl ReviewCore {
         self.steps_started_read
     }
 
-    fn is_basic(&self) -> bool {
+    pub(super) fn is_basic(&self) -> bool {
         matches!(self.tour, Tour::Basic(_))
     }
 

@@ -11,6 +11,7 @@ mod jobs;
 mod kept;
 mod pr_controls;
 mod run_ai_review;
+mod stations;
 mod work;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

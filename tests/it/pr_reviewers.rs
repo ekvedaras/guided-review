@@ -221,7 +221,7 @@ fn your_review_after(pull: &Pull, github: &FakeGitHub) -> (Review, YourReview) {
 }
 
 #[test]
-fn your_review_says_where_you_stand_and_that_the_pr_moved_on_since() {
+fn your_review_says_where_you_stand_and_when_you_sent_it() {
     let pull = Pull::new();
     let github = pull
         .reviewed_by(vec![standing("me", ReviewOutcome::Approved, &pull.base)])
@@ -231,10 +231,7 @@ fn your_review_says_where_you_stand_and_that_the_pr_moved_on_since() {
 
     assert_eq!(yours.status, ReviewerStatus::Approved);
     assert_eq!(yours.title(), "You approved");
-    assert_eq!(
-        yours.since(),
-        "Last review 2026-11-18 · PR has new commits since"
-    );
+    assert_eq!(yours.since(), "Last review 2026-11-18");
     assert_eq!(yours.age, StanceAge::BeforeNewCommits);
     assert_eq!(yours.body(), "looks fine");
 }

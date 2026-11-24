@@ -113,9 +113,7 @@ impl AiReviewRun {
     #[cfg(feature = "snapshots")]
     pub fn staged_failed() -> Self {
         Self::Failed {
-            reason:
-                "The review agent stopped without findings. Show the agent to answer it, or try again."
-                    .to_owned(),
+            reason: "The review agent stopped before it reported.".to_owned(),
             agent: Some(TerminalId::new("t1")),
         }
     }
@@ -159,8 +157,7 @@ impl AiReviewRun {
             AgentStatus::Working => running.first_turn = FirstTurn::Taken,
             AgentStatus::Idle if running.first_turn == FirstTurn::Taken => {
                 *self = Self::Failed {
-                    reason: "The review agent stopped without findings. Show the agent to answer it, or try again."
-                        .to_owned(),
+                    reason: "The review agent stopped before it reported.".to_owned(),
                     agent: Some(running.terminal.clone()),
                 };
             }

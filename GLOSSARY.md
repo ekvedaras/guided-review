@@ -58,6 +58,8 @@
 
 **Step**: One stop in a tour. It holds diff pieces, a diagram, or both, and a short text that says what they do and why they come at this point. A step can have child steps: the details of that step. The reader sees a step first, then its child steps.
 
+**Station**: One part of the work around reading a review, shown as one icon in the sidebar's stepper: the tour, the AI review, the fixes, your review, and GitHub (a local review has no GitHub station). Each says how it stands: failed, waiting, working, done or not started. The card under the stepper shows the station that failed, else one that waits, else one at work, unless the reviewer clicked another. Avoid: stop, stage (a **step** is a stop in a tour).
+
 **Check hint**: A one-line note on a risky step that tells the reviewer what to verify.
 
 **Skim step**: A step the reviewer only needs to glance at, for example callers that only pass a flag.

@@ -118,6 +118,10 @@ pub struct ReviewSession {
     #[cfg(feature = "snapshots")]
     staged_re_review: Option<StagedReReview>,
     #[cfg(feature = "snapshots")]
+    is_viewed_wait_staged: bool,
+    #[cfg(feature = "snapshots")]
+    staged_station: Option<crate::viewer::Station>,
+    #[cfg(feature = "snapshots")]
     is_unread_end_staged: bool,
     tour_agent_follow: Option<Task<()>>,
     show_agent: Option<Task<()>>,
@@ -236,6 +240,10 @@ impl ReviewSession {
             staged_refresh: None,
             #[cfg(feature = "snapshots")]
             staged_re_review: None,
+            #[cfg(feature = "snapshots")]
+            is_viewed_wait_staged: false,
+            #[cfg(feature = "snapshots")]
+            staged_station: None,
             #[cfg(feature = "snapshots")]
             is_unread_end_staged: false,
             tour_agent_follow: None,
@@ -969,17 +977,52 @@ impl ReviewSession {
         }
     }
 
+    /// Draws one station as given, until it is staged back to `None`: nothing in the review changes.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_station(
+        &mut self,
+        station: Option<crate::viewer::Station>,
+        cx: &mut Context<Self>,
+    ) {
+        self.staged_station = station;
+        self.sidebar = self.sidebar_rows();
+        cx.notify();
+    }
+
     /// Shows the open screen and the sidebar as if every step were read, without ticking anything,
     /// so no viewed mark goes to GitHub. The next rebuild of the rows undoes it.
     #[cfg(feature = "snapshots")]
     pub fn stage_all_read(&mut self, cx: &mut Context<Self>) {
+        use crate::viewer::{Station, StationHealth, StationKind};
+
         let total = self.sidebar.progress.total;
         self.sidebar.progress.read = total;
         for step in &mut self.sidebar.steps {
             step.is_ticked = true;
         }
+        let not_sent = self
+            .sidebar
+            .stations
+            .get(StationKind::YourReview)
+            .is_some_and(|station| station.state == "not sent yet");
+        if not_sent {
+            self.sidebar.stations.stage(Station::new(
+                StationKind::YourReview,
+                StationHealth::Waiting,
+                "ready to send",
+            ));
+        }
         self.rows.stage_all_read(total, &self.open_details);
         self.screen_list.reset(self.rows.len());
+        cx.notify();
+    }
+
+    /// The GitHub station as it stands while viewed marks wait to go through, drawn only: nothing is
+    /// ticked, so no mark goes to GitHub.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_viewed_wait(&mut self, is_staged: bool, cx: &mut Context<Self>) {
+        self.is_viewed_wait_staged = is_staged;
+        self.sidebar = self.sidebar_rows();
         cx.notify();
     }
 
@@ -996,7 +1039,10 @@ impl ReviewSession {
     fn draw_re_review(&self, stage: StagedReReview, sidebar: &mut SidebarRows) {
         use crate::app::components::finish_review::Finishing;
         use crate::app::sidebar_rows::{SidebarFinish, SidebarReviews, SidebarYourReview};
-        use crate::viewer::{ReviewerKind, ReviewerLine, ReviewerStatus, StanceAge};
+        use crate::viewer::{
+            ReviewerKind, ReviewerLine, ReviewerStatus, StanceAge, Station, StationHealth,
+            StationKind,
+        };
 
         let is_marked_done = stage == StagedReReview::MarkedDone;
         let reviewer = |name: &str, kind, status, age| ReviewerLine {
@@ -1013,7 +1059,7 @@ impl ReviewSession {
                 since: if is_marked_done {
                     "Last review 2026-11-18 · new commits checked"
                 } else {
-                    "Last review 2026-11-18 · PR has new commits since"
+                    "Last review 2026-11-18"
                 }
                 .into(),
                 body: "Reads well. One naming nit inline, nothing blocking.".into(),
@@ -1060,6 +1106,15 @@ impl ReviewSession {
             is_marked_done,
         };
         sidebar.finishing = Finishing::AnyVerdict;
+        sidebar.stations.stage(if is_marked_done {
+            Station::new(StationKind::YourReview, StationHealth::Done, "marked done")
+        } else {
+            Station::new(
+                StationKind::YourReview,
+                StationHealth::Waiting,
+                "new commits",
+            )
+        });
     }
 
     /// The last screen as it ends when steps were passed unread, without ticking anything, so no
@@ -1519,6 +1574,10 @@ impl ReviewSession {
     /// The sidebar lists what went wrong in small red lines far from where the reader acted, so a
     /// problem that was not there before is also a toast that stays until dismissed.
     fn show_sidebar(&mut self, cx: &mut Context<Self>) {
+        if let Err(error) = self.review.time_viewed_wait(std::time::SystemTime::now()) {
+            // A save that fails is named by the review's problems; the time is still shown.
+            eprintln!("could not keep when viewed marks started to wait: {error:#}");
+        }
         let sidebar = self.sidebar_rows();
         let before: Vec<Problem> = self
             .sidebar
@@ -1837,6 +1896,19 @@ impl ReviewSession {
         #[cfg(feature = "snapshots")]
         if let Some(stage) = self.staged_re_review {
             self.draw_re_review(stage, &mut rows);
+        }
+        #[cfg(feature = "snapshots")]
+        if self.is_viewed_wait_staged {
+            use crate::viewer::{Station, StationHealth, StationKind};
+            rows.stations.stage(Station::new(
+                StationKind::GitHub,
+                StationHealth::Waiting,
+                "3 viewed marks waiting · 4 min",
+            ));
+        }
+        #[cfg(feature = "snapshots")]
+        if let Some(station) = &self.staged_station {
+            rows.stations.stage(station.clone());
         }
         rows
     }

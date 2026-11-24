@@ -32,7 +32,7 @@ use crate::viewer::{
     TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
-use crate::viewer::{IssueDetails, IssueState, RelatedIssue};
+use crate::viewer::{IssueDetails, IssueState, RelatedIssue, Station, StationHealth, StationKind};
 
 const MAX_SCREENS: usize = 16;
 /// Not the PR on screen, so the veil and the loading screen have another PR to name.
@@ -112,10 +112,11 @@ enum Scene {
     BasicGuidedWriting,
     TitleBarMerging,
     FoldedMarkdownParts,
+    StationsBusy,
 }
 
 impl Scene {
-    const ALL: [Self; 72] = [
+    const ALL: [Self; 73] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -188,6 +189,7 @@ impl Scene {
         Self::BasicGuidedWriting,
         Self::TitleBarMerging,
         Self::FoldedMarkdownParts,
+        Self::StationsBusy,
     ];
 
     fn file_name(self) -> &'static str {
@@ -264,6 +266,7 @@ impl Scene {
             Self::CommentComposerNowPrimary => "91-comment-composer-now-primary",
             Self::TitleBarMerging => "92-title-bar-merging",
             Self::FoldedMarkdownParts => "93-folded-markdown-parts",
+            Self::StationsBusy => "95-sidebar-stations-busy",
         }
     }
 
@@ -750,7 +753,16 @@ impl OneStepLayout {
                         "Reads well. Two small questions inline, nothing blocking.",
                         cx,
                     );
+                    session.stage_station(
+                        Some(Station::new(
+                            StationKind::YourReview,
+                            StationHealth::NotStarted,
+                            "not sent yet",
+                        )),
+                        cx,
+                    );
                 });
+                self.picked_station = Some(StationKind::YourReview);
                 cx.set_global(StagedFinishReview(true));
             }
             Scene::CommentComposer => self.compose_on_first_added_lines(window, cx),
@@ -1052,6 +1064,23 @@ impl OneStepLayout {
             }),
             Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
             Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
+            Scene::StationsBusy => {
+                self.change_review(cx, |review| {
+                    review.go_forward();
+                    let first_line = review
+                        .page()
+                        .lines()
+                        .next()
+                        .map(|line| line.location.clone());
+                    if let Some(at) = first_line {
+                        review.ai_review_is(AiReview::staged_on(&at.path, at.line));
+                        review.stage_fix_requests();
+                    }
+                    review.ide_not_started(&"zed: command not found");
+                });
+                self.session
+                    .update(cx, |session, cx| session.stage_viewed_wait(true, cx));
+            }
             Scene::RefreshRunning => {
                 self.scroll_to_row(0);
                 self.session
@@ -1128,7 +1157,9 @@ impl OneStepLayout {
             Scene::FinishReview => {
                 self.session.update(cx, |session, cx| {
                     session.type_in(&TextBox::FinishBody, "", cx);
+                    session.stage_station(None, cx);
                 });
+                self.picked_station = None;
                 cx.set_global(StagedFinishReview(false));
             }
             Scene::CommentComposer | Scene::CommentComposerNowPrimary => {
@@ -1171,6 +1202,15 @@ impl OneStepLayout {
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
                     toaster.0.update(cx, ToastShelf::clear);
                 }
+            }
+            Scene::StationsBusy => {
+                self.session
+                    .update(cx, |session, cx| session.stage_viewed_wait(false, cx));
+                self.change_review(cx, |review| {
+                    review.unstage_fix_requests();
+                    review.ai_review_is(AiReview::NotRun);
+                    review.go_to_summary();
+                });
             }
             Scene::GitHubOutage => {
                 self.session.update(cx, ReviewSession::unstage_outage);

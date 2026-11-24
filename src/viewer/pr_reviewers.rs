@@ -239,7 +239,8 @@ impl YourReview {
         }
     }
 
-    /// When the last review was sent, and what happened to the PR since.
+    /// When the last review was sent, and that its new commits were checked. New commits not checked
+    /// are the head of the your-review station.
     pub fn since(&self) -> String {
         let Some(last) = &self.last_sent else {
             return String::new();
@@ -247,8 +248,6 @@ impl YourReview {
         let day = last.submitted_at.split('T').next().unwrap_or_default();
         let after = if self.is_marked_done {
             " · new commits checked"
-        } else if self.age == StanceAge::BeforeNewCommits {
-            " · PR has new commits since"
         } else {
             ""
         };

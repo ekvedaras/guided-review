@@ -76,7 +76,7 @@ impl AiReview {
         }
     }
 
-    /// The sidebar's line for the review.
+    /// The AI review card's line: the findings by severity, as the card's head counts them.
     pub fn line(&self) -> String {
         match self {
             Self::NotRun => "Not run".to_owned(),
@@ -95,8 +95,7 @@ impl AiReview {
                 .join(", ");
                 match counts.total() {
                     0 => "No findings".to_owned(),
-                    1 => format!("1 finding: {by_severity}"),
-                    total => format!("{total} findings: {by_severity}"),
+                    _ => by_severity,
                 }
             }
         }
