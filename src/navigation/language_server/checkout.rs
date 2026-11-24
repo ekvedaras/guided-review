@@ -146,8 +146,11 @@ fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// The PR's files may hold hooks that a relative `core.hooksPath` would point at, so no git command on
+/// a server checkout runs any.
 fn git(folder: &Path, args: &[&str]) -> anyhow::Result<String> {
     let output = Command::new("git")
+        .args(["-c", "core.hooksPath=/dev/null"])
         .arg("-C")
         .arg(folder)
         .args(args)

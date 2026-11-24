@@ -5,7 +5,7 @@ use guided_review::navigation::{Change, ServerCheckouts};
 use guided_review::pull_request::{RepoName, Sha};
 use tempfile::TempDir;
 
-use crate::support::FixtureRepo;
+use crate::support::{FixtureRepo, write_executable};
 
 struct Rig {
     clone: FixtureRepo,
@@ -149,4 +149,23 @@ fn a_second_review_moves_the_same_checkout_and_says_which_files_changed() {
         ]
     );
     assert_eq!(rig.move_to(&rig.first).changed, []);
+}
+
+#[test]
+fn moving_the_checkout_runs_no_git_hook_from_the_prs_files() {
+    let rig = Rig::with_a_dirty_clone();
+    let marker = rig.state.path().join("hook-ran");
+    rig.clone.git(&["config", "core.hooksPath", "hooks"]);
+    std::fs::create_dir(rig.clone.path().join("hooks")).unwrap();
+    write_executable(
+        &rig.clone.path().join("hooks/post-checkout"),
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    );
+    let with_hook = Sha::new(&rig.clone.commit("a hook in the PR"));
+
+    rig.move_to(&with_hook);
+    rig.move_to(&rig.first);
+    rig.move_to(&with_hook);
+
+    assert!(!marker.exists(), "a hook ran");
 }
