@@ -5695,7 +5695,7 @@ impl Render for OneStepLayout {
             Self::KEY_CONTEXT.to_owned()
         };
         let frame_painted_marker = self.frame_stats.frame_started();
-        let name_card = self.name_card_layer(cx);
+        let name_card = self.name_card_layer(window, cx);
         let switching_veil = cx
             .global::<PrSwitching>()
             .active

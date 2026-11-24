@@ -192,7 +192,8 @@ pub use more_lines::{MoreLines, MoreLinesEntry};
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 pub use move_to_pr::{PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
 pub use name_card::{
-    CardNote, DefinitionCard, DefinitionRow, FoundNames, NameTarget, USAGES_SHOWN, UsageRow,
+    CardNote, DefinitionCard, DefinitionRow, FoundNames, NameTarget, Snippet, USAGES_SHOWN,
+    UsageFile, UsageLine,
 };
 pub use name_desk::{HoveredName, NameOutcome, NameUnderPointer, NameWork};
 pub use name_hover::{HoverTicket, NameHover};

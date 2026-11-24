@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use gpui::{
     AnyElement, Bounds, Context, InteractiveElement, IntoElement, ParentElement, Pixels,
-    StatefulInteractiveElement, Styled, div,
+    StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use crate::app::code_links::open_code;
@@ -21,6 +21,8 @@ use super::OneStepLayout;
 
 /// How long the pointer rests on a name before its card opens, as a tooltip waits.
 const REST: Duration = Duration::from_millis(500);
+/// The space the window keeps clear of the card on each side (`popover_by` places it by the name).
+const WINDOW_MARGIN: f32 = 8.;
 /// Between the pointer leaving the name and the card closing, long enough to cross to the card.
 const GRACE: Duration = Duration::from_millis(150);
 
@@ -142,7 +144,11 @@ impl OneStepLayout {
     }
 
     /// The card of the name the pointer rests on, drawn over the page.
-    pub(super) fn name_card_layer(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn name_card_layer(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let name = self.name_hover.shown()?.clone();
         let place = self.name_card_place.as_ref()?;
         let word = place.word;
@@ -161,6 +167,7 @@ impl OneStepLayout {
                 .ok();
         });
         let colors = Colors::active(cx);
+        let room = window.viewport_size().width - px(2. * WINDOW_MARGIN);
         Some(
             popover_by(
                 word,
@@ -174,7 +181,7 @@ impl OneStepLayout {
                             this.wait(GRACE, ticket, Self::name_grace_over, cx);
                         }
                     }))
-                    .child(name_card(&colors, &card, &on_open)),
+                    .child(name_card(&colors, &card, &on_open, room)),
             )
             .into_any_element(),
         )

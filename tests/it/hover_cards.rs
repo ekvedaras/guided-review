@@ -8,7 +8,7 @@ use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     CardNote, DefinitionCard, HoveredName, JumpPlace, LineLocation, NameTarget, Review,
-    ReviewStateFile, Side,
+    ReviewStateFile, Side, Snippet,
 };
 use serde_json::{Value, json};
 
@@ -160,9 +160,13 @@ fn the_hovered_line_is_left_out_of_the_usages() {
         &hover("src/checkout.ts", Side::Head, 4, "Cart"),
     ));
 
-    let places: Vec<&str> = card.usages.iter().map(|usage| &*usage.place).collect();
-    assert_eq!(places, ["src/checkout.ts:1"]);
-    assert_eq!(card.usages_heading.as_deref(), Some("1 USAGE"));
+    let places: Vec<(&str, &str)> = card
+        .usages
+        .iter()
+        .flat_map(|file| file.lines.iter().map(|line| (&*file.path, &*line.number)))
+        .collect();
+    assert_eq!(places, [("src/checkout.ts", "1")]);
+    assert_eq!(&*card.counts, "1 definition · 1 usage in 1 file");
 }
 
 #[test]
@@ -321,7 +325,9 @@ fn an_unchanged_line_found_at_base_jumps_to_the_row_that_shows_it() {
     let usage = card
         .usages
         .iter()
-        .find(|usage| &*usage.place == "src/use.ts:1")
+        .filter(|file| &*file.path == "src/use.ts")
+        .flat_map(|file| &file.lines)
+        .find(|line| &*line.number == "1")
         .expect("line 1 uses price at base");
     let NameTarget::Tour(target) = &usage.target else {
         panic!("the safety net shows line 1: {:?}", usage.target);
@@ -435,15 +441,83 @@ fn more_than_twenty_usages_show_twenty_and_count_the_rest() {
         &hover("src/checkout.ts", Side::Head, 5, "price"),
     ));
 
-    assert_eq!(card.usages.len(), 20);
+    let shown: usize = card.usages.iter().map(|file| file.lines.len()).sum();
+    assert_eq!(shown, 20);
     assert_eq!(card.usages_not_shown, 6);
-    assert_eq!(card.usages_heading.as_deref(), Some("26 USAGES"));
-    assert_eq!(card.more_usages.as_deref(), Some("and 6 more"));
+    assert_eq!(&*card.counts, "1 definition · 26 usages in 2 files");
+    assert_eq!(card.more_usages.as_deref(), Some("and 6 more in 1 file"));
+    let files: Vec<(&str, &str, &str, usize)> = card
+        .usages
+        .iter()
+        .map(|file| (&*file.folder, &*file.name, &*file.count, file.lines.len()))
+        .collect();
     assert_eq!(
-        card.usages.first().map(|usage| &*usage.place),
-        Some("src/checkout.ts:2"),
-        "usages in the PR's files come first"
+        files,
+        [("src", "checkout.ts", "1", 1), ("src", "many.ts", "25", 19)],
+        "usages in the PR's files come first; a file's count is all its usages, its rows the ones shown"
     );
+}
+
+#[test]
+fn usages_are_grouped_by_file_and_a_file_in_the_root_has_no_folder() {
+    let shop = Shop::with_files(&[
+        ("zeta.ts".to_owned(), "price();\n".to_owned()),
+        (
+            "src/deep/er/alpha.ts".to_owned(),
+            "price();\nprice();\n".to_owned(),
+        ),
+    ]);
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 5, "price"),
+    ));
+
+    let files: Vec<(&str, &str, &str)> = card
+        .usages
+        .iter()
+        .map(|file| (&*file.folder, &*file.name, &*file.path))
+        .collect();
+    assert_eq!(
+        files,
+        [
+            ("src", "checkout.ts", "src/checkout.ts"),
+            ("src/deep/er", "alpha.ts", "src/deep/er/alpha.ts"),
+            ("", "zeta.ts", "zeta.ts"),
+        ]
+    );
+    let alpha = &card.usages[1];
+    let numbers: Vec<&str> = alpha.lines.iter().map(|line| &*line.number).collect();
+    assert_eq!(numbers, ["1", "2"]);
+    assert_eq!(
+        alpha.target, alpha.lines[0].target,
+        "the file row opens its first usage"
+    );
+}
+
+#[test]
+fn a_snippet_marks_the_name_and_starts_before_it_when_the_name_is_far_right() {
+    let near = Snippet::of("  price();", "price");
+    assert_eq!(&*near.text, "price();");
+    assert_eq!(near.name_text(), Some("price"));
+
+    let far_line = "const aVeryLongVariableNameThatPushesTheCallFarRight = total + price();";
+    let far = Snippet::of(far_line, "price");
+    assert!(far.text.starts_with('…'), "{}", far.text);
+    assert!(far.text.ends_with("price();"), "{}", far.text);
+    assert!(far.text.chars().count() < far_line.chars().count());
+    assert_eq!(far.name_text(), Some("price"));
+}
+
+#[test]
+fn a_snippet_marks_the_whole_word_and_not_a_longer_name_that_contains_it() {
+    let snippet = Snippet::of("priceList(); price();", "price");
+    assert_eq!(snippet.name_text(), Some("price"));
+    assert_eq!(snippet.name, Some(13..18));
+    assert_eq!(Snippet::of("other();", "price").name_text(), None);
 }
 
 #[test]

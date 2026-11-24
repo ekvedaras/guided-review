@@ -1496,60 +1496,82 @@ impl OneStepLayout {
     }
 }
 
+/// The maintainer's case: a PHP enum used all over a big repo, with a same-named TypeScript enum.
 fn staged_lookup(hovered: &HoveredName) -> Lookup {
+    const FOLDERS: [&str; 6] = [
+        "app/Domain/StandingOrders/Actions",
+        "app/Http/Controllers/Api/V2/StandingOrders",
+        "app/Models/StandingOrders/Scopes",
+        "tests/Feature/Domain/StandingOrders",
+        "resources/js/features/standing-orders/components",
+        "database/migrations",
+    ];
+    const FILES: [&str; 7] = [
+        "UpdateStandingOrder.php",
+        "StandingOrder.php",
+        "ListStandingOrderScheduleItems.php",
+        "CancelStandingOrderTest.php",
+        "ScheduleItemRow.tsx",
+        "StandingOrderScheduleItemFactory.php",
+        "RescheduleDeliveries.php",
+    ];
+    const LINES: [&str; 4] = [
+        "use App\\Models\\Enum\\StandingOrders\\{word};",
+        "->where('status', {word}::PENDING)",
+        "return collect([{word}::PENDING, {word}::WAITING_FOR_APPROVAL, {word}::CANCELLED])->contains($this->status);",
+        "$items = $standingOrder->scheduleItems()->whereIn('status', [{word}::PENDING, {word}::REJECTED]);",
+    ];
     let word = &hovered.word;
     let line = |number: u32| LineNumber::try_from(number).unwrap_or(LineNumber::FIRST);
     let place = |path: &str, number: u32| Place {
         path: FilePath::new(path).unwrap_or_else(|_| hovered.at.path.clone()),
         line: line(number),
     };
-    let usage = |path: &str, number: u32, text: String| Usage {
-        place: place(path, number),
-        text: text.into(),
-    };
+    let mut usages = Vec::new();
+    for file in 0..41_usize {
+        let folder = FOLDERS
+            .get(file % FOLDERS.len())
+            .copied()
+            .unwrap_or_default();
+        let name = FILES.get(file % FILES.len()).copied().unwrap_or_default();
+        let path = format!("{folder}/{}/{name}", file / FILES.len());
+        for (n, template) in LINES
+            .iter()
+            .cycle()
+            .take(if file < 14 { 16 } else { 15 })
+            .enumerate()
+        {
+            usages.push(Usage {
+                place: place(&path, u32::try_from(7 + n * 3).unwrap_or(7)),
+                text: template.replace("{word}", word.as_str()).into(),
+            });
+        }
+    }
     Lookup {
         word: word.clone(),
         definitions: vec![
             Definition {
                 name: word.clone(),
-                kind: DefinitionKind::Method,
-                place: Place {
-                    path: hovered.at.path.clone(),
-                    line: line(12),
-                },
-                signature: format!("pub fn {word}(&self) -> Money").into(),
+                kind: DefinitionKind::Enum,
+                place: place("app/Models/Enum/StandingOrders/StandingOrderScheduleItemStatus.php", 12),
+                signature: format!(
+                    "enum {word}: string implements HasLabel, HasColor, JsonSerializable"
+                )
+                .into(),
                 doc: Some(
-                    "Sum of the lines with discounts applied, rounded to the currency's minor unit."
+                    "Where a scheduled delivery is in its life, from the week it is planned to the day it is delivered or called off. Drives the badge in the schedule."
                         .into(),
                 ),
             },
             Definition {
                 name: word.clone(),
-                kind: DefinitionKind::Function,
-                place: place("src/billing/legacy.rs", 40),
-                signature: format!("fn {word}(items: &[Item]) -> u64").into(),
+                kind: DefinitionKind::Enum,
+                place: place("resources/js/features/standing-orders/types/standing-order-schedule-item-status.ts", 3),
+                signature: format!("export enum {word}").into(),
                 doc: None,
             },
         ],
-        usages: Arc::from(vec![
-            usage(
-                hovered.at.path.as_str(),
-                58,
-                format!("let amount = cart.{word}();"),
-            ),
-            usage("src/checkout.rs", 21, format!("charge(order.{word}())?;")),
-            usage(
-                "src/app/layouts/one_step/settings_panel.rs",
-                12,
-                format!("total += line.{word}();"),
-            ),
-            usage("src/billing/invoice.rs", 77, format!("self.{word}() + tax")),
-            usage(
-                "tests/cart.rs",
-                8,
-                format!("assert_eq!(cart.{word}(), Money::zero());"),
-            ),
-        ]),
+        usages: Arc::from(usages),
         reach: Reach::ChangedFiles,
         cut_short: false,
     }
