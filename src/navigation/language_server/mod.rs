@@ -6,6 +6,7 @@ mod checkout;
 mod hover;
 mod managed;
 mod notices;
+mod recipes;
 mod rpc;
 
 use std::collections::{HashMap, HashSet};
@@ -30,8 +31,9 @@ use super::{
 };
 pub use checkout::{Change, ChangedFile, Checkout, ServerCheckouts};
 use hover::{Hovered, kind_of};
-pub use managed::{ManagedServers, PackagePin, ReleasePin, ServerFolders, ServerPins};
+pub use managed::{ManagedServers, ServerFolders};
 use notices::Notices;
+pub use recipes::{PackagePin, ReleasePin, ServerPins};
 use rpc::{Connection, Failure, locked};
 
 /// Whether a server says by `experimental/serverStatus` that it is busy.
@@ -54,50 +56,6 @@ pub struct ServerLaunch {
 }
 
 impl ServerLaunch {
-    /// Build scripts, proc macros and check on save are off, so it builds nothing in the repo.
-    pub fn rust_analyzer(program: PathBuf) -> Self {
-        Self {
-            name: ServerName::new("rust-analyzer"),
-            program,
-            args: Vec::new(),
-            status: StatusReports::No,
-            options: json!({
-                "cargo": {"buildScripts": {"enable": false}},
-                "procMacro": {"enable": false},
-                "checkOnSave": false,
-            }),
-        }
-    }
-
-    /// Intelephense on the app's Node, keeping its index in `index`.
-    pub fn intelephense(node: PathBuf, script: &Path, index: &Path) -> Self {
-        Self {
-            name: ServerName::of(Language::Php),
-            program: node,
-            args: vec![script.to_string_lossy().into_owned(), "--stdio".to_owned()],
-            status: StatusReports::No,
-            options: json!({
-                "storagePath": index.join("storage"),
-                "globalStoragePath": index.join("global"),
-            }),
-        }
-    }
-
-    /// typescript-language-server on the app's Node, running the tsserver at `tsserver`. Typings
-    /// acquisition is off, since it runs npm to install `@types` packages the repo names.
-    pub fn typescript_language_server(node: PathBuf, script: &Path, tsserver: &Path) -> Self {
-        Self {
-            name: ServerName::of(Language::TypeScript),
-            program: node,
-            args: vec![script.to_string_lossy().into_owned(), "--stdio".to_owned()],
-            status: StatusReports::No,
-            options: json!({
-                "tsserver": {"path": tsserver},
-                "disableAutomaticTypingAcquisition": true,
-            }),
-        }
-    }
-
     /// The server tells whether it is busy with `experimental/serverStatus`, so until it has, it is.
     pub fn reporting_status(mut self) -> Self {
         self.status = StatusReports::Yes;
