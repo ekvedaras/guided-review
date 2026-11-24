@@ -76,6 +76,7 @@ mod hand_offs;
 mod hc_tour_agent;
 mod hidden_text;
 mod highlighting;
+mod hover_cards;
 mod icons;
 mod ide;
 mod image_previews;

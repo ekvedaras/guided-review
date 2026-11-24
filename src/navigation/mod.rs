@@ -6,6 +6,6 @@ mod word;
 mod word_in_file;
 
 pub use git_grep::GitGrep;
-pub use lookup::{FileSearch, FilesWithWord, Lookup, Lookups, Reach};
+pub use lookup::{FILES_PARSED_AT_MOST, FileSearch, FilesWithWord, Lookup, Lookups, Reach};
 pub use word::Word;
 pub use word_in_file::{Definition, DefinitionKind, Place, Usage, WordInFile};

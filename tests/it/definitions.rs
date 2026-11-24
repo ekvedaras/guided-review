@@ -358,10 +358,15 @@ fn definitions_rank_the_hovered_file_then_the_files_it_imports_then_the_rest() {
         "Cart",
         &["legacy/basket.ts", "src/cart.ts", "src/checkout.ts"],
     );
-    let lookups = Lookups::new(shop.code(), FileSearch::whole_repo(Arc::new(search)));
+    let lookups = Lookups::new(FileSearch::whole_repo(Arc::new(search)));
 
     let lookup = lookups
-        .look_up(&shop.head, &word("Cart"), &file_path("src/checkout.ts"))
+        .look_up(
+            &*shop.code(),
+            &shop.head,
+            &word("Cart"),
+            &file_path("src/checkout.ts"),
+        )
         .unwrap();
 
     let places: Vec<String> = lookup
@@ -386,10 +391,15 @@ fn definitions_rank_the_hovered_file_then_the_files_it_imports_then_the_rest() {
 fn a_definition_in_the_hovered_file_comes_first() {
     let shop = Shop::new();
     let search = FakeFilesWithWord::default().with("Cart", &["legacy/basket.ts", "src/cart.ts"]);
-    let lookups = Lookups::new(shop.code(), FileSearch::whole_repo(Arc::new(search)));
+    let lookups = Lookups::new(FileSearch::whole_repo(Arc::new(search)));
 
     let lookup = lookups
-        .look_up(&shop.head, &word("Cart"), &file_path("legacy/basket.ts"))
+        .look_up(
+            &*shop.code(),
+            &shop.head,
+            &word("Cart"),
+            &file_path("legacy/basket.ts"),
+        )
         .unwrap();
 
     assert_eq!(
@@ -403,16 +413,23 @@ fn a_definition_in_the_hovered_file_comes_first() {
 fn a_word_is_searched_once_per_sha() {
     let shop = Shop::new();
     let search = FakeFilesWithWord::default().with("Cart", &["src/cart.ts"]);
-    let lookups = Lookups::new(
-        shop.code(),
-        FileSearch::whole_repo(Arc::new(search.clone())),
-    );
+    let lookups = Lookups::new(FileSearch::whole_repo(Arc::new(search.clone())));
 
     let first = lookups
-        .look_up(&shop.head, &word("Cart"), &file_path("src/cart.ts"))
+        .look_up(
+            &*shop.code(),
+            &shop.head,
+            &word("Cart"),
+            &file_path("src/cart.ts"),
+        )
         .unwrap();
     let again = lookups
-        .look_up(&shop.head, &word("Cart"), &file_path("src/checkout.ts"))
+        .look_up(
+            &*shop.code(),
+            &shop.head,
+            &word("Cart"),
+            &file_path("src/checkout.ts"),
+        )
         .unwrap();
 
     assert_eq!(search.searches(), ["Cart"]);
@@ -422,13 +439,17 @@ fn a_word_is_searched_once_per_sha() {
 #[test]
 fn without_a_clone_only_the_changed_files_are_read() {
     let shop = Shop::new();
-    let lookups = Lookups::new(
-        shop.code(),
-        FileSearch::changed_files([file_path("src/checkout.ts"), file_path("src/gone.ts")].into()),
-    );
+    let lookups = Lookups::new(FileSearch::changed_files(
+        [file_path("src/checkout.ts"), file_path("src/gone.ts")].into(),
+    ));
 
     let lookup = lookups
-        .look_up(&shop.head, &word("Cart"), &file_path("src/checkout.ts"))
+        .look_up(
+            &*shop.code(),
+            &shop.head,
+            &word("Cart"),
+            &file_path("src/checkout.ts"),
+        )
         .unwrap();
 
     assert_eq!(lookup.reach, Reach::ChangedFiles);
@@ -439,15 +460,59 @@ fn without_a_clone_only_the_changed_files_are_read() {
 #[test]
 fn a_source_with_a_clone_searches_it_with_git_grep() {
     let shop = Shop::new();
-    let lookups = Lookups::new(
-        shop.code(),
-        FileSearch::for_source(&*shop.code(), [file_path("src/checkout.ts")].into()),
-    );
+    let lookups = Lookups::new(FileSearch::for_source(
+        &*shop.code(),
+        [file_path("src/checkout.ts")].into(),
+    ));
 
     let lookup = lookups
-        .look_up(&shop.head, &word("Cart"), &file_path("src/checkout.ts"))
+        .look_up(
+            &*shop.code(),
+            &shop.head,
+            &word("Cart"),
+            &file_path("src/checkout.ts"),
+        )
         .unwrap();
 
     assert_eq!(lookup.reach, Reach::WholeRepo);
     assert_eq!(lookup.definitions.len(), 2);
+}
+
+#[test]
+fn a_word_in_more_files_than_the_cap_parses_the_first_ones_and_says_so() {
+    let shop = Shop::new();
+    let search = FakeFilesWithWord::default().with(
+        "Cart",
+        &["legacy/basket.ts", "src/cart.ts", "src/checkout.ts"],
+    );
+    let lookups = Lookups::new(FileSearch::whole_repo(Arc::new(search))).parsing_at_most(2);
+
+    let lookup = lookups
+        .look_up(
+            &*shop.code(),
+            &shop.head,
+            &word("Cart"),
+            &file_path("src/checkout.ts"),
+        )
+        .unwrap();
+
+    assert!(lookup.cut_short);
+    assert!(
+        lookup
+            .usages
+            .iter()
+            .all(|usage| usage.place.path != file_path("src/checkout.ts"))
+    );
+    let whole = Lookups::new(FileSearch::whole_repo(Arc::new(
+        FakeFilesWithWord::default().with("Cart", &["src/cart.ts"]),
+    )))
+    .parsing_at_most(2)
+    .look_up(
+        &*shop.code(),
+        &shop.head,
+        &word("Cart"),
+        &file_path("src/cart.ts"),
+    )
+    .unwrap();
+    assert!(!whole.cut_short);
 }

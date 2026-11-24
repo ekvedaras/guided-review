@@ -67,35 +67,53 @@ pub struct Lookup {
     /// By file, then line.
     pub usages: Arc<[Usage]>,
     pub reach: Reach,
+    /// More files hold the word than were parsed, so definitions and usages may be missing.
+    pub cut_short: bool,
 }
+
+/// How many files a lookup parses at most, so a word as common as `new` cannot stall it.
+pub const FILES_PARSED_AT_MOST: usize = 300;
 
 /// What a commit says of a word, the same whichever file asks.
 struct Found {
     definitions: Arc<[Definition]>,
     usages: Arc<[Usage]>,
+    cut_short: bool,
 }
 
 /// Looks words up, each one once per commit: a commit never changes, so what was found stays true.
 pub struct Lookups {
-    code: Arc<dyn CodeSource>,
     search: FileSearch,
+    file_cap: usize,
     found: Mutex<HashMap<(Sha, Word), Arc<Found>>>,
 }
 
 impl Lookups {
-    pub fn new(code: Arc<dyn CodeSource>, search: FileSearch) -> Self {
+    pub fn new(search: FileSearch) -> Self {
         Self {
-            code,
             search,
+            file_cap: FILES_PARSED_AT_MOST,
             found: Mutex::new(HashMap::new()),
         }
     }
 
-    /// `from` is the file the word was read in: its own definitions rank first, then those in
+    pub fn parsing_at_most(mut self, files: usize) -> Self {
+        self.file_cap = files;
+        self
+    }
+
+    /// `code` is read at `sha`; it is lent per call, so a lookup runs with whatever source the
+    /// review has now. `from` is the file the word was read in: its own definitions rank first, then those in
     /// files it imports.
-    pub fn look_up(&self, sha: &Sha, word: &Word, from: &FilePath) -> anyhow::Result<Lookup> {
-        let found = self.found_at(sha, word)?;
-        let imported = self.imported_names(sha, from)?;
+    pub fn look_up(
+        &self,
+        code: &dyn CodeSource,
+        sha: &Sha,
+        word: &Word,
+        from: &FilePath,
+    ) -> anyhow::Result<Lookup> {
+        let found = self.found_at(code, sha, word)?;
+        let imported = Self::imported_names(code, sha, from)?;
         let mut definitions = found.definitions.to_vec();
         definitions.sort_by(|a, b| {
             let rank = |definition: &Definition| {
@@ -117,15 +135,21 @@ impl Lookups {
             definitions,
             usages: Arc::clone(&found.usages),
             reach: self.search.reach(),
+            cut_short: found.cut_short,
         })
     }
 
-    fn found_at(&self, sha: &Sha, word: &Word) -> anyhow::Result<Arc<Found>> {
+    fn found_at(
+        &self,
+        code: &dyn CodeSource,
+        sha: &Sha,
+        word: &Word,
+    ) -> anyhow::Result<Arc<Found>> {
         let key = (sha.clone(), word.clone());
         if let Some(found) = self.cache().get(&key) {
             return Ok(Arc::clone(found));
         }
-        let found = Arc::new(self.find(sha, word)?);
+        let found = Arc::new(self.find(code, sha, word)?);
         self.cache().insert(key, Arc::clone(&found));
         Ok(found)
     }
@@ -134,10 +158,11 @@ impl Lookups {
         self.found.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn find(&self, sha: &Sha, word: &Word) -> anyhow::Result<Found> {
+    fn find(&self, code: &dyn CodeSource, sha: &Sha, word: &Word) -> anyhow::Result<Found> {
         let mut definitions = Vec::new();
         let mut usages = Vec::new();
-        for (path, source) in self.files_with(sha, word)? {
+        let (files, cut_short) = self.files_with(code, sha, word)?;
+        for (path, source) in files {
             let Some(language) = Language::for_path(path.as_str()) else {
                 continue;
             };
@@ -149,39 +174,59 @@ impl Lookups {
         Ok(Found {
             definitions: definitions.into(),
             usages: usages.into(),
+            cut_short,
         })
     }
 
-    fn files_with(&self, sha: &Sha, word: &Word) -> anyhow::Result<Vec<(FilePath, String)>> {
-        match &self.search {
-            FileSearch::WholeRepo(search) => search
-                .files_with(sha, word)?
+    /// The files to parse, and whether more held the word than the cap lets through.
+    fn files_with(
+        &self,
+        code: &dyn CodeSource,
+        sha: &Sha,
+        word: &Word,
+    ) -> anyhow::Result<(Vec<(FilePath, String)>, bool)> {
+        let candidates: Vec<FilePath> = match &self.search {
+            FileSearch::WholeRepo(search) => search.files_with(sha, word)?,
+            FileSearch::ChangedFiles(files) => files.to_vec(),
+        };
+        let mut parsed: Vec<FilePath> = candidates
+            .into_iter()
+            .filter(|path| Language::for_path(path.as_str()).is_some())
+            .collect();
+        let cut_short = parsed.len() > self.file_cap;
+        parsed.truncate(self.file_cap);
+        let files = match &self.search {
+            FileSearch::WholeRepo(_) => parsed
                 .into_iter()
-                .filter(|path| Language::for_path(path.as_str()).is_some())
                 .map(|path| {
-                    let source = self
-                        .code
+                    let source = code
                         .file_at(sha, &path)
                         .with_context(|| format!("reading {path} at {sha} for {word}"))?;
                     Ok((path, source))
                 })
-                .collect(),
+                .collect::<anyhow::Result<Vec<_>>>()?,
             // A changed file is missing on one side of the review: added at head, deleted at
             // base. A file that cannot be read is one of those and holds nothing to find.
-            FileSearch::ChangedFiles(files) => Ok(files
-                .iter()
-                .filter(|path| Language::for_path(path.as_str()).is_some())
-                .filter_map(|path| Some((path.clone(), self.code.file_at(sha, path).ok()?)))
-                .collect()),
-        }
+            FileSearch::ChangedFiles(_) => parsed
+                .into_iter()
+                .filter_map(|path| {
+                    let source = code.file_at(sha, &path).ok()?;
+                    Some((path, source))
+                })
+                .collect(),
+        };
+        Ok((files, cut_short))
     }
 
-    fn imported_names(&self, sha: &Sha, from: &FilePath) -> anyhow::Result<Vec<String>> {
+    fn imported_names(
+        code: &dyn CodeSource,
+        sha: &Sha,
+        from: &FilePath,
+    ) -> anyhow::Result<Vec<String>> {
         let Some(language) = Language::for_path(from.as_str()) else {
             return Ok(Vec::new());
         };
-        let source = self
-            .code
+        let source = code
             .file_at(sha, from)
             .with_context(|| format!("reading {from} at {sha} for its imports"))?;
         Ok(language.imported_names(&source))

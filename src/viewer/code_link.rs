@@ -37,6 +37,8 @@ pub enum NotInIde {
     RemovedFromBranch,
     /// The review's own folder, which no IDE was pointed at.
     NoLocalFolder,
+    /// A place found at the review's base, which the working copy is not at.
+    ReadAtBase,
 }
 
 impl fmt::Display for NotInIde {
@@ -50,6 +52,7 @@ impl fmt::Display for NotInIde {
             Self::RemovedLine => f.write_str("removed lines exist only at the PR's base"),
             Self::RemovedFromBranch => f.write_str("removed lines exist only at the branch's base"),
             Self::NoLocalFolder => f.write_str("no ide is set for the review's folder"),
+            Self::ReadAtBase => f.write_str("the code was read at the review's base"),
         }
     }
 }
@@ -329,6 +332,27 @@ impl CodeLinks<'_> {
         CodeLink {
             on_github: on_github.map(|at| format!("{at}#L{}", location.line)),
             in_working_copy,
+        }
+    }
+
+    /// Any place at one side's commit, as a definition or a usage found there.
+    pub fn to_place(&self, side: Side, path: &FilePath, line: LineNumber) -> CodeLink {
+        match side {
+            Side::Base => CodeLink {
+                on_github: self
+                    .blob(self.base, path.as_str())
+                    .map(|at| format!("{at}#L{line}")),
+                in_working_copy: Err(NotInIde::ReadAtBase),
+            },
+            Side::Head => CodeLink {
+                on_github: self
+                    .blob(self.head, path.as_str())
+                    .map(|at| format!("{at}#L{line}")),
+                in_working_copy: Ok(WorkingCopyLine {
+                    path: path.clone(),
+                    line,
+                }),
+            },
         }
     }
 

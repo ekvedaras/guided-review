@@ -9,6 +9,7 @@ pub use ask_why::{DEFAULT_WHY_QUESTION, WhyAsked};
 pub use finding_outcome::{FindingRefusal, FindingsBatch};
 mod jobs;
 mod kept;
+mod names;
 mod pr_controls;
 mod run_ai_review;
 mod stations;
@@ -24,6 +25,7 @@ use crate::coverage::{self, PiecePart};
 use crate::issue::IssueLink;
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
+use crate::navigation::FileSearch;
 use crate::pieces::{self, ChangedFile, PieceId};
 use crate::pull_request::{ChangeTips, Sha};
 use crate::review_subject::ReviewSubject;
@@ -68,6 +70,7 @@ use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::local_threads::ThreadHome;
 use super::markdown::Markdown;
+use super::name_desk::NameDesk;
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
@@ -375,6 +378,8 @@ pub struct ReviewCore {
     ask_desk: AskDesk,
     work: WorkAgenda,
     jobs: ReplacingJobs,
+    /// The names hovered in the diff, looked up at the commits this review reads. Not saved.
+    names: NameDesk,
     reviewing_mark: ReviewingMark,
     /// Agent replies taken while a re-pin ran, which the re-pinned review applies and saves.
     replies_after_repin: Vec<(HandOffId, AgentReplied)>,
@@ -665,6 +670,10 @@ impl ReviewCore {
         let branch_link = BranchLink::of(&subject);
         let related_issues = RelatedIssues::of(&subject, &tour, state.pr_description());
         let pr_controls = PrControls::of(&subject);
+        let names = NameDesk::new(FileSearch::for_source(
+            source,
+            files.iter().map(|file| file.path.clone()).collect(),
+        ));
         Ok(Self {
             tour,
             file_tree,
@@ -721,6 +730,7 @@ impl ReviewCore {
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
             jobs: ReplacingJobs::default(),
+            names,
             reviewing_mark,
             replies_after_repin: Vec::new(),
             agent_link_is_off: false,
