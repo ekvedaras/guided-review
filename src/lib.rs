@@ -34,6 +34,7 @@ pub mod local_facts;
 pub mod local_git;
 pub mod local_work_tree;
 pub mod make_basic_tour;
+pub mod navigation;
 pub mod open_review;
 pub mod opened_subject;
 pub mod outline;

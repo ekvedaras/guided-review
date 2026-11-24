@@ -1048,3 +1048,36 @@ impl guided_review::update::ReleasesPort for FakeReleases {
             .ok_or_else(|| anyhow::anyhow!("404 for {url}"))
     }
 }
+
+/// Stands in for searching a commit for the files that hold a word: answers what it was given
+/// and keeps the words it was asked for.
+#[derive(Clone, Default)]
+pub struct FakeFilesWithWord {
+    files: BTreeMap<String, Vec<FilePath>>,
+    searches: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeFilesWithWord {
+    pub fn with(mut self, word: &str, paths: &[&str]) -> Self {
+        self.files.insert(
+            word.to_owned(),
+            paths.iter().map(|path| file_path(path)).collect(),
+        );
+        self
+    }
+
+    pub fn searches(&self) -> Vec<String> {
+        self.searches.lock().unwrap().clone()
+    }
+}
+
+impl guided_review::navigation::FilesWithWord for FakeFilesWithWord {
+    fn files_with(
+        &self,
+        _sha: &Sha,
+        word: &guided_review::navigation::Word,
+    ) -> anyhow::Result<Vec<FilePath>> {
+        self.searches.lock().unwrap().push(word.as_str().to_owned());
+        Ok(self.files.get(word.as_str()).cloned().unwrap_or_default())
+    }
+}

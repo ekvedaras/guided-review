@@ -63,7 +63,9 @@ impl Symbols {
             .set_language(&grammar)
             .expect("grammar matches tree-sitter");
         let lines = source.lines().map(str::to_owned).collect();
-        let Some(tree) = parser.parse(source, None) else {
+        let (Some(tree), Some(symbol_query)) =
+            (parser.parse(source, None), language.symbol_query())
+        else {
             return Self {
                 symbols: Vec::new(),
                 imports: Vec::new(),
@@ -71,7 +73,7 @@ impl Symbols {
                 lines,
             };
         };
-        let query = Query::new(&grammar, language.symbol_query()).expect("valid symbol query");
+        let query = Query::new(&grammar, symbol_query).expect("valid symbol query");
 
         let mut found: Vec<(Node, &str, PieceKind)> = Vec::new();
         let mut cursor = QueryCursor::new();
@@ -338,7 +340,7 @@ fn kind_of(capture: &str) -> Option<PieceKind> {
 }
 
 /// The declaration without attributes and body: `public function total(): int`
-fn signature_of(node: Node, source: &str) -> String {
+pub(crate) fn signature_of(node: Node, source: &str) -> String {
     let mut children = node.walk();
     let start = node
         .children(&mut children)

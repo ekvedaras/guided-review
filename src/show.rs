@@ -118,7 +118,7 @@ impl Show<'_> {
                     )
                 })
             }
-            (Some(symbol), _) => Language::for_path(file.path.as_str()).and_then(|language| {
+            (Some(symbol), _) => Language::for_pieces(file.path.as_str()).and_then(|language| {
                 Symbols::find(&code, language)
                     .named(symbol)
                     .map(|symbol| (symbol.first_line, symbol.last_line))
