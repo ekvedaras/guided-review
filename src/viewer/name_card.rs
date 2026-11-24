@@ -284,6 +284,8 @@ pub struct FoundNames {
     pub usages: Vec<UsageFile>,
     pub usages_not_shown: usize,
     pub notes: Vec<CardNote>,
+    /// The notes as the card shows them.
+    pub note_lines: Arc<[Arc<str>]>,
     /// Asked on the first hover in a repo that has not said whether language servers may answer.
     pub question: Option<ServerQuestion>,
     /// "and 6 more in 2 files"
@@ -393,6 +395,7 @@ impl DefinitionCard {
             definitions,
             usages: files,
             usages_not_shown,
+            note_lines: notes.iter().map(|note| Arc::from(note.text())).collect(),
             notes,
             question: None,
             more_usages: (usages_not_shown > 0).then(|| {

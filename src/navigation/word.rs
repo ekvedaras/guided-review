@@ -17,6 +17,11 @@ impl Word {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The text shared, not copied.
+    pub fn shared_text(&self) -> Arc<str> {
+        Arc::clone(&self.0)
+    }
 }
 
 impl fmt::Display for Word {

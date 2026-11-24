@@ -848,6 +848,12 @@ fn an_answer_by_name_with_a_reason_carries_a_note_naming_it() {
         card.notes[0].text(),
         "Answered by name: rust-analyzer did not answer in time"
     );
+    assert_eq!(
+        *card.note_lines,
+        [Arc::from(
+            "Answered by name: rust-analyzer did not answer in time"
+        )]
+    );
 }
 
 #[test]

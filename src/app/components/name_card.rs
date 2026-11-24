@@ -85,7 +85,7 @@ fn header(colors: &Colors, found: &FoundNames) -> Div {
                 .font_family(*CODE_FONT)
                 .text_sm()
                 .font_weight(FontWeight::SEMIBOLD)
-                .child(SharedString::from(found.word.as_str().to_owned())),
+                .child(SharedString::from(found.word.shared_text())),
         )
         .child(
             div()
@@ -142,7 +142,7 @@ fn question_band(colors: &Colors, question: &ServerQuestion, on_answer: &OnServe
 fn found_lists(colors: &Colors, found: &FoundNames, on_open: &OnNameTarget) -> Div {
     let nothing_found = found.definitions.is_empty() && found.usages.is_empty();
     let both = !found.definitions.is_empty() && !found.usages.is_empty();
-    let notes = (!found.notes.is_empty()).then(|| {
+    let notes = (!found.note_lines.is_empty()).then(|| {
         div()
             .flex_none()
             .px_4()
@@ -155,7 +155,12 @@ fn found_lists(colors: &Colors, found: &FoundNames, on_open: &OnNameTarget) -> D
             .bg(colors.header_band())
             .text_xs()
             .text_color(colors.muted_text)
-            .children(found.notes.iter().map(|note| div().child(note.text())))
+            .children(
+                found
+                    .note_lines
+                    .iter()
+                    .map(|line| div().child(SharedString::from(Arc::clone(line)))),
+            )
     });
     div()
         .flex()
