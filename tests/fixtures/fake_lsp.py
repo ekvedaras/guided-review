@@ -55,6 +55,9 @@ while True:
             send({"jsonrpc": "2.0", "id": "create", "method": "window/workDoneProgress/create", "params": {"token": "index"}})
             progress("begin")
             threading.Timer(script["indexing_ms"] / 1000, lambda: progress("end")).start()
+        if method == "initialized":
+            for shown in script.get("show_on_initialized", []):
+                send({"jsonrpc": "2.0", **shown})
         if method == "initialized" and script.get("reports_status") and not script.get("busy_ms"):
             send({"jsonrpc": "2.0", "method": "experimental/serverStatus", "params": {"health": "ok", "quiescent": True}})
         if method == "exit":

@@ -20,7 +20,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256, Sha512};
 use tempfile::TempDir;
 
-use crate::support::{FixtureRepo, file_path, line, tarball};
+use crate::support::fake_ports::IgnoredServerMessages;
+use crate::support::{FixtureRepo, file_path, line, require_python3, tarball};
 
 const LIB: &str = "pub fn add(a: u32, b: u32) -> u32 { a + b }
 
@@ -168,6 +169,7 @@ impl Rig {
         });
         let script_file = scratch.path().join("script.json");
         std::fs::write(&script_file, script.to_string()).unwrap();
+        require_python3();
         let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
         let binary = format!(
             "#!/bin/sh\nexec python3 '{}' '{}'\n",
@@ -248,6 +250,7 @@ impl Rig {
             Arc::clone(&managed) as Arc<dyn guided_review::navigation::ServerCatalog>,
             ServerCheckouts::new(scratch.path().join("checkouts")),
             Timeouts::default(),
+            Arc::new(IgnoredServerMessages),
         );
         Self {
             repo,

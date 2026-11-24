@@ -2,20 +2,50 @@
 
 use std::sync::Arc;
 
+use futures::StreamExt;
+use futures::channel::mpsc::{UnboundedSender, unbounded};
 use gpui::{App, Global};
 
+use crate::app::components::toast_stack::post_toast;
 use crate::app_folders::AppFolders;
 use crate::config::Config;
 use crate::github::GitHub;
 use crate::navigation::{
-    LanguageServers, ManagedServers, ServerCheckouts, ServerFolders, ServerPins, Timeouts,
+    LanguageServers, ManagedServers, MessageKind, ServerCheckouts, ServerFolders, ServerMessage,
+    ServerMessages, ServerPins, Timeouts,
 };
 use crate::update::Target;
-use crate::viewer::{LanguageServersRow, Review};
+use crate::viewer::{LanguageServersRow, Review, ToastTone};
 
 struct ActiveLanguageServers(Arc<LanguageServers>);
 
 impl Global for ActiveLanguageServers {}
+
+/// Hands what servers ask to be shown from their reading threads to the window's toasts.
+struct ToastedMessages(UnboundedSender<ServerMessage>);
+
+impl ServerMessages for ToastedMessages {
+    fn show(&self, message: ServerMessage) {
+        // The receiver ends with the app.
+        self.0.unbounded_send(message).ok();
+    }
+}
+
+fn toast_server_messages(cx: &mut App) -> Arc<dyn ServerMessages> {
+    let (messages, mut shown) = unbounded::<ServerMessage>();
+    cx.spawn(async move |cx| {
+        while let Some(message) = shown.next().await {
+            let tone = match message.kind {
+                MessageKind::Error => ToastTone::Danger,
+                MessageKind::Notice => ToastTone::Neutral,
+            };
+            let line = format!("{}: {}", message.server, message.text);
+            cx.update(|cx| post_toast(cx, tone, line));
+        }
+    })
+    .detach();
+    Arc::new(ToastedMessages(messages))
+}
 
 /// The answers Settings saved count in every open review at once, and a no stops that codebase's
 /// servers.
@@ -57,6 +87,7 @@ pub fn use_language_servers(review: &mut Review, folders: &AppFolders, cx: &mut 
             Arc::new(managed),
             checkouts,
             Timeouts::default(),
+            toast_server_messages(cx),
         ));
         let on_quit = Arc::clone(&servers);
         cx.on_app_quit(move |_| {

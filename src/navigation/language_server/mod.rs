@@ -5,6 +5,7 @@
 mod checkout;
 mod hover;
 mod managed;
+mod notices;
 mod rpc;
 
 use std::collections::{HashMap, HashSet};
@@ -23,12 +24,14 @@ use crate::line_number::LineNumber;
 use crate::pull_request::Sha;
 
 use super::{
-    Answer, AnsweredBy, CodeNavigator, Column, Definition, FallbackReason, Lookup,
-    NavigationRequest, Place, Reach, ServerAnswer, ServerName, ServerOptIns, Usage, Waiting, Word,
+    Answer, AnsweredBy, CodeNavigator, Column, Definition, FallbackReason, Lookup, MessageKind,
+    NavigationRequest, Place, Reach, ServerAnswer, ServerMessage, ServerMessages, ServerName,
+    ServerOptIns, Usage, Waiting, Word,
 };
 pub use checkout::{Change, ChangedFile, Checkout, ServerCheckouts};
 use hover::{Hovered, kind_of};
 pub use managed::{ManagedServers, PackagePin, ReleasePin, ServerFolders, ServerPins};
+use notices::Notices;
 use rpc::{Connection, Failure, locked};
 
 /// Whether a server says by `experimental/serverStatus` that it is busy.
@@ -140,6 +143,12 @@ impl Default for Timeouts {
     }
 }
 
+/// A request no server knows. LSP 3.17, "$ Notifications and Requests": a server that does not
+/// implement a `$/` request answers it with `MethodNotFound`. Servers handle messages in order, so
+/// that answer comes after everything the server began on `initialized`, which makes the request a
+/// barrier. The test server in `tests/fixtures/fake_lsp.py` names it too.
+const BARRIER_REQUEST: &str = "$/guidedReviewBarrier";
+
 /// How often a question the server dropped because files changed is asked again.
 const MODIFIED_RETRIES: u32 = 5;
 const MODIFIED_PAUSE: Duration = Duration::from_millis(250);
@@ -166,14 +175,24 @@ impl Running {
         launch: &ServerLaunch,
         checkout: &Checkout,
         timeouts: &Timeouts,
+        notices: &Arc<Notices>,
     ) -> Result<Self, String> {
         let folder = checkout.folder.as_path();
+        let (server, notices) = (launch.name.clone(), Arc::clone(notices));
+        let on_message = Box::new(move |kind: MessageKind, text: String| {
+            notices.show(ServerMessage {
+                server: server.clone(),
+                kind,
+                text,
+            });
+        });
         let connection = Connection::spawn(
             &launch.program,
             &launch.args,
             folder,
             launch.options.clone(),
             launch.status,
+            on_message,
         )
         .map_err(|error| format!("{} could not start: {error}", launch.name))?;
         let uri = uri_of(folder);
@@ -186,7 +205,7 @@ impl Running {
                 "initializationOptions": launch.options,
                 "capabilities": {
                     "general": {"positionEncodings": ["utf-8", "utf-16"]},
-                    "window": {"workDoneProgress": true},
+                    "window": {"workDoneProgress": true, "showMessage": {}},
                     "workspace": {"configuration": true},
                     "textDocument": {"hover": {"contentFormat": ["markdown", "plaintext"]}},
                     "experimental": {"serverStatusNotification": true},
@@ -214,11 +233,7 @@ impl Running {
         // A round trip lets the progress the server began on `initialized` arrive before anyone checks
         // whether it is busy. A server that does not know the method answers with an error, or not at all.
         connection
-            .request(
-                "$/guidedReviewBarrier",
-                &Value::Null,
-                Duration::from_secs(2),
-            )
+            .request(BARRIER_REQUEST, &Value::Null, Duration::from_secs(2))
             .ok();
         Ok(Self {
             connection,
@@ -375,6 +390,7 @@ struct Pool {
     catalog: Arc<dyn ServerCatalog>,
     checkouts: ServerCheckouts,
     timeouts: Timeouts,
+    notices: Arc<Notices>,
     /// One per (codebase, server): the server is reused by every review of the codebase.
     slots: Mutex<HashMap<(Codebase, String), Slot>>,
     places: Mutex<HashMap<Codebase, CheckoutPlace>>,
@@ -440,11 +456,13 @@ impl LanguageServers {
         catalog: Arc<dyn ServerCatalog>,
         checkouts: ServerCheckouts,
         timeouts: Timeouts,
+        messages: Arc<dyn ServerMessages>,
     ) -> Self {
         let pool = Arc::new(Pool {
             catalog,
             checkouts,
             timeouts,
+            notices: Arc::new(Notices::new(messages)),
             slots: Mutex::default(),
             places: Mutex::default(),
             answers: Mutex::default(),
@@ -598,7 +616,12 @@ impl ServerNavigator {
             server.connection.stop();
         }
         waiting(Waiting::Starting(launch.name.clone()));
-        let server = Arc::new(Running::start(launch, checkout, &self.pool.timeouts)?);
+        let server = Arc::new(Running::start(
+            launch,
+            checkout,
+            &self.pool.timeouts,
+            &self.pool.notices,
+        )?);
         *held = Some(Arc::clone(&server));
         drop(held);
         Ok((slot, server))

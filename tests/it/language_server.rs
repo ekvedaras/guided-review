@@ -10,9 +10,9 @@ use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, DefinitionKind, FallbackReason, FileSearch,
-    LanguageServers, Lookups, ManagedServers, NavigationRequest, Place, ServerAnswer,
-    ServerCatalog, ServerCheckouts, ServerFolders, ServerLaunch, ServerName, ServerPins, Timeouts,
-    Waiting, Word,
+    LanguageServers, Lookups, ManagedServers, MessageKind, NavigationRequest, Place, ServerAnswer,
+    ServerCatalog, ServerCheckouts, ServerFolders, ServerLaunch, ServerMessage, ServerMessages,
+    ServerName, ServerPins, Timeouts, Waiting, Word,
 };
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::GuidedTour;
@@ -23,7 +23,8 @@ use guided_review::viewer::{
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
-use crate::support::{FixtureRepo, file_path, line, write_executable};
+use crate::support::fake_ports::{IgnoredServerMessages, RecordedServerMessages};
+use crate::support::{FixtureRepo, file_path, line, require_python3, write_executable};
 
 fn shop_codebase() -> Codebase {
     Codebase::GitHub(RepoName::new("acme", "shop"))
@@ -70,6 +71,7 @@ impl ServerCatalog for FakeCatalog {
         _codebase: &Codebase,
         _waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
+        require_python3();
         let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
         let script: Value =
             serde_json::from_str(&std::fs::read_to_string(&self.script).unwrap()).unwrap();
@@ -100,6 +102,7 @@ struct Rig {
     /// Where the app's checkout of the repo will be: what a server's locations are under.
     checkout: PathBuf,
     servers: LanguageServers,
+    messages: Arc<RecordedServerMessages>,
 }
 
 fn location(checkout: &Path, path: &str, line: u32, from: u32, to: u32) -> Value {
@@ -133,6 +136,7 @@ impl Rig {
         script["log"] = json!(scratch.path().join("log").to_string_lossy());
         let script_file = scratch.path().join("script.json");
         std::fs::write(&script_file, script.to_string()).unwrap();
+        let messages = Arc::new(RecordedServerMessages::default());
         let servers = LanguageServers::new(
             Arc::new(FakeCatalog {
                 script: script_file,
@@ -140,6 +144,7 @@ impl Rig {
             }),
             ServerCheckouts::new(scratch.path().join("checkouts")),
             timeouts,
+            Arc::clone(&messages) as Arc<dyn ServerMessages>,
         );
         Self {
             file,
@@ -148,16 +153,27 @@ impl Rig {
             scratch,
             checkout,
             servers,
+            messages,
         }
     }
 
     fn answering_add() -> Self {
+        Self::answering_add_with(json!({}))
+    }
+
+    /// The script of `answering_add` with the keys of `more` added.
+    fn answering_add_with(more: Value) -> Self {
         Self::new(LIB, |repo| {
-            json!({"answers": {
+            let mut script = json!({"answers": {
                 "textDocument/definition": [location(repo, "src/lib.rs", 3, 7, 10)],
                 "textDocument/references": [location(repo, "src/lib.rs", 5, 23, 26)],
                 "textDocument/hover": {"contents": {"kind": "markdown", "value": HOVER}},
-            }})
+            }});
+            script
+                .as_object_mut()
+                .unwrap()
+                .extend(more.as_object().unwrap().clone());
+            script
         })
     }
 
@@ -250,6 +266,93 @@ impl Rig {
 
 fn rust_analyzer() -> ServerName {
     ServerName::new("rust-analyzer")
+}
+
+#[test]
+fn a_message_the_server_asks_to_show_reaches_the_port_with_the_server_s_name() {
+    let rig = Rig::new(LIB, |_| {
+        json!({"show_on_initialized": [
+            {"method": "window/showMessage", "params": {"type": 3, "message": "Licence notice"}},
+            {"method": "window/showMessage", "params": {"type": 1, "message": "Index broke"}},
+        ]})
+    });
+
+    rig.hover_add().0.unwrap();
+
+    assert_eq!(
+        rig.messages.shown(),
+        vec![
+            ServerMessage {
+                server: rust_analyzer(),
+                kind: MessageKind::Notice,
+                text: "Licence notice".to_owned(),
+            },
+            ServerMessage {
+                server: rust_analyzer(),
+                kind: MessageKind::Error,
+                text: "Index broke".to_owned(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_message_request_reaches_the_port_gets_no_action_as_its_answer_and_the_server_keeps_answering()
+{
+    let rig = Rig::answering_add_with(json!({"show_on_initialized": [
+        {"id": "ask", "method": "window/showMessageRequest", "params": {
+            "type": 2,
+            "message": "Buy a licence?",
+            "actions": [{"title": "Buy"}],
+        }},
+    ]}));
+
+    let (answer, _) = rig.hover_add();
+
+    assert_eq!(
+        answer.unwrap().answered_by,
+        AnsweredBy::LanguageServer(rust_analyzer())
+    );
+    assert_eq!(
+        rig.messages.shown(),
+        vec![ServerMessage {
+            server: rust_analyzer(),
+            kind: MessageKind::Notice,
+            text: "Buy a licence?".to_owned(),
+        }]
+    );
+    let reply = rig.sent().into_iter().find(|m| m["id"] == "ask").unwrap();
+    assert_eq!(reply["result"], Value::Null);
+    assert!(reply.get("error").is_none());
+}
+
+#[test]
+fn a_message_a_restarted_server_says_again_is_shown_once() {
+    let timeouts = Timeouts {
+        answer: Duration::from_millis(300),
+        ..Timeouts::default()
+    };
+    let rig = Rig::timed(
+        LIB,
+        |checkout| {
+            json!({
+                "silent_in_first_start": ["textDocument/definition"],
+                "show_on_initialized": [
+                    {"method": "window/showMessage", "params": {"type": 3, "message": "Licence notice"}},
+                ],
+                "answers": {"textDocument/definition": [location(checkout, "src/lib.rs", 3, 7, 10)]},
+            })
+        },
+        timeouts,
+    );
+    rig.hover_add().0.unwrap();
+    rig.hover_add().0.unwrap();
+
+    assert_eq!(
+        rig.methods().iter().filter(|m| *m == "initialize").count(),
+        2
+    );
+    assert_eq!(rig.messages.shown().len(), 1);
 }
 
 #[test]
@@ -616,6 +719,7 @@ fn a_slow_server_holds_up_no_hover_another_server_of_the_repo_answers() {
         }),
         ServerCheckouts::new(scratch.path().join("checkouts")),
         Timeouts::default(),
+        Arc::new(IgnoredServerMessages),
     );
     let by_name: Arc<dyn CodeNavigator> =
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
@@ -787,6 +891,7 @@ fn the_real_rust_analyzer_finds_a_definition() {
         managed,
         ServerCheckouts::new(scratch.path().join("checkouts")),
         Timeouts::default(),
+        Arc::new(IgnoredServerMessages),
     );
     let by_name: Arc<dyn CodeNavigator> =
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
@@ -841,6 +946,7 @@ fn the_real_rust_analyzer_wrote_a_marker_with(
         managed,
         ServerCheckouts::new(checkouts),
         Timeouts::default(),
+        Arc::new(IgnoredServerMessages),
     );
     let by_name: Arc<dyn CodeNavigator> =
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
@@ -967,6 +1073,7 @@ fn the_real_intelephense_finds_the_method_of_the_class_the_code_calls() {
         managed,
         ServerCheckouts::new(scratch.path().join("checkouts")),
         Timeouts::default(),
+        Arc::new(IgnoredServerMessages),
     );
     let by_name: Arc<dyn CodeNavigator> =
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
@@ -1096,6 +1203,7 @@ fn the_real_typescript_language_server_finds_the_method_of_the_class_the_code_ca
         managed,
         ServerCheckouts::new(scratch.path().join("checkouts")),
         Timeouts::default(),
+        Arc::new(IgnoredServerMessages),
     );
     let by_name: Arc<dyn CodeNavigator> =
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
@@ -1173,6 +1281,7 @@ fn the_real_typescript_language_server_loads_no_tsserver_plugin_that_the_prs_tsc
         managed,
         ServerCheckouts::new(scratch.path().join("checkouts")),
         Timeouts::default(),
+        Arc::new(IgnoredServerMessages),
     );
     let by_name: Arc<dyn CodeNavigator> =
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
@@ -1501,6 +1610,7 @@ fn a_server_hears_every_change_since_its_own_head_when_another_servers_review_mo
         }),
         ServerCheckouts::new(scratch.path().join("checkouts")),
         Timeouts::default(),
+        Arc::new(IgnoredServerMessages),
     );
     let checkout = scratch.path().join("checkouts/acme/shop");
     let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();

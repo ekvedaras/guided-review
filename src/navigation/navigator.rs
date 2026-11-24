@@ -43,6 +43,27 @@ pub trait ServerOptIns: Send + Sync {
     fn answered(&self, codebase: &Codebase, answer: ServerAnswer);
 }
 
+/// Whether a server's message reports a failure or only tells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageKind {
+    Error,
+    Notice,
+}
+
+/// A message a language server asked the client to show the reviewer (`window/showMessage`, or
+/// `window/showMessageRequest`, which is answered with no action).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerMessage {
+    pub server: ServerName,
+    pub kind: MessageKind,
+    pub text: String,
+}
+
+/// Where a server's messages are shown. Called from the server's reading thread.
+pub trait ServerMessages: Send + Sync {
+    fn show(&self, message: ServerMessage);
+}
+
 /// A language server, named as the card says it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerName(Arc<str>);

@@ -17,6 +17,18 @@ pub mod fake_tour_agent;
 pub mod graphql;
 pub mod work;
 
+/// The fake language server (`tests/fixtures/fake_lsp.py`) is a Python script.
+pub fn require_python3() {
+    static FOUND: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    FOUND.get_or_init(|| {
+        let runs = Command::new("python3")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success());
+        assert!(runs, "the language server tests need python3 on PATH");
+    });
+}
+
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};

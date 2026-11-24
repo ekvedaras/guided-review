@@ -23,6 +23,7 @@ pub fn blocked_merging() -> Merging {
 }
 use guided_review::file_path::FilePath;
 use guided_review::issue::IssueUrl;
+use guided_review::navigation::{ServerMessage, ServerMessages};
 use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
@@ -1138,5 +1139,28 @@ impl guided_review::navigation::CodeNavigator for FakeNavigator {
             },
             answered_by: self.answered_by.clone(),
         })
+    }
+}
+
+/// Server messages nobody reads.
+pub struct IgnoredServerMessages;
+
+impl ServerMessages for IgnoredServerMessages {
+    fn show(&self, _message: ServerMessage) {}
+}
+
+/// Server messages kept in the order they were shown.
+#[derive(Default)]
+pub struct RecordedServerMessages(Mutex<Vec<ServerMessage>>);
+
+impl RecordedServerMessages {
+    pub fn shown(&self) -> Vec<ServerMessage> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl ServerMessages for RecordedServerMessages {
+    fn show(&self, message: ServerMessage) {
+        self.0.lock().unwrap().push(message);
     }
 }

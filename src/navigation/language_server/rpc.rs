@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use super::StatusReports;
+use crate::navigation::MessageKind;
 
 pub(super) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -48,6 +49,9 @@ impl Failure {
 fn is_modified(code: &Value) -> bool {
     matches!(code.as_i64(), Some(-32801 | -32802))
 }
+
+/// Told what the server asked to be shown.
+pub(super) type OnMessage = Box<dyn Fn(MessageKind, String) + Send>;
 
 type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, Failure>>>>>;
 
@@ -89,6 +93,7 @@ impl Connection {
         folder: &std::path::Path,
         settings: Value,
         status: StatusReports,
+        on_message: OnMessage,
     ) -> std::io::Result<Self> {
         let mut command = Command::new(program);
         if let Some(path) = std::env::var_os("PATH") {
@@ -119,6 +124,7 @@ impl Connection {
             shared: Arc::clone(&shared),
             stdin: Arc::clone(&stdin),
             settings,
+            on_message,
         };
         std::thread::spawn(move || reader.run(BufReader::new(stdout)));
         Ok(Self {
@@ -252,6 +258,7 @@ struct Reader {
     shared: Arc<Shared>,
     stdin: Arc<Mutex<ChildStdin>>,
     settings: Value,
+    on_message: OnMessage,
 }
 
 impl Reader {
@@ -278,11 +285,17 @@ impl Reader {
     }
 
     fn answer_server(&self, method: &str, id: &Value, params: &Value) {
-        let result = if method == "workspace/configuration" {
-            let items = params["items"].as_array().map_or(1, Vec::len);
-            Value::Array(vec![self.settings.clone(); items])
-        } else {
-            Value::Null
+        let result = match method {
+            "workspace/configuration" => {
+                let items = params["items"].as_array().map_or(1, Vec::len);
+                Value::Array(vec![self.settings.clone(); items])
+            }
+            "window/showMessageRequest" => {
+                // No action is chosen: the app offers none of the buttons the server lists.
+                self.show(params);
+                Value::Null
+            }
+            _ => Value::Null,
         };
         // A server that is gone cannot hear the answer; the reader ends with it.
         write_message(
@@ -308,9 +321,27 @@ impl Reader {
                 }
             }
             "experimental/serverStatus" => busy.quiescent = params["quiescent"].as_bool(),
+            "window/showMessage" => {
+                drop(busy);
+                self.show(params);
+                return;
+            }
             _ => return,
         }
         self.shared.changed.notify_all();
+    }
+
+    fn show(&self, params: &Value) {
+        let Some(text) = params["message"].as_str() else {
+            return;
+        };
+        // LSP's `MessageType.Error` is 1; warnings, infos and logs only tell.
+        let kind = if params["type"].as_i64() == Some(1) {
+            MessageKind::Error
+        } else {
+            MessageKind::Notice
+        };
+        (self.on_message)(kind, text.to_owned());
     }
 
     fn settle(&self, id: &Value, message: &Value) {
