@@ -35,6 +35,17 @@ const NODE: &str = "v99.0.0";
 
 const INTELEPHENSE: &str = "9.9.9";
 
+const TYPESCRIPT_LANGUAGE_SERVER: &str = "8.8.8";
+
+const TYPESCRIPT: &str = "7.7.7";
+
+const SHAPES: &str = "class Circle {
+    area(): number { return 1; }
+
+    describe(): string { return `${this.area()}`; }
+}
+";
+
 const JOBS: &str = "<?php
 
 class Jobs
@@ -59,6 +70,16 @@ fn node_url(target: Target) -> String {
 
 fn intelephense_url() -> String {
     format!("https://registry.npmjs.org/intelephense/-/intelephense-{INTELEPHENSE}.tgz")
+}
+
+fn typescript_language_server_url() -> String {
+    format!(
+        "https://registry.npmjs.org/typescript-language-server/-/typescript-language-server-{TYPESCRIPT_LANGUAGE_SERVER}.tgz"
+    )
+}
+
+fn typescript_url() -> String {
+    format!("https://registry.npmjs.org/typescript/-/typescript-{TYPESCRIPT}.tgz")
 }
 
 fn sha512_of(bytes: &[u8]) -> String {
@@ -128,6 +149,8 @@ impl Rig {
         let repo = FixtureRepo::cloned_from("acme/shop");
         repo.write("src/lib.rs", LIB);
         repo.write("app/Jobs.php", JOBS);
+        repo.write("src/shapes.ts", SHAPES);
+        repo.write("src/shapes.tsx", SHAPES);
         let head = Sha::new(&repo.commit("head"));
         let scratch = TempDir::new().unwrap();
         let script = json!({
@@ -167,11 +190,24 @@ impl Rig {
             ("package/package.json", "{}", 0o644),
             ("package/lib/intelephense.js", "// the server", 0o644),
         ]);
+        let typescript_language_server_archive = tarball(&[
+            ("package/package.json", "{}", 0o644),
+            ("package/lib/cli.mjs", "// the server", 0o644),
+        ]);
+        let typescript_archive = tarball(&[
+            ("package/package.json", "{}", 0o644),
+            ("package/lib/tsserver.js", "// tsserver", 0o644),
+        ]);
         let host = Arc::new(Host::default());
         host.files.lock().unwrap().extend([
             (url_of(TAG, TARGET), archive.clone()),
             (node_url(TARGET), node_archive.clone()),
             (intelephense_url(), intelephense_archive.clone()),
+            (
+                typescript_language_server_url(),
+                typescript_language_server_archive.clone(),
+            ),
+            (typescript_url(), typescript_archive.clone()),
         ]);
         let pins = ServerPins {
             rust_analyzer: ReleasePin {
@@ -185,6 +221,14 @@ impl Rig {
             intelephense: PackagePin {
                 version: INTELEPHENSE.to_owned(),
                 sha512: sha512_of(&intelephense_archive),
+            },
+            typescript_language_server: PackagePin {
+                version: TYPESCRIPT_LANGUAGE_SERVER.to_owned(),
+                sha512: sha512_of(&typescript_language_server_archive),
+            },
+            typescript: PackagePin {
+                version: TYPESCRIPT.to_owned(),
+                sha512: sha512_of(&typescript_archive),
             },
         };
         let cache = scratch.path().join("cache/language-servers");
@@ -220,6 +264,11 @@ impl Rig {
     /// `$this->schedule()` in `run`.
     fn hover_schedule(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
         self.hover("app/Jobs.php", 7, 41, "schedule")
+    }
+
+    /// `this.area()` in `describe`.
+    fn hover_area(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
+        self.hover("src/shapes.ts", 4, 40, "area")
     }
 
     fn hover(
@@ -368,6 +417,109 @@ fn intelephense_keeps_its_index_in_a_folder_of_the_repo_under_the_state_folder()
     );
 }
 
+fn typescript_language_server() -> ServerName {
+    ServerName::new("typescript-language-server")
+}
+
+#[test]
+fn the_first_typescript_hover_downloads_node_typescript_language_server_and_typescript_and_runs_the_server_on_that_node()
+ {
+    let rig = Rig::new();
+
+    let (answer, waits) = rig.hover_area();
+    let answer = answer.unwrap();
+
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(typescript_language_server())
+    );
+    assert_eq!(
+        waits[..2],
+        [
+            Waiting::Downloading(ServerName::new("Node")),
+            Waiting::Downloading(typescript_language_server())
+        ]
+    );
+    assert_eq!(
+        rig.requested(),
+        vec![
+            node_url(TARGET),
+            typescript_language_server_url(),
+            typescript_url()
+        ]
+    );
+    let args = std::fs::read_to_string(rig.scratch.path().join("node-args")).unwrap();
+    assert_eq!(
+        args.trim(),
+        format!(
+            "{}/typescript-language-server-{TYPESCRIPT_LANGUAGE_SERVER}/package/lib/cli.mjs --stdio",
+            rig.cache.display()
+        )
+    );
+}
+
+#[test]
+fn typescript_language_server_is_told_the_pinned_tsserver_even_when_the_repo_installs_typescript() {
+    let rig = Rig::new();
+    let installed = rig.repo.path().join("node_modules/typescript/lib");
+    std::fs::create_dir_all(&installed).unwrap();
+    std::fs::write(installed.join("tsserver.js"), "// the PR's tsserver").unwrap();
+
+    rig.hover_area().0.unwrap();
+
+    let log = std::fs::read_to_string(rig.scratch.path().join("log")).unwrap();
+    let initialize: serde_json::Value = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|message| message["method"] == "initialize")
+        .unwrap();
+    assert_eq!(
+        initialize["params"]["initializationOptions"],
+        json!({
+            "tsserver": {"path": rig.cache.join(format!("typescript-{TYPESCRIPT}/package/lib/tsserver.js"))},
+            "disableAutomaticTypingAcquisition": true,
+        })
+    );
+}
+
+#[test]
+fn a_typescript_tarball_that_is_not_the_pinned_one_is_refused_unpacked_nowhere_and_never_run() {
+    let rig = Rig::new();
+    rig.serving_at(
+        &typescript_url(),
+        &tarball(&[("package/lib/tsserver.js", "// another tsserver", 0o644)]),
+    );
+
+    let (answer, _) = rig.hover_area();
+    let answer = answer.unwrap();
+
+    let note = note_of(&answer).expect("answered by name with a note");
+    assert!(note.contains("typescript-language-server"), "{note}");
+    assert!(note.contains("does not match its checksum"), "{note}");
+    let mut downloads = rig.downloads();
+    downloads.sort();
+    assert_eq!(
+        downloads,
+        vec![
+            format!("node-{NODE}"),
+            format!("typescript-language-server-{TYPESCRIPT_LANGUAGE_SERVER}")
+        ]
+    );
+    assert!(!rig.server_started());
+}
+
+#[test]
+fn a_tsx_hover_is_answered_by_typescript_language_server() {
+    let rig = Rig::new();
+
+    let (answer, _) = rig.hover("src/shapes.tsx", 4, 40, "area");
+
+    assert_eq!(
+        answer.unwrap().answered_by,
+        AnsweredBy::LanguageServer(typescript_language_server())
+    );
+}
+
 fn note_of(answer: &Answer) -> Option<String> {
     match &answer.answered_by {
         AnsweredBy::ByName { because } => because.as_ref().map(|reason| reason.as_str().to_owned()),
@@ -491,6 +643,27 @@ fn removing_unpinned_downloads_keeps_the_pinned_node_and_intelephense() {
         vec![
             format!("intelephense-{INTELEPHENSE}"),
             format!("node-{NODE}")
+        ]
+    );
+}
+
+#[test]
+fn removing_unpinned_downloads_keeps_the_pinned_typescript_language_server_and_typescript() {
+    let rig = Rig::new();
+    rig.hover_area().0.unwrap();
+    std::fs::create_dir_all(rig.cache.join("typescript-language-server-0.0.1")).unwrap();
+    std::fs::create_dir_all(rig.cache.join("typescript-0.0.1")).unwrap();
+
+    rig.managed.remove_unpinned().unwrap();
+
+    let mut downloads = rig.downloads();
+    downloads.sort();
+    assert_eq!(
+        downloads,
+        vec![
+            format!("node-{NODE}"),
+            format!("typescript-{TYPESCRIPT}"),
+            format!("typescript-language-server-{TYPESCRIPT_LANGUAGE_SERVER}"),
         ]
     );
 }

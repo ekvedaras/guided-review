@@ -79,6 +79,21 @@ impl ServerLaunch {
         }
     }
 
+    /// typescript-language-server on the app's Node, running the tsserver at `tsserver`. Typings
+    /// acquisition is off, since it runs npm to install `@types` packages the repo names.
+    pub fn typescript_language_server(node: PathBuf, script: &Path, tsserver: &Path) -> Self {
+        Self {
+            name: ServerName::of(Language::TypeScript),
+            program: node,
+            args: vec![script.to_string_lossy().into_owned(), "--stdio".to_owned()],
+            status: StatusReports::No,
+            options: json!({
+                "tsserver": {"path": tsserver},
+                "disableAutomaticTypingAcquisition": true,
+            }),
+        }
+    }
+
     /// The server tells whether it is busy with `experimental/serverStatus`, so until it has, it is.
     pub fn reporting_status(mut self) -> Self {
         self.status = StatusReports::Yes;

@@ -724,6 +724,145 @@ fn the_real_intelephense_finds_the_method_of_the_class_the_code_calls() {
     assert_eq!(definition.place.line, line(13));
 }
 
+fn answering_typescript(hover: &str) -> Rig {
+    let hover = hover.to_owned();
+    Rig::with_file(
+        "src/shapes.ts",
+        SHAPES,
+        move |checkout| {
+            json!({"answers": {
+                "textDocument/definition": [location(checkout, "src/shapes.ts", 0, 13, 19)],
+                "textDocument/hover": {"contents": {"kind": "markdown", "value": hover}},
+            }})
+        },
+        Timeouts::default(),
+    )
+}
+
+#[test]
+fn a_typescript_method_hover_shows_its_signature_as_a_method_and_its_doc_summary() {
+    let rig = answering_typescript(
+        "\n```typescript\n(method) Circle.area(): number\n```\nThe area in square units.\n\n*@returns* — the area",
+    );
+
+    let answer = rig.navigate_at(12, 28, "area").0.unwrap();
+
+    let definition = &answer.lookup.definitions[0];
+    assert_eq!(&*definition.signature, "(method) Circle.area(): number");
+    assert_eq!(definition.kind, DefinitionKind::Method);
+    assert_eq!(definition.doc.as_deref(), Some("The area in square units."));
+}
+
+#[test]
+fn a_typescript_import_hover_shows_the_line_that_declares_the_imported_name() {
+    let rig =
+        answering_typescript("\n```typescript\n(alias) new Circle(): Circle\nimport Circle\n```\n");
+
+    let answer = rig.navigate_at(12, 28, "Circle").0.unwrap();
+
+    let definition = &answer.lookup.definitions[0];
+    assert_eq!(&*definition.signature, "export class Circle {");
+    assert_eq!(definition.kind, DefinitionKind::Class);
+}
+
+const SHAPES: &str = "export class Circle {
+    /**
+     * The area in square units.
+     *
+     * @returns the area
+     */
+    area(): number {
+        return 3;
+    }
+
+    describe(): string {
+        return `area ${this.area()}`;
+    }
+}
+
+export class Square {
+    area(): number {
+        return 4;
+    }
+}
+";
+
+const MAIN: &str = "import { Circle } from './shapes';
+
+export const text = new Circle().describe();
+";
+
+#[test]
+fn the_real_typescript_language_server_finds_the_method_of_the_class_the_code_calls_and_an_import()
+{
+    let Some(managed) = downloaded_server(Language::TypeScript) else {
+        eprintln!("the pinned typescript-language-server is not downloaded: skipped");
+        return;
+    };
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("src/shapes.ts", SHAPES);
+    repo.write("src/main.ts", MAIN);
+    let head = Sha::new(&repo.commit("head"));
+    repo.write(
+        "node_modules/typescript/package.json",
+        r#"{"name": "typescript", "version": "5.9.3"}"#,
+    );
+    repo.write(
+        "node_modules/typescript/lib/tsserver.js",
+        "process.exit(3); // the PR's own TypeScript, never run\n",
+    );
+    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let scratch = TempDir::new().unwrap();
+    let servers = LanguageServers::new(
+        managed,
+        ServerCheckouts::new(scratch.path().join("checkouts")),
+        Timeouts::default(),
+    );
+    let by_name: Arc<dyn CodeNavigator> =
+        Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
+            file_path("src/shapes.ts"),
+            file_path("src/main.ts"),
+        ]))));
+    let navigator = servers.navigator(RepoName::new("acme", "shop"), by_name);
+    let ask = |path: &str, number: usize, column: usize, word: &str| {
+        navigator
+            .navigate(
+                &code,
+                &NavigationRequest {
+                    sha: head.clone(),
+                    at: Place {
+                        path: file_path(path),
+                        line: line(number),
+                    },
+                    column: Column::try_from(column).unwrap(),
+                    word: Word::new(word).unwrap(),
+                },
+                &|_| {},
+            )
+            .unwrap()
+    };
+
+    let area = ask("src/shapes.ts", 12, 28, "area");
+    let circle = ask("src/main.ts", 3, 25, "Circle");
+    servers.stop_all();
+
+    let server = AnsweredBy::LanguageServer(ServerName::new("typescript-language-server"));
+    assert_eq!(area.answered_by, server);
+    let [definition] = &area.lookup.definitions[..] else {
+        panic!("one definition: {:?}", area.lookup.definitions);
+    };
+    eprintln!("{definition:?}");
+    assert_eq!(definition.place.path, file_path("src/shapes.ts"));
+    assert_eq!(definition.place.line, line(7));
+    assert_eq!(circle.answered_by, server);
+    let [definition] = &circle.lookup.definitions[..] else {
+        panic!("one definition: {:?}", circle.lookup.definitions);
+    };
+    eprintln!("{definition:?}");
+    assert_eq!(definition.place.path, file_path("src/shapes.ts"));
+    assert_eq!(definition.place.line, line(1));
+}
+
 #[test]
 fn a_review_at_another_head_moves_the_checkout_and_tells_the_running_server_which_files_changed() {
     let rig = Rig::answering_add();
@@ -778,6 +917,50 @@ fn a_location_in_a_borrowed_dependency_shows_as_a_repo_path_and_opens_from_disk(
         Some(rig.checkout.join("vendor/laravel/framework.php").as_path())
     );
     assert_eq!(&*definition.signature, "<?php // installed");
+}
+
+#[test]
+fn a_typescript_definition_in_the_borrowed_node_modules_shows_its_repo_path_and_opens_from_disk() {
+    let rig = Rig::with_file(
+        "src/total.ts",
+        "import { sum } from 'lodash';
+
+export const total = sum([1, 2]);
+",
+        |checkout| {
+            json!({"answers": {"textDocument/definition": [
+                location(checkout, "node_modules/lodash/sum.d.ts", 0, 16, 19),
+            ]}})
+        },
+        Timeouts::default(),
+    );
+    rig.repo.write(
+        "node_modules/lodash/sum.d.ts",
+        "export function sum(values: number[]): number;
+",
+    );
+
+    let answer = rig.navigate_at(3, 21, "sum").0.unwrap();
+
+    let [definition] = answer.lookup.definitions.as_slice() else {
+        panic!("one definition: {:?}", answer.lookup.definitions)
+    };
+    assert_eq!(
+        definition.place.path,
+        file_path("node_modules/lodash/sum.d.ts")
+    );
+    assert_eq!(
+        answer.lookup.on_disk(&definition.place.path),
+        Some(rig.checkout.join("node_modules/lodash/sum.d.ts").as_path())
+    );
+    assert_eq!(
+        &*definition.signature,
+        "export function sum(values: number[]): number;"
+    );
+    assert_eq!(
+        rig.params_of("textDocument/didOpen")[0]["textDocument"]["languageId"],
+        "typescript"
+    );
 }
 
 #[test]

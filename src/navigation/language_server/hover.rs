@@ -19,10 +19,10 @@ impl Hovered {
             Some((head, doc)) => (head, summary(doc)),
             None => (markdown.as_str(), summary(&prose_of(&markdown))),
         };
-        Self {
-            signature: last_code_block(head),
-            doc,
-        }
+        // tsserver describes an imported name as the import, not as what it declares, so the
+        // definition's own line says more.
+        let signature = last_code_block(head).filter(|signature| !signature.starts_with("(alias)"));
+        Self { signature, doc }
     }
 }
 
@@ -106,6 +106,20 @@ fn summary(doc: &str) -> Option<String> {
 
 /// What a declaration is, read from the start of its signature.
 pub(super) fn kind_of(signature: &str) -> DefinitionKind {
+    // tsserver names the kind first in brackets: `(method) Circle.area(): number`.
+    if let Some(label) = signature
+        .strip_prefix('(')
+        .and_then(|rest| rest.split_once(')'))
+        .map(|(label, _)| label)
+    {
+        return match label {
+            "method" => DefinitionKind::Method,
+            "function" | "local function" => DefinitionKind::Function,
+            "parameter" => DefinitionKind::Parameter,
+            "enum member" => DefinitionKind::Constant,
+            _ => DefinitionKind::Variable,
+        };
+    }
     let mut in_a_class = false;
     let mut tokens = signature
         .split(|c: char| c.is_whitespace() || c == '(')

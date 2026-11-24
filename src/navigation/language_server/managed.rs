@@ -18,6 +18,10 @@ use crate::update::{Cpu, ReleasesPort, Target, check_digest};
 /// Where the package's server is, inside its download folder.
 const INTELEPHENSE_SCRIPT: &str = "package/lib/intelephense.js";
 
+const TYPESCRIPT_LANGUAGE_SERVER_SCRIPT: &str = "package/lib/cli.mjs";
+
+const TSSERVER_SCRIPT: &str = "package/lib/tsserver.js";
+
 use super::{FallbackReason, ServerCatalog, ServerLaunch, ServerName, Waiting, locked};
 
 /// One release of a server: its tag and the sha256 of its download for each target it is built for.
@@ -42,6 +46,9 @@ pub struct ServerPins {
     /// Runs the servers that are npm packages.
     pub node: ReleasePin,
     pub intelephense: PackagePin,
+    pub typescript_language_server: PackagePin,
+    /// The tsserver typescript-language-server runs, whatever TypeScript the reviewed repo installs.
+    pub typescript: PackagePin,
 }
 
 /// Where managed servers keep what they need: downloads can be fetched again, indexes are costly to
@@ -113,6 +120,16 @@ impl ServerPins {
                 version: "1.18.5".to_owned(),
                 sha512: "76a087d583424651c604b343fa25058c12651b0338a4f8a65f68e6f0068fffa2b659934cd8adbe13c74e5820f765830fdb30b6202043f52a1eda8c4ab54f5df4".to_owned(),
             },
+            typescript_language_server: PackagePin {
+                version: "6.1.0".to_owned(),
+                sha512: "fcefddaf609bbc34b55bd8ca25c050c64e166a0510f7ba016fc93f7aaf5c3ac96c6ed02e0b60433e991c50bc44d9211988f209bd534b78d8cb65ef61425d7309".to_owned(),
+            },
+            // TypeScript 7 is a native program with no tsserver.js, so 6.0 is the last one
+            // typescript-language-server can run.
+            typescript: PackagePin {
+                version: "6.0.3".to_owned(),
+                sha512: "cb64efbb14993c3c906a490544f6472859be28a56a222b1d83dfc26709bd7edbca5cb3fc3515a3dfcfce0e335baf8dd2b285ea36e022b047f519d0b1a9671d07".to_owned(),
+            },
         }
     }
 }
@@ -150,7 +167,11 @@ impl ManagedServers {
         match language {
             Language::Rust => self.rust_analyzer_binary().is_file(),
             Language::Php => self.node_binary().is_file() && self.intelephense_script().is_file(),
-            Language::TypeScript | Language::Tsx => false,
+            Language::TypeScript | Language::Tsx => {
+                self.node_binary().is_file()
+                    && self.typescript_language_server_script().is_file()
+                    && self.tsserver_script().is_file()
+            }
         }
     }
 
@@ -164,6 +185,17 @@ impl ManagedServers {
 
     fn intelephense_folder(&self) -> String {
         format!("intelephense-{}", self.pins.intelephense.version)
+    }
+
+    fn typescript_language_server_folder(&self) -> String {
+        format!(
+            "typescript-language-server-{}",
+            self.pins.typescript_language_server.version
+        )
+    }
+
+    fn typescript_folder(&self) -> String {
+        format!("typescript-{}", self.pins.typescript.version)
     }
 
     fn rust_analyzer_binary(&self) -> PathBuf {
@@ -182,12 +214,26 @@ impl ManagedServers {
             .join(INTELEPHENSE_SCRIPT)
     }
 
+    fn typescript_language_server_script(&self) -> PathBuf {
+        self.folder
+            .join(self.typescript_language_server_folder())
+            .join(TYPESCRIPT_LANGUAGE_SERVER_SCRIPT)
+    }
+
+    fn tsserver_script(&self) -> PathBuf {
+        self.folder
+            .join(self.typescript_folder())
+            .join(TSSERVER_SCRIPT)
+    }
+
     /// Removes every download of a version this build does not pin, and what a stopped unpacking left.
     pub fn remove_unpinned(&self) -> anyhow::Result<()> {
         let kept = [
             self.rust_analyzer_folder(),
             self.node_folder(),
             self.intelephense_folder(),
+            self.typescript_language_server_folder(),
+            self.typescript_folder(),
         ];
         let entries = match std::fs::read_dir(&self.folder) {
             Ok(entries) => entries,
@@ -236,7 +282,7 @@ impl ManagedServers {
         })?;
         let script = self.intelephense_script();
         self.downloaded(&ServerName::of(Language::Php), &script, waiting, || {
-            self.download_intelephense(&script)
+            self.download_package("intelephense", &self.pins.intelephense, &script)
         })?;
         let index = self
             .indexes
@@ -244,6 +290,31 @@ impl ManagedServers {
             .join(repo.name())
             .join("intelephense");
         Ok(ServerLaunch::intelephense(node, &script, &index))
+    }
+
+    /// typescript-language-server would take the TypeScript of the repo's `node_modules` unless it is
+    /// told the pinned one, and that would run code the reviewed PR ships.
+    fn typescript_language_server(
+        &self,
+        waiting: &dyn Fn(Waiting),
+    ) -> Result<ServerLaunch, FallbackReason> {
+        let node = self.node_binary();
+        self.downloaded(&ServerName::new("Node"), &node, waiting, || {
+            self.download_node(&node)
+        })?;
+        let name = ServerName::of(Language::TypeScript);
+        let script = self.typescript_language_server_script();
+        let pin = &self.pins.typescript_language_server;
+        self.downloaded(&name, &script, waiting, || {
+            self.download_package("typescript-language-server", pin, &script)
+        })?;
+        let tsserver = self.tsserver_script();
+        self.downloaded(&name, &tsserver, waiting, || {
+            self.download_package("typescript", &self.pins.typescript, &tsserver)
+        })?;
+        Ok(ServerLaunch::typescript_language_server(
+            node, &script, &tsserver,
+        ))
     }
 
     /// Downloads what puts `file` in place unless it is there, and says so while it does.
@@ -340,12 +411,17 @@ impl ManagedServers {
         })
     }
 
-    /// The registry tarball holds the package under `package/`. Intelephense is bundled into one
-    /// script, so it needs no packages of its own.
-    fn download_intelephense(&self, script: &Path) -> anyhow::Result<()> {
-        let pin = &self.pins.intelephense;
+    /// The registry tarball holds the package under `package/`, and `script` is in it. Intelephense,
+    /// typescript-language-server and typescript are each bundled with no dependencies, so no npm
+    /// installs anything.
+    fn download_package(
+        &self,
+        package: &str,
+        pin: &PackagePin,
+        script: &Path,
+    ) -> anyhow::Result<()> {
         let url = format!(
-            "https://registry.npmjs.org/intelephense/-/intelephense-{}.tgz",
+            "https://registry.npmjs.org/{package}/-/{package}-{}.tgz",
             pin.version
         );
         let archive = self.checked_download(&url, |archive| check_sha512(archive, &pin.sha512))?;
@@ -357,9 +433,11 @@ impl ManagedServers {
             tar::Archive::new(GzDecoder::new(archive.as_slice()))
                 .unpack(unpacking)
                 .with_context(|| format!("could not unpack {url}"))?;
+            let inside = script.strip_prefix(folder)?;
             anyhow::ensure!(
-                unpacking.join(INTELEPHENSE_SCRIPT).is_file(),
-                "{url} has no {INTELEPHENSE_SCRIPT}"
+                unpacking.join(inside).is_file(),
+                "{url} has no {}",
+                inside.display()
             );
             Ok(())
         })
@@ -430,10 +508,7 @@ impl ServerCatalog for ManagedServers {
         match language {
             Language::Rust => self.rust_analyzer(waiting),
             Language::Php => self.intelephense(repo, waiting),
-            Language::TypeScript | Language::Tsx => Err(FallbackReason::new(&format!(
-                "{} is not downloaded by the app yet",
-                ServerName::of(language)
-            ))),
+            Language::TypeScript | Language::Tsx => self.typescript_language_server(waiting),
         }
     }
 }
