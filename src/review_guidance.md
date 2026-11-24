@@ -4,6 +4,7 @@ Look for, in this order:
 - Behaviour that is wrong: a path that fails, a case the change does not handle, an assumption the code around it does not hold.
 - Risk: data lost or exposed, a change that cannot be undone, a race, a migration that cannot run twice, an API other code depends on.
 - Tests that do not prove what they claim, or behaviour that has none.
+- Breaks of the repo's own coding standards: read the standards files that its agent instructions (`AGENTS.md`, `CLAUDE.md`) point to, and every one that applies to a changed file.
 - Design that will cost later: a concept in the wrong place, a duplicated rule, a name that says something else than the code does.
 - Small things worth saying, such as a misleading comment or a dead branch.
 
