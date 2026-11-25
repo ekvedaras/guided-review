@@ -12,6 +12,7 @@ use crate::viewer::comments::Audience;
 use crate::viewer::comments::{
     CommentPlace, CommentProblem, CommentRefusal, CommentResult, QueuedComment, SendMode,
 };
+use crate::viewer::comments_list::{CommentsList, ListedThread, ThreadVisit};
 use crate::viewer::github_outage::Affected;
 use crate::viewer::hand_offs::{HandOff, HandOffState, HandOffs, HandToAgentRefused, SentFrom};
 use crate::viewer::line_location::LineLocation;
@@ -54,6 +55,86 @@ impl ReviewCore {
         } else {
             self.github_answered(Affected::Comments);
             self.raise_problem(Problem::ThreadsNotRead(error.short_reason()));
+        }
+    }
+
+    pub fn has_threads(&self) -> bool {
+        !self.pulled_threads.is_empty()
+    }
+
+    /// Every thread of the review, in reading order, each with the screen that shows it.
+    pub fn comments_list(&self) -> CommentsList {
+        let mut listed: Vec<ListedThread> = Vec::new();
+        for screen in self.reading_order() {
+            let title = self.screen_title(&screen);
+            listed.extend(
+                self.threads
+                    .on_screen(&screen)
+                    .threads()
+                    .iter()
+                    .map(|thread| ListedThread {
+                        thread: thread.clone(),
+                        shown_on: Some((screen.clone(), title.clone())),
+                    }),
+            );
+        }
+        let unshown: Vec<ListedThread> = self
+            .pulled_threads
+            .iter()
+            .filter(|thread| !listed.iter().any(|listed| listed.thread.id == thread.id))
+            .map(|thread| ListedThread {
+                thread: thread.clone(),
+                shown_on: None,
+            })
+            .collect();
+        listed.extend(unshown);
+        CommentsList::of(listed)
+    }
+
+    /// Goes to the screen that shows the thread, opening its step and the thread when folded.
+    pub fn go_to_thread(&mut self, id: &ThreadId) -> ThreadVisit {
+        let Some(thread) = self.pulled_threads.iter().find(|thread| thread.id == *id) else {
+            return ThreadVisit::Nowhere;
+        };
+        let is_folded = thread.is_folded_by_default() != self.thread_fold_flipped.contains(id);
+        let link = thread
+            .comments
+            .first()
+            .map(|comment| comment.url.clone())
+            .filter(|url| !url.is_empty());
+        let shown_on = self.reading_order().into_iter().find(|screen| {
+            self.threads
+                .on_screen(screen)
+                .threads()
+                .iter()
+                .any(|placed| placed.id == *id)
+        });
+        let Some(screen) = shown_on else {
+            return link.map_or(ThreadVisit::Nowhere, ThreadVisit::OnGitHub);
+        };
+        self.go_to_screen(screen);
+        if let Screen::Step(step) = self.screen.clone()
+            && self.is_folded(&step)
+        {
+            self.toggle_fold(&step);
+        }
+        if is_folded {
+            self.toggle_thread_fold(id);
+        }
+        ThreadVisit::OnScreen
+    }
+
+    fn screen_title(&self, screen: &Screen) -> String {
+        match screen {
+            Screen::Step(id) => self
+                .tour
+                .guided()
+                .and_then(|guided| guided.steps().into_iter().find(|step| step.id == *id))
+                .map_or_default(|step| step.title.clone()),
+            Screen::File(path) => path.to_string(),
+            Screen::SafetyNet => "Safety net".to_owned(),
+            Screen::Summary => "Summary".to_owned(),
+            Screen::Overview => "Overview".to_owned(),
         }
     }
 

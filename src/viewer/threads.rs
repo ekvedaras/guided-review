@@ -17,6 +17,7 @@ use super::line_location::{LineLocation, Side};
 use super::outdated_lines::FollowedLines;
 use super::piece_diff::PieceDiff;
 use super::review::StepId;
+use super::screen::Screen;
 use super::used_findings::{FindingsOfThreads, UsedFinding};
 
 impl ReviewThread {
@@ -94,13 +95,17 @@ pub(super) struct Placed<'a> {
     followed: &'a BTreeMap<ThreadId, FollowedLines>,
 }
 
-impl Placed<'_> {
+impl<'a> Placed<'a> {
     pub fn len(&self) -> usize {
         self.threads.len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.threads.is_empty()
+    }
+
+    pub fn threads(&self) -> &'a [ReviewThread] {
+        self.threads
     }
 }
 
@@ -175,6 +180,19 @@ impl ThreadPlacement {
 
     pub fn in_safety_net(&self) -> Placed<'_> {
         self.of_home(&Home::SafetyNet)
+    }
+
+    /// The summary and the overview hold no thread.
+    pub fn on_screen(&self, screen: &Screen) -> Placed<'_> {
+        match screen {
+            Screen::Step(id) => self.in_step(id),
+            Screen::File(path) => self.in_file(path),
+            Screen::SafetyNet => self.in_safety_net(),
+            Screen::Summary | Screen::Overview => Placed {
+                threads: &[],
+                followed: &self.followed,
+            },
+        }
     }
 
     fn of_home(&self, home: &Home) -> Placed<'_> {

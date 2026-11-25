@@ -3,6 +3,7 @@ pub mod button;
 pub mod card;
 pub mod chip;
 pub mod comment_composer;
+pub mod comments_sheet;
 pub mod diagram;
 pub mod diff_view;
 pub mod finding_view;

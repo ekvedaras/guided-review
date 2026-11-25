@@ -20,6 +20,7 @@ mod code_link;
 mod comment_desk;
 mod comment_send;
 mod comments;
+mod comments_list;
 mod diff_display;
 mod diff_fence;
 mod diff_line;
@@ -149,6 +150,7 @@ pub use comments::{
     CommentDraft, CommentPlace, CommentProblem, CommentRefusal, CommentResult, QueuedComment,
     SendMode, Sending,
 };
+pub use comments_list::{CommentsList, CommentsListRow, ThreadVisit};
 pub use diff_display::{
     ChangeId, DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext,
     hidden_lines_after, hidden_lines_before,

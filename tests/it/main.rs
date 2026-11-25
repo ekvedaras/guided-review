@@ -45,6 +45,7 @@ mod clone_offer;
 mod code_links;
 mod code_source;
 mod comment_actions;
+mod comments_list;
 mod contrast;
 mod definitions;
 mod desktop_file;

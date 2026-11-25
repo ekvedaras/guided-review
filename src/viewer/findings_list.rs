@@ -366,13 +366,13 @@ const PLACE_WIDTH: usize = 44;
 fn place_of(anchor: &Anchor) -> String {
     match anchor {
         Anchor::Change => "the whole change".to_owned(),
-        Anchor::File { file } => shortened(&file.to_string()),
-        Anchor::Lines { file, lines, .. } => shortened(&format!("{file}:{}", lines.start)),
+        Anchor::File { file } => shortened_place(&file.to_string()),
+        Anchor::Lines { file, lines, .. } => shortened_place(&format!("{file}:{}", lines.start)),
     }
 }
 
 /// Cut from the start, at a folder boundary when one fits, so the file name and the line stay.
-fn shortened(place: &str) -> String {
+pub(super) fn shortened_place(place: &str) -> String {
     let count = place.chars().count();
     if count <= PLACE_WIDTH {
         return place.to_owned();
