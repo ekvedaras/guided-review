@@ -366,7 +366,13 @@ fn conversation(last: &str) -> Vec<ThreadComment> {
 fn a_reply_sent_with_ask_agent_is_handed_off_with_the_thread_so_far() {
     let pull = Pull::new();
     let mut host = pull.host();
-    host.threads = vec![thread_on_line_ten("T1", conversation("and why not nine?"))];
+    host.threads = vec![thread_on_line_ten(
+        "T1",
+        vec![
+            comment("C1", "me", "why ten?"),
+            comment("C2", "alice", "because"),
+        ],
+    )];
     let mut review = pull.open();
 
     let result = reply(&mut review, "and why not nine?", Audience::Agent, &host);

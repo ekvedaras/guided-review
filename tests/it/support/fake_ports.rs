@@ -33,8 +33,8 @@ use guided_review::viewer::{
     PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
     Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
     RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
-    ReviewVerdict, ReviewWritesPort, SendMode, Standing, SubmittedReview, ThreadId, TurnStopper,
-    Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    ReviewVerdict, ReviewWritesPort, SendMode, Standing, SubmittedReview, ThreadComment, ThreadId,
+    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -153,6 +153,8 @@ pub enum HostFault {
     ViewedPushesFail,
     /// Every viewed call is refused, as for a token that may not do it.
     TokenRefused(String),
+    /// There is no token at all, so every call is refused, as GitHub refuses every GraphQL call without one.
+    NoToken,
     /// A new thread is answered with `thread: null` and no error.
     NewThreadsAnswerNull,
     /// The next `comment_now` finds a pending review that appeared meanwhile. Used up by it.
@@ -216,6 +218,7 @@ pub struct FakeHost {
     reacted_now: Mutex<BTreeMap<(CommentId, Reaction), bool>>,
     edited_now: Mutex<BTreeMap<CommentId, String>>,
     deleted_now: Mutex<BTreeSet<CommentId>>,
+    replied_now: Mutex<Vec<(ThreadId, ThreadComment)>>,
     description: Mutex<String>,
     status: Mutex<PrStatus>,
     pulls_of_branches: Mutex<Vec<(String, PullOfBranch)>>,
@@ -243,6 +246,7 @@ impl FakeHost {
             reacted_now: Mutex::default(),
             edited_now: Mutex::default(),
             deleted_now: Mutex::default(),
+            replied_now: Mutex::default(),
             description: Mutex::default(),
             status: Mutex::new(PrStatus::Open(OpenPrStatus {
                 readiness: Readiness::Ready,
@@ -386,6 +390,7 @@ impl FakeHost {
     }
 
     fn fail_if_connection_lost(&self) -> Result<(), HostError> {
+        self.refuse_without_token()?;
         if self.is_faulty(&HostFault::ConnectionLost) {
             return Err(anyhow::anyhow!("network is down").into());
         }
@@ -393,6 +398,7 @@ impl FakeHost {
     }
 
     fn fail_if_reads_fail_with(&self) -> Result<(), HostError> {
+        self.refuse_without_token()?;
         let failure = self
             .faults
             .lock()
@@ -413,7 +419,17 @@ impl FakeHost {
         Ok(())
     }
 
+    fn refuse_without_token(&self) -> Result<(), HostError> {
+        if self.is_faulty(&HostFault::NoToken) {
+            return Err(HostError::NoAccess(NoAccess::new(
+                "no GitHub token: run `gh auth login` or set GITHUB_TOKEN",
+            )));
+        }
+        Ok(())
+    }
+
     fn check_access(&self) -> Result<(), HostError> {
+        self.refuse_without_token()?;
         let refusal = self
             .faults
             .lock()
@@ -687,6 +703,7 @@ impl ViewedFilesPort for FakeHost {
             viewed,
         });
         self.check_access()?;
+        self.fail_if_connection_lost()?;
         if self.is_faulty(&HostFault::ViewedPushesFail) {
             return Err(anyhow::anyhow!("network is down").into());
         }
@@ -726,8 +743,15 @@ impl ReviewThreadsPort for FakeHost {
         let reacted = self.reacted_now.lock().unwrap();
         let edited = self.edited_now.lock().unwrap();
         let deleted = self.deleted_now.lock().unwrap();
+        let replied = self.replied_now.lock().unwrap();
         let mut threads = self.threads.clone();
         for thread in &mut threads {
+            thread.comments.extend(
+                replied
+                    .iter()
+                    .filter(|(replied_to, _)| *replied_to == thread.id)
+                    .map(|(_, reply)| reply.clone()),
+            );
             thread
                 .comments
                 .retain(|comment| !deleted.contains(&comment.id));
@@ -785,7 +809,22 @@ impl ReviewThreadsPort for FakeHost {
             .iter()
             .filter(|call| matches!(call, HostCall::Reply { .. }))
             .count();
-        Ok(CommentId::new(&format!("R{replies_so_far}")))
+        let reply = CommentId::new(&format!("R{replies_so_far}"));
+        self.replied_now.lock().unwrap().push((
+            thread_id.clone(),
+            ThreadComment {
+                id: reply.clone(),
+                author: "viewer".to_owned(),
+                avatar_url: None,
+                is_bot: false,
+                by_agent: None,
+                by_viewer: true,
+                body: body.to_owned(),
+                url: format!("https://github.com/acme/shop/pull/7#discussion_r{reply}"),
+                reactions: Vec::new(),
+            },
+        ));
+        Ok(reply)
     }
 
     fn set_thread_resolved(

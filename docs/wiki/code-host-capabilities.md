@@ -35,6 +35,16 @@ A flag list beside the ports (`supports_viewed_marks: true`) can disagree with t
 - `PrControls::status_is` says when to read the status again (while checks run), the rule `ReviewCore` held; `ReviewCore::pr_status` hands out a copy, not a borrow.
 - The merge method is the reviewer's setting, not the PR's state: `ReviewCore` holds it and passes it to `PrControls::ask_to_change_merging`. `ReviewCore::read_merge_method_from(&Config)` picks the PR repo's method, so `ReviewBuilder` no longer names it.
 
+## Host contract
+
+Issue #140 step 3, 2026-11-25. `tests/it/host_contract/` holds shared cases per port (viewed marks, review threads), each written once over a builder that makes a host holding a given PR, and `every_case_for!` runs every case against `FakeHost` and the GitHub adapter. GitHub runs against `github_api.rs`, GitHub's GraphQL API for one PR held in memory and answered in GitHub's shapes, two nodes a page, never the network. `capabilities.rs` checks that GitHub offers every capability and `NoHost` none. A new host gets a builder in `hosts.rs` and one more name in `every_case_for!`.
+
+What the contract found, fixed in the fake to match GitHub:
+
+- A reply never showed in `FakeHost`'s threads; a hand-off test had seeded the reply itself to make up for it.
+- `FakeHost` had no way to have no token at all: `TokenRefused` refuses only viewed marks. `HostFault::NoToken` refuses every call.
+- `ConnectionLost`, "every write fails", let a viewed mark through.
+
 ## Left open
 
 - Comment reactions (the hand-off's seen mark) are still in `ReviewThreadsPort`; a host with no reactions on comments would need them split out too.
