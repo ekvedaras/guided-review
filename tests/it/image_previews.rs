@@ -380,10 +380,13 @@ fn github_names_a_blob_and_its_size_without_sending_the_bytes() {
         request
     });
 
-    let info = guided_review::github::GitHub::at(&url)
-        .code_source(&RepoName::new("acme", "shop"))
-        .blob_info_at(&Sha::new("abc123"), &file_path("assets/my logo.png"))
-        .unwrap();
+    let info = guided_review::viewer::HostedCodePort::code_of(
+        &guided_review::github::GitHub::at(&url),
+        &RepoName::new("acme", "shop"),
+    )
+    .unwrap()
+    .blob_info_at(&Sha::new("abc123"), &file_path("assets/my logo.png"))
+    .unwrap();
 
     assert_eq!((info.id.as_str(), info.size), ("980a0d5f", 4096));
     let request = asked.join().unwrap();

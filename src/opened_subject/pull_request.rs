@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::github::GitHub;
 use crate::local_git::LocalGit;
 use crate::make_basic_tour::make_basic_tour;
 use crate::pick_code_source::pick_code_source;
@@ -12,19 +11,20 @@ use crate::repin::Repin;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin, ToursOnDisk};
 use crate::viewer::{
-    ChangeTipsPort, PickCodeSource, ReviewStateFile, let_go_of_unread_snapshots, repin_tour,
+    ChangeTipsPort, CodeHost, PickCodeSource, ReviewStateFile, let_go_of_unread_snapshots,
+    repin_tour,
 };
 
 use super::CodeAtTips;
-use super::hosts::code_reader_of;
+use super::hosts::adapter_of;
 
-/// The PR adapter: GitHub holds the PR's tips and title, and its code is read from a clone found from
-/// `current_dir`, else from GitHub.
+/// The PR adapter: the PR's host holds its tips and title, and its code is read from a clone found
+/// from `current_dir`, else from the host.
 pub(super) struct OpenedPr {
     pr: PullRequestUrl,
     folders: AppFolders,
     current_dir: PathBuf,
-    github: GitHub,
+    host: Arc<dyn CodeHost>,
 }
 
 impl OpenedPr {
@@ -37,7 +37,7 @@ impl OpenedPr {
             pr: pr.clone(),
             folders: folders.clone(),
             current_dir: current_dir.to_path_buf(),
-            github: code_reader_of(pr.host),
+            host: adapter_of(pr.host),
         }
     }
 
@@ -45,8 +45,8 @@ impl OpenedPr {
         ReviewSubject::from(self.pr.clone())
     }
 
-    pub(super) const fn github(&self) -> &GitHub {
-        &self.github
+    pub(super) fn host(&self) -> Arc<dyn CodeHost> {
+        Arc::clone(&self.host)
     }
 
     pub(super) const fn folders(&self) -> &AppFolders {
@@ -69,7 +69,7 @@ impl OpenedPr {
             return Ok(false);
         }
         let code = self.at_live_tips()?;
-        let title = self.github.pull_request_title(&self.pr)?;
+        let title = self.host.pull_request_title(&self.pr)?;
         make_basic_tour(
             &self.folders,
             &subject,
@@ -80,9 +80,9 @@ impl OpenedPr {
         Ok(true)
     }
 
-    /// The PR as GitHub has it now.
+    /// The PR as its host has it now.
     pub(super) fn at_live_tips(&self) -> anyhow::Result<CodeAtTips> {
-        let tips = self.github.pull_request_tips(&self.pr)?;
+        let tips = self.host.pull_request_tips(&self.pr)?;
         self.at(tips)
     }
 
@@ -92,21 +92,21 @@ impl OpenedPr {
     }
 
     fn at(&self, tips: ChangeTips) -> anyhow::Result<CodeAtTips> {
-        let source = pick_code_source(&self.github, &self.pr, &tips, &self.current_dir)?;
+        let source = pick_code_source(self.host.as_ref(), &self.pr, &tips, &self.current_dir)?;
         Ok(CodeAtTips { tips, source })
     }
 
     /// Picks the code source again for any tips, as the app does when the PR moves.
     pub(super) fn code_source_picker(&self) -> PickCodeSource {
-        let (github, pr, current_dir) = (
-            self.github.clone(),
+        let (host, pr, current_dir) = (
+            Arc::clone(&self.host),
             self.pr.clone(),
             self.current_dir.clone(),
         );
-        Arc::new(move |tips| pick_code_source(&github, &pr, tips, &current_dir))
+        Arc::new(move |tips| pick_code_source(host.as_ref(), &pr, tips, &current_dir))
     }
 
-    /// `repin`: the guided tour, else the basic one, moves to the PR's head on GitHub.
+    /// `repin`: the guided tour, else the basic one, moves to the PR's head on its host.
     pub(super) fn repin(&self) -> anyhow::Result<Repin> {
         let tour_path = self.tour_to_repin_path();
         // Fails before any network call when there is no tour yet.
@@ -115,7 +115,7 @@ impl OpenedPr {
             &self.folders,
             &self.pr,
             &tour_path,
-            &self.github,
+            self.host.as_ref(),
             &self.code_source_picker(),
         )?;
         Ok(repinned)

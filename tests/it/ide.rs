@@ -83,7 +83,12 @@ fn a_local_clone_says_where_it_is_and_the_github_source_says_it_has_none() {
     );
     assert_eq!(
         guided_review::code_source::CodeSource::local_clone(
-            &guided_review::github::GitHub::from_env().code_source(&RepoName::new("acme", "shop"))
+            guided_review::viewer::HostedCodePort::code_of(
+                &guided_review::github::GitHub::from_env(),
+                &RepoName::new("acme", "shop")
+            )
+            .unwrap()
+            .as_ref()
         ),
         None
     );

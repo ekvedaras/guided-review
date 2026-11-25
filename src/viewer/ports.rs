@@ -14,6 +14,7 @@ use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::{IssueDetails, PullRequestIssues};
 use super::relevant_prs::RelevantPullRequests;
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
+use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::issue::IssueUrl;
 use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName};
@@ -23,6 +24,13 @@ use crate::review_subject::{BranchName, ReviewSubject};
 /// login, so a private repo clones too.
 pub trait ClonePort: Send + Sync {
     fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()>;
+}
+
+/// Reads a repo's code on the host itself, for a PR with no local clone: a file at a commit, the diff
+/// between two and their merge base. Every host serves them (GitLab: its repository files and compare
+/// APIs, not checked).
+pub trait HostedCodePort: Send + Sync {
+    fn code_of(&self, repo: &RepoName) -> anyhow::Result<Arc<dyn CodeSource>>;
 }
 
 pub trait ChangeTipsPort: Send + Sync {
@@ -72,6 +80,9 @@ pub trait ViewedFilesPort: Send + Sync {
 }
 
 pub trait PullRequestDescriptionPort: Send + Sync {
+    /// The PR's own title, as the host has it now.
+    fn pull_request_title(&self, pr: &PullRequestUrl) -> Result<String, HostError>;
+
     /// The PR's body as markdown; empty when it has none.
     fn pull_request_description(&self, pr: &PullRequestUrl) -> Result<String, HostError>;
 
@@ -211,6 +222,7 @@ pub trait ReviewWritesPort: Send + Sync {
 pub trait CodeHost:
     ChangeTipsPort
     + ClonePort
+    + HostedCodePort
     + PullsOfBranchPort
     + PullRequestDescriptionPort
     + PullRequestOriginPort

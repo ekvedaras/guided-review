@@ -9,7 +9,6 @@ mod pull_request;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub(crate) use hosts::code_reader_of;
 pub use hosts::{EveryHost, adapter_of, host_of};
 pub use local::OpenedChangeSet;
 
@@ -126,7 +125,7 @@ impl OpenedSubject {
     /// the look-up of a PR of its branch, on the host its origin is on.
     pub fn host(&self) -> Arc<dyn CodeHost> {
         match &self.0 {
-            Adapter::PullRequest(opened) => Arc::new(opened.github().clone()),
+            Adapter::PullRequest(opened) => opened.host(),
             Adapter::Local(opened) => host_of(&opened.subject()),
         }
     }

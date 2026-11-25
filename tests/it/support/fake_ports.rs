@@ -22,13 +22,14 @@ pub fn blocked_merging() -> Merging {
         viewer_may_merge: true,
     }
 }
+use guided_review::code_source::CodeSource;
 use guided_review::file_path::FilePath;
 use guided_review::issue::IssueUrl;
 use guided_review::navigation::{ServerMessage, ServerMessages};
 use guided_review::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
-    Checks, ClonePort, CodeHost, CommentId, CommentPlace, HostError, IssueDetails,
+    Checks, ClonePort, CodeHost, CommentId, CommentPlace, HostError, HostedCodePort, IssueDetails,
     IssueDetailsPort, MergingPort, NoAccess, NotDelivered, OpenPrStatus, PictureUploadPort,
     PrStatus, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin,
     PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort,
@@ -222,6 +223,7 @@ pub struct FakeHost {
     issues: Mutex<PullRequestIssues>,
     origin: Mutex<Option<PullRequestOrigin>>,
     issue_details: Mutex<Vec<(IssueUrl, IssueDetails)>>,
+    code: Option<Arc<dyn CodeSource>>,
 }
 
 impl FakeHost {
@@ -256,6 +258,15 @@ impl FakeHost {
             issues: Mutex::default(),
             origin: Mutex::default(),
             issue_details: Mutex::default(),
+            code: None,
+        }
+    }
+
+    /// The host reads the PR's repo as `code` does, for a review with no clone.
+    pub fn serving_code(self, code: Arc<dyn CodeSource>) -> Self {
+        Self {
+            code: Some(code),
+            ..self
         }
     }
 
@@ -531,6 +542,14 @@ impl CodeHost for FakeHost {
     }
 }
 
+impl HostedCodePort for FakeHost {
+    fn code_of(&self, repo: &RepoName) -> anyhow::Result<Arc<dyn CodeSource>> {
+        self.code
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("FakeHost serves no code of {repo}"))
+    }
+}
+
 /// Clones are the clone offer's to test, with a cloner of its own.
 impl ClonePort for FakeHost {
     fn clone_repo(&self, repo: &RepoName, _folder: &Path) -> anyhow::Result<()> {
@@ -550,6 +569,11 @@ impl ChangeTipsPort for FakeHost {
 }
 
 impl PullRequestDescriptionPort for FakeHost {
+    fn pull_request_title(&self, _pr: &PullRequestUrl) -> Result<String, HostError> {
+        self.fail_if_reads_fail()?;
+        Ok("Hello world".to_owned())
+    }
+
     fn pull_request_description(&self, _pr: &PullRequestUrl) -> Result<String, HostError> {
         self.fail_if_reads_fail()?;
         Ok(self.description_now())
@@ -1202,7 +1226,7 @@ impl FakeNavigator {
 impl guided_review::navigation::CodeNavigator for FakeNavigator {
     fn navigate(
         &self,
-        _code: &dyn guided_review::code_source::CodeSource,
+        _code: &dyn CodeSource,
         request: &guided_review::navigation::NavigationRequest,
         waiting: &dyn Fn(guided_review::navigation::Waiting),
     ) -> anyhow::Result<guided_review::navigation::Answer> {

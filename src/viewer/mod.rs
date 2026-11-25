@@ -233,7 +233,7 @@ pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::ReviewVerdict;
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, ClonePort, CodeHost, HostError,
-    IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
+    HostedCodePort, IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
     PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
     PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, RelevantPullRequestsPort, Resolution,
     ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort,

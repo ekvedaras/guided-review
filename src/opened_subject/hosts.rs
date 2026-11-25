@@ -18,14 +18,6 @@ pub fn adapter_of(host: HostSite) -> Arc<dyn CodeHost> {
     }
 }
 
-/// A PR's code is read without a clone through the adapter's own code source, which no port hands
-/// out yet, so whoever reads a PR's code holds the adapter by its type.
-pub(crate) fn code_reader_of(host: HostSite) -> GitHub {
-    match host {
-        HostSite::GitHub => GitHub::from_env(),
-    }
-}
-
 /// The code host a review talks to: a PR's, or a local review's `NoHost`.
 pub fn host_of(subject: &ReviewSubject) -> Arc<dyn CodeHost> {
     match subject {

@@ -95,7 +95,6 @@ From my knowledge of GitLab, not checked against its docs:
 
 - `RepoName` is two segments, and everything keyed by it has no host level: the state folder (`state/<owner>/<repo>/`, read back as GitHub's in `ReviewStateFile::folders_opened_from_any_repo`), `Codebase`, the clones in `config.toml`.
 - `LocalGit::find` and `configured_clone` take a clone whose remote points at the repo on any host the app reads, not only the PR's host: Settings' clones and the clone offer name a `RepoName` with no host.
-- Code read without a clone comes through `GitHub::code_source`; `pick_code_source` takes the GitHub adapter, so `opened_subject::code_reader_of` still makes a `GitHub` beside `adapter_of`.
 - The switcher's "Loading your pull requests from GitHub..." and "Refreshing from GitHub..." name GitHub while the list is read from every host the app reads.
 - The palette's and title bar's "Open on GitHub" and "Open checks on GitHub" keep GitHub in their names and labels; `open_on_github` is also a key name in `[keys]`, which a rename must keep reading.
 - `PullRequestUrl::short` writes `owner/repo#7`; GitLab writes `group/project!7`.
@@ -110,6 +109,10 @@ Issue #140, 2026-11-25. Before it, `host_web::repo_of_remote` kept a remote's re
 - `opened_subject::hosts` is the one place a `HostSite` becomes its adapter: `adapter_of` (`Arc<dyn CodeHost>`), `host_of(&ReviewSubject)` (a PR's adapter, or a local review's `NoHost` looking up its branch's PR on its origin's host, none with no origin), and `EveryHost`, which routes look-ups by the repo's or PR's host and lists the switcher's PRs from every `HostSite::ALL`, merged by `RelevantPullRequests::merged`: newest first, a host that fails left out, failing only when every host does, since a reviewer need not have an account on each.
 - `RelevantPullRequestsPort` moved into `ports` and became core: every host lists the PRs that involve the viewer (GitLab: merge requests by author, assignee and reviewer, not checked against its docs).
 - Only the release downloaders (`app::updater`, `app::language_servers`) make `GitHub::from_env()` outside the adapter and `opened_subject::hosts`: guided-review's and the language servers' releases are on GitHub whatever host a PR is on.
+
+## Code read on the host
+
+Issue #140, 2026-11-25. Reading a PR's code with no clone is `HostedCodePort::code_of(repo)`, a core port and a supertrait of `CodeHost`: every host serves a file at a commit, the diff between two and their merge base (GitLab: its repository files and compare APIs, not checked). `pick_code_source` takes the port, so `opened_subject::hosts` has one mapping, `adapter_of`, and `code_reader_of` is gone; `OpenedPr` holds the PR's `Arc<dyn CodeHost>`, and the PR's title, which a basic tour is made with, moved into `PullRequestDescriptionPort`. Why the host's code is read though a clone was found (its fetch failed) is `pick_code_source`'s, which wraps whatever the host gives, so no adapter carries a fallback reason. `NoHost` refuses: a local review reads its own folder.
 
 ## Left open
 

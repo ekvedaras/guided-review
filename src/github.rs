@@ -22,14 +22,14 @@ use crate::viewer::{
 };
 use crate::viewer::{
     AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, ClonePort, CodeHost, CommentId,
-    CommentPlace, HeadBranch, HostError, IssueDetails, IssueDetailsPort, IssueState, MergeRoute,
-    MergingPort, NoAccess, OutageCause, PictureUploadPort, PrAuthor, PullOfBranch,
-    PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin, PullRequestOriginPort,
-    PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
-    Reaction, ReactionChange, ReactionCount, RelatedIssue, Resolution, ReviewOutcome, ReviewRecord,
-    ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, Reviewer, ReviewersOnGitHub,
-    SendMode, Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
-    ViewedState,
+    CommentPlace, HeadBranch, HostError, HostedCodePort, IssueDetails, IssueDetailsPort,
+    IssueState, MergeRoute, MergingPort, NoAccess, OutageCause, PictureUploadPort, PrAuthor,
+    PullOfBranch, PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin,
+    PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort,
+    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RelatedIssue, Resolution,
+    ReviewOutcome, ReviewRecord, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort,
+    Reviewer, ReviewersOnGitHub, SendMode, Side, SubmittedReview, ThreadComment, ThreadId, Viewed,
+    ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 #[derive(Clone)]
@@ -381,14 +381,6 @@ impl GitHub {
         }
         Ok(request.call()?)
     }
-
-    pub fn code_source(&self, repo: &RepoName) -> GitHubCodeSource {
-        GitHubCodeSource {
-            github: self.clone(),
-            repo: repo.clone(),
-            fallback_reason: None,
-        }
-    }
 }
 
 /// A release archive is about 15 MB; the cap only stops a runaway download.
@@ -532,9 +524,8 @@ struct HeadRepoJson {
     full_name: String,
 }
 
-impl GitHub {
-    /// The PR's own title, as GitHub has it now.
-    pub fn pull_request_title(&self, pr: &PullRequestUrl) -> anyhow::Result<String> {
+impl PullRequestDescriptionPort for GitHub {
+    fn pull_request_title(&self, pr: &PullRequestUrl) -> Result<String, HostError> {
         let pull: PullTitleJson = self
             .get(
                 &format!("repos/{}/pulls/{}", pr.repo, pr.number),
@@ -544,9 +535,7 @@ impl GitHub {
             .with_context(|| format!("could not read the title of {pr} from GitHub"))?;
         Ok(pull.title)
     }
-}
 
-impl PullRequestDescriptionPort for GitHub {
     fn pull_request_description(&self, pr: &PullRequestUrl) -> Result<String, HostError> {
         let pull: PullBodyJson = self
             .get(
@@ -1405,10 +1394,9 @@ impl ReviewWritesPort for GitHub {
 }
 
 /// Reads one repo through the GitHub API, for PRs without a local clone.
-pub struct GitHubCodeSource {
+struct GitHubCodeSource {
     github: GitHub,
     repo: RepoName,
-    fallback_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1417,24 +1405,12 @@ struct CompareJson {
 }
 
 impl GitHubCodeSource {
-    /// Read from GitHub because the local clone could not give the commits.
-    pub fn instead_of_clone_because(self, reason: String) -> Self {
-        Self {
-            fallback_reason: Some(reason),
-            ..self
-        }
-    }
-
     fn compare_path(&self, base: &Sha, head: &Sha) -> String {
         format!("repos/{}/compare/{base}...{head}", self.repo)
     }
 }
 
 impl CodeSource for GitHubCodeSource {
-    fn fallback_reason(&self) -> Option<&str> {
-        self.fallback_reason.as_deref()
-    }
-
     fn file_at(&self, sha: &Sha, path: &FilePath) -> anyhow::Result<String> {
         Ok(String::from_utf8_lossy(&self.blob_at(sha, path)?).into_owned())
     }
@@ -1580,6 +1556,15 @@ fn non_empty_id(id: &serde_json::Value) -> Option<String> {
 }
 
 /// `gh` holds the reviewer's GitHub login, so private repos clone too.
+impl HostedCodePort for GitHub {
+    fn code_of(&self, repo: &RepoName) -> anyhow::Result<Arc<dyn CodeSource>> {
+        Ok(Arc::new(GitHubCodeSource {
+            github: self.clone(),
+            repo: repo.clone(),
+        }))
+    }
+}
+
 impl ClonePort for GitHub {
     fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()> {
         let output = Command::new("gh")

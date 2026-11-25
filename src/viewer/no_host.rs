@@ -1,8 +1,8 @@
 use super::comments::{CommentPlace, SendMode};
 use super::ports::ReviewVerdict;
 use super::ports::{
-    ChangeTipsPort, ClonePort, CodeHost, HostError, IssueDetailsPort, MergingPort, NoAccess,
-    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
+    ChangeTipsPort, ClonePort, CodeHost, HostError, HostedCodePort, IssueDetailsPort, MergingPort,
+    NoAccess, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
     PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, RelevantPullRequestsPort,
     Resolution, ReviewThreadsPort, ReviewWritesPort, ViewedFilesPort,
 };
@@ -13,6 +13,7 @@ use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::PullRequestIssues;
 use super::relevant_prs::RelevantPullRequests;
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
+use crate::code_source::CodeSource;
 use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName};
 use crate::review_subject::BranchName;
 use std::path::Path;
@@ -91,6 +92,14 @@ impl ClonePort for NoHost {
     }
 }
 
+impl HostedCodePort for NoHost {
+    fn code_of(&self, repo: &RepoName) -> anyhow::Result<Arc<dyn CodeSource>> {
+        anyhow::bail!(
+            "a local review reads no repo on a host, not {repo} either: it reads its own folder"
+        )
+    }
+}
+
 impl RelevantPullRequestsPort for NoHost {
     fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, HostError> {
         refused()
@@ -104,6 +113,10 @@ impl ChangeTipsPort for NoHost {
 }
 
 impl PullRequestDescriptionPort for NoHost {
+    fn pull_request_title(&self, _pr: &PullRequestUrl) -> Result<String, HostError> {
+        refused()
+    }
+
     fn pull_request_description(&self, _pr: &PullRequestUrl) -> Result<String, HostError> {
         refused()
     }

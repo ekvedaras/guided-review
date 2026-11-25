@@ -8,7 +8,7 @@ use crate::config::{AskSettings, Config};
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::instructions::TourWriter;
-use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner, code_reader_of};
+use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner, adapter_of};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::Tour;
 use crate::viewer::{
@@ -115,7 +115,12 @@ pub fn mover_of(folders: &AppFolders, change_set: &LocalChangeSet) -> PrMover {
         folders: folders.clone(),
         change_set: change_set.clone(),
         pick_code_source: Arc::new(move |pr, tips| {
-            crate::pick_code_source::pick_code_source(&code_reader_of(pr.host), pr, tips, &folder)
+            crate::pick_code_source::pick_code_source(
+                adapter_of(pr.host).as_ref(),
+                pr,
+                tips,
+                &folder,
+            )
         }),
         drop_local_review: Arc::new(|change_set, folders| {
             OpenedChangeSet::new(change_set, folders).drop_review()
