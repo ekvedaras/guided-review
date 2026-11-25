@@ -1,6 +1,6 @@
 # One Rust for this machine and CI, so a new stable's lints never turn CI red unseen. Raise it on purpose.
 [toolchain]
 channel = "1.100"
-components = ["clippy", "rustfmt"]
+components = ["clippy", "rustfmt", "rust-analyzer", "rust-src"]
 # A target added by the workflow goes to its own toolchain, not this one.
 targets = ["aarch64-apple-darwin"]

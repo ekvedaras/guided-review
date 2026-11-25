@@ -4,13 +4,24 @@ Rust 2024 gpui app.
 
 ## The gate
 
-`scripts/check` is the gate before every commit: change notes (`scripts/changes-check` against the open PR's base, else `origin/main`; `CHANGES_BASE=<ref>` overrides, `changelog: none` in the PR body skips the missing-note rule), fmt, clippy, tests, stopping at the first failure, ending on `ALL GREEN`. CI runs the same script. It finds `cargo` itself, rustup's (`~/.cargo/bin`) before any other, since a distro's cargo may be older than the pin. `rust-toolchain.toml` pins Rust for both, so CI's clippy is never newer than yours; raise it in its own commit.
+`scripts/check` is the gate before every commit: change notes (`scripts/changes-check` against the open PR's base, else `origin/main`; `CHANGES_BASE=<ref>` overrides, `changelog: none` in the PR body skips the missing-note rule), fmt, clippy, `scripts/deslop`, tests, stopping at the first failure, ending on `ALL GREEN`. CI runs the same script. It finds `cargo` itself, rustup's (`~/.cargo/bin`) before any other, since a distro's cargo may be older than the pin. `rust-toolchain.toml` pins Rust for both, so CI's clippy is never newer than yours; raise it in its own commit.
 
 - Start it with `run_in_background` and read only until it ends. A commit stages what is on disk, so edit nothing while it runs, and stage first or check `git diff` against what you commit.
 - Agent sessions, worktrees included, share the main checkout's `target` folder (`CARGO_TARGET_DIR` in `.claude/settings.json`), since a `target/` per worktree (3-5 GB each) filled the disk on 2026-11-16. Two builds at once wait for each other's cargo lock.
 - One agent builds at a time. Never delete `target/` while a build runs. On 2026-11-17 two agents' gates after a wiped `target/` overloaded the maintainer's Mac, since macOS checks every new test binary (`syspolicyd`); see `docs/wiki/agent-builds.md`.
 - Inner loop: `scripts/check <test-name-filter>` runs only matching tests. Clippy denies warnings, so while code is half-written, see a red test with `cargo test <filter>`. Run `cargo fmt` and `cargo clippy --all-targets -- -D warnings` first, and the full `scripts/check` once, when the change is done, not after every fix.
 - Change files with the Edit and Write tools, not shell edits. In an agent worktree the sandbox has refused heredocs, `sed -i` without a backup suffix, and chained commands (2026-11-06).
+
+## Module structure
+
+`scripts/deslop` runs [deslop-please](https://github.com/deterministic-machines/deslop-please), a linter for deep modules and narrow interfaces, on this machine's target with all features. `.deslop-please/<target>.allow` lists the errors that existed when it came in, one file per target, since code behind a `cfg` differs per OS (`docs/wiki/deslop-please.md`). A listed error does not fail; a new one does.
+
+- Fix a new error from first principles, not with a move that only hides it.
+    - `module-cycle` and `tangle`: what layer of abstraction is each module? Which one belongs below the other?
+    - `field-leak` and `shallow-module`: why do these fields or functions exist? How are they used? Fix the leaks of one type together, behind a narrow interface, not one leak at a time.
+    - Draw a diagram of the structure before and after, for the maintainer.
+- Never add lines to an allow list to pass the gate. A rename changes a key and may need one; say so in the PR.
+- When the run says allowed errors are fixed, run `scripts/deslop --update-allow`, not the `deslop-please --update-allow` it prints: that one forgets `--all-features` and the other target.
 
 ## Tests
 
