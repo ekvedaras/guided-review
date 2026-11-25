@@ -8,7 +8,7 @@ use crate::findings::{FindingId, Severity};
 use super::comments::CommentDraft;
 use super::finding_threads::WhyMessage;
 use super::review_state::ReviewState;
-use super::threads::{ReviewThread, ThreadId};
+use super::review_thread::{ReviewThread, ThreadId};
 
 /// A finding a comment of the thread carried.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -5,7 +5,6 @@ use std::str::FromStr;
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 
-use crate::codebase::Codebase;
 use crate::pull_request::{PullRequestUrl, RepoName};
 
 /// What a review reads: a PR, or a local change set.
@@ -93,15 +92,6 @@ impl ReviewSubject {
         match self {
             Self::PullRequest(pr) => Some(&pr.repo),
             Self::Local(_) => None,
-        }
-    }
-
-    /// What the reviewer's yes or no to language servers is kept for, and whose server checkout
-    /// the review reads from.
-    pub fn codebase(&self) -> Codebase {
-        match self {
-            Self::PullRequest(pr) => Codebase::GitHub(pr.repo.clone()),
-            Self::Local(change_set) => change_set.codebase(),
         }
     }
 
@@ -321,13 +311,6 @@ impl LocalChangeSet {
 
     fn files_folder(&self) -> PathBuf {
         PathBuf::from(LOCAL_FILES_FOLDER).join(self.folder.stem())
-    }
-
-    /// The repo of `origin`; a folder with none is its own codebase.
-    fn codebase(&self) -> Codebase {
-        self.repo
-            .clone()
-            .map_or_else(|| Codebase::Folder(self.folder.clone()), Codebase::GitHub)
     }
 
     pub const fn folder(&self) -> &WorkTreeRoot {

@@ -6,8 +6,8 @@ use crate::viewer::ai_review::AiReview;
 use crate::viewer::finding_decisions::Fate;
 use crate::viewer::finding_threads::{FindingThreads, WhyAuthor};
 use crate::viewer::fix_requests::FixRequests;
-use crate::viewer::step_page::Side;
-use crate::viewer::threads::{CommentId, ReviewThread, ThreadComment, ThreadId};
+use crate::viewer::line_location::Side;
+use crate::viewer::review_thread::{CommentId, ReviewThread, ThreadComment, ThreadId};
 
 const STAGED_THREAD: &str = "staged-from-finding";
 

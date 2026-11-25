@@ -7,7 +7,12 @@ use crate::file_path::FilePath;
 use crate::language::Language;
 use crate::pull_request::Sha;
 
-use super::{FilesWithWord, Word};
+use super::Word;
+
+/// Finds the files at a commit that hold a word, so only those are parsed.
+pub trait FilesWithWord: Send + Sync {
+    fn files_with(&self, sha: &Sha, word: &Word) -> anyhow::Result<Vec<FilePath>>;
+}
 
 /// Searches a clone's git objects, so no checkout of the commit is needed.
 pub struct GitGrep {

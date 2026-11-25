@@ -66,7 +66,13 @@ impl AppFolders {
     /// The XDG folders of this process's environment, moved into or not.
     pub fn xdg() -> anyhow::Result<Self> {
         let home = std::env::home_dir().context("could not find the home folder")?;
-        Ok(platform::app_folders(&home, |name| std::env::var_os(name)))
+        Ok(Self::xdg_of(&home, |name| std::env::var_os(name)))
+    }
+
+    /// The folders the OS names for an environment, with `env` reading its variables.
+    pub fn xdg_of(home: &Path, env: impl Fn(&str) -> Option<OsString>) -> Self {
+        let os = platform::app_folders(home, env);
+        Self::new(home, os.config, os.state, os.cache)
     }
 
     /// The folders a start uses: `xdg`, after each file `~/.guided-review` holds that `xdg` lacks is
@@ -323,11 +329,21 @@ pub enum Mover {
 }
 
 impl Mover {
+    /// The release install moves the app folders while there is one; on a machine with none, a
+    /// source build is the only binary, so it does.
+    pub fn of(install: &ReleaseInstall, exe: &Path) -> Self {
+        if install.runs(exe) || !install.has_a_release() {
+            Self::ThisBinary
+        } else {
+            Self::AnotherBinary
+        }
+    }
+
     fn of_this_process(home: &Path) -> Self {
         let install = ReleaseInstall::in_home(home);
         match platform::running_binary() {
-            Ok(exe) => install.folder_mover(&exe),
-            Err(_) => install.folder_mover(Path::new("")),
+            Ok(exe) => Self::of(&install, &exe),
+            Err(_) => Self::of(&install, Path::new("")),
         }
     }
 }

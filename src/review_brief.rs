@@ -5,8 +5,9 @@ use std::fmt;
 use std::path::PathBuf;
 
 use crate::app_folders::AppFolders;
+use crate::config::Config;
 use crate::findings::Finding;
-use crate::instructions::ReviewInstructions;
+use crate::instructions::{ReviewInstructions, Reviewer};
 use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
@@ -24,7 +25,7 @@ impl ReviewBrief {
         Self {
             subject: subject.clone(),
             findings_path: Tour::findings_path_for(folders, subject),
-            instructions: ReviewInstructions::of(folders),
+            instructions: Config::read_instructions::<Reviewer>(folders),
             dismissed: dismissed_by_the_reviewer(folders, subject),
         }
     }

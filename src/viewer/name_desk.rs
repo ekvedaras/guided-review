@@ -19,9 +19,9 @@ use crate::navigation::{
 use crate::pull_request::Sha;
 
 use super::highlight::Capture;
+use super::line_location::{LineLocation, Side};
 use super::name_card::{DefinitionCard, ServerQuestion};
 use super::name_highlights::NameHighlights;
-use super::step_page::{LineLocation, Side};
 
 /// A name under the pointer in a shown diff line. The location's path is the file's new path, as
 /// everywhere in the viewer.

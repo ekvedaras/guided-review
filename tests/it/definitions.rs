@@ -4,7 +4,7 @@ use guided_review::code_source::CodeSource;
 use guided_review::language::Language;
 use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
-    DefinitionKind, FileSearch, FilesWithWord, GitGrep, Lookups, Reach, Word, WordInFile,
+    DefinitionKind, FileSearch, FilesWithWord, GitGrep, Import, Lookups, Reach, Word, WordInFile,
 };
 use guided_review::pull_request::{RepoName, Sha};
 
@@ -640,9 +640,13 @@ fn a_file_imported_for_another_name_does_not_rank_the_word() {
 
 #[test]
 fn rust_imports_behind_any_visibility_are_read() {
-    let names = Language::Rust.imported_names(
+    let names: Vec<String> = Import::all_in(
+        Language::Rust,
         "pub(crate) use crate::cart::Cart;\npub(super) use super::Item;\npub(in crate::shop) use crate::Price;\npub use crate::Tax;\n",
-    );
+    )
+    .into_iter()
+    .map(|import| import.name)
+    .collect();
 
     for name in ["Cart", "Item", "Price", "Tax"] {
         assert!(

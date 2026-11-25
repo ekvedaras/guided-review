@@ -36,3 +36,13 @@ fn lines_of(text: &str) -> Vec<&str> {
     }
     lines
 }
+
+/// The word as a shell reads it as it is, or in single quotes when a character in it would split or expand.
+pub fn shell_word(text: &str) -> String {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "_./:@%+=,-".contains(c);
+    if !text.is_empty() && text.chars().all(plain) {
+        text.to_owned()
+    } else {
+        format!("'{}'", text.replace('\'', "'\\''"))
+    }
+}

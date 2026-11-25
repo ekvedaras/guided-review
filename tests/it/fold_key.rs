@@ -1,10 +1,10 @@
 //! The key for Open all pieces / Fold all pieces: the toolbar button's job, on the keyboard.
 
 use crate::support::{FixtureRepo, file_path};
+use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::{BasicTour, GuidedTour, TourPin};
-use guided_review::update::Build;
 use guided_review::viewer::{
     Command, Effect, Intent, PaletteAction, Review, ReviewStateFile, Screen, WindowMoment,
 };

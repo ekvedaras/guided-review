@@ -1,5 +1,5 @@
-use super::finish_review::SubmittedReview;
 use super::ports::{GitHubError, PullRequestReactionsPort};
+use super::pr_reviewers::SubmittedReview;
 use super::reactions::{Reaction, ReactionChange};
 use crate::pull_request::{PullRequestUrl, Sha};
 

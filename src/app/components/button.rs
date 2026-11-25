@@ -294,6 +294,14 @@ pub fn button_keys(colors: &Colors, kind: ButtonKind, command: Command, cx: &App
 
 /// The same for a key already looked up; no key draws nothing.
 pub fn chord_keys(colors: &Colors, kind: ButtonKind, chord: Option<Chord>) -> Div {
-    let caps = chord.map(|chord| chord_caps(colors, chord, CapGround::of(kind)));
+    let caps = chord.map(|chord| chord_caps(colors, chord, cap_ground(kind)));
     div().flex_none().ml_1().children(caps)
+}
+
+/// A cap inside a button stands on that button's ground.
+fn cap_ground(kind: ButtonKind) -> CapGround {
+    match kind {
+        ButtonKind::Primary => CapGround::Accent,
+        _ => CapGround::Page,
+    }
 }

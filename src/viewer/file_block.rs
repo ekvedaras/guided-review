@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
 use super::diff_display::{ChangeId, DiffHunk, MoreContext};
-use super::step_page::{DiffLine, LineKind, LineLocation, PieceDiff, Side};
+use super::diff_line::{DiffLine, LineKind};
+use super::line_location::{LineLocation, Side};
+use super::piece_diff::PieceDiff;
 use crate::file_path::FilePath;
 use crate::line_number::LineNumber;
 

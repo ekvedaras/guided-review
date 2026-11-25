@@ -863,7 +863,7 @@ fn the_config_the_app_runs_on_ignores_the_custom_keys() {
     let config = "ide = \"zed://file{path}:{line}\"\nide_custom = \"x {path}\"\nask_model = \"haiku\"\nask_model_custom = \"m\"\n";
 
     assert_eq!(
-        AskSettings::from_config_text(config).unwrap().model,
+        Config::from_text(config).unwrap().ask_settings().model,
         "haiku"
     );
 }

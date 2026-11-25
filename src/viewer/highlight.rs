@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
@@ -11,7 +11,7 @@ use crate::file_path::FilePath;
 use crate::pieces::ChangedFile;
 use crate::pull_request::Sha;
 
-use super::step_page::Side;
+use super::line_location::Side;
 
 /// What a piece of code is. Spans keep this and not a colour, so a theme switch needs no new highlighting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -225,40 +225,33 @@ impl HighlightLanguage {
     }
 
     /// Compiling a language's queries takes milliseconds, so each is compiled once, on first use, and shared.
+    /// Blade is drawn with the HTML configuration.
     fn configuration(self) -> Option<&'static HighlightConfiguration> {
-        static PHP: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::Php.compile());
-        static TYPESCRIPT: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::TypeScript.compile());
-        static TSX: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::Tsx.compile());
-        static JAVASCRIPT: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::JavaScript.compile());
-        static JSON: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::Json.compile());
-        static CSS: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::Css.compile());
-        static HTML: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::Html.compile());
-        static RUST: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::Rust.compile());
-        static BASH: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::Bash.compile());
-        static YAML: LazyLock<Option<HighlightConfiguration>> =
-            LazyLock::new(|| HighlightLanguage::Yaml.compile());
-        let configuration = match self {
-            Self::Php => &PHP,
-            Self::TypeScript => &TYPESCRIPT,
-            Self::Tsx => &TSX,
-            Self::JavaScript => &JAVASCRIPT,
-            Self::Json => &JSON,
-            Self::Css => &CSS,
-            Self::Blade | Self::Html => &HTML,
-            Self::Rust => &RUST,
-            Self::Bash => &BASH,
-            Self::Yaml => &YAML,
+        const COMPILED_LANGUAGES: [HighlightLanguage; 10] = [
+            HighlightLanguage::Php,
+            HighlightLanguage::TypeScript,
+            HighlightLanguage::Tsx,
+            HighlightLanguage::JavaScript,
+            HighlightLanguage::Json,
+            HighlightLanguage::Css,
+            HighlightLanguage::Html,
+            HighlightLanguage::Rust,
+            HighlightLanguage::Bash,
+            HighlightLanguage::Yaml,
+        ];
+        static COMPILED: [OnceLock<Option<HighlightConfiguration>>; COMPILED_LANGUAGES.len()] =
+            [const { OnceLock::new() }; COMPILED_LANGUAGES.len()];
+        let language = match self {
+            Self::Blade => Self::Html,
+            other => other,
         };
-        configuration.as_ref()
+        let index = COMPILED_LANGUAGES
+            .iter()
+            .position(|compiled| *compiled == language)?;
+        COMPILED
+            .get(index)?
+            .get_or_init(|| language.compile())
+            .as_ref()
     }
 
     /// None when the built-in query does not compile; the file then stays plain, and stderr says which language.

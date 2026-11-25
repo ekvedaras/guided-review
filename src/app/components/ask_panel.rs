@@ -15,6 +15,7 @@ use gpui::{
 use crate::app::review_session::ReviewSession;
 use crate::config::AskSettings;
 use crate::findings::FindingId;
+use crate::open_review::AskSetup;
 use crate::viewer::{
     AgentLaunch, AgentLauncher, Ask, AskDesk, AskId, AskProcessEvent, AskProcesses, AskTarget,
     Author, NotDelivered, Place, Presence, Question, Review, Shown, TurnStopper,
@@ -31,12 +32,6 @@ use super::overlay::{close_presence, input_blocker};
 use super::palette::{CARD_RADIUS, Colors, TEXT_FONT};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
-
-/// Everything the panel needs to start the AI, built once at startup.
-pub struct AskSetup {
-    pub launcher: Arc<dyn AgentLauncher>,
-    pub settings: AskSettings,
-}
 
 /// How often the panel looks for AI processes idle long enough to stop.
 const IDLE_CHECK: Duration = Duration::from_secs(30);

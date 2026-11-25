@@ -1,16 +1,20 @@
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::config::Config;
-use crate::opened_subject::{OpenedChangeSet, unreadable_local_tours};
+use crate::local_reviews_on_disk::unreadable_local_tours;
+use crate::local_work_tree::LocalWorkTree;
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 
 use super::branch_link::LocalReviewsOfRepo;
 use super::code_link::WorkingCopy;
+use super::new_commits::PickCodeSource;
 use super::new_commits::catch_up_findings;
 use super::problems::Problem;
+use super::replacing_jobs::RepinnedTour;
 use super::review::Review;
 use super::review_state::ReviewStateFile;
+use crate::tour::GuidedTour;
 
 /// Builds a subject's review from its tour as it is on disk, with every fact the config, the clone
 /// and the app folders give it. Open, Update tour, reload, Refresh and the switch to the guided tour
@@ -37,7 +41,10 @@ impl ReviewBuilder {
         let local_facts = self
             .subject
             .local()
-            .map(|change_set| OpenedChangeSet::new(change_set, &self.folders).facts(tour.pin()))
+            .map(|change_set| {
+                LocalWorkTree::at(change_set.folder().clone())
+                    .facts(change_set, &tour.pin().pinned_tips())
+            })
             .transpose()?;
         let working_copy = WorkingCopy::of(source.working_tree_is_at(&tour.pin().head));
         let state_file = ReviewStateFile::for_subject(&self.folders, &self.subject);
@@ -73,5 +80,28 @@ impl ReviewBuilder {
             review.raise_problem(Problem::LocalToursNotRead(unreadable));
         }
         Ok(review)
+    }
+}
+
+/// Reads the tour file again at the commits it is pinned to, for a tour the agent rewrote while the app
+/// shows it.
+pub struct TourReloader {
+    pub folders: AppFolders,
+    pub subject: ReviewSubject,
+    pub pick_code_source: PickCodeSource,
+}
+
+impl TourReloader {
+    /// Blocks on the code source; the app runs it off the main thread.
+    pub fn run(&self) -> anyhow::Result<RepinnedTour> {
+        let tour =
+            GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
+        let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
+        let review = ReviewBuilder::new(&self.folders, &self.subject)
+            .build(Tour::Guided(tour), source.as_ref())?;
+        Ok(RepinnedTour {
+            review,
+            source: source.into(),
+        })
     }
 }

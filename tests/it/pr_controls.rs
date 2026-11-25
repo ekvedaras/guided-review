@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 use crate::pr_status::Pull;
 use crate::support::FixtureRepo;
 use crate::support::fake_ports::blocked_merging;
+use guided_review::build::Build;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
 use guided_review::review_subject::ReviewSubject;
-use guided_review::update::Build;
 use guided_review::viewer::{
     Checks, Command, MergeMethod, OpenPrStatus, PaletteAction, PrStatus, PressStep, Readiness,
     Review,

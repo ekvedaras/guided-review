@@ -8,8 +8,9 @@ use crate::pieces::{ChangedFile, PieceId};
 use crate::pull_request::Sha;
 
 use super::code_link::CodeLinks;
+use super::diff_line::{DiffLine, LineKind, RowView};
 use super::highlight::Highlights;
-use super::step_page::{DiffLine, LineKind, LineLocation, RowView, Side};
+use super::line_location::{LineLocation, Side};
 use super::word_diff::changed_words;
 
 /// GitHub's diff shows this many unchanged lines around a change; only those take comments.

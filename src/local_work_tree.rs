@@ -9,8 +9,7 @@ use sha2::{Digest, Sha256};
 
 use crate::file_path::FilePath;
 use crate::local_facts::LocalFacts;
-use crate::local_git::LocalGit;
-use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
+use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject, WorkTreeRoot};
 
 /// Why `open` stops before it makes a review.
@@ -138,7 +137,7 @@ impl LocalWorkTree {
         Ok(LocalChangeSet::new(
             self.root.clone(),
             branch,
-            LocalGit::origin_of(self.root.as_path()),
+            self.origin(),
         ))
     }
 
@@ -498,6 +497,12 @@ impl LocalWorkTree {
         self.git_with(&env, &["read-tree", "HEAD"])?;
         self.git_with(&env, &["add", "--all"])?;
         self.git_with(&env, &["write-tree"])
+    }
+
+    /// The GitHub repo the `origin` remote points at.
+    fn origin(&self) -> Option<RepoName> {
+        let url = self.git(&["config", "--get", "remote.origin.url"]).ok()?;
+        RepoName::from_github_remote(url.trim())
     }
 
     fn git(&self, args: &[&str]) -> Result<String, OpenRefusal> {

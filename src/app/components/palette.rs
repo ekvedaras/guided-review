@@ -3,8 +3,9 @@ use std::sync::LazyLock;
 
 use usvg::fontdb::{Database, Family, Source};
 
-use crate::app_icon::Look;
+use crate::app_icon::{AppIcon, Look};
 use crate::platform::Os;
+use crate::update::running_build;
 
 use gpui::{
     App, Background, BoxShadow, Global, Rgba, Window, WindowAppearance, linear_color_stop,
@@ -86,7 +87,7 @@ impl Appearance {
     pub fn follow(window: &Window, cx: &mut App) {
         let appearance = Self::of(window);
         if cx.try_global::<Self>() != Some(&appearance) {
-            crate::platform::show_look(appearance.look());
+            crate::platform::show_icon(AppIcon::of(running_build(), appearance.look()));
         }
         cx.set_global(appearance);
     }

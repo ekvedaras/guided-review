@@ -20,6 +20,7 @@ pub mod markdown_view;
 pub mod motion;
 pub mod name_card;
 pub mod new_commits_banner;
+pub mod outdated_lines;
 pub mod overlay;
 pub mod palette;
 pub mod picture_zoom;

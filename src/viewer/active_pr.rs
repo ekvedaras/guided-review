@@ -1,7 +1,7 @@
 use super::app_state::{AppState, AppStateFile};
 use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{AgentReplied, HandOffId};
-use super::pr_switcher::WritingFact;
+use super::tour_agent::OpenOrigin;
 use super::tour_agent::{AgentStatus, TerminalId, TourAgentPort};
 use super::tour_writing::TourWriting;
 use crate::review_subject::ReviewSubject;
@@ -38,16 +38,6 @@ struct Build {
 /// Names one build, so its result can be told from the result of an older one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildTicket(u64);
-
-/// Who asked to open a PR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OpenOrigin {
-    /// The reviewer, or an agent they started: the window goes where they ask.
-    Reviewer,
-    /// A tour agent the app started. It writes or fixes tours on its own time, so its open never pulls
-    /// the window away from what the reviewer reads.
-    AppStartedAgent,
-}
 
 /// What an open request of a PR comes to.
 pub enum OpenOutcome {
@@ -485,4 +475,13 @@ impl ActivePr {
             .find(|(writing, _)| writing == pr)
             .map(|(_, writing)| writing)
     }
+}
+
+/// A tour agent the app started writing a guided tour of the PR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WritingFact {
+    None,
+    Writing,
+    /// The writing ended without a tour.
+    Failed,
 }

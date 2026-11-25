@@ -3,17 +3,16 @@
 //! needs none: macOS draws that icon in the user's icon style, which a picture from the app would
 //! cover.
 
-use crate::app_icon::{AppIcon, Look};
-use crate::update::Build;
+use crate::app_icon::AppIcon;
 
 const SIZE: u16 = 512;
 
 /// Also called again when macOS turns light or dark, so the Dock icon matches it.
-pub fn show(look: Look) {
+pub fn show(icon: AppIcon) {
     if bundle_has_its_own_icon() {
         return;
     }
-    paint(look);
+    paint(icon);
 }
 
 /// Asks Launch Services for the app's bundle, not `NSBundle::mainBundle`: a launch from Finder runs
@@ -36,13 +35,13 @@ fn bundle_has_its_own_icon() -> bool {
     unsafe_code,
     reason = "objc2 marks the Cocoa call unsafe; it runs on the main thread, proved by the marker, with an image made just above"
 )]
-fn paint(look: Look) {
+fn paint(icon: AppIcon) {
     use objc2::AllocAnyThread;
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::NSData;
 
-    let Some(png) = picture(look) else {
+    let Some(png) = picture(icon) else {
         return;
     };
     let Some(main_thread) = MainThreadMarker::new() else {
@@ -56,9 +55,8 @@ fn paint(look: Look) {
     unsafe { app.setApplicationIconImage(Some(&image)) };
 }
 
-fn picture(look: Look) -> Option<Vec<u8>> {
-    AppIcon::of(Build::running(), look)
-        .png(SIZE)
+fn picture(icon: AppIcon) -> Option<Vec<u8>> {
+    icon.png(SIZE)
         .inspect_err(|error| eprintln!("could not draw the Dock icon: {error:#}"))
         .ok()
 }

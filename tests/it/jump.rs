@@ -1,10 +1,10 @@
 use crate::support::FixtureRepo;
+use guided_review::build::Build;
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
 use guided_review::pieces::PieceId;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
-use guided_review::update::Build;
 use guided_review::viewer::{Command, JumpPlace, PaletteEntry, Review, ReviewStateFile, Screen};
 use serde_json::{Value, json};
 

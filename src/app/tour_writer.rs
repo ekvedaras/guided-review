@@ -10,7 +10,8 @@ use futures::channel::mpsc::unbounded;
 use gpui::{App, AsyncApp, Entity};
 
 use super::components::pr_switcher::PrSwitching;
-use crate::instructions::SummaryInstructions;
+use crate::config::Config;
+use crate::instructions::TourWriter;
 use crate::opened_subject::writer_folder;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
@@ -70,7 +71,7 @@ fn hand_over(switching: &PrSwitching, pr: ReviewSubject, task: WriterTask, cx: &
     let port = Arc::clone(&switching.agents);
     let agents = TourAgents::new(Arc::clone(&port))
         .finding_head_branches_with(Arc::clone(&switching.head_branches))
-        .with_summary_skill(SummaryInstructions::skill_for_launch(&switching.folders))
+        .with_summary_skill(Config::skill_for_launch::<TourWriter>(&switching.folders))
         .starting_in(writer_folder(&pr, &switching.folders));
     cx.spawn(async move |cx| {
         loop {

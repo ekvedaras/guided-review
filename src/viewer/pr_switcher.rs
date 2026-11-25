@@ -1,3 +1,4 @@
+use super::active_pr::WritingFact;
 use crate::app_folders::AppFolders;
 use crate::review_subject::ReviewSubject;
 
@@ -61,15 +62,6 @@ pub enum RowKind {
 pub struct TourFact {
     pub on_disk: ToursOnDisk,
     pub writing: WritingFact,
-}
-
-/// A tour agent the app started writing a guided tour of the PR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WritingFact {
-    None,
-    Writing,
-    /// The writing ended without a tour.
-    Failed,
 }
 
 /// What a line of the list holds, found again by it after the list changed.

@@ -12,12 +12,14 @@ use crate::navigation::{
 use crate::pieces::ChangedFile;
 use crate::viewer::code_link::CodeLinks;
 use crate::viewer::jump::{JumpPlace, JumpTarget};
+use crate::viewer::line_location::{LineLocation, Side};
 use crate::viewer::name_card::{DefinitionCard, NameTarget, PlacesOfReview};
 use crate::viewer::name_desk::{HoveredName, Looked, NameKey, NameOutcome, NameWaiting, NameWork};
 use crate::viewer::name_highlights::NameHighlights;
-use crate::viewer::step_page::{LineLocation, PieceDiff, Side};
+use crate::viewer::piece_diff::PieceDiff;
 
-use super::{ReviewCore, Screen};
+use super::ReviewCore;
+use crate::viewer::screen::Screen;
 
 impl ReviewCore {
     /// The lookup to run off the UI thread for a name under the pointer, or `None` when it is on

@@ -1,5 +1,3 @@
-use super::shortcuts::Command;
-
 /// A way a comment or reply box can send what was written. Each box offers some of them, under
 /// its own labels (a reply says "Reply now", a local review "Send now").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,16 +42,6 @@ impl SendAction {
             Self::SuggestChange => "Suggest change",
             Self::AskAgent => "Ask agent",
             Self::AskAgentNow => "Ask agent now",
-        }
-    }
-
-    pub fn command(self) -> Command {
-        match self {
-            Self::AddToReview => Command::AddToReview,
-            Self::CommentNow => Command::CommentNow,
-            Self::SuggestChange => Command::SuggestChange,
-            Self::AskAgent => Command::AskAgent,
-            Self::AskAgentNow => Command::AskAgentNow,
         }
     }
 

@@ -799,6 +799,10 @@ impl Feature {
                     .context("the fixture has a clone")?;
                 Ok(Box::new(clone))
             }),
+            drop_local_review: std::sync::Arc::new(|change_set, folders| {
+                guided_review::opened_subject::OpenedChangeSet::new(change_set, folders)
+                    .drop_review()
+            }),
         }
     }
 

@@ -9,17 +9,21 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::app_folders::AppFolders;
-use crate::app_icon::Look;
+use crate::app_icon::AppIcon;
+use crate::version::Version;
 
 mod desktop_entry;
 mod linux;
 mod macos;
 
-pub use desktop_entry::{
-    APP_ID, DesktopEntry, EntryPlaced, IN_LOGIN_SHELL, Relaunch, info_plist,
-    write_desktop_entry_templates,
-};
+pub use desktop_entry::{APP_ID, DesktopEntry, EntryPlaced, IN_LOGIN_SHELL, Relaunch};
+pub use macos::app_bundle::info_plist;
+
+/// What the release workflow packs for every OS's entry, so each archive takes its own.
+pub fn write_desktop_entry_templates(out: &Path, version: Version) -> anyhow::Result<()> {
+    macos::app_bundle::write_template(out, version)?;
+    linux::desktop_file::write_template(out)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
@@ -162,19 +166,26 @@ pub fn running_binary_from(reported: PathBuf) -> PathBuf {
 /// The XDG folders, on every OS so far: the variables when set to an absolute path, the XDG
 /// defaults under home otherwise.
 /// A Windows adapter would pick its own here.
-pub fn app_folders(home: &Path, env: impl Fn(&str) -> Option<OsString>) -> AppFolders {
+pub fn app_folders(home: &Path, env: impl Fn(&str) -> Option<OsString>) -> OsFolders {
     let base = |name: &str| {
         env(name)
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
     };
     let ours = |folder: PathBuf| folder.join("guided-review");
-    AppFolders::new(
-        home,
-        ours(base("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"))),
-        ours(base("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state"))),
-        ours(base("XDG_CACHE_HOME").unwrap_or_else(|| home.join(".cache"))),
-    )
+    OsFolders {
+        config: ours(base("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"))),
+        state: ours(base("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state"))),
+        cache: ours(base("XDG_CACHE_HOME").unwrap_or_else(|| home.join(".cache"))),
+    }
+}
+
+/// Where the OS has the app keep its config, its state and its cache.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OsFolders {
+    pub config: PathBuf,
+    pub state: PathBuf,
+    pub cache: PathBuf,
 }
 
 /// The OS's close, minimise and zoom buttons, drawn on the app's own title bar.
@@ -273,15 +284,15 @@ pub enum TextEdit {
     Paste,
 }
 
-/// The Dock icon of the look macOS turned to, on macOS; nothing on Linux, whose launcher shows the
+/// The Dock icon, of the look macOS turned to, on macOS; nothing on Linux, whose launcher shows the
 /// desktop entry's icon.
 #[cfg_attr(
     not(target_os = "macos"),
     expect(unused_variables, reason = "only the macOS adapter needs it")
 )]
-pub fn show_look(look: Look) {
+pub fn show_icon(icon: AppIcon) {
     #[cfg(target_os = "macos")]
-    macos::dock_icon::show(look);
+    macos::dock_icon::show(icon);
 }
 
 /// What the OS gets from the app as it starts. On macOS: the Dock icon a binary with no app
@@ -296,11 +307,11 @@ pub fn show_look(look: Look) {
         reason = "only the macOS adapter needs these"
     )
 )]
-pub fn start(focus: Focus, look: Look, quit: impl gpui::Action, cx: &mut gpui::App) {
+pub fn start(focus: Focus, icon: AppIcon, quit: impl gpui::Action, cx: &mut gpui::App) {
     #[cfg(target_os = "macos")]
     {
         match focus {
-            Focus::Taken => macos::dock_icon::show(look),
+            Focus::Taken => macos::dock_icon::show(icon),
             Focus::LeftAlone => macos::dock_icon::stay_in_background(),
         }
         macos::word_keys::take(cx);

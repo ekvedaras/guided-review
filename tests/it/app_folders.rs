@@ -4,7 +4,6 @@ use std::path::Path;
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use guided_review::app_folders::{AppFolders, Mover, NotRead};
-use guided_review::platform;
 use tempfile::TempDir;
 
 use crate::support::folders_in;
@@ -20,7 +19,7 @@ fn env<'a>(values: &'a [(&str, &str)]) -> impl Fn(&str) -> Option<OsString> + 'a
 
 #[test]
 fn with_no_xdg_variables_the_folders_are_the_xdg_defaults_under_home() {
-    let folders = platform::app_folders(Path::new("/home/me"), env(&[]));
+    let folders = AppFolders::xdg_of(Path::new("/home/me"), env(&[]));
 
     assert_eq!(
         folders.config_file(),
@@ -43,7 +42,7 @@ fn with_no_xdg_variables_the_folders_are_the_xdg_defaults_under_home() {
 #[test]
 fn xdg_variables_name_the_folders_and_the_socket_lives_beside_the_lock_whatever_the_runtime_folder()
 {
-    let folders = platform::app_folders(
+    let folders = AppFolders::xdg_of(
         Path::new("/home/me"),
         env(&[
             ("XDG_CONFIG_HOME", "/cfg"),
@@ -76,7 +75,7 @@ fn xdg_variables_name_the_folders_and_the_socket_lives_beside_the_lock_whatever_
 
 #[test]
 fn an_empty_or_relative_xdg_variable_is_ignored_as_the_xdg_spec_says() {
-    let folders = platform::app_folders(
+    let folders = AppFolders::xdg_of(
         Path::new("/home/me"),
         env(&[
             ("XDG_CONFIG_HOME", ""),
@@ -289,7 +288,7 @@ fn a_move_to_another_disk_copies_checks_and_then_deletes() {
     // Under the build folder, which is often on another disk than the system's temp folder.
     let elsewhere = TempDir::new_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let base = elsewhere.path().display().to_string();
-    let xdg = platform::app_folders(
+    let xdg = AppFolders::xdg_of(
         home.path(),
         env(&[
             ("XDG_CONFIG_HOME", &format!("{base}/config")),

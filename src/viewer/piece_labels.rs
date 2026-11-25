@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use super::step_page::PieceDiff;
+use super::piece_diff::PieceDiff;
 use crate::file_path::FilePath;
 
 /// A piece that changes this many lines or fewer is tiny: one line added, removed or rewritten, or a

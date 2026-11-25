@@ -19,9 +19,7 @@ use crate::app::code_links::{
     open_code, open_code_hint, open_code_icon, open_code_label, open_link, use_code_opener,
 };
 use crate::app::code_selection::{CodeSelection, TextSpot};
-use crate::app::components::ask_panel::{
-    AskPanel, AskSetup, HandToAgent, UseAsComment, ask_button,
-};
+use crate::app::components::ask_panel::{AskPanel, HandToAgent, UseAsComment, ask_button};
 use crate::app::components::button::{
     ButtonKind, ButtonSize, button, button_icon, button_keys, icon_label_button, joined,
     toggle_button,
@@ -102,9 +100,10 @@ use crate::file_path::FilePath;
 use crate::findings::FindingId;
 use crate::ide::{Ide, NoIde};
 use crate::local_facts::{LocalChange, LocalFacts};
+use crate::open_review::AskSetup;
 use crate::repin::RepinStatus;
 use crate::tour::ToursOnDisk;
-use crate::update::Build;
+use crate::update::running_build;
 use crate::viewer::{
     AgentReplied, AiReviewAction, AskAt, Audience, AutoMerge, BoxEdges, BoxFold, ChangeInView,
     CheckList, CheckState, Checks, CloneOffer, CloneOfferState, CodeLink, Command, CommentBox,
@@ -350,7 +349,7 @@ impl OneStepLayout {
                         .session
                         .read(cx)
                         .review()
-                        .palette(query, Build::running());
+                        .palette(query, running_build());
                     palette.update(cx, |palette, _| palette.set_groups(groups));
                 }
                 JumpEvent::Act(action) => this.act((*action).into(), window, cx),
@@ -1764,7 +1763,7 @@ impl OneStepLayout {
                 self.change_review(cx, Review::toggle_screen_fold);
             }
             Effect::Toggle(Overlay::Jump) => {
-                let groups = self.session.read(cx).review().palette("", Build::running());
+                let groups = self.session.read(cx).review().palette("", running_build());
                 self.jump.update(cx, |palette, cx| {
                     if palette.is_open() {
                         palette.close(window, cx);

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::app_folders::AppFolders;
-use crate::opened_subject::local_reviews_of_repo;
+use crate::local_reviews_on_disk::local_reviews_on_disk;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
@@ -230,4 +230,17 @@ impl LocalReviewsOfRepo {
 fn head_branch_retry_after(failures: u32) -> Duration {
     const LONGEST_WAIT_DOUBLINGS: u32 = 5;
     PULL_OF_BRANCH_RETRY * 2_u32.pow(failures.saturating_sub(1).min(LONGEST_WAIT_DOUBLINGS))
+}
+
+/// The local reviews on disk of the PR's repo whose move to the PR was not declined: one of them may be of
+/// the branch the PR is opened from. Reads the tour and state files only: no GitHub and no git.
+pub fn local_reviews_of_repo(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<LocalChangeSet> {
+    local_reviews_on_disk(folders)
+        .into_iter()
+        .filter(|review| review.repo() == Some(&pr.repo))
+        .filter(|review| {
+            let subject = ReviewSubject::from(review.clone());
+            !ReviewStateFile::for_subject(folders, &subject).has_declined_move_to(pr)
+        })
+        .collect()
 }

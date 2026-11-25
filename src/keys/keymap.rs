@@ -36,7 +36,7 @@ impl Keymap {
         let planned = |action: SendAction, role: SendRole, keyed_as: SendAction| PlannedSend {
             action,
             role,
-            chord: self.first_chord(keyed_as.command()),
+            chord: self.first_chord(Command::from(keyed_as)),
         };
         let mut plan = vec![planned(primary, SendRole::Primary, choice.primary())];
         if secondary != primary {

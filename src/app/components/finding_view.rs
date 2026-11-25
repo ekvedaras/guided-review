@@ -15,10 +15,10 @@ use super::chip::chip;
 use super::icon::Icon;
 use super::key_cap::{KeyLabel, key_hint};
 use super::markdown_view::{MarkdownView, parsed_markdown};
+use super::outdated_lines::before_block;
 use super::palette::{Colors, Tone};
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
-use super::thread_view::before_block;
 use crate::findings::{FindingId, Severity};
 use crate::viewer::{FindingRow, WhyAuthor, WhyMessage};
 

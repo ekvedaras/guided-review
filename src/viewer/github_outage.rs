@@ -6,9 +6,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
-use super::problems::Read;
-use super::work_agenda::WorkKind;
-
 /// Why GitHub is not answering. A refused token or a missing page is not one: those say something
 /// the reviewer can put right, and trying again changes nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,21 +36,6 @@ pub enum Affected {
     Authorship,
     LastReview,
     PrStatus,
-}
-
-impl Affected {
-    /// The work that reads it again.
-    pub(super) fn retried_by(self) -> WorkKind {
-        match self {
-            Self::NewCommits => WorkKind::CheckPrHead,
-            Self::Description => WorkKind::PullPrDescription,
-            Self::Comments => WorkKind::PullThreads,
-            Self::ViewedMarks => WorkKind::SyncViewed,
-            Self::PendingReview | Self::Authorship => WorkKind::PullPendingReview,
-            Self::LastReview => WorkKind::PullReviews,
-            Self::PrStatus => WorkKind::PullPrStatus,
-        }
-    }
 }
 
 impl From<Read> for Affected {
@@ -149,4 +131,15 @@ pub(super) fn waiting(duration: Duration) -> String {
     } else {
         format!("{} min", seconds / 60)
     }
+}
+
+/// What the app reads from GitHub that has no problem of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Read {
+    PrHead,
+    PrDescription,
+    PendingReview,
+    Authorship,
+    LastReview,
+    PrStatus,
 }

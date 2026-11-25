@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use super::StepId;
 use super::agent_event::AgentEvent;
+use super::line_location::LineLocation;
 use super::ports::{AgentLaunch, AgentPort, TurnStopper};
-use super::step_page::LineLocation;
 
 /// The place in a tour an Ask is about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -3,8 +3,9 @@ use std::time::Instant;
 use super::{Review, ReviewCore};
 use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
+use crate::viewer::github_outage::Read;
 use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
-use crate::viewer::problems::{Problem, ProblemKind, Read};
+use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::related_issues::RelatedIssues;
 use crate::viewer::tour_agent::{TourAgentState, TourKind};
 use crate::viewer::work_agenda::{

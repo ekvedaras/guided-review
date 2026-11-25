@@ -12,8 +12,8 @@ use super::tour_agent::{
     TourAgentState, follow_state, make_room, terminal_name,
 };
 use crate::app_folders::AppFolders;
-use crate::claude_cli::{review_agent_denied_tools, review_agent_tools};
-use crate::instructions::ReviewInstructions;
+use crate::config::Config;
+use crate::instructions::Reviewer;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
@@ -62,15 +62,13 @@ impl ReviewAgents {
             head,
             self.checkouts.as_ref(),
         )?;
-        let findings = Tour::findings_path_for(&self.folders, subject);
-        let skill = ReviewInstructions::skill_for_launch(&self.folders);
         self.port.start_review(&ReviewAgentStart {
             subject: subject.clone(),
             name: terminal_name(AgentRole::Review, subject),
-            folder: place.folder().to_path_buf(),
             first_task: first_task(subject, &place, head),
-            tools: review_agent_tools(&place, &findings, skill.as_deref()),
-            denied_tools: review_agent_denied_tools(),
+            place,
+            findings: Tour::findings_path_for(&self.folders, subject),
+            skill: Config::skill_for_launch::<Reviewer>(&self.folders),
         })
     }
 

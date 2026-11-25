@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 
-use super::active_pr::OpenOrigin;
 use super::ports::PullsOfBranchPort;
+use super::review_place::ReviewPlace;
 use super::toasts::ToastTone;
 use crate::local_work_tree::LocalWorkTree;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
@@ -174,13 +174,13 @@ pub struct ReviewAgentStart {
     pub subject: ReviewSubject,
     pub name: String,
     /// Where the agent starts: the tour agent's folder at the reviewed head, or the clone it makes a
-    /// worktree from (`ReviewPlace`).
-    pub folder: PathBuf,
+    /// worktree from.
+    pub place: ReviewPlace,
     pub first_task: String,
-    /// What the agent may do without asking: the list `--allowedTools` gets.
-    pub tools: String,
-    /// What it may never do, whatever the permission mode would decide: `--disallowedTools`.
-    pub denied_tools: String,
+    /// The one file the agent writes its findings to.
+    pub findings: PathBuf,
+    /// The reviewer's review instructions skill, allowed to the agent so it is not silently denied.
+    pub skill: Option<String>,
 }
 
 /// At most this many agents the app started stay alive, tour agents and review agents together.
@@ -1261,4 +1261,14 @@ fn change_set_first_task(subject: &ReviewSubject, change_set: &LocalChangeSet) -
 pub enum TourKind {
     Guided,
     Basic,
+}
+
+/// Who asked to open a PR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenOrigin {
+    /// The reviewer, or an agent they started: the window goes where they ask.
+    Reviewer,
+    /// A tour agent the app started. It writes or fixes tours on its own time, so its open never pulls
+    /// the window away from what the reviewer reads.
+    AppStartedAgent,
 }

@@ -1,24 +1,27 @@
+use super::thread_actions::TourFreshness;
 use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::ask::Ask;
+use super::comment_send::{CommentOutcome, CommentRequest, Origin, Outcome};
+use super::comments::Audience;
 use super::comments::{
-    CommentDraft, CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest,
-    CommentResult, Origin, Outcome, QueuedComment, SendMode,
+    CommentDraft, CommentPlace, CommentProblem, CommentRefusal, CommentResult, QueuedComment,
+    SendMode,
 };
-use super::finish_review::{
-    FinishOutcome, FinishRefusal, FinishRequest, FinishResult, ReviewVerdict,
-};
-use super::hand_offs::{Audience, SentComment, SentFrom};
-use super::local_threads::ThreadHome;
+use super::diff_line::DiffLine;
+use super::finish_review::{FinishOutcome, FinishRefusal, FinishRequest, FinishResult};
+use super::hand_offs::{SentComment, SentFrom};
+use super::line_location::{LineLocation, Side};
+use super::local_thread_store::ThreadHome;
+use super::ports::ReviewVerdict;
 use super::review_state::{ReviewState, ReviewStateFile};
+use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::saved_state::SavedState;
-use super::step_page::{DiffLine, LineLocation, Side};
 use super::suggestion::suggestion_block;
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-use super::threads::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use crate::findings::Finding;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -131,13 +134,6 @@ pub enum BoxState {
     Sending,
 }
 
-/// Whether the tour shows the PR as it is now: a comment on an older tour may land on lines the tour does not show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TourFreshness {
-    Current,
-    Behind,
-}
-
 impl CommentDesk {
     pub(super) fn pending_review_is(&mut self, exists: bool) {
         self.pending_review = PendingReview::exists(exists);
@@ -201,7 +197,7 @@ impl CommentDesk {
         if freshness == TourFreshness::Behind {
             return Err(CommentRefusal::TourIsOld);
         }
-        let place = CommentPlace::of(&selected);
+        let place = selected.comment_place();
         self.open_draft(state, &place, head, None)?;
         Ok(Some(place))
     }
@@ -229,7 +225,7 @@ impl CommentDesk {
         head: &Sha,
         text: &str,
     ) -> Result<CommentPlace, CommentRefusal> {
-        let place = CommentPlace::of(selected);
+        let place = selected.comment_place();
         self.add_text_at(state, &place, head, text, &[])?;
         Ok(place)
     }
@@ -745,14 +741,12 @@ impl CommentDesk {
     }
 }
 
-impl CommentOutcome {
-    /// For a send that ended after its review was dropped, as when the window switched to another PR:
-    /// the comment reached GitHub, or failed, and its PR's state file must say so all the same.
-    pub fn land_in(self, file: &ReviewStateFile) -> anyhow::Result<()> {
-        file.update(|state| {
-            CommentDesk::default().settle(state, self, (SentFrom::Elsewhere, None));
-        })
-    }
+/// For a send that ended after its review was dropped, as when the window switched to another PR:
+/// the comment reached GitHub, or failed, and its PR's state file must say so all the same.
+pub fn land_elsewhere(outcome: CommentOutcome, file: &ReviewStateFile) -> anyhow::Result<()> {
+    file.update(|state| {
+        CommentDesk::default().settle(state, outcome, (SentFrom::Elsewhere, None));
+    })
 }
 
 /// Puts `text` after what the draft holds already. `None` when there is no draft at `place`.

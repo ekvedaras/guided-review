@@ -16,8 +16,8 @@ use crate::ide::{IdeChoice, IdeTemplate};
 use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use crate::navigation::ServerAnswer;
 use crate::viewer::{
-    CloneRowProblem, MergeMethod, MoreLines, Motion, Presence, SaveOutcome, SendAction, SendRole,
-    SettingProblem, Settings, SettingsPage,
+    CloneRowProblem, Command, MergeMethod, MoreLines, Motion, Presence, SaveOutcome, SendAction,
+    SendRole, SettingProblem, Settings, SettingsPage,
 };
 
 use super::button::{
@@ -1428,8 +1428,7 @@ impl SettingsPanel {
                 )
             })
             .collect();
-        let key = chosen
-            .command()
+        let key = Command::from(chosen)
             .default_chords_for(settings.send_choice())
             .first()
             .map_or_default(|chord| chord.spelled());
@@ -1920,16 +1919,13 @@ impl SettingsPanel {
     pub fn stage_sample_keys(&mut self, cx: &mut Context<Self>) {
         self.edit(cx, |editing| {
             use crate::viewer::Chord;
-            for (command, text) in [
-                (crate::viewer::Command::WrapLines, "y"),
-                (crate::viewer::Command::Jump, "n"),
-            ] {
+            for (command, text) in [(Command::WrapLines, "y"), (Command::Jump, "n")] {
                 if let Some(chord) = Chord::parse(text) {
                     editing.settings.set_key(command, chord);
                 }
             }
         });
-        self.start_recording(crate::viewer::Command::ToggleRead, cx);
+        self.start_recording(Command::ToggleRead, cx);
     }
 
     /// Shows one page, for the pictures.

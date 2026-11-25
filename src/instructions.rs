@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Deserializer};
 
 use crate::app_folders::AppFolders;
-use crate::config::Config;
 use crate::home::expand_home;
 
 /// Which agent a setting of instructions is for.
@@ -45,8 +44,8 @@ impl InstructionsKind {
 
     pub fn off_env(self) -> &'static str {
         match self {
-            Self::Summary => Config::SUMMARY_INSTRUCTIONS_OFF_ENV,
-            Self::Review => Config::REVIEW_INSTRUCTIONS_OFF_ENV,
+            Self::Summary => "GUIDED_REVIEW_SUMMARY_INSTRUCTIONS_OFF",
+            Self::Review => "GUIDED_REVIEW_REVIEW_INSTRUCTIONS_OFF",
         }
     }
 
@@ -254,27 +253,15 @@ impl<A: Agent> Instructions<A> {
         }
     }
 
-    /// What a launch of the tour agent goes by: a config that cannot be read is no instructions and a warning.
-    pub fn of(folders: &AppFolders) -> Self {
-        match Config::load_from(folders) {
-            Ok(config) => config.instructions(folders),
-            Err(error) => Self {
-                warning: Some(format!(
-                    "{} instructions not read: {error:#}",
-                    A::KIND.label()
-                )),
-                ..Self::none()
-            },
+    /// No instructions, and a warning that the config holding them could not be read.
+    pub fn config_not_read(error: &anyhow::Error) -> Self {
+        Self {
+            warning: Some(format!(
+                "{} instructions not read: {error:#}",
+                A::KIND.label()
+            )),
+            ..Self::none()
         }
-    }
-
-    /// The skill a launch of the tour agent runs for the reviewer summary, after saying what could not be read.
-    pub fn skill_for_launch(folders: &AppFolders) -> Option<String> {
-        let instructions = Self::of(folders);
-        if let Some(warning) = instructions.warning() {
-            eprintln!("warning: {warning}");
-        }
-        instructions.skill().map(str::to_owned)
     }
 
     pub fn text(&self) -> Option<&str> {

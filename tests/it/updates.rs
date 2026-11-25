@@ -4,8 +4,9 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use guided_review::platform::Os;
 use guided_review::update::{
     AppVersion, Cpu, Installed, PublishedRelease, ReleaseAsset, SkillLink, Target, Update,
-    UpdateOffer, Version, find_update,
+    UpdateOffer, find_update,
 };
+use guided_review::version::Version;
 
 use crate::support::fake_ports::FakeReleases;
 

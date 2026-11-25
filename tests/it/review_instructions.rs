@@ -1,5 +1,6 @@
 use crate::support::folders_in;
-use guided_review::instructions::{ReviewInstructions, SummaryInstructions};
+use guided_review::config::Config;
+use guided_review::instructions::{ReviewInstructions, Reviewer, TourWriter};
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -10,7 +11,7 @@ fn guided_review_file(home: &Path, name: &str, text: &str) {
 }
 
 fn review_instructions(home: &TempDir) -> ReviewInstructions {
-    ReviewInstructions::of(&folders_in(home.path()))
+    Config::read_instructions::<Reviewer>(&folders_in(home.path()))
 }
 
 #[test]
@@ -119,7 +120,7 @@ fn the_two_keys_are_read_apart() {
         "review_instructions = \"off\"\nsummary_instructions = { skill = \"recap\" }\n",
     );
 
-    let summary = SummaryInstructions::of(&folders_in(home.path()));
+    let summary = Config::read_instructions::<TourWriter>(&folders_in(home.path()));
 
     assert_eq!(summary.skill(), Some("recap"));
     assert!(!review_instructions(&home).are_set());
@@ -129,7 +130,7 @@ fn the_two_keys_are_read_apart() {
 fn the_summary_has_no_built_in_guidance() {
     let home = TempDir::new().unwrap();
 
-    assert!(!SummaryInstructions::of(&folders_in(home.path())).are_set());
+    assert!(!Config::read_instructions::<TourWriter>(&folders_in(home.path())).are_set());
 }
 
 #[test]

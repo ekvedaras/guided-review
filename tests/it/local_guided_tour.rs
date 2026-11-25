@@ -9,13 +9,14 @@ use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, file_path};
 use guided_review::local_work_tree::{LocalWorkTree, snapshot_ref};
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::opened_subject::OpenedChangeSet;
+use guided_review::opened_subject::TourRepinner;
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
     ActivePr, AgentStatus, DiskOffer, OpenDecision, OpenOrigin, OpenOutcome, Review,
-    ReviewStateFile, TerminalId, TourAgentPort, TourAgents, TourReloader, TourRepinner,
-    TourSwitcher, WriteDecision, WriterHandOver,
+    ReviewStateFile, TerminalId, TourAgentPort, TourAgents, TourReloader, TourSwitcher,
+    WriteDecision, WriterHandOver,
 };
 use serde_json::json;
 
@@ -284,7 +285,7 @@ fn check_names_the_repo_of_the_clone_so_a_pr_of_the_repo_finds_the_guided_tour_w
 
     let pr = "https://github.com/acme/shop/pull/7".parse().unwrap();
     assert_eq!(
-        guided_review::opened_subject::local_reviews_of_repo(&feature.repo.folders(), &pr),
+        guided_review::viewer::local_reviews_of_repo(&feature.repo.folders(), &pr),
         [feature.subject.local().unwrap().clone()]
     );
 }

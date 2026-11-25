@@ -1,9 +1,10 @@
-use super::{Review, Screen};
+use super::Review;
 use crate::viewer::move_offer::MoveFrom;
 use crate::viewer::problems::Problem;
 use crate::viewer::replacing_jobs::{
     AfterJob, JobOutcome, ReplacingJob, ReplacingJobs, StartedJob,
 };
+use crate::viewer::screen::Screen;
 
 impl Review {
     /// `None` while another job runs: a reload then waits for it and comes from `due_job`, any

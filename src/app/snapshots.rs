@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use gpui::{AsyncWindowContext, Global, Modifiers, MouseMoveEvent, PlatformInput, point, px};
 
-use crate::app::components::ask_panel::AskSetup;
 use crate::app::components::palette::Appearance;
+use crate::open_review::AskSetup;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use super::shortcuts::Command;
+use crate::keys::Command;
 
 /// The work running now that a reopen would kill, as the window counts it: Ask turns answer in threads
 /// the Ask panel owns, and hand-offs and Asks handed to the agent are typed in by tasks of the session.

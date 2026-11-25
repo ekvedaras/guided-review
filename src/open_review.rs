@@ -1,22 +1,27 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::app::AskSetup;
 use crate::app_folders::AppFolders;
 use crate::claude_cli::{ClaudeCli, ClaudeRefreshWriter};
 use crate::code_source::CodeSource;
-use crate::config::Config;
+use crate::config::{AskSettings, Config};
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
-use crate::instructions::SummaryInstructions;
-use crate::opened_subject::OpenedSubject;
+use crate::instructions::TourWriter;
+use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::Tour;
 use crate::viewer::{
-    GitHubPort, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher, TourReloader,
-    TourRepinner, TourSwitcher,
+    AgentLauncher, GitHubPort, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher,
+    TourReloader, TourSwitcher,
 };
+
+/// Everything the Ask panel needs to start the AI, built once at startup.
+pub struct AskSetup {
+    pub launcher: Arc<dyn AgentLauncher>,
+    pub settings: AskSettings,
+}
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
 /// this frees them.
@@ -84,7 +89,7 @@ pub fn open_review(
     let tour_agents = TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
         .finding_head_branches_with(Arc::clone(&github) as Arc<dyn PullsOfBranchPort>)
         .starting_in(agent_folder)
-        .with_summary_skill(SummaryInstructions::skill_for_launch(folders));
+        .with_summary_skill(Config::skill_for_launch::<TourWriter>(folders));
     Ok(OpenedReview {
         review,
         source: source.into(),
@@ -107,6 +112,9 @@ pub fn mover_of(folders: &AppFolders, change_set: &LocalChangeSet) -> PrMover {
         change_set: change_set.clone(),
         pick_code_source: Arc::new(move |pr, tips| {
             crate::pick_code_source::pick_code_source(&GitHub::from_env(), pr, tips, &folder)
+        }),
+        drop_local_review: Arc::new(|change_set, folders| {
+            OpenedChangeSet::new(change_set, folders).drop_review()
         }),
     }
 }

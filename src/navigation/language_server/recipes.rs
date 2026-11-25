@@ -7,13 +7,14 @@ use std::path::{Path, PathBuf};
 use anyhow::Context as _;
 use flate2::read::GzDecoder;
 use serde_json::json;
+use sha2::{Digest as _, Sha512};
 
 use crate::codebase::Codebase;
 use crate::language::Language;
 use crate::platform::Os;
 use crate::update::{Cpu, Target, check_digest};
 
-use super::managed::{Downloads, place, write_program};
+use super::downloads::{Downloads, place, write_program};
 use super::{FallbackReason, ServerLaunch, ServerName, StatusReports, Waiting};
 
 /// One release of a server: its tag and the sha256 of its download for each target it is built for.
@@ -281,6 +282,35 @@ pub(super) struct NpmPackage {
 }
 
 impl NpmPackage {
+    /// The registry tarball holds the package under `package/`, and `script` is in it. Intelephense,
+    /// typescript-language-server and typescript are each bundled with no dependencies, so no npm
+    /// installs anything.
+    fn download(&self, downloads: &Downloads, script: &Path) -> anyhow::Result<()> {
+        let (package, pin) = (self.name, &self.pin);
+        let url = format!(
+            "https://registry.npmjs.org/{package}/-/{package}-{}.tgz",
+            pin.version
+        );
+        let archive =
+            downloads.checked_download(&url, |archive| check_sha512(archive, &pin.sha512))?;
+        let folder = script
+            .ancestors()
+            .nth(3)
+            .context("the script has no package folder")?;
+        place(folder, |unpacking| {
+            tar::Archive::new(GzDecoder::new(archive.as_slice()))
+                .unpack(unpacking)
+                .with_context(|| format!("could not unpack {url}"))?;
+            let inside = script.strip_prefix(folder)?;
+            anyhow::ensure!(
+                unpacking.join(inside).is_file(),
+                "{url} has no {}",
+                inside.display()
+            );
+            Ok(())
+        })
+    }
+
     fn folder(&self) -> String {
         format!("{}-{}", self.name, self.pin.version)
     }
@@ -298,7 +328,7 @@ impl NpmPackage {
     ) -> Result<PathBuf, FallbackReason> {
         let script = self.script(downloads);
         downloads.downloaded(server, &script, waiting, || {
-            downloads.download_package(self.name, &self.pin, &script)
+            self.download(downloads, &script)
         })?;
         Ok(script)
     }
@@ -423,4 +453,14 @@ impl ServerLaunch {
             }),
         }
     }
+}
+
+/// Fails unless `bytes` has the sha512 `expected`, in hex.
+fn check_sha512(bytes: &[u8], expected: &str) -> anyhow::Result<()> {
+    let actual = crate::hex::lower(&Sha512::digest(bytes));
+    anyhow::ensure!(
+        actual.eq_ignore_ascii_case(expected),
+        "the archive does not match its checksum: {actual} is not {expected}"
+    );
+    Ok(())
 }

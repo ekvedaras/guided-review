@@ -2,6 +2,7 @@
 //! diff's, so a line is coloured by what surrounds it; only the files that have a shown row are
 //! read, and the result is cut to the rows when the lookup lands.
 
+use crate::navigation::Usage;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
@@ -15,7 +16,6 @@ use crate::symbols::NO_ORIGIN;
 use std::cell::OnceCell;
 
 use super::highlight::{Capture, highlight_file_lines, highlight_snippet};
-use super::name_card::{USAGES_SHOWN, usages_in_card_order};
 
 type Captures = Arc<[(Range<usize>, Capture)]>;
 
@@ -213,4 +213,29 @@ impl HighlightedFile {
         }
         runs.into()
     }
+}
+
+/// How many usages the card lists; the rest are counted.
+pub const USAGES_SHOWN: usize = 20;
+
+/// The usages the card counts: those in the review's files first, then by path and line; the
+/// hovered line is left out.
+pub(super) fn usages_in_card_order<'a>(
+    lookup: &'a Lookup,
+    hovered: &Place,
+    is_changed: &dyn Fn(&FilePath) -> bool,
+) -> Vec<&'a Usage> {
+    let mut usages: Vec<&Usage> = lookup
+        .usages
+        .iter()
+        .filter(|usage| usage.place != *hovered)
+        .collect();
+    usages.sort_by_key(|usage| {
+        (
+            !is_changed(&usage.place.path),
+            usage.place.path.as_str(),
+            usage.place.line.get(),
+        )
+    });
+    usages
 }

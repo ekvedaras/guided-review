@@ -4,14 +4,14 @@ use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
 use super::code_link::CodeLinks;
+use super::diff_display::ChangeId;
 use super::diff_display::{DiffDisplay, FilesAtHead, HiddenLines, MoreContext};
-use super::focused_change::Focus;
 use super::highlight::Highlights;
 use super::image_preview::ImagePreview;
-use super::more_lines::MoreLines;
+use super::piece_diff::PieceDiff;
 use super::piece_labels::{FileLabels, PieceLabels};
 use super::rendered_view::{FileView, FileViews, RenderedBlock, Rendering};
-use super::step_page::PieceDiff;
+use crate::more_lines::MoreLines;
 use crate::pieces::ChangedFile;
 use std::sync::Arc;
 
@@ -176,4 +176,17 @@ impl DisplayOptions {
             links,
         }
     }
+}
+
+/// What has the focus: a changed hunk, or a file box shown rendered, which has no hunks but must
+/// keep the focus so the key that rendered it can switch it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Focus {
+    /// The `part`-th of the page changes that hold `id`. Lines shown that join the parts again
+    /// leave fewer parts; the focus goes to the last.
+    Change {
+        id: ChangeId,
+        part: usize,
+    },
+    RenderedFile(FilePath),
 }

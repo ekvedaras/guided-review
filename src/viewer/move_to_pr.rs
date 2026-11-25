@@ -2,7 +2,8 @@
 //! files. The PR's state is saved first and only then do the local tours, state file and snapshot ref
 //! go, so a crash between the two carries again instead of losing work.
 
-use std::collections::{BTreeMap, BTreeSet};
+use crate::viewer::carried::MovedReview;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
@@ -10,53 +11,31 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::local_work_tree::LocalWorkTree;
 use crate::make_basic_tour::make_basic_tour;
-use crate::opened_subject::OpenedChangeSet;
 use crate::pieces;
 use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use crate::repin::repin;
 use crate::review_subject::{LocalChangeSet, ReviewSubject, WorkTreeRoot};
 use crate::tour::{Tour, ToursOnDisk};
 
-use super::local_threads::MovedComment;
+use super::carried::{CarriedReads, ReadCarrier};
 use super::move_offer::MoveOffer;
 use super::ports::ChangeTipsPort;
 use super::review_state::{RepinRecord, ReviewStateFile};
-use super::switch_to_guided::{CarriedReads, ReadCarrier};
 
 /// Finds the code source that reads the PR's commits, fetching what is missing.
 pub type PickPullCodeSource =
     Arc<dyn Fn(&PullRequestUrl, &ChangeTips) -> anyhow::Result<Box<dyn CodeSource>> + Send + Sync>;
 
-/// What a local review hands to the PR it moves to, worked out before anything is saved.
-pub(super) struct MovedReview {
-    /// The PR's head the move was worked out for, which the drafts' lines are at.
-    pub(super) head: Sha,
-    pub(super) file_ticks: BTreeMap<FilePath, Sha>,
-    pub(super) file_read_before: BTreeMap<FilePath, Sha>,
-    pub(super) steps: CarriedReads,
-    pub(super) comments: Vec<MovedComment>,
-}
-
-impl MovedReview {
-    /// The heads the PR's review reads files or steps at that are not its own head: the local
-    /// review's snapshots, which nothing keeps once the local review is gone.
-    fn heads_before_the_pr(&self) -> BTreeSet<Sha> {
-        self.file_ticks
-            .values()
-            .chain(self.file_read_before.values())
-            .chain(self.steps.ticked.iter().map(|(_, head)| head))
-            .chain(self.steps.read_before.iter().map(|(_, head)| head))
-            .filter(|head| **head != self.head)
-            .cloned()
-            .collect()
-    }
-}
+/// Deletes a local review's tours, state file and snapshot ref.
+pub type DropLocalReview =
+    Arc<dyn Fn(&LocalChangeSet, &AppFolders) -> anyhow::Result<()> + Send + Sync>;
 
 /// The move of one local review to a PR, as the app runs it.
 pub struct PrMover {
     pub folders: AppFolders,
     pub change_set: LocalChangeSet,
     pub pick_code_source: PickPullCodeSource,
+    pub drop_local_review: DropLocalReview,
 }
 
 impl PrMover {
@@ -90,7 +69,7 @@ impl PrMover {
 
     /// Only once the PR's state is saved: a crash before this carries again.
     pub fn forget_local(&self) -> anyhow::Result<()> {
-        OpenedChangeSet::new(&self.change_set, &self.folders).drop_review()
+        (self.drop_local_review)(&self.change_set, &self.folders)
     }
 
     /// The PR may have no tour yet, as when it was opened a moment ago from another machine.

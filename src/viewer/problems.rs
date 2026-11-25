@@ -1,10 +1,11 @@
+use super::github_outage::Read;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::app_folders::NotRead;
-use crate::opened_subject::UnreadableLocalTour;
+use crate::local_reviews_on_disk::UnreadableLocalTour;
 use crate::update::InTheWay;
 
 use super::github_outage::{Affected, Outage, OutageCause, waiting};
@@ -201,17 +202,6 @@ impl Problems {
     pub fn list(&self) -> impl Iterator<Item = &Problem> {
         self.raised.values()
     }
-}
-
-/// What the app reads from GitHub that has no problem of its own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Read {
-    PrHead,
-    PrDescription,
-    PendingReview,
-    Authorship,
-    LastReview,
-    PrStatus,
 }
 
 impl Problem {

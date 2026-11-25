@@ -1,9 +1,9 @@
 use crate::support::FixtureRepo;
+use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, TourPin};
-use guided_review::update::Build;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, Effect, GuidedTourProgress, GuidedTourRefusal, Intent,
     PaletteAction, Review, ReviewStateFile, Screen, StationHealth, StationKind, TerminalId,

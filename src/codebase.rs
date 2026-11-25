@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use crate::pull_request::RepoName;
-use crate::review_subject::WorkTreeRoot;
+use crate::review_subject::{ReviewSubject, WorkTreeRoot};
 
 /// What language servers are opted into and run on: a GitHub repo, or a local folder that has no
 /// GitHub origin. Written as `owner/repo` or as the folder's absolute path, which no `owner/repo`
@@ -20,6 +20,19 @@ pub enum Codebase {
 const FOLDERS_OWNER: &str = "_folders";
 
 impl Codebase {
+    /// What the reviewer's yes or no to language servers is kept for, and whose server checkout
+    /// the review reads from. A local change set's is the repo of its `origin`; a folder with none
+    /// is its own codebase.
+    pub fn of(subject: &ReviewSubject) -> Self {
+        match subject {
+            ReviewSubject::PullRequest(pr) => Self::GitHub(pr.repo.clone()),
+            ReviewSubject::Local(change_set) => change_set
+                .repo()
+                .cloned()
+                .map_or_else(|| Self::Folder(change_set.folder().clone()), Self::GitHub),
+        }
+    }
+
     /// Where the app keeps this codebase's files under a state folder (server checkout, server
     /// index): `owner/repo`, or `_folders/<folder name>-<short hash of the path>`.
     pub fn state_folder(&self) -> PathBuf {

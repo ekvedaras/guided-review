@@ -1,13 +1,13 @@
 use crate::pull_request::{PullRequestUrl, Sha};
 
-use super::local_threads::{LocalAuthor, LocalThreadStore, ThreadHome};
+use super::local_thread_store::{LocalThreadStore, ThreadHome};
+use super::local_threads::LocalAuthor;
 
-use super::comment_desk::TourFreshness;
+use super::comments::Audience;
 use super::comments::{CommentRefusal, SendMode};
-use super::hand_offs::Audience;
 use super::ports::{GitHubError, Resolution, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
-use super::threads::{CommentId, ReviewThread, ThreadId};
+use super::review_thread::{CommentId, ReviewThread, ThreadId};
 
 /// What the reviewer does to a thread that is already on GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,4 +211,11 @@ fn classify(error: &GitHubError) -> ThreadActionResult {
             ThreadActionResult::Failed(format!("{error:#}"))
         }
     }
+}
+
+/// Whether the tour shows the PR as it is now: a comment on an older tour may land on lines the tour does not show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TourFreshness {
+    Current,
+    Behind,
 }

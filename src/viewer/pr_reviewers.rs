@@ -2,8 +2,6 @@ use std::sync::Arc;
 
 use crate::pull_request::Sha;
 
-use super::finish_review::{ReviewOutcome, SubmittedReview};
-
 /// Someone GitHub lists among a PR's reviewers: a person, or a team asked to review.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reviewer {
@@ -316,4 +314,52 @@ impl ReviewerLine {
             is_viewer: standing.is_viewer(),
         }
     }
+}
+
+/// How a review that is on GitHub ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewOutcome {
+    Approved,
+    ChangesRequested,
+    Commented,
+    /// Someone took the review back; it no longer counts for or against the PR.
+    Dismissed,
+}
+
+impl SubmittedReview {
+    /// Too tall for the sidebar as it is, so it is shown clamped to `CLAMPED_BODY_LINES`.
+    pub fn body_is_long(&self) -> bool {
+        self.body.lines().count() > CLAMPED_BODY_LINES
+            || self.body.chars().count() > LONG_BODY_CHARS
+    }
+}
+
+impl ReviewOutcome {
+    /// From GitHub's `PullRequestReviewState`. A pending review is not sent, so it has no outcome.
+    pub fn from_github_state(state: &str) -> Option<Self> {
+        match state {
+            "APPROVED" => Some(Self::Approved),
+            "CHANGES_REQUESTED" => Some(Self::ChangesRequested),
+            "COMMENTED" => Some(Self::Commented),
+            "DISMISSED" => Some(Self::Dismissed),
+            _ => None,
+        }
+    }
+}
+
+pub const CLAMPED_BODY_LINES: usize = 4;
+
+/// About what a sidebar line holds times the clamped lines; a longer text wraps past them.
+const LONG_BODY_CHARS: usize = 200;
+
+/// The viewer's latest sent review of a PR, as GitHub holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmittedReview {
+    pub outcome: ReviewOutcome,
+    /// What the reviewer wrote with it; empty when nothing.
+    pub body: String,
+    /// GitHub's UTC time, like `2026-11-05T13:35:33Z`.
+    pub submitted_at: String,
+    /// The PR's head when the review was sent.
+    pub commit: Sha,
 }

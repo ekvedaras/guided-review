@@ -42,13 +42,16 @@ use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
 use super::branch_link::{BranchLink, BranchOffer, LocalReviewsOfRepo};
+use super::carried::ReadCarrier;
 use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
-use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
+use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox};
+use super::comment_send::{CommentOutcome, CommentRequest};
+use super::comments::Audience;
 use super::comments::{
-    CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest, CommentResult,
-    QueuedComment, SendMode, Sending,
+    CommentPlace, CommentProblem, CommentRefusal, CommentResult, QueuedComment, SendMode, Sending,
 };
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
+use super::diff_line::DiffLine;
 use super::disk_news::DiskNews;
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
@@ -56,101 +59,64 @@ use super::file_tree::{FileTree, FolderPath, TreeRow};
 use super::finding_placement::{FindingHome, FindingPlacement, FindingView};
 use super::finish_review::{
     ApproveWarning, FinishAction, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
-    ReviewVerdict, SubmittedReview,
 };
+use super::github_outage::Read;
 use super::github_outage::{Affected, OutageCause};
 use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{
-    AgentReplied, Audience, HandOff, HandOffId, HandOffState, HandOffs, HandToAgentRefused,
-    SentFrom,
+    AgentReplied, HandOff, HandOffId, HandOffState, HandOffs, HandToAgentRefused, SentFrom,
 };
 use super::hidden_text::HiddenText;
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
-use super::local_threads::ThreadHome;
+use super::line_location::LineLocation;
+use super::local_thread_store::ThreadHome;
 use super::markdown::Markdown;
 use super::name_desk::NameDesk;
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::page::Page;
+use super::piece_diff::PieceDiff;
+use super::ports::ReviewVerdict;
 use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
 use super::pr_controls::PrControls;
 use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
 use super::pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
+use super::pr_reviewers::SubmittedReview;
 use super::pr_reviewers::{PullRequestReviews, ReviewerLine, StanceAge, Standing, YourReview};
-use super::problems::{Problem, ProblemKind, Problems, Read};
+use super::problems::{Problem, ProblemKind, Problems};
 use super::reactions::ReactionChange;
-use super::refresh::RefreshBrief;
+use super::refresh_brief::RefreshBrief;
 use super::related_issues::{IssueDetails, RelatedIssue, RelatedIssues};
 use super::replacing_jobs::{ReplacingJob, ReplacingJobs};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
+use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use super::reviewing_mark::{ReviewingMark, ReviewingMarkRemoval};
 use super::row_selection::{RowSelection, SelectedLines};
 use super::saved_state::SavedState;
-use super::step_page::{
-    DiffLine, FilePage, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage,
-};
-use super::switch_to_guided::ReadCarrier;
+use super::step_page::{FilePage, SafetyNetPage, SinceRead, StepPage};
+use super::thread_actions::TourFreshness;
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
-use super::threads::{
-    self, AgentOfThreads, CommentId, ReviewThread, ThreadId, ThreadPlacement, ThreadWork,
-};
+use super::threads::{self, AgentOfThreads, ThreadPlacement, ThreadWork};
 use super::typing_save::TypingSave;
 use super::used_findings::{FindingsOfThreads, thread_made_of};
 use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
 use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
 use crate::app_folders::AppFolders;
+use crate::build::Build;
 use crate::file_path::FilePath;
 use crate::findings::{Finding, FindingId};
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
-use crate::update::Build;
 
 pub use crate::tour::StepId;
 
-/// What a read tick says was read: a guided tour's step, or a basic tour's whole file.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ReadSubject {
-    Step(StepId),
-    File(FilePath),
-}
+use super::screen::{NextScreen, ReadSubject, Screen};
+
 pub use kept::Review;
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Screen {
-    Summary,
-    /// A basic tour's first screen, in place of the summary.
-    Overview,
-    /// One changed file of a basic tour, in place of a step.
-    File(FilePath),
-    Step(StepId),
-    /// After the last step: every change no step shows.
-    SafetyNet,
-}
-
-impl Screen {
-    /// What an Ask about lines of this screen records as the screen it was shown on; the
-    /// summary and the overview show no lines.
-    pub fn shown_on(&self) -> Option<ShownOn> {
-        match self {
-            Self::Step(step) => Some(ShownOn::Step { step: step.clone() }),
-            Self::SafetyNet => Some(ShownOn::SafetyNet),
-            Self::File(path) => Some(ShownOn::File { path: path.clone() }),
-            Self::Summary | Self::Overview => None,
-        }
-    }
-
-    fn sent_from(&self) -> SentFrom {
-        match self {
-            Self::Step(step) => SentFrom::Step(step.clone()),
-            Self::File(path) => SentFrom::File(path.clone()),
-            Self::Summary | Self::Overview | Self::SafetyNet => SentFrom::Elsewhere,
-        }
-    }
-}
 
 /// One row of the step tree. Rows come in reading order, so indenting by `depth` draws the tree.
 pub struct SidebarEntry<'a> {
@@ -277,19 +243,6 @@ pub struct ReadingPlace {
     pub file_count: usize,
     pub has_previous: bool,
     pub next: Option<NextScreen>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum NextScreen {
-    /// Its title is markdown.
-    Step {
-        title: String,
-    },
-    /// A basic tour's next file.
-    File {
-        path: FilePath,
-    },
-    SafetyNet,
 }
 
 /// What the sidebar counts for the safety net, cheap enough to ask on every change.
@@ -558,7 +511,7 @@ impl Review {
             .steps()
             .into_iter()
             .map(|step| {
-                let shown = super::step_page::pieces_of(step, guided, &self.files);
+                let shown = super::piece_diff::pieces_of(step, guided, &self.files);
                 (
                     step.id.clone(),
                     shown.iter().map(|piece| piece.id.clone()).collect(),
@@ -2057,7 +2010,7 @@ impl ReviewCore {
     pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
         self.work.want(WorkKind::DeliverHandOff);
         self.comment_desk
-            .apply_thread_action(&mut self.state, &outcome, self.screen.sent_from());
+            .apply_thread_action(&mut self.state, &outcome, sent_from(&self.screen));
         self.show_pulled_threads(outcome.threads.as_ref());
         if outcome.result == ThreadActionResult::Done {
             match &outcome.action {
@@ -2293,7 +2246,7 @@ impl ReviewCore {
             return Err(HandToAgentRefused::NotAPullRequest);
         }
         let threads = &self.pulled_threads;
-        let from = self.screen.sent_from();
+        let from = sent_from(&self.screen);
         self.state
             .record(|state| state.hand_offs_mut().hand_over(threads, comment, from))
             .map_err(|error| HandToAgentRefused::NotSaved(format!("{error:#}")))??;
@@ -2389,7 +2342,7 @@ impl ReviewCore {
         let result = self.comment_desk.apply_comment(
             &mut self.state,
             outcome,
-            (self.screen.sent_from(), code),
+            (sent_from(&self.screen), code),
         );
         self.note_new_hand_off(hand_offs_before);
         self.show_pulled_threads(threads.as_ref());
@@ -3102,4 +3055,12 @@ fn read_head_of<'a>(state: &'a ReviewState, step: &StepId) -> Option<&'a Sha> {
         .read_tick(step)
         .or_else(|| state.read_before(step))
         .map(|tick| &tick.head)
+}
+
+fn sent_from(screen: &Screen) -> SentFrom {
+    match screen {
+        Screen::Step(step) => SentFrom::Step(step.clone()),
+        Screen::File(path) => SentFrom::File(path.clone()),
+        Screen::Summary | Screen::Overview | Screen::SafetyNet => SentFrom::Elsewhere,
+    }
 }

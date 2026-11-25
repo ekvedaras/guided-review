@@ -1,7 +1,8 @@
 //! Ask why: the reviewer's questions about a finding and the review agent's answers, on a thread of the
 //! finding's own. It lives in the review's state file for a PR too, since a PR's threads are GitHub's.
 
-use crate::viewer::kept_values::KeptEntries;
+use super::kept_values::KeptEntries;
+use crate::prompt_safety::shell_word;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -10,7 +11,6 @@ use crate::findings::{Finding, FindingId};
 use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::review_subject::ReviewSubject;
 
-use super::hand_offs::shell_word;
 use super::review_agents::ReviewAgents;
 use super::tour_agent::{AgentStatus, SendOutcome};
 

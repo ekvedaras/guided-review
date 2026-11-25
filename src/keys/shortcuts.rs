@@ -154,6 +154,18 @@ pub enum Command {
     Quit,
 }
 
+impl From<SendAction> for Command {
+    fn from(action: SendAction) -> Self {
+        match action {
+            SendAction::AddToReview => Self::AddToReview,
+            SendAction::CommentNow => Self::CommentNow,
+            SendAction::SuggestChange => Self::SuggestChange,
+            SendAction::AskAgent => Self::AskAgent,
+            SendAction::AskAgentNow => Self::AskAgentNow,
+        }
+    }
+}
+
 impl Command {
     /// The send action a command runs in a comment or reply box.
     pub fn send_action(self) -> Option<SendAction> {

@@ -7,8 +7,8 @@ use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::GuidedTour;
 
 use super::ports::{ChangeTipsPort, GitHubError, Viewed, ViewedFilesPort};
-use super::review::ReadSubject;
 use super::review_state::ReviewState;
+use super::screen::ReadSubject;
 
 /// Keeps GitHub's "viewed" marks and the read ticks in step. Ticks keep working when it is off.
 #[derive(Default)]
