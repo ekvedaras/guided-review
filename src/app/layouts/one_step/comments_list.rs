@@ -21,6 +21,16 @@ impl OneStepLayout {
         }
     }
 
+    /// An open list follows the threads as GitHub's answers change them.
+    pub(super) fn refresh_comments_list(&mut self, cx: &mut Context<Self>) {
+        if !self.comments_list.read(cx).is_open() {
+            return;
+        }
+        let list = self.session.read(cx).review().comments_list();
+        self.comments_list
+            .update(cx, |sheet, cx| sheet.refresh(&list, cx));
+    }
+
     fn scroll_to_thread(&mut self, id: &ThreadId, cx: &mut Context<Self>) {
         let row = self.session.read(cx).rows().row_of_thread(id);
         self.screen_list.scroll_to(ListOffset {

@@ -130,6 +130,35 @@ impl CommentsList {
         }
     }
 
+    /// The same list over the threads another list holds now: the cursor stays on its thread, or
+    /// its heading, and the Resolved section stays as the reviewer left it.
+    #[must_use]
+    pub fn refreshed_to(&self, newer: &Self) -> Self {
+        let mut list = Self {
+            threads: newer.threads.clone(),
+            cursor: 0,
+            resolved_are_shown: self.resolved_are_shown || newer.resolved_are_shown,
+        };
+        let thread_stop = self.thread_under_cursor().and_then(|id| {
+            let position = list
+                .threads
+                .iter()
+                .position(|listed| listed.thread.id == *id)?;
+            list.stop_of(position)
+        });
+        let header_stop =
+            (self.is_on_resolved_header() && list.resolved_count() > 0).then(|| list.open_count());
+        list.cursor = thread_stop
+            .or(header_stop)
+            .unwrap_or(self.cursor)
+            .min(list.stop_count().saturating_sub(1));
+        list
+    }
+
+    pub fn has_resolved(&self) -> bool {
+        self.resolved_count() > 0
+    }
+
     pub const fn resolved_are_shown(&self) -> bool {
         self.resolved_are_shown
     }

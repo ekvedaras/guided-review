@@ -246,6 +246,7 @@ impl OneStepLayout {
                 this.screen_travel.arrive(session.read(cx).review());
                 this.use_code_opener_of_review(cx);
                 this.reopen_if_work_ended(cx);
+                this.refresh_comments_list(cx);
                 cx.notify();
             }),
             cx.subscribe_in(&session, window, |this, _, event, window, cx| match event {

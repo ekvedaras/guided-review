@@ -714,3 +714,74 @@ fn c_and_the_palette_open_the_comments_list_only_when_the_review_has_threads() {
     );
     assert_eq!(Command::CommentsList.default_chords()[0].keystroke(), "c");
 }
+
+#[test]
+fn a_list_open_while_threads_change_takes_the_new_threads_and_keeps_the_cursor_on_its_thread() {
+    let shop = Shop::with_pull();
+    let on_order = || {
+        thread(
+            "on-order",
+            "app/Order.php",
+            7,
+            vec![comment("alice", "Why two?")],
+        )
+    };
+    let on_config = || {
+        thread(
+            "on-config",
+            "config.yml",
+            3,
+            vec![comment("bob", "Why three?")],
+        )
+    };
+    let before = shop.open_with(two_steps(), &[on_order(), on_config()]);
+    let resolved_order = ReviewThread {
+        is_resolved: true,
+        ..on_order()
+    };
+    let after = shop.open_with(two_steps(), &[resolved_order, on_config()]);
+    let mut list = before.comments_list();
+    list.cursor_down();
+    assert_eq!(
+        list.thread_under_cursor(),
+        Some(&ThreadId::new("on-config"))
+    );
+
+    let list = list.refreshed_to(&after.comments_list());
+
+    assert_eq!(ids(&list), ["on-config"]);
+    assert_eq!(
+        list.thread_under_cursor(),
+        Some(&ThreadId::new("on-config"))
+    );
+}
+
+#[test]
+fn a_list_open_while_threads_change_keeps_the_cursor_on_the_resolved_heading() {
+    let shop = Shop::with_pull();
+    let on_order = thread(
+        "on-order",
+        "app/Order.php",
+        7,
+        vec![comment("alice", "Why two?")],
+    );
+    let on_config = thread(
+        "on-config",
+        "config.yml",
+        3,
+        vec![comment("bob", "Why three?")],
+    );
+    let resolved = ReviewThread {
+        is_resolved: true,
+        ..thread("done", "config.yml", 3, vec![comment("bob", "Fixed.")])
+    };
+    let before = shop.open_with(two_steps(), &[on_order.clone(), resolved.clone()]);
+    let after = shop.open_with(two_steps(), &[on_order, on_config, resolved]);
+    let mut list = before.comments_list();
+    list.cursor_down();
+    assert!(list.is_on_resolved_header());
+
+    let list = list.refreshed_to(&after.comments_list());
+
+    assert!(list.is_on_resolved_header());
+}

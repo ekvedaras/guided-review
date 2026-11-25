@@ -71,6 +71,19 @@ impl CommentsSheet {
         }
     }
 
+    pub fn is_open(&self) -> bool {
+        self.presence.is_open()
+    }
+
+    /// The threads changed while the list is open: it shows them, the cursor kept on its thread.
+    pub fn refresh(&mut self, list: &CommentsList, cx: &mut Context<Self>) {
+        if !self.presence.is_open() {
+            return;
+        }
+        self.list = self.list.refreshed_to(list);
+        cx.notify();
+    }
+
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.presence.is_open() {
             return;
@@ -423,6 +436,16 @@ impl Render for CommentsSheet {
                                 ],
                                 "move",
                             ))
+                            .when(self.list.has_resolved(), |footer| {
+                                footer.child(key_hint(
+                                    &colors,
+                                    &[
+                                        KeyLabel::Icon(Icon::ArrowLeft),
+                                        KeyLabel::Icon(Icon::ArrowRight),
+                                    ],
+                                    "fold resolved",
+                                ))
+                            })
                             .child(key_hint(&colors, &[KeyLabel::Text("return")], "show")),
                     ),
                 "comments-sheet-rise",
