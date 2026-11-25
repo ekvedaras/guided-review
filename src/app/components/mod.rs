@@ -35,6 +35,7 @@ pub mod settings_panel;
 pub mod shortcuts_sheet;
 pub mod sidebar_row;
 pub mod step_notes;
+pub mod svg_picture;
 pub mod switching_veil;
 pub mod text_box;
 pub mod text_input;

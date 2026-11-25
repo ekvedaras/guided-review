@@ -158,6 +158,7 @@ mod show;
 mod stations;
 mod step_details;
 mod summary_instructions;
+mod svg_pictures;
 mod switch_to_guided;
 mod symbol_edges;
 mod text_boxes;

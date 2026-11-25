@@ -271,6 +271,7 @@ fn zoom_diagram(svg: Svg, window: &mut Window, cx: &mut App) {
                     .update(|window, cx| {
                         let picture = ZoomedPicture {
                             path: path.into(),
+                            drawn: None,
                             ratio: svg.width() / svg.height(),
                             pixel_width: svg.width() * scale / window.scale_factor(),
                         };

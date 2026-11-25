@@ -1,3 +1,4 @@
+use gpui::Image;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Div, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
@@ -17,7 +18,7 @@ use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
 use crate::app::code_selection::TextSpot;
 use crate::app::prose_selection::ProseSelections;
-use crate::image_facts::is_svg_path;
+use crate::image_facts::{PixelSize, is_svg_path};
 use crate::viewer::{
     Block, Capture, ColumnAlignment, FenceLine, Markdown, Run, Span, Table, fence_lines,
 };
@@ -28,6 +29,7 @@ use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
 use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, inside_edge};
 use super::picture_zoom::{ZoomedPicture, zoom_picture};
+use super::svg_picture;
 
 /// The mark before an item of a list without numbers: a small dot, centred on the item's first line.
 pub fn bullet(colors: &Colors, line_height: gpui::Pixels) -> Div {
@@ -188,6 +190,9 @@ enum PreparedBlock {
     Table(PreparedTable),
     Picture {
         path: Arc<Path>,
+        /// An SVG drawn by the app, since gpui draws the emoji in it as boxes. `None` for any
+        /// other picture, and for an SVG that did not draw: gpui then reads the file.
+        drawn: Option<Arc<Image>>,
         /// Width over height, so the picture's room is kept before it loads.
         ratio: f32,
         /// Its width at the screen's two pixels to a point, the widest it is drawn.
@@ -200,10 +205,12 @@ impl PreparedBlock {
         match self {
             Self::Picture {
                 path,
+                drawn,
                 ratio,
                 widest,
             } => Some(ZoomedPicture {
                 path: Arc::clone(path),
+                drawn: drawn.clone(),
                 ratio: *ratio,
                 pixel_width: if is_svg_path(&path.to_string_lossy()) {
                     f32::INFINITY
@@ -386,10 +393,25 @@ fn prepare_block(block: &Block) -> PreparedBlock {
             ..
         } => PreparedBlock::Picture {
             path: Arc::from(path.as_path()),
+            drawn: drawn_svg(
+                path,
+                PixelSize {
+                    width: *width,
+                    height: *height,
+                },
+            ),
             ratio: *width as f32 / (*height).max(1) as f32,
             widest: *width as f32 / 2.,
         },
     }
+}
+
+/// Read here, once per summary text, not by gpui, which would draw some emoji of the SVG as boxes.
+fn drawn_svg(path: &Path, natural_size: PixelSize) -> Option<Arc<Image>> {
+    if !is_svg_path(&path.to_string_lossy()) {
+        return None;
+    }
+    svg_picture::image(&std::fs::read(path).ok()?, natural_size)
 }
 
 fn details_title(summary: &[Run]) -> Vec<Run> {
@@ -646,6 +668,7 @@ fn block_element(
         }
         PreparedBlock::Picture {
             path,
+            drawn,
             ratio,
             widest,
         } => {
@@ -675,11 +698,14 @@ fn block_element(
                     .size_full(),
                 )
                 .child(
-                    img(Arc::clone(path))
-                        .w(px(width))
-                        .h(px(width / ratio))
-                        .max_w_full()
-                        .rounded(px(INNER_RADIUS)),
+                    match drawn {
+                        Some(drawn) => img(Arc::clone(drawn)),
+                        None => img(Arc::clone(path)),
+                    }
+                    .w(px(width))
+                    .h(px(width / ratio))
+                    .max_w_full()
+                    .rounded(px(INNER_RADIUS)),
                 );
             div()
                 .flex()

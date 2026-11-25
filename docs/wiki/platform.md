@@ -16,7 +16,7 @@ Until 2026-11-14 the app was built for macOS only, and what it knew of macOS was
 
 ## Decisions, 2026-11-14 (#69)
 
-- **The platform names the font families** (`d53ab58`). Each adapter lists its text and code families, best first; `Os::text_font` and `Os::code_font` take the first that is installed and the last one unasked. macOS lists one of each (Helvetica Neue, Menlo), so it never reads the font database for the app's text. Linux lists Adwaita, Noto, Liberation and DejaVu (Sans and Mono), names checked against the installed fonts, not asked of fontconfig: a list is plain data, so both adapters are tested on any host, and the families come out the same on every desktop that has them.
+- **The platform names the font families** (`d53ab58`). Each adapter lists its text and code families, best first; `Os::font` (by `FontRole`) takes the first that is installed and the last one unasked. macOS lists one of each (Helvetica Neue, Menlo), so it never reads the font database for the app's text. Linux lists Adwaita, Noto, Liberation and DejaVu (Sans and Mono), names checked against the installed fonts, not asked of fontconfig: a list is plain data, so both adapters are tested on any host, and the families come out the same on every desktop that has them.
 - **Diagrams find the files of the text family** in the font database (`palette::font_files`), all of them, so bold labels are measured in bold too. The path `/System/Library/Fonts/HelveticaNeue.ttc` is gone; it was why every diagram failed on Linux. The system font database is read once (`INSTALLED_FONTS`) and shared by the Linux font check and the diagram drawer.
 
 ## Decisions, 2026-11-14 (#70, Primary modifier)

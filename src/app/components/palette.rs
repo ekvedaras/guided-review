@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use usvg::fontdb::{Database, Family, Source};
 
 use crate::app_icon::{AppIcon, Look};
-use crate::platform::Os;
+use crate::platform::{FontRole, Os};
 use crate::update::running_build;
 
 use gpui::{
@@ -16,12 +16,12 @@ use crate::viewer::{Capture, ReadProgress};
 
 /// GPUI has no usable default font outside Zed, so every text names its family.
 pub static TEXT_FONT: LazyLock<&'static str> = LazyLock::new(|| {
-    Os::RUNNING.text_font(is_installed, || {
+    Os::RUNNING.font(FontRole::Text, is_installed, || {
         INSTALLED_FONTS.family_name(&Family::SansSerif)
     })
 });
 pub static CODE_FONT: LazyLock<&'static str> = LazyLock::new(|| {
-    Os::RUNNING.code_font(is_installed, || {
+    Os::RUNNING.font(FontRole::Code, is_installed, || {
         INSTALLED_FONTS.family_name(&Family::Monospace)
     })
 });

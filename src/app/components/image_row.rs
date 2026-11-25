@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, ElementId, Image, ImageFormat, InteractiveElement, IntoElement, ObjectFit,
@@ -16,11 +16,10 @@ use super::chip::chip;
 use super::diff_view::OnImageComment;
 use super::icon::Icon;
 use super::palette::{CONTROL_RADIUS, Colors, Tone};
+use super::svg_picture;
 
 const PICTURE_BOX: (f32, f32) = (460., 360.);
 const CHECKER_CELL: f32 = 8.;
-const SVG_DRAW_SCALE: f32 = 2.;
-const MAX_SVG_SIDE_PX: f32 = 4096.;
 
 /// What can be drawn of each side, made off the main thread because an SVG has to be rasterized.
 /// Kept by the layout, so the same decoded bitmap is drawn on every frame.
@@ -57,14 +56,11 @@ impl Picture {
         };
         let pixels = loaded.pixels?;
         let image = if image_facts::is_svg_path(path) {
-            Image::from_bytes(ImageFormat::Png, rasterize_svg(&loaded.bytes, pixels)?)
+            svg_picture::image(&loaded.bytes, pixels)?
         } else {
-            Image::from_bytes(format_of(path)?, loaded.bytes.to_vec())
+            Arc::new(Image::from_bytes(format_of(path)?, loaded.bytes.to_vec()))
         };
-        Some(Self {
-            image: Arc::new(image),
-            pixels,
-        })
+        Some(Self { image, pixels })
     }
 }
 
@@ -76,47 +72,6 @@ fn format_of(path: &str) -> Option<ImageFormat> {
         "webp" => Some(ImageFormat::Webp),
         _ => None,
     }
-}
-
-static SVG_OPTIONS: LazyLock<usvg::Options<'static>> = LazyLock::new(|| {
-    let mut fonts = usvg::fontdb::Database::new();
-    fonts.load_system_fonts();
-    usvg::Options {
-        fontdb: Arc::new(fonts),
-        ..usvg::Options::default()
-    }
-});
-
-/// A PNG of the SVG at twice its size, capped so a huge canvas stays small enough to hold.
-fn rasterize_svg(svg: &[u8], size: PixelSize) -> Option<Vec<u8>> {
-    let tree = usvg::Tree::from_data(svg, &SVG_OPTIONS).ok()?;
-    let longest = size.width.max(size.height) as f32;
-    let scale = SVG_DRAW_SCALE.min(MAX_SVG_SIDE_PX / longest);
-    let (width, height) = (
-        image_facts::whole_pixels((size.width as f32 * scale).ceil()),
-        image_facts::whole_pixels((size.height as f32 * scale).ceil()),
-    );
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
-    let fit = resvg::tiny_skia::Transform::from_scale(
-        width as f32 / tree.size().width(),
-        height as f32 / tree.size().height(),
-    );
-    resvg::render(&tree, fit, &mut pixmap.as_mut());
-    let mut rgba = Vec::with_capacity(pixmap.pixels().len() * 4);
-    for pixel in pixmap.pixels() {
-        let straight = pixel.demultiply();
-        rgba.extend([
-            straight.red(),
-            straight.green(),
-            straight.blue(),
-            straight.alpha(),
-        ]);
-    }
-    let mut png = std::io::Cursor::new(Vec::new());
-    image::RgbaImage::from_raw(width, height, rgba)?
-        .write_to(&mut png, image::ImageFormat::Png)
-        .ok()?;
-    Some(png.into_inner())
 }
 
 /// The pictures of one changed image: base left, head right, a facts row above, and a button

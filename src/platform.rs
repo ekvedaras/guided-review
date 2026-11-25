@@ -51,23 +51,26 @@ impl Os {
         self.adapter().triple_system
     }
 
-    /// The family for the app's text: the one that comes with the OS, or the first of this OS's
-    /// choices that is installed, or else the font database's `default` sans-serif family.
-    pub fn text_font(
+    /// The family for the app's text or its code: the one that comes with the OS, or the first of
+    /// this OS's choices that is installed, or else the font database's `default` family, which is
+    /// sans-serif for text and monospace for code.
+    pub fn font(
         self,
+        role: FontRole,
         installed: impl Fn(&str) -> bool,
         default: impl FnOnce() -> &'static str,
     ) -> &'static str {
-        self.adapter().text_font.pick(installed, default)
+        let adapter = self.adapter();
+        match role {
+            FontRole::Text => &adapter.text_font,
+            FontRole::Code => &adapter.code_font,
+        }
+        .pick(installed, default)
     }
 
-    /// The family for code, picked like [`Self::text_font`], `default` being monospace.
-    pub fn code_font(
-        self,
-        installed: impl Fn(&str) -> bool,
-        default: impl FnOnce() -> &'static str,
-    ) -> &'static str {
-        self.adapter().code_font.pick(installed, default)
+    /// The families that hold this OS's colour emoji, the first installed one drawing them.
+    pub fn emoji_families(self) -> &'static [&'static str] {
+        self.adapter().emoji_families
     }
 
     /// The key held for the app's own shortcuts, as gpui's `secondary` picks it.
@@ -129,6 +132,7 @@ struct Adapter {
     triple_system: &'static str,
     text_font: FontChoice,
     code_font: FontChoice,
+    emoji_families: &'static [&'static str],
     primary_key: PrimaryKey,
     key_spelling: KeySpelling,
     text_keys: &'static [(&'static str, TextEdit)],
@@ -195,6 +199,13 @@ pub struct WindowButtons {
     pub corner: gpui::Pixels,
     /// From the window's left edge to past the buttons' right edge.
     pub inset: gpui::Pixels,
+}
+
+/// What a font is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontRole {
+    Text,
+    Code,
 }
 
 /// Where a font family comes from on one OS.

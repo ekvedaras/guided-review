@@ -20,6 +20,12 @@ pub(super) const ADAPTER: Adapter = Adapter {
         "Liberation Mono",
         "DejaVu Sans Mono",
     ]),
+    emoji_families: &[
+        "Noto Color Emoji",
+        "Emoji One",
+        "Twitter Color Emoji",
+        "JoyPixels",
+    ],
     primary_key: PrimaryKey::Control,
     key_spelling: KeySpelling {
         primary: "Ctrl",

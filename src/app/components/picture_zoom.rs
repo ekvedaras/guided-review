@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    App, Bounds, Context, Entity, FocusHandle, Global, InteractiveElement, IntoElement,
+    App, Bounds, Context, Entity, FocusHandle, Global, Image, InteractiveElement, IntoElement,
     KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Styled, WeakEntity, Window, div, img,
     point, px, size,
 };
@@ -31,6 +31,8 @@ struct Zoom {
 #[derive(Clone)]
 pub struct ZoomedPicture {
     pub path: Arc<Path>,
+    /// The picture drawn by the app when gpui would draw it wrong (an SVG); `path` is not read then.
+    pub drawn: Option<Arc<Image>>,
     /// Width over height.
     pub ratio: f32,
     /// Its width in pixels; drawn wider than that, it only blurs. Endless for a drawing (SVG).
@@ -120,9 +122,12 @@ impl Render for PictureZoom {
         let is_leaving = shown == Shown::Leaving;
         let turn = self.presence.turn();
         let large = large_place(&zoom.picture, window);
-        let shown = img(Arc::clone(&zoom.picture.path))
-            .rounded(px(CARD_RADIUS))
-            .shadow(colors.overlay_shadow());
+        let shown = match &zoom.picture.drawn {
+            Some(drawn) => img(Arc::clone(drawn)),
+            None => img(Arc::clone(&zoom.picture.path)),
+        }
+        .rounded(px(CARD_RADIUS))
+        .shadow(colors.overlay_shadow());
         let shown = match (zoom.page_place, is_leaving) {
             (Some(page), false) => {
                 move_between(shown, ("picture-zoom-grow", turn), page, large).into_any_element()
