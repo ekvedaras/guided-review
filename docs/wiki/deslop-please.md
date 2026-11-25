@@ -103,3 +103,44 @@ Commit `a1c766bc`. Three of the four long files are split; the macOS allow list 
 - The wave's brief named `update`; no `update` entry is on either list.
 
 Open as of 2026-11-25: 119 entries on macOS.
+
+## 2026-11-25: what was left, wave 4
+
+Commit `4ae77c74`. 19 field leaks fixed on each target; the macOS allow list went from 119 to 100 entries, and `scripts/deslop --update-allow` only removed lines. Behaviour is unchanged: the code moved into the type whose fields it read, and the full gate passed. `scripts/check` now warns about lines a change adds to an allow list.
+
+### What changed, and why
+
+- **`SyncOutcome`, all 4, and `Coverage::files_by_subject`.** `ViewedSync::take_in` and `SyncRequest` built and read the outcome of a viewed sync field by field. The outcome now says how it came about (`failed`, `pushed`, `baseline_taken`) and `land`s itself in the review state; `push` returns what it sent and where it stopped. `Coverage::held_files` replaces walking its map from `baseline_wishes`.
+- **`CommentRequest`, all 3.** `CommentDesk::settle` and three free functions read the request's origin, draft and mode to decide what the state file keeps. The request now does it: `leave`, `keep_for_retry`, `keep_as_draft`, `sent_comment` (what a hand-off is made from) and `leaves_a_pending_review`. `CommentOutcome::thread_made` finds the thread the comment became; `findings_carried` names the findings the draft carries.
+- **`CommentDesk::comment_edits` and `::delete_asked`.** `ReviewCore` built `ThreadWork` from two getters; `CommentDesk::thread_work(reply_drafts)` builds it.
+- **`Standing`, both.** The sidebar line, the "already listed" check and your review's status read the reviewer and the stance. `Standing::line` (was `ReviewerLine::of`), `is_by` and `status` answer them. The fields stay `pub` for the tests that read a parsed answer.
+- **`SymbolPairing`, both.** The cut of a file into symbol pieces reached through the pairing to the base and head symbols. The pairing now answers `head_slot_of_added_line`, `symbols_in`, `tokens_in` and `has_same_text_in` for a slot pair.
+- **`BladeScan`, both.** `highlight_blade` coloured the scan's marks and PHP parts. `BladeScan::coloured` does, with `PhpCode::coloured` for one PHP part; `html_only` and `PhpCode`'s fields are private now.
+- **`RepinRecord::pieces`.** `RefreshBrief` counted the record's pieces; `new_or_changed_of_all` gives both counts.
+- **`KeyChanges::send_choice`.** Settings read the send choice, changed it and wrote it back; `choose_primary` and `choose_secondary` replace `set_send_choice`.
+- **`InlineText::code_ranges`.** `InlineText::code_backgrounds` draws the grounds of its own code; `width_units` and `widest_word_units` give a table column's widths.
+
+### Tried and undone
+
+- Drawing `InlineText` as its own method (`styled_text` and `styled_links`) made a new 14-item tangle: the link click opens through `code_links`, which reads the session, which holds the page rows, which hold the prepared markdown. Prepared text stays below the drawing; `InlineText::text` and `::links` stay listed.
+- `SavedState::thread_home` in place of `SavedState::file`: `ReviewCore::state_file` hands the same file to the app's session for its background work, so the getter stays.
+
+### Left, and why
+
+- **Values the app draws** (`Colors`, 12; `Snippet`, 2; `YourReview::avatar_url`; `CloneOffer::state`; `AskDesk::target`; `NameHover::open`; `PageRows::description_hidden`; `InlineText::text` and `::links`; `PreparedMarkdown::blocks`). Each is the viewer's or the prepared rows' answer of what to draw, read as a value. `Colors` is the design tokens of [visual design](visual-design.md). A method per drawn fact would move drawing decisions into the viewer, or forward to the one function that draws them.
+- **`EditState`, 14.** It is the text box's state across frames, shared by `TextBox` and `TextBoxElement` in one file; gpui's `Element` trait splits that code by layout phase, not by data. Moving `request_layout` and `prepaint` into `EditState` is a rewrite of a gpui element with no window tests.
+- **Events and hand-overs the lint reads as getters or setters**: `PrSwitcher::hovered` and `::selected` (`hover` and `select` are the pointer's events), `AskDesk::code_changed` (`code_changed_is` is the event), `DiagramMemory::pending_svgs`, `ReviewState::typed` and `Saves::typing_is_unsaved` (each `mem::take`s work to hand it over), `SavedState::state` (`keep_until_repinned` is the save gate's closure), `PressAgain::to_send` (set only by a snapshot scene) and `NameHover::pointer` (read only by one).
+- **`ReleaseInstall::desktop_entry`**: the install hands out its OS adapter (`dyn DesktopEntry`), which `launch`, `install_app`, `start_app` and the updater use as a port. Forwarding six port methods through the install would widen it and hide nothing.
+- **`OpenedPr::folders` and `OpenedChangeSet::folders`**: `OpenedSubject` is one enum over the two adapters; it reads each adapter's app folders to do what both share (the state file, the shown tour). Moving that into each adapter writes it twice.
+- **`SavedState::file`**: see "Tried and undone".
+- **`Signature::text` and `::origin`**: `Signature` builds a declaration line and where its bytes came from; its two fields are what it builds, and `Definition` stores them as two arrays. A `finish` returning both would be the same read under another name.
+- **`DisplayOptions`, 3**: the reader's display choices, asked by the page builder and `ReviewCore` one choice at a time; the first deepening pass left them outside the save gate on purpose.
+- **`Page`, `PageChange`, `FileBlock` (10)** and **`ReviewCore`, `ReviewSession`, `ActivePr`, `TourWriting`**: the Page/ReviewCore knot and the reasons waves 1 and 2 gave stand. The page's types are read by the builder and the focused-change moves that wave 1 left in one cycle with them.
+- **`module-cycle` and `tangle` (8)**, **`shallow-module` (4)** and **`long-file src/app/review_session.rs`**: unchanged since waves 1 and 3, for the reasons given there.
+- **`wide-directory` (5)**: `src/` (71 entries), `src/app/` (22), `src/app/components/` (46), `src/viewer/` (113), `tests/it/` (164). A folder per group is a module per group, and deslop-please checks cycles among siblings: `viewer`'s modules still form the two cycles above, so a split of its 110 files into folders of at most 15 puts those cycles between the new folders. Grouping waits for the cycles. `tests/it/` is one module per topic (AGENTS.md); its 163 topics have no grouping that is not by the `src` module they test, which would follow the same split.
+
+### The gate warns about new allow-list lines
+
+`scripts/deslop-added <base>` lists the lines the allow lists on disk have that they did not have at the fork point with the base; a list that did not exist there is named with its count. `scripts/check` runs it after `scripts/deslop`, outside CI, against the same base as the change notes. It warns and never fails: a rename may need a new key.
+
+Open as of 2026-11-25: 100 entries on macOS, 101 on Linux.
