@@ -13,7 +13,7 @@ use crate::keys::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, SendChoice, Wr
 use crate::merge_method::MergeMethod;
 use crate::more_lines::MoreLines;
 use crate::navigation::ServerAnswer;
-use crate::pull_request::{HostedRepo, RepoName};
+use crate::pull_request::HostedRepo;
 
 /// `config.toml` in the config folder.
 #[derive(Default, Deserialize)]
@@ -41,7 +41,7 @@ pub struct Config {
     /// `"merge"`, `"squash"` or `"rebase"`: how auto-merge and Merge now merge.
     #[serde(default)]
     merge_method: Option<String>,
-    /// `"owner/repo" = "squash"`: a repo's own merge method, over `merge_method`.
+    /// `"owner/repo" = "squash"`: a repo's own merge method, over `merge_method`. Keyed as `clones` is.
     #[serde(default)]
     merge_methods: BTreeMap<String, String>,
     /// `"owner/repo" = true`: whether language servers answer the Definition card in that repo. A
@@ -220,11 +220,11 @@ impl Config {
 
     /// The repo's own method, else the global one, else a merge commit. A value that names no
     /// method is passed over, so a typo cannot stop the app opening.
-    pub fn merge_method(&self, repo: &RepoName) -> MergeMethod {
+    pub fn merge_method(&self, repo: &HostedRepo) -> MergeMethod {
         let own = self
             .merge_methods
             .iter()
-            .find(|(name, _)| name.parse::<RepoName>().is_ok_and(|name| name == *repo))
+            .find(|(name, _)| name.parse::<HostedRepo>().is_ok_and(|name| name == *repo))
             .and_then(|(_, method)| MergeMethod::of_config_text(method));
         own.or_else(|| {
             self.merge_method

@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::bail;
@@ -156,6 +157,37 @@ impl FromStr for HostedRepo {
         Ok(Self {
             host,
             repo: repo.parse()?,
+        })
+    }
+}
+
+impl HostedRepo {
+    /// Where the app keeps the repo's files under a folder it keys by repo (state, tours, server
+    /// checkouts, server indexes): GitHub's at `<owner>/<repo>`, as before hosts were named. A second
+    /// host's go under `_<host key>/`, which no GitHub owner can be, so the two never meet.
+    pub fn files_folder(&self) -> PathBuf {
+        match self.host {
+            HostSite::GitHub => PathBuf::from(self.repo.namespace()).join(self.repo.name()),
+        }
+    }
+
+    /// The repo whose files folder `folder` is, relative to the folder it is under.
+    pub fn of_files_folder(folder: &Path) -> Option<Self> {
+        let segments: Vec<&str> = folder
+            .components()
+            .map(|component| match component {
+                Component::Normal(segment) => segment.to_str(),
+                _ => None,
+            })
+            .collect::<Option<_>>()?;
+        HostSite::ALL.into_iter().find_map(|host| match host {
+            HostSite::GitHub => match segments.as_slice() {
+                [owner, name] if !owner.starts_with('_') => Some(Self {
+                    host,
+                    repo: RepoName::new(owner, name),
+                }),
+                _ => None,
+            },
         })
     }
 }

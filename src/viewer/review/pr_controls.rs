@@ -39,7 +39,7 @@ impl ReviewCore {
     /// Settings name a merge method per repo; `Shift+M` uses the one of this PR's repo.
     pub fn read_merge_method_from(&mut self, config: &Config) {
         if let Some(pr) = self.subject.pull_request() {
-            self.merge_method = config.merge_method(&pr.repo);
+            self.merge_method = config.merge_method(&pr.hosted_repo());
         }
     }
 

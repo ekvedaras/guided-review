@@ -186,7 +186,7 @@ impl ReviewSubject {
 impl ReviewSubject {
     pub fn files_folder(&self) -> PathBuf {
         match self {
-            Self::PullRequest(pr) => PathBuf::from(pr.repo.to_string()),
+            Self::PullRequest(pr) => pr.hosted_repo().files_folder(),
             Self::Local(change_set) => change_set.files_folder(),
         }
     }

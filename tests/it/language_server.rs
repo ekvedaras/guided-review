@@ -14,7 +14,7 @@ use guided_review::navigation::{
     ServerCatalog, ServerCheckouts, ServerFolders, ServerLaunch, ServerMessage, ServerMessages,
     ServerName, ServerPins, Timeouts, Waiting, Word,
 };
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::tour::GuidedTour;
 use guided_review::update::Target;
 use guided_review::viewer::{
@@ -27,7 +27,7 @@ use crate::support::fake_ports::{IgnoredServerMessages, RecordedServerMessages};
 use crate::support::{FixtureRepo, file_path, line, require_python3, write_executable};
 
 fn shop_codebase() -> Codebase {
-    Codebase::GitHub(RepoName::new("acme", "shop"))
+    Codebase::Hosted(crate::support::shop_on_github())
 }
 
 const LIB: &str = "/// Adds two numbers.

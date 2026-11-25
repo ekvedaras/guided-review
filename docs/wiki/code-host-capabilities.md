@@ -89,11 +89,10 @@ From my knowledge of GitLab, not checked against its docs:
 
 - An MR's page is `https://gitlab.com/<group>/<subgroup>/<project>/-/merge_requests/7`, its head ref `refs/merge-requests/7/head`, its pipelines `.../-/merge_requests/7/pipelines`, a file `.../-/blob/<sha>/<path>#L12`. Each fits a `host_web` method.
 - A clone is `git clone https://gitlab.com/<group>/<project>.git` (or `glab repo clone`): it fits `ClonePort::clone_repo(repo, folder)`.
-- Two shapes do not fit. `RepoName` is `owner/name`, and a GitLab project path has any number of groups. A self-managed GitLab is its own site, so `HostSite` would carry its address and the hosts the app reads would come from the config, not `HostSite::ALL`.
+- Two shapes did not fit. `RepoName` was `owner/name`, and a GitLab project path has any number of groups; it is a path now (see A repo is a path below). A self-managed GitLab is its own site, so `HostSite` would carry its address and the hosts the app reads would come from the config, not `HostSite::ALL`.
 
 ### Left open after step 4
 
-- Everything keyed by `RepoName` has no host level: the state folder (`state/<owner>/<repo>/`, read back as GitHub's in `ReviewStateFile::folders_opened_from_any_repo`), `Codebase`, the clones in `config.toml`.
 - The switcher's "Loading your pull requests from GitHub..." and "Refreshing from GitHub..." name GitHub while the list is read from every host the app reads.
 - The palette's and title bar's "Open on GitHub" and "Open checks on GitHub" keep GitHub in their names and labels; `open_on_github` is also a key name in `[keys]`, which a rename must keep reading.
 - `PullRequestUrl::short` writes `owner/repo#7`; GitLab writes `group/project!7`.
@@ -120,6 +119,19 @@ Issue #140, 2026-11-25. `RepoName` was `owner/name`; a GitLab project path has a
 ## A clone is of a repo on a host
 
 Issue #140, 2026-11-25. `LocalGit::find` and `configured_clone` took a `RepoName` and accepted a clone whose remote pointed at that repo on any host the app reads. They take a `HostedRepo` and accept only a remote of that repo on that host, as do `Config::clone_of`, Settings' clone rows and the clone offer, whose line names the host the code comes from. `HostedRepo` has a text form: `<host key>:namespace/name` (`HostSite::key`, `github`), and a bare `namespace/name` is GitHub's, so every `[clones]` key written before reads as GitHub's, and a GitHub repo is still written bare (`clone_offer::a_clone_of_a_github_repo_is_saved_under_its_owner_and_name_as_before_hosts_were_named`). A second host writes its key, since `HostedRepo`'s `Display` is a `match` on the host.
+
+## What a repo keys is keyed by its host
+
+Issue #140, 2026-11-25. The state and tour folders of a PR (`ReviewSubject::files_folder`), `Codebase` (the language servers' answer, server checkout and server index) and `[merge_methods]` were keyed by `RepoName`, and `ReviewStateFile::folders_opened_from_any_repo` read every `state/<owner>/<repo>/` back as GitHub's. Each is keyed by `HostedRepo` now: `Codebase::GitHub(RepoName)` became `Codebase::Hosted(HostedRepo)`, and `HostedRepo::files_folder` is the one place a repo becomes a folder, GitHub's `<owner>/<repo>` as before, so nothing on disk moves. `HostedRepo::of_files_folder` reads a folder back, and `folders_opened_from_any_repo` walks the state folder down to each folder it reads as a repo, so a second host's deeper folders are found once its arm of the `match` names them. Its folders go under `_<host key>/`: GitHub owners cannot start with `_`, as `Codebase`'s `_folders` already counts on. Keys in `config.toml` (`[language_servers]`, `[merge_methods]`) are `HostedRepo`'s text form, bare for GitHub.
+
+```
+before                                       after
+  ReviewSubject::files_folder ── RepoName      ReviewSubject::files_folder ─┐
+  Codebase::GitHub(RepoName) ─── RepoName      Codebase::Hosted ────────────┼─▶ HostedRepo::files_folder
+  folders_opened_from_any_repo                 folders_opened_from_any_repo ┘   HostedRepo::of_files_folder
+    └─ owner/name dirs, read as GitHub         Config clones, merge_methods ──▶ HostedRepo text form
+  Config clones, merge_methods ── RepoName
+```
 
 ## Left open
 

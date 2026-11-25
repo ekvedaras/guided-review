@@ -7,7 +7,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     AnsweredBy, Column, FallbackReason, ServerAnswer, ServerName, Waiting, Word,
 };
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::review_subject::WorkTreeRoot;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -885,7 +885,7 @@ const SERVER_QUESTION: &str =
     "Use language servers for acme/shop? typescript-language-server may build it";
 
 fn shop_repo() -> Codebase {
-    Codebase::GitHub(RepoName::new("acme", "shop"))
+    Codebase::Hosted(crate::support::shop_on_github())
 }
 
 /// A review whose language server adapter is `adapter`, with the repo not asked yet.

@@ -9,7 +9,7 @@ use crate::app_folders::{AppFolders, remove_if_there};
 use crate::file_path::FilePath;
 use crate::findings::{Finding, FindingId};
 use crate::pieces::PieceId;
-use crate::pull_request::{HostSite, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{HostedRepo, PullRequestUrl, Sha};
 use crate::repin::{Repin, RepinStatus};
 use crate::review_subject::{LOCAL_FILES_FOLDER, ReviewSubject};
 use crate::timestamp::UtcTimestamp;
@@ -1075,7 +1075,7 @@ impl ReviewStateFile {
     /// The folders any PR of the repo was last opened from, for the PRs the app knows. Unreadable files
     /// and folders count for nothing: this only looks for a clone to work in.
     pub fn folders_opened_from_in(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<PathBuf> {
-        Self::folders_opened_from_repo(folders, pr.host, &pr.repo)
+        Self::folders_opened_from_repo(folders, &pr.hosted_repo())
     }
 
     /// The folders any PR of any repo was last opened from, as far as the state files tell. Unreadable
@@ -1083,35 +1083,33 @@ impl ReviewStateFile {
     /// missed here is still found through the configured clone folders and the reviews on disk, and a
     /// state file that cannot be read is raised by the review that owns it when it is opened.
     pub fn folders_opened_from_any_repo(folders: &AppFolders) -> Vec<PathBuf> {
-        let subfolders = |parent: &Path| -> Vec<String> {
-            let mut names: Vec<String> = std::fs::read_dir(parent)
-                .into_iter()
-                .flatten()
-                .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-                .collect();
-            names.sort_unstable();
-            names
-        };
         let state_files = folders.state_files();
-        subfolders(&state_files)
+        let mut repos = Vec::new();
+        let mut unread: Vec<PathBuf> = subfolders(&state_files)
             .into_iter()
-            .filter(|owner| owner != LOCAL_FILES_FOLDER)
-            .flat_map(|owner| {
-                subfolders(&state_files.join(&owner))
-                    .into_iter()
-                    .map(move |name| RepoName::new(&owner, &name))
-            })
-            // The state folder names no host: every PR it holds is on GitHub, the one host so far.
-            .flat_map(|repo| Self::folders_opened_from_repo(folders, HostSite::GitHub, &repo))
+            .filter(|folder| folder.as_os_str() != LOCAL_FILES_FOLDER)
+            .collect();
+        while let Some(folder) = unread.pop() {
+            match HostedRepo::of_files_folder(&folder) {
+                Some(repo) => repos.push(repo),
+                None => unread.extend(
+                    subfolders(&state_files.join(&folder))
+                        .into_iter()
+                        .map(|name| folder.join(name)),
+                ),
+            }
+        }
+        repos.sort_by(|a, b| {
+            (a.repo.namespace(), a.repo.name()).cmp(&(b.repo.namespace(), b.repo.name()))
+        });
+        repos
+            .iter()
+            .flat_map(|repo| Self::folders_opened_from_repo(folders, repo))
             .collect()
     }
 
-    fn folders_opened_from_repo(
-        folders: &AppFolders,
-        host: HostSite,
-        repo: &RepoName,
-    ) -> Vec<PathBuf> {
-        let Ok(files) = std::fs::read_dir(folders.state_files().join(repo.to_string())) else {
+    fn folders_opened_from_repo(folders: &AppFolders, repo: &HostedRepo) -> Vec<PathBuf> {
+        let Ok(files) = std::fs::read_dir(folders.state_files().join(repo.files_folder())) else {
             return Vec::new();
         };
         let mut numbers: Vec<u64> = files
@@ -1122,8 +1120,8 @@ impl ReviewStateFile {
             .into_iter()
             .filter_map(|number| {
                 let other = PullRequestUrl {
-                    host,
-                    repo: repo.clone(),
+                    host: repo.host,
+                    repo: repo.repo.clone(),
                     number,
                 };
                 Self::for_subject(folders, &ReviewSubject::from(other))
@@ -1347,6 +1345,24 @@ impl AskStore for ReviewStateFile {
 
 /// What a move marks as read before its change, but not where the PR's review has a tick or a mark of
 /// its own.
+/// The folders in `parent` by name, sorted; none when it cannot be read.
+fn subfolders(parent: &Path) -> Vec<PathBuf> {
+    let mut names: Vec<PathBuf> = std::fs::read_dir(parent)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            entry
+                .file_type()
+                .ok()?
+                .is_dir()
+                .then(|| PathBuf::from(entry.file_name()))
+        })
+        .collect();
+    names.sort_unstable();
+    names
+}
+
 fn keep_read_before<'a, K: Ord + Clone + 'a>(
     marks: &mut BTreeMap<K, ReadTick>,
     ticks: &BTreeMap<K, ReadTick>,
