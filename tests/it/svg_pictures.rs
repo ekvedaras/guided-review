@@ -9,9 +9,9 @@ const NATURAL: PixelSize = PixelSize {
 };
 
 #[test]
-fn macos_and_linux_each_name_their_colour_emoji_family() {
+fn macos_names_its_colour_emoji_family_and_linux_keeps_the_default_fallback() {
     assert!(Os::MacOs.emoji_families().contains(&"Apple Color Emoji"));
-    assert!(Os::Linux.emoji_families().contains(&"Noto Color Emoji"));
+    assert_eq!(Os::Linux.emoji_families(), [] as [&str; 0]);
 }
 
 #[test]

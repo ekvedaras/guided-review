@@ -20,12 +20,9 @@ pub(super) const ADAPTER: Adapter = Adapter {
         "Liberation Mono",
         "DejaVu Sans Mono",
     ]),
-    emoji_families: &[
-        "Noto Color Emoji",
-        "Emoji One",
-        "Twitter Color Emoji",
-        "JoyPixels",
-    ],
+    // None: usvg drew Noto Color Emoji with no colour on Ubuntu CI (2026-11-25), so an SVG's emoji
+    // keep usvg's own fallback here, as before.
+    emoji_families: &[],
     primary_key: PrimaryKey::Control,
     key_spelling: KeySpelling {
         primary: "Ctrl",
