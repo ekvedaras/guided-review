@@ -1044,7 +1044,7 @@ pub(super) fn terminal_name(role: AgentRole, subject: &ReviewSubject) -> String 
             format!(
                 "{}-{}-{}",
                 role.name_prefix(),
-                pr.repo.owner(),
+                pr.repo.namespace(),
                 pr.repo.name()
             ),
             format!("-{}", pr.number),

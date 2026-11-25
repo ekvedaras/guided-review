@@ -189,7 +189,7 @@ impl IssueLink {
         let repo = if named_repo.is_empty() {
             repo.clone()
         } else {
-            named_repo.parse().ok()?
+            github_web::repo_named(named_repo)?
         };
         (number > 0).then(|| Self::GitHub(IssueUrl::new(repo, number)))
     }

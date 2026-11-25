@@ -3,24 +3,27 @@ use std::str::FromStr;
 
 use anyhow::bail;
 
+/// A repo's path on its host: the namespace it is in and its own name. GitHub's namespace is the owner;
+/// GitLab's is a group with any number of subgroups (`group/sub/project`).
 #[derive(Debug, Clone)]
 pub struct RepoName {
-    owner: String,
+    namespace: String,
     name: String,
 }
 
 impl RepoName {
-    pub fn owner(&self) -> &str {
-        &self.owner
+    /// GitHub's owner, GitLab's group path.
+    pub fn namespace(&self) -> &str {
+        &self.namespace
     }
 
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub fn new(owner: &str, name: &str) -> Self {
+    pub fn new(namespace: &str, name: &str) -> Self {
         Self {
-            owner: owner.to_owned(),
+            namespace: namespace.to_owned(),
             name: name.trim_end_matches(".git").to_owned(),
         }
     }
@@ -28,7 +31,8 @@ impl RepoName {
 
 impl PartialEq for RepoName {
     fn eq(&self, other: &Self) -> bool {
-        self.owner.eq_ignore_ascii_case(&other.owner) && self.name.eq_ignore_ascii_case(&other.name)
+        self.namespace.eq_ignore_ascii_case(&other.namespace)
+            && self.name.eq_ignore_ascii_case(&other.name)
     }
 }
 
@@ -36,27 +40,29 @@ impl Eq for RepoName {}
 
 impl std::hash::Hash for RepoName {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.owner.to_ascii_lowercase().hash(state);
+        self.namespace.to_ascii_lowercase().hash(state);
         self.name.to_ascii_lowercase().hash(state);
     }
 }
 
 impl fmt::Display for RepoName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.owner, self.name)
+        write!(f, "{}/{}", self.namespace, self.name)
     }
 }
 
-/// `owner/name`, as it is shown.
+/// `namespace/name`, as it is shown: two segments or more, none of them empty.
 impl FromStr for RepoName {
     type Err = anyhow::Error;
 
     fn from_str(full_name: &str) -> anyhow::Result<Self> {
-        match full_name.split_once('/') {
-            Some((owner, name)) if !owner.is_empty() && !name.is_empty() && !name.contains('/') => {
-                Ok(Self::new(owner, name))
+        match full_name.rsplit_once('/') {
+            Some((namespace, name))
+                if !name.is_empty() && namespace.split('/').all(|segment| !segment.is_empty()) =>
+            {
+                Ok(Self::new(namespace, name))
             }
-            _ => bail!("not an owner/name repo: {full_name}"),
+            _ => bail!("not a namespace/name repo: {full_name}"),
         }
     }
 }

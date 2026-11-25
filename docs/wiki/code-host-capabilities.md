@@ -93,7 +93,7 @@ From my knowledge of GitLab, not checked against its docs:
 
 ### Left open after step 4
 
-- `RepoName` is two segments, and everything keyed by it has no host level: the state folder (`state/<owner>/<repo>/`, read back as GitHub's in `ReviewStateFile::folders_opened_from_any_repo`), `Codebase`, the clones in `config.toml`.
+- Everything keyed by `RepoName` has no host level: the state folder (`state/<owner>/<repo>/`, read back as GitHub's in `ReviewStateFile::folders_opened_from_any_repo`), `Codebase`, the clones in `config.toml`.
 - `LocalGit::find` and `configured_clone` take a clone whose remote points at the repo on any host the app reads, not only the PR's host: Settings' clones and the clone offer name a `RepoName` with no host.
 - The switcher's "Loading your pull requests from GitHub..." and "Refreshing from GitHub..." name GitHub while the list is read from every host the app reads.
 - The palette's and title bar's "Open on GitHub" and "Open checks on GitHub" keep GitHub in their names and labels; `open_on_github` is also a key name in `[keys]`, which a rename must keep reading.
@@ -113,6 +113,10 @@ Issue #140, 2026-11-25. Before it, `host_web::repo_of_remote` kept a remote's re
 ## Code read on the host
 
 Issue #140, 2026-11-25. Reading a PR's code with no clone is `HostedCodePort::code_of(repo)`, a core port and a supertrait of `CodeHost`: every host serves a file at a commit, the diff between two and their merge base (GitLab: its repository files and compare APIs, not checked). `pick_code_source` takes the port, so `opened_subject::hosts` has one mapping, `adapter_of`, and `code_reader_of` is gone; `OpenedPr` holds the PR's `Arc<dyn CodeHost>`, and the PR's title, which a basic tour is made with, moved into `PullRequestDescriptionPort`. Why the host's code is read though a clone was found (its fetch failed) is `pick_code_source`'s, which wraps whatever the host gives, so no adapter carries a fallback reason. `NoHost` refuses: a local review reads its own folder.
+
+## A repo is a path
+
+Issue #140, 2026-11-25. `RepoName` was `owner/name`; a GitLab project path has any number of groups (`group/sub/project`). It is now a namespace of one segment or more and a name, read from `namespace/name` split at the last `/`, every segment non-empty; `owner()` became `namespace()`. GitHub's form is the same text, so every persisted form of a GitHub repo (state and tour folders `<owner>/<repo>`, `server-checkouts/<owner>/<repo>`, `config.toml` keys) is unchanged. `config.toml`'s `[clones]` and `[merge_methods]` keys and Settings' clone rows are parsed as a `RepoName`, not split at the first `/`. A GitHub issue reference (`owner/repo#12`) reads only GitHub's two segments (`github_web::repo_named`), so `a/b/c#12` names no issue, as before.
 
 ## Left open
 

@@ -130,9 +130,7 @@ impl CloneRow {
     }
 
     fn repo_name(&self) -> Option<RepoName> {
-        let (owner, name) = self.repo.split_once('/')?;
-        let well_formed = !owner.is_empty() && !name.is_empty() && !name.contains('/');
-        well_formed.then(|| RepoName::new(owner, name))
+        self.repo.parse().ok()
     }
 }
 

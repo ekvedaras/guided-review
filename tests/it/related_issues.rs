@@ -179,6 +179,11 @@ fn a_description_names_the_issues_it_is_part_of_by_number_repo_and_number_or_lin
 }
 
 #[test]
+fn a_reference_with_a_repo_path_github_cannot_have_names_no_issue() {
+    assert_eq!(part_of("Part of acme/stock/old#4"), Vec::<String>::new());
+}
+
+#[test]
 fn a_description_names_the_issues_githubs_closing_keywords_name_in_the_order_it_names_them() {
     for keyword in [
         "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved",

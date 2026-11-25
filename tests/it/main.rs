@@ -139,6 +139,7 @@ mod reopen_after_save;
 mod repin;
 mod repin_guard;
 mod replacing_jobs;
+mod repo_name;
 mod restart_guard;
 mod review_agents;
 mod review_brief;

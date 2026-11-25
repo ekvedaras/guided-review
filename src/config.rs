@@ -224,10 +224,7 @@ impl Config {
         let own = self
             .merge_methods
             .iter()
-            .find(|(name, _)| {
-                name.split_once('/')
-                    .is_some_and(|(owner, name)| RepoName::new(owner, name) == *repo)
-            })
+            .find(|(name, _)| name.parse::<RepoName>().is_ok_and(|name| name == *repo))
             .and_then(|(_, method)| MergeMethod::of_config_text(method));
         own.or_else(|| {
             self.merge_method
@@ -282,10 +279,7 @@ impl Config {
     pub fn clone_of(&self, repo: &RepoName) -> Option<PathBuf> {
         self.clones
             .iter()
-            .find(|(name, _)| {
-                name.split_once('/')
-                    .is_some_and(|(owner, name)| RepoName::new(owner, name) == *repo)
-            })
+            .find(|(name, _)| name.parse::<RepoName>().is_ok_and(|name| name == *repo))
             .map(|(_, path)| expand_env_home(Path::new(path)))
     }
 }

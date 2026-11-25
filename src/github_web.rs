@@ -66,7 +66,7 @@ pub fn file_of_link(repo: &RepoName, url: &str) -> Option<(FilePath, LineNumber)
         segments.next()?,
     );
     let is_this_repo =
-        owner.eq_ignore_ascii_case(repo.owner()) && name.eq_ignore_ascii_case(repo.name());
+        owner.eq_ignore_ascii_case(repo.namespace()) && name.eq_ignore_ascii_case(repo.name());
     if !(is_this_repo && kind == "blob") {
         return None;
     }
@@ -87,6 +87,12 @@ pub fn repo_of_remote(url: &str) -> Option<RepoName> {
         return None;
     }
     Some(RepoName::new(owner, name))
+}
+
+/// `owner/name`, the only repo path GitHub has.
+pub fn repo_named(text: &str) -> Option<RepoName> {
+    let repo: RepoName = text.parse().ok()?;
+    (!repo.namespace().contains('/')).then_some(repo)
 }
 
 pub fn issue_page(repo: &RepoName, number: u64) -> String {

@@ -37,7 +37,7 @@ impl Codebase {
     /// index): `owner/repo`, or `_folders/<folder name>-<short hash of the path>`.
     pub fn state_folder(&self) -> PathBuf {
         match self {
-            Self::GitHub(repo) => PathBuf::from(repo.owner()).join(repo.name()),
+            Self::GitHub(repo) => PathBuf::from(repo.namespace()).join(repo.name()),
             Self::Folder(folder) => PathBuf::from(FOLDERS_OWNER).join(folder.stem()),
         }
     }

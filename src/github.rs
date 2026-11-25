@@ -115,7 +115,7 @@ struct FileNodeJson {
 }
 
 fn pull_request_variables(pr: &PullRequestUrl, after: &serde_json::Value) -> serde_json::Value {
-    let (owner, name) = (pr.repo.owner(), pr.repo.name());
+    let (owner, name) = (pr.repo.namespace(), pr.repo.name());
     serde_json::json!({"owner": owner, "name": name, "number": pr.number, "after": after})
 }
 
@@ -465,7 +465,7 @@ impl PullsOfBranchPort for GitHub {
         branch: &BranchName,
     ) -> Result<Option<PullOfBranch>, HostError> {
         let repo = &hosted.repo;
-        let head = url_path::encode(&format!("{}:{}", repo.owner(), branch.as_str()));
+        let head = url_path::encode(&format!("{}:{}", repo.namespace(), branch.as_str()));
         let pulls: Vec<PullListedJson> = self
             .get(
                 &format!("repos/{repo}/pulls?head={head}&state=open"),
@@ -692,7 +692,7 @@ impl IssueDetailsPort for GitHub {
             .enumerate()
             .flat_map(|(place, issue)| {
                 [
-                    (format!("owner{place}"), issue.repo().owner().into()),
+                    (format!("owner{place}"), issue.repo().namespace().into()),
                     (format!("name{place}"), issue.repo().name().into()),
                     (format!("number{place}"), issue.number().into()),
                 ]
