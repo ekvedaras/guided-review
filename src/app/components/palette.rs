@@ -619,6 +619,18 @@ impl Colors {
         }
     }
 
+    /// The fill and edge of inline code on a ground of `tone`: a callout's own border colour, so the code
+    /// reads as part of the callout; plain text's grey on a neutral ground.
+    pub fn code_ground(&self, tone: Tone) -> (Rgba, Rgba) {
+        match tone {
+            Tone::Neutral => (self.inline_code, self.subtle_border),
+            Tone::Accent | Tone::Success | Tone::Warning | Tone::Danger => {
+                let border = self.tone(tone).border;
+                (border, border)
+            }
+        }
+    }
+
     pub fn tone(&self, tone: Tone) -> ToneColors {
         let (text, background, border) = match tone {
             Tone::Neutral => (self.muted_text, self.surface, self.subtle_border),

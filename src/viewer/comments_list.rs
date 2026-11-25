@@ -61,10 +61,6 @@ impl CommentsList {
             .collect()
     }
 
-    pub const fn is_empty(&self) -> bool {
-        self.threads.is_empty()
-    }
-
     pub fn thread_under_cursor(&self) -> Option<&ThreadId> {
         self.threads
             .get(self.cursor)
@@ -77,17 +73,6 @@ impl CommentsList {
 
     pub const fn cursor_up(&mut self) {
         self.cursor = self.cursor.saturating_sub(1);
-    }
-
-    /// A click on a row puts the cursor there.
-    pub fn move_cursor_to(&mut self, id: &ThreadId) {
-        if let Some(position) = self
-            .threads
-            .iter()
-            .position(|listed| listed.thread.id == *id)
-        {
-            self.cursor = position;
-        }
     }
 }
 

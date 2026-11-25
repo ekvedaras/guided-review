@@ -202,10 +202,7 @@ impl Render for CommentsSheet {
                     .flat_map(|chord| chord.caps().map(KeyLabel::of)),
             )
             .collect();
-        let title = match rows.len() {
-            0 => "Comments".to_owned(),
-            count => format!("Comments ({count})"),
-        };
+        let title = format!("Comments ({})", rows.len());
         let header = div()
             .px_5()
             .pt_4()

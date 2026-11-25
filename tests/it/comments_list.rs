@@ -211,7 +211,7 @@ fn a_thread_no_screen_shows_comes_last_with_no_screen() {
 }
 
 #[test]
-fn the_cursor_moves_over_the_rows_stops_at_the_ends_and_goes_to_a_clicked_row() {
+fn the_cursor_moves_over_the_rows_and_stops_at_the_ends() {
     let shop = Shop::with_pull();
     let review = shop.open_with(
         two_steps(),
@@ -243,11 +243,6 @@ fn the_cursor_moves_over_the_rows_stops_at_the_ends_and_goes_to_a_clicked_row() 
     );
     let under: Vec<bool> = list.rows().iter().map(|row| row.is_under_cursor).collect();
     assert_eq!(under, [false, true]);
-
-    list.move_cursor_to(&ThreadId::new("on-order"));
-    assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("on-order")));
-    list.move_cursor_to(&ThreadId::new("gone"));
-    assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("on-order")));
 }
 
 #[test]

@@ -27,7 +27,7 @@ use super::diagram::{DiagramSet, DiagramView};
 use super::diff_view::{byte_at, with_selection};
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
-use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, inside_edge};
+use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, Tone, inside_edge};
 use super::picture_zoom::{ZoomedPicture, zoom_picture};
 use super::svg_picture;
 
@@ -755,6 +755,7 @@ fn table_view(
                             cell,
                             &format!("{row_key}-{index}"),
                             selectable_as,
+                            Tone::Neutral,
                             cx,
                         ));
                     cell_view.style().flex_grow = Some(column.weight);
@@ -909,6 +910,7 @@ fn code_line(colors: &Colors, line: &CodeLine) -> Div {
 pub struct InlineMarkdown {
     key: SharedString,
     text: Rc<InlineText>,
+    ground: Tone,
 }
 
 impl InlineMarkdown {
@@ -916,13 +918,27 @@ impl InlineMarkdown {
         Self {
             key: key.into(),
             text: parsed_inline(source),
+            ground: Tone::Neutral,
         }
+    }
+
+    /// Drawn on a callout of `tone`, so its inline code takes that tone's ground.
+    pub const fn on(mut self, tone: Tone) -> Self {
+        self.ground = tone;
+        self
     }
 }
 
 impl RenderOnce for InlineMarkdown {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        styled_text(&Colors::active(cx), &self.text, &self.key, None, cx)
+        styled_text(
+            &Colors::active(cx),
+            &self.text,
+            &self.key,
+            None,
+            self.ground,
+            cx,
+        )
     }
 }
 
@@ -977,7 +993,14 @@ fn inline_text(
 ) -> AnyElement {
     div()
         .text_size(gpui::rems(scale))
-        .child(styled_text(colors, text, key, selectable_as, cx))
+        .child(styled_text(
+            colors,
+            text,
+            key,
+            selectable_as,
+            Tone::Neutral,
+            cx,
+        ))
         .into_any_element()
 }
 
@@ -1051,9 +1074,9 @@ impl InlineText {
     }
 
     /// The rounded grounds of its inline code; `None` when it has none.
-    fn code_backgrounds(&self, layout: &TextLayout) -> Option<AnyElement> {
+    fn code_backgrounds(&self, layout: &TextLayout, ground: Tone) -> Option<AnyElement> {
         (!self.code_ranges.is_empty())
-            .then(|| code_backgrounds(layout.clone(), self.code_ranges.clone()))
+            .then(|| code_backgrounds(layout.clone(), self.code_ranges.clone(), ground))
     }
 
     /// How wide the text is in a table column, in `text_units`.
@@ -1077,6 +1100,7 @@ fn styled_text(
     inline: &Rc<InlineText>,
     key: &str,
     selectable_as: Option<&SharedString>,
+    ground: Tone,
     cx: &mut App,
 ) -> AnyElement {
     let row = selectable_as.map(|body| {
@@ -1103,7 +1127,7 @@ fn styled_text(
                 .map(|range| (range, code_font.clone())),
         );
     let layout = styled.layout().clone();
-    let backgrounds = inline.code_backgrounds(&layout);
+    let backgrounds = inline.code_backgrounds(&layout, ground);
     let text = selectable_text(styled_links(styled, inline, key), row, layout);
     match backgrounds {
         Some(backgrounds) => div()
@@ -1181,12 +1205,12 @@ fn styled_links(styled: StyledText, inline: &Rc<InlineText>, key: &str) -> AnyEl
 
 /// Rounded backgrounds behind inline code, one per line a code run covers. Drawn under the text,
 /// which is laid out by the time this paints.
-fn code_backgrounds(layout: TextLayout, ranges: Vec<Range<usize>>) -> AnyElement {
+fn code_backgrounds(layout: TextLayout, ranges: Vec<Range<usize>>, ground: Tone) -> AnyElement {
     canvas(
         |_, _, _| (),
         move |_, (), window, cx| {
             let colors = Colors::active(cx);
-            let (color, edge) = (colors.inline_code, colors.subtle_border);
+            let (color, edge) = colors.code_ground(ground);
             let line_height = layout.line_height();
             let inset = line_height * 0.1;
             let text = layout.text();
