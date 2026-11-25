@@ -5,13 +5,14 @@ use guided_review::viewer::{ClonePort, CodeHost, HostError, NoHost, ReviewThread
 
 use super::{PullOnHost, hosts, pr};
 
-fn offered(host: &dyn CodeHost) -> [bool; 5] {
+fn offered(host: &dyn CodeHost) -> [bool; 6] {
     [
         host.viewed_marks().is_some(),
         host.merging().is_some(),
         host.pull_request_reactions().is_some(),
         host.picture_uploads().is_some(),
         host.issue_tracker().is_some(),
+        host.change_requests().is_some(),
     ]
 }
 
@@ -19,13 +20,13 @@ fn offered(host: &dyn CodeHost) -> [bool; 5] {
 fn github_offers_every_capability() {
     assert_eq!(
         offered(hosts::github(PullOnHost::default()).as_ref()),
-        [true; 5]
+        [true; 6]
     );
 }
 
 #[test]
 fn no_host_offers_no_capability() {
-    assert_eq!(offered(&NoHost::default()), [false; 5]);
+    assert_eq!(offered(&NoHost::default()), [false; 6]);
 }
 
 #[test]

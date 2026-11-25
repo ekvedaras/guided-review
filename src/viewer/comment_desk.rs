@@ -2,17 +2,18 @@ use super::thread_actions::TourFreshness;
 use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::ask::Ask;
+use super::capability::{Capability, HostCapabilities};
 use super::comment_send::{CommentOutcome, CommentRequest, Origin, Outcome};
 use super::comments::Audience;
 use super::comments::{
     CommentDraft, CommentPlace, CommentProblem, CommentRefusal, CommentResult, SendMode,
 };
 use super::diff_line::DiffLine;
+use super::finish_review::ReviewVerdict;
 use super::finish_review::{FinishOutcome, FinishRefusal, FinishRequest, FinishResult};
 use super::hand_offs::{SentComment, SentFrom};
 use super::line_location::{LineLocation, Side};
 use super::local_thread_store::ThreadHome;
-use super::ports::ReviewVerdict;
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -43,6 +44,8 @@ pub(super) struct CommentDesk {
     /// left open is given up with the app.
     delete_asked: Option<CommentId>,
     boxes: BoxActivity,
+    /// What the PR's host offers, so a verdict it lacks is refused before anything is sent.
+    host: HostCapabilities,
 }
 
 /// What the comment boxes are doing. Not saved, but kept when a re-pin reopens the review.
@@ -135,6 +138,13 @@ pub enum BoxState {
 }
 
 impl CommentDesk {
+    pub(super) fn for_host(host: HostCapabilities) -> Self {
+        Self {
+            host,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn pending_review_is(&mut self, exists: bool) {
         self.pending_review = PendingReview::exists(exists);
     }
@@ -153,6 +163,10 @@ impl CommentDesk {
 
     pub(super) fn can_approve_or_request_changes(&self) -> bool {
         self.authorship == PullRequestAuthorship::OwnedBySomeoneElse
+    }
+
+    pub(super) fn can_request_changes(&self) -> bool {
+        self.host.has(Capability::ChangeRequests) && self.can_approve_or_request_changes()
     }
 
     pub(super) fn can_finish_review(&self) -> bool {
@@ -708,6 +722,9 @@ impl CommentDesk {
         let judges = verdict != ReviewVerdict::Comment;
         if judges && !self.can_approve_or_request_changes() {
             return Err(FinishRefusal::OwnPullRequest);
+        }
+        if verdict == ReviewVerdict::RequestChanges && !self.host.has(Capability::ChangeRequests) {
+            return Err(FinishRefusal::NotOffered(Capability::ChangeRequests));
         }
         let has_text = !body.trim().is_empty();
         let needs_text = match verdict {

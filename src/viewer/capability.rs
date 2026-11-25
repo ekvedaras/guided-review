@@ -6,15 +6,17 @@ pub enum Capability {
     PullRequestReactions,
     PictureUploads,
     IssueTracker,
+    ChangeRequests,
 }
 
 impl Capability {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::ViewedMarks,
         Self::Merging,
         Self::PullRequestReactions,
         Self::PictureUploads,
         Self::IssueTracker,
+        Self::ChangeRequests,
     ];
 
     const fn bit(self) -> u8 {
@@ -30,6 +32,7 @@ impl std::fmt::Display for Capability {
             Self::PullRequestReactions => "reactions on a PR",
             Self::PictureUploads => "picture uploads",
             Self::IssueTracker => "issue tracker",
+            Self::ChangeRequests => "requests for changes",
         })
     }
 }
@@ -37,8 +40,8 @@ impl std::fmt::Display for Capability {
 /// The capabilities a code host offers, read once from its ports (`HostCapabilities::of`). The
 /// review's work is planned on the UI thread and run with the ports lent on another, so the review
 /// cannot hold a port; it holds this. Each part of a review that shows a capability is built from it,
-/// so none shows a feature its host lacks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// so none shows a feature its host lacks. The default is a host that offers none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HostCapabilities {
     offered: u8,
 }

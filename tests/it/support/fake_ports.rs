@@ -28,15 +28,16 @@ use guided_review::issue::IssueUrl;
 use guided_review::navigation::{ServerMessage, ServerMessages};
 use guided_review::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName, Sha};
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
-    Checks, ClonePort, CodeHost, CommentId, CommentPlace, HostError, HostedCodePort, IssueDetails,
-    IssueDetailsPort, MergingPort, NoAccess, NotDelivered, OpenPrStatus, PictureUploadPort,
-    PrStatus, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin,
-    PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort,
-    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
-    RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
-    ReviewVerdict, ReviewWritesPort, SendMode, Standing, SubmittedReview, ThreadComment, ThreadId,
-    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeRequestsPort,
+    ChangeTipsPort, Checks, ClonePort, CodeHost, CommentId, CommentPlace, HostError,
+    HostedCodePort, IssueDetails, IssueDetailsPort, MergingPort, NoAccess, NotDelivered,
+    OpenPrStatus, PictureUploadPort, PrStatus, PullOfBranch, PullRequestDescriptionPort,
+    PullRequestIssues, PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort,
+    PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
+    ReactionCount, Readiness, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
+    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
+    Standing, SubmittedReview, ThreadComment, ThreadId, TurnStopper, Viewed, ViewedFile,
+    ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -540,6 +541,10 @@ impl CodeHost for FakeHost {
     fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort> {
         self.offers(Capability::IssueTracker).then_some(self)
     }
+
+    fn change_requests(&self) -> Option<&dyn ChangeRequestsPort> {
+        self.offers(Capability::ChangeRequests).then_some(self)
+    }
 }
 
 impl HostedCodePort for FakeHost {
@@ -977,12 +982,23 @@ impl ReviewWritesPort for FakeHost {
         Ok(())
     }
 
-    fn submit_review(
-        &self,
-        _pr: &PullRequestUrl,
-        verdict: ReviewVerdict,
-        body: &str,
-    ) -> Result<(), HostError> {
+    fn submit_review(&self, _pr: &PullRequestUrl, body: &str) -> Result<(), HostError> {
+        self.send_review(ReviewVerdict::Comment, body)
+    }
+
+    fn approve(&self, _pr: &PullRequestUrl, body: &str) -> Result<(), HostError> {
+        self.send_review(ReviewVerdict::Approve, body)
+    }
+}
+
+impl ChangeRequestsPort for FakeHost {
+    fn request_changes(&self, _pr: &PullRequestUrl, body: &str) -> Result<(), HostError> {
+        self.send_review(ReviewVerdict::RequestChanges, body)
+    }
+}
+
+impl FakeHost {
+    fn send_review(&self, verdict: ReviewVerdict, body: &str) -> Result<(), HostError> {
         self.sent.record(HostCall::Submit {
             verdict,
             body: body.to_owned(),

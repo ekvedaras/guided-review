@@ -6,8 +6,8 @@ use crate::support::line;
 use guided_review::github::GitHub;
 use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::viewer::{
-    CommentId, CommentPlace, HostError, LineLocation, Reaction, ReactionChange, ReactionCount,
-    Resolution, ReviewOutcome, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, ReviewerKind,
+    ChangeRequestsPort, CommentId, CommentPlace, HostError, LineLocation, Reaction, ReactionChange,
+    ReactionCount, Resolution, ReviewOutcome, ReviewThreadsPort, ReviewWritesPort, ReviewerKind,
     SendMode, Side, Stance, ThreadId,
 };
 
@@ -627,9 +627,7 @@ fn a_reaction_is_added_and_removed_with_githubs_content_name() {
 fn the_pending_review_is_sent_with_the_verdict_and_body() {
     let (url, asked) = serve_graphql(vec![PENDING.into(), OK.into()]);
 
-    GitHub::at(&url)
-        .submit_review(&pr(), ReviewVerdict::RequestChanges, "fix it")
-        .unwrap();
+    GitHub::at(&url).request_changes(&pr(), "fix it").unwrap();
 
     let asked = asked_as_json(&asked);
     assert!(
@@ -648,9 +646,7 @@ fn the_pending_review_is_sent_with_the_verdict_and_body() {
 fn without_a_pending_review_a_new_review_carries_the_verdict() {
     let (url, asked) = serve_graphql(vec![NO_PENDING.into(), PULL_ID.into(), OK.into()]);
 
-    GitHub::at(&url)
-        .submit_review(&pr(), ReviewVerdict::Approve, "")
-        .unwrap();
+    GitHub::at(&url).approve(&pr(), "").unwrap();
 
     let asked = asked_as_json(&asked);
     assert!(
@@ -800,9 +796,7 @@ fn a_new_review_github_answers_with_one_pending_review_is_a_failure_to_send() {
         ONE_PENDING_REVIEW.into(),
     ]);
 
-    let error = GitHub::at(&url)
-        .submit_review(&pr(), ReviewVerdict::Approve, "")
-        .unwrap_err();
+    let error = GitHub::at(&url).approve(&pr(), "").unwrap_err();
 
     assert!(matches!(error, HostError::Other(_)), "{error:?}");
     assert!(

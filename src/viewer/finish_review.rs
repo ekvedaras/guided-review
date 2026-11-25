@@ -1,9 +1,18 @@
-use super::ports::ReviewVerdict;
 use std::fmt;
 
 use crate::pull_request::PullRequestUrl;
 
-use super::ports::{HostError, ReviewWritesPort};
+use super::capability::Capability;
+use super::ports::{CodeHost, HostError};
+
+/// What the reviewer's review says of the PR besides its comments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewVerdict {
+    Comment,
+    Approve,
+    /// Only on a host that has requests for changes (`Capability::ChangeRequests`).
+    RequestChanges,
+}
 
 /// What finishing does: a PR takes a review on GitHub; a local review sends its queued tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,6 +41,8 @@ pub enum FinishRefusal {
     NoAccess(String),
     /// A local review has no PR to send a review to.
     NoPullRequest,
+    /// The PR's host has no such verdict.
+    NotOffered(Capability),
 }
 
 impl fmt::Display for FinishRefusal {
@@ -46,6 +57,9 @@ impl fmt::Display for FinishRefusal {
             Self::BodyNeeded(_) => f.write_str("Write something, or add comments to the review"),
             Self::NoAccess(reason) => write!(f, "No access to GitHub: {reason}"),
             Self::NoPullRequest => f.write_str("A local review has no pull request to send to"),
+            Self::NotOffered(capability) => {
+                write!(f, "The pull request's host has no {capability}")
+            }
         }
     }
 }
@@ -69,8 +83,17 @@ pub struct FinishOutcome {
 }
 
 impl FinishRequest {
-    pub fn run(self, host: &dyn ReviewWritesPort) -> FinishOutcome {
-        let result = match host.submit_review(&self.pr, self.verdict, &self.body) {
+    pub fn run(self, host: &dyn CodeHost) -> FinishOutcome {
+        let (pr, body) = (&self.pr, self.body.as_str());
+        let sent = match self.verdict {
+            ReviewVerdict::Comment => host.submit_review(pr, body),
+            ReviewVerdict::Approve => host.approve(pr, body),
+            ReviewVerdict::RequestChanges => match host.change_requests() {
+                Some(change_requests) => change_requests.request_changes(pr, body),
+                None => Err(HostError::NotOffered(Capability::ChangeRequests)),
+            },
+        };
+        let result = match sent {
             Ok(()) => FinishResult::Sent,
             Err(HostError::NoAccess(no_access)) => {
                 FinishResult::Refused(FinishRefusal::NoAccess(no_access.into_reason()))

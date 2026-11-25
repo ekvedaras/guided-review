@@ -9,6 +9,7 @@ use crate::coverage;
 use crate::issue::IssueLink;
 use crate::tour::Tour;
 use crate::viewer::branch_link::{BranchOffer, LocalReviewsOfRepo};
+use crate::viewer::finish_review::ReviewVerdict;
 use crate::viewer::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
 };
@@ -16,7 +17,6 @@ use crate::viewer::hidden_text::HiddenText;
 use crate::viewer::host_outage::Affected;
 use crate::viewer::host_outage::Read;
 use crate::viewer::markdown::Markdown;
-use crate::viewer::ports::ReviewVerdict;
 use crate::viewer::ports::{HostError, PullOfBranch};
 use crate::viewer::pr_notes::{Note, NoteSubject, NotesButton, ToNotes, ToNotesOutcome};
 #[cfg(feature = "snapshots")]
@@ -321,6 +321,11 @@ impl ReviewCore {
     pub fn can_approve_or_request_changes(&self) -> bool {
         self.finishes_with_send_tasks().is_none()
             && self.comment_desk.can_approve_or_request_changes()
+    }
+
+    /// Request changes, where the PR's host has it, on a PR someone else wrote.
+    pub fn can_request_changes(&self) -> bool {
+        self.finishes_with_send_tasks().is_none() && self.comment_desk.can_request_changes()
     }
 
     /// On the viewer's own PR there is no verdict to give, so finishing only makes sense with comments

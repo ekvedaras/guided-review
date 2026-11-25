@@ -1,10 +1,10 @@
 use super::comments::{CommentPlace, SendMode};
-use super::ports::ReviewVerdict;
 use super::ports::{
-    ChangeTipsPort, ClonePort, CodeHost, HostError, HostedCodePort, IssueDetailsPort, MergingPort,
-    NoAccess, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
-    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, RelevantPullRequestsPort,
-    Resolution, ReviewThreadsPort, ReviewWritesPort, ViewedFilesPort,
+    ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost, HostError, HostedCodePort,
+    IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
+    PullRequestStatusPort, PullsOfBranchPort, RelevantPullRequestsPort, Resolution,
+    ReviewThreadsPort, ReviewWritesPort, ViewedFilesPort,
 };
 use super::pr_origin::PullRequestOrigin;
 use super::pr_reviewers::PullRequestReviews;
@@ -82,6 +82,10 @@ impl CodeHost for NoHost {
     }
 
     fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort> {
+        None
+    }
+
+    fn change_requests(&self) -> Option<&dyn ChangeRequestsPort> {
         None
     }
 }
@@ -226,12 +230,11 @@ impl ReviewWritesPort for NoHost {
         refused()
     }
 
-    fn submit_review(
-        &self,
-        _pr: &PullRequestUrl,
-        _verdict: ReviewVerdict,
-        _body: &str,
-    ) -> Result<(), HostError> {
+    fn submit_review(&self, _pr: &PullRequestUrl, _body: &str) -> Result<(), HostError> {
+        refused()
+    }
+
+    fn approve(&self, _pr: &PullRequestUrl, _body: &str) -> Result<(), HostError> {
         refused()
     }
 }

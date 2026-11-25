@@ -6,8 +6,8 @@ use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    ApproveWarning, FinishRefusal, FinishResult, Review, ReviewOutcome, ReviewStateFile,
-    ReviewVerdict, SubmittedReview, TextBox,
+    ApproveWarning, Capability, FinishRefusal, FinishResult, HostCapabilities, Review,
+    ReviewOutcome, ReviewStateFile, ReviewVerdict, SubmittedReview, TextBox,
 };
 use serde_json::json;
 
@@ -45,6 +45,10 @@ impl Pull {
     }
 
     fn open(&self) -> Review {
+        self.open_on(crate::support::fake_ports::every_capability())
+    }
+
+    fn open_on(&self, host: HostCapabilities) -> Review {
         let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
@@ -65,7 +69,7 @@ impl Pull {
             tour,
             &source,
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
-            crate::support::fake_ports::every_capability(),
+            host,
         )
         .unwrap()
     }
@@ -211,6 +215,46 @@ fn a_comment_review_with_no_text_needs_a_pending_review_to_send() {
         review.finish_review(ReviewVerdict::Comment, "", &host),
         FinishResult::Sent
     );
+}
+
+#[test]
+fn a_host_with_no_requests_for_changes_is_asked_for_none() {
+    let pull = Pull::new();
+    let host = pull.host().without(Capability::ChangeRequests);
+    let mut review = pull.open_on(HostCapabilities::of(&host));
+    review.pull_viewer_authorship(&host).unwrap();
+
+    assert!(review.can_approve_or_request_changes(), "approving is core");
+    assert!(!review.can_request_changes());
+    assert_eq!(
+        review.finish_review(ReviewVerdict::RequestChanges, "fix it", &host),
+        FinishResult::Refused(FinishRefusal::NotOffered(Capability::ChangeRequests))
+    );
+    assert!(
+        !pull
+            .sent
+            .host_calls()
+            .iter()
+            .any(|call| matches!(call, HostCall::Submit { .. }))
+    );
+}
+
+#[test]
+fn a_host_with_requests_for_changes_is_sent_one() {
+    let pull = Pull::new();
+    let host = pull.host();
+    let mut review = pull.open();
+    review.pull_viewer_authorship(&host).unwrap();
+
+    assert!(review.can_request_changes());
+    assert_eq!(
+        review.finish_review(ReviewVerdict::RequestChanges, "fix it", &host),
+        FinishResult::Sent
+    );
+    assert!(pull.sent.host_calls().contains(&HostCall::Submit {
+        verdict: ReviewVerdict::RequestChanges,
+        body: "fix it".into()
+    }));
 }
 
 #[test]

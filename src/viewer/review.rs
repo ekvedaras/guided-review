@@ -781,7 +781,7 @@ impl ReviewCore {
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
-            comment_desk: CommentDesk::default(),
+            comment_desk: CommentDesk::for_host(host),
             display_options,
             pr_notes: PrNotes::for_host(host),
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),

@@ -21,15 +21,15 @@ use crate::viewer::{
     PrStatus, Readiness,
 };
 use crate::viewer::{
-    AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, ClonePort, CodeHost, CommentId,
-    CommentPlace, HeadBranch, HostError, HostedCodePort, IssueDetails, IssueDetailsPort,
-    IssueState, MergeRoute, MergingPort, NoAccess, OutageCause, PictureUploadPort, PrAuthor,
-    PullOfBranch, PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin,
-    PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort,
-    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, RelatedIssue, Resolution,
-    ReviewOutcome, ReviewRecord, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort,
-    Reviewer, ReviewersOnGitHub, SendMode, Side, SubmittedReview, ThreadComment, ThreadId, Viewed,
-    ViewedFile, ViewedFilesPort, ViewedState,
+    AvatarPort, ChangeRequestsPort, ChangeTipsPort, CheckRun, CheckState, Checks, ClonePort,
+    CodeHost, CommentId, CommentPlace, HeadBranch, HostError, HostedCodePort, IssueDetails,
+    IssueDetailsPort, IssueState, MergeRoute, MergingPort, NoAccess, OutageCause,
+    PictureUploadPort, PrAuthor, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues,
+    PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews,
+    PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount,
+    RelatedIssue, Resolution, ReviewOutcome, ReviewRecord, ReviewThread, ReviewThreadsPort,
+    ReviewWritesPort, Reviewer, ReviewersOnGitHub, SendMode, Side, SubmittedReview, ThreadComment,
+    ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 #[derive(Clone)]
@@ -356,7 +356,7 @@ impl GitHub {
     fn submit_pending_review(
         &self,
         review_id: &str,
-        verdict: ReviewVerdict,
+        verdict: ReviewEvent,
         body: &str,
     ) -> Result<(), HostError> {
         self.graphql(
@@ -365,10 +365,36 @@ impl GitHub {
             }",
             &serde_json::json!({"input": {
                 "pullRequestReviewId": review_id,
-                "event": verdict.github_name(),
+                "event": verdict.name(),
                 "body": body,
             }}),
         )?;
+        Ok(())
+    }
+
+    /// Sends the viewer's pending review, or a new review with just the verdict and body when there is none.
+    fn send_review(
+        &self,
+        pr: &PullRequestUrl,
+        verdict: ReviewEvent,
+        body: &str,
+    ) -> Result<(), HostError> {
+        if let Some(review_id) = self.pending_review_id(pr)? {
+            return self
+                .submit_pending_review(&review_id, verdict, body)
+                .map_err(|error| error.context("could not send the review"));
+        }
+        self.graphql(
+            "mutation($input: AddPullRequestReviewInput!) {
+                addPullRequestReview(input: $input) { clientMutationId }
+            }",
+            &serde_json::json!({"input": {
+                "pullRequestId": self.pull_request_id(pr)?,
+                "event": verdict.name(),
+                "body": body,
+            }}),
+        )
+        .map_err(|error| error.context("could not send the review"))?;
         Ok(())
     }
 
@@ -943,6 +969,10 @@ impl CodeHost for GitHub {
     fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort> {
         Some(self)
     }
+
+    fn change_requests(&self) -> Option<&dyn ChangeRequestsPort> {
+        Some(self)
+    }
 }
 
 impl PullRequestReactionsPort for GitHub {
@@ -1119,7 +1149,7 @@ impl ReviewThreadsPort for GitHub {
             let review_id = self
                 .review_holding_new_comment(pr, non_empty_id(at(review, "/id")))
                 .map_err(|error| error.context("could not post the reply"))?;
-            self.submit_pending_review(&review_id, ReviewVerdict::Comment, "")
+            self.submit_pending_review(&review_id, ReviewEvent::Comment, "")
                 .map_err(|error| error.context("could not post the reply"))?;
         }
         Ok(reply)
@@ -1366,30 +1396,36 @@ impl ReviewWritesPort for GitHub {
         Ok(())
     }
 
-    /// Sends the viewer's pending review, or a new review with just the verdict and body when there is none.
-    fn submit_review(
-        &self,
-        pr: &PullRequestUrl,
-        verdict: ReviewVerdict,
-        body: &str,
-    ) -> Result<(), HostError> {
-        if let Some(review_id) = self.pending_review_id(pr)? {
-            return self
-                .submit_pending_review(&review_id, verdict, body)
-                .map_err(|error| error.context("could not send the review"));
+    fn submit_review(&self, pr: &PullRequestUrl, body: &str) -> Result<(), HostError> {
+        self.send_review(pr, ReviewEvent::Comment, body)
+    }
+
+    fn approve(&self, pr: &PullRequestUrl, body: &str) -> Result<(), HostError> {
+        self.send_review(pr, ReviewEvent::Approve, body)
+    }
+}
+
+impl ChangeRequestsPort for GitHub {
+    fn request_changes(&self, pr: &PullRequestUrl, body: &str) -> Result<(), HostError> {
+        self.send_review(pr, ReviewEvent::RequestChanges, body)
+    }
+}
+
+/// GitHub's `PullRequestReviewEvent`: what a review it is sent says of the PR.
+#[derive(Debug, Clone, Copy)]
+enum ReviewEvent {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+impl ReviewEvent {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Comment => "COMMENT",
+            Self::Approve => "APPROVE",
+            Self::RequestChanges => "REQUEST_CHANGES",
         }
-        self.graphql(
-            "mutation($input: AddPullRequestReviewInput!) {
-                addPullRequestReview(input: $input) { clientMutationId }
-            }",
-            &serde_json::json!({"input": {
-                "pullRequestId": self.pull_request_id(pr)?,
-                "event": verdict.github_name(),
-                "body": body,
-            }}),
-        )
-        .map_err(|error| error.context("could not send the review"))?;
-        Ok(())
     }
 }
 

@@ -204,13 +204,18 @@ pub trait ReviewWritesPort: Send + Sync {
         body: &str,
     ) -> Result<(), HostError>;
 
-    /// Sends the pending review, or a new review when there is none.
-    fn submit_review(
-        &self,
-        pr: &PullRequestUrl,
-        verdict: ReviewVerdict,
-        body: &str,
-    ) -> Result<(), HostError>;
+    /// Sends the pending review, or a new review when there is none, with no verdict.
+    fn submit_review(&self, pr: &PullRequestUrl, body: &str) -> Result<(), HostError>;
+
+    /// Sends the pending review, or a new review when there is none, approving the PR.
+    fn approve(&self, pr: &PullRequestUrl, body: &str) -> Result<(), HostError>;
+}
+
+/// A review that asks the PR's author for changes before it can merge. Optional: GitLab has it only
+/// in its newer versions, and a self-managed GitLab may be older (not checked).
+pub trait ChangeRequestsPort: Send + Sync {
+    /// Sends the pending review, or a new review when there is none, requesting changes.
+    fn request_changes(&self, pr: &PullRequestUrl, body: &str) -> Result<(), HostError>;
 }
 
 /// Everything the viewer core asks of the code host (GitHub now), for the app that holds one
@@ -241,6 +246,8 @@ pub trait CodeHost:
     fn picture_uploads(&self) -> Option<&dyn PictureUploadPort>;
 
     fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort>;
+
+    fn change_requests(&self) -> Option<&dyn ChangeRequestsPort>;
 }
 
 impl HostCapabilities {
@@ -255,6 +262,7 @@ impl HostCapabilities {
                     Capability::PullRequestReactions => host.pull_request_reactions().is_some(),
                     Capability::PictureUploads => host.picture_uploads().is_some(),
                     Capability::IssueTracker => host.issue_tracker().is_some(),
+                    Capability::ChangeRequests => host.change_requests().is_some(),
                 }),
         )
     }
@@ -438,22 +446,4 @@ pub trait RefreshWriter: Send + Sync {
     /// thin. An `Ok` says only that the AI ran to its end, not that it refreshed the tour.
     fn refresh(&self, subject: &ReviewSubject, on_line: &mut dyn FnMut(&str))
     -> anyhow::Result<()>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReviewVerdict {
-    Comment,
-    Approve,
-    RequestChanges,
-}
-
-impl ReviewVerdict {
-    /// The `PullRequestReviewEvent` value GitHub's GraphQL API uses.
-    pub fn github_name(self) -> &'static str {
-        match self {
-            Self::Comment => "COMMENT",
-            Self::Approve => "APPROVE",
-            Self::RequestChanges => "REQUEST_CHANGES",
-        }
-    }
 }

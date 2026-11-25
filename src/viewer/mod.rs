@@ -172,6 +172,7 @@ pub use finding_threads::{
 pub use findings_list::{Batch, FindingLine, FindingsList, FindingsListRow};
 pub use finish_review::{
     ApproveWarning, FinishAction, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
+    ReviewVerdict,
 };
 pub use fix_requests::{
     FixNote, FixReply, FixRequest, FixRequests, FixState, FixTiming, NoFixRequest,
@@ -230,11 +231,10 @@ pub use page::{
 };
 pub use piece_diff::PieceDiff;
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
-pub use ports::ReviewVerdict;
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, ClonePort, CodeHost, HostError,
-    HostedCodePort, IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
-    PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
+    AgentLaunch, AgentLauncher, AgentPort, ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost,
+    HostError, HostedCodePort, IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort,
+    PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
     PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, RelevantPullRequestsPort, Resolution,
     ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort,
     ViewedState,
