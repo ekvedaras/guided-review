@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 
+use crate::pull_request::HostSite;
+
 use crate::file_path::FilePath;
 use crate::keys::Command;
 use crate::pieces::{ChangedFile, PieceId};
@@ -229,9 +231,10 @@ pub enum PaletteAction {
     SendTasks,
     /// A local review's ask to its agent to open the PR of its branch.
     OpenPr,
-    OpenOnGitHub,
-    /// GitHub's checks page of the PR.
-    OpenChecksOnGitHub,
+    /// The PR's page on its host, named after the host.
+    OpenOnHost(HostSite),
+    /// The PR's checks page on its host.
+    OpenChecksOnHost(HostSite),
     /// Offered only where the review knows its issue; lists them when there are several.
     OpenIssue,
     /// Offered only where the PR is ready and the viewer may change it.
@@ -282,8 +285,8 @@ impl PaletteAction {
             Self::MarkDone => "Mark review done",
             Self::SendTasks => "Send tasks",
             Self::OpenPr => "Open PR",
-            Self::OpenOnGitHub => "Open on GitHub",
-            Self::OpenChecksOnGitHub => "Open checks on GitHub",
+            Self::OpenOnHost(HostSite::GitHub) => "Open on GitHub",
+            Self::OpenChecksOnHost(HostSite::GitHub) => "Open checks on GitHub",
             Self::OpenIssue => "Open related issue",
             Self::ConvertToDraft => "Convert to draft",
             Self::MarkReadyForReview => "Mark as ready for review",
@@ -330,8 +333,8 @@ impl PaletteAction {
             | Self::FinishReview
             | Self::MarkDone
             | Self::SendTasks
-            | Self::OpenOnGitHub
-            | Self::OpenChecksOnGitHub
+            | Self::OpenOnHost(_)
+            | Self::OpenChecksOnHost(_)
             | Self::CheckForUpdates
             | Self::RestartApp => None,
         }

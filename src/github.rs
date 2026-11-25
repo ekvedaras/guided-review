@@ -12,7 +12,7 @@ use crate::image_facts;
 use crate::issue::{IssueLink, IssueUrl};
 use crate::json::at;
 use crate::line_number::LineNumber;
-use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, HostSite, HostedRepo, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::url_path;
@@ -51,7 +51,7 @@ impl From<anyhow::Error> for HostError {
     /// in one place, by what the HTTP client reported and not by its text.
     fn from(error: anyhow::Error) -> Self {
         match error.downcast_ref::<ureq::Error>().and_then(outage_cause) {
-            Some(cause) => Self::NotAnswering(cause),
+            Some(cause) => Self::NotAnswering(HostSite::GitHub, cause),
             None => Self::Other(error),
         }
     }

@@ -37,6 +37,17 @@ use super::sidebar_row::RowPlace;
 use super::text_box::TextBox;
 use super::text_input::Lines;
 use super::thread_view::avatar_circle;
+use crate::pull_request::HostSite;
+
+/// The list is read from every host the app reads, so the wait names them all; made once, not per frame.
+static LOADING: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "Loading your pull requests from {}...",
+        HostSite::all_named()
+    )
+});
+static REFRESHING: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| format!("Refreshing from {}...", HostSite::all_named()));
 
 /// A row is two lines high, a repo's name one: `PrSwitcher::ROW_LINES` and `HEADING_LINES`.
 const LINE_HEIGHT: Pixels = px(28.);
@@ -844,7 +855,7 @@ impl Render for PrSwitcherView {
             switcher.is_finding_local(),
         );
         let busy: Vec<&str> = [
-            (is_refreshing && !is_loading).then_some("Refreshing from GitHub..."),
+            (is_refreshing && !is_loading).then_some(REFRESHING.as_str()),
             is_finding_local.then_some("Looking in your folders..."),
         ]
         .into_iter()
@@ -869,7 +880,7 @@ impl Render for PrSwitcherView {
             });
         let sticky = self.sticky_heading(&colors).filter(|_| overflows);
         let empty_text = if is_loading {
-            "Loading your pull requests from GitHub..."
+            LOADING.as_str()
         } else {
             "No pull request matches."
         };

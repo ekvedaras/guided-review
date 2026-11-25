@@ -310,7 +310,7 @@ fn a_repo_that_is_not_owner_slash_repo_or_set_twice_blocks_the_save_and_names_it
             SettingProblem::Clone {
                 row: unreadable,
                 clone: CloneRow::new("shop", shop.path().to_path_buf()),
-                problem: CloneRowProblem::NotOwnerSlashRepo
+                problem: CloneRowProblem::NotARepoPath
             },
             SettingProblem::Clone {
                 row: twice,
@@ -665,8 +665,8 @@ fn each_problem_words_the_red_line_under_its_setting() {
         "No remote of this clone points at acme/shop"
     );
     assert_eq!(
-        clone_problem("shop", CloneRowProblem::NotOwnerSlashRepo).message(),
-        "Write the repo as owner/repo"
+        clone_problem("shop", CloneRowProblem::NotARepoPath).message(),
+        "Write the repo as its path on its code host, as owner/repo"
     );
     assert_eq!(
         clone_problem("acme/shop", CloneRowProblem::SameRepoTwice).message(),

@@ -1581,7 +1581,10 @@ impl ReviewSession {
     pub fn stage_outage(&mut self, cx: &mut Context<Self>) {
         use crate::viewer::{HostError, OutageCause, Read};
 
-        let outage = HostError::NotAnswering(OutageCause::ServerError(503));
+        let outage = HostError::NotAnswering(
+            crate::pull_request::HostSite::GitHub,
+            OutageCause::ServerError(503),
+        );
         self.review.could_not_read(Read::PrHead, &outage);
         self.review.could_not_read(Read::PrDescription, &outage);
         self.review.threads_not_read(&outage);
@@ -1986,12 +1989,14 @@ impl ReviewSession {
         }
         #[cfg(feature = "snapshots")]
         if self.is_viewed_wait_staged {
-            use crate::viewer::{Station, StationHealth, StationKind};
-            rows.stations.stage(Station::new(
-                StationKind::Host,
-                StationHealth::Waiting,
-                "3 viewed marks waiting · 4 min",
-            ));
+            use crate::viewer::{Station, StationHealth};
+            if let Some(pr) = self.review.subject().pull_request() {
+                rows.stations.stage(Station::of_host(
+                    pr.host,
+                    StationHealth::Waiting,
+                    "3 viewed marks waiting · 4 min",
+                ));
+            }
         }
         #[cfg(feature = "snapshots")]
         if let Some(station) = &self.staged_station {
@@ -2182,7 +2187,7 @@ impl ReviewSession {
 fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
     let done = match mode {
         SendMode::AddToReview => "added to your review",
-        SendMode::CommentNow => "posted on GitHub",
+        SendMode::CommentNow => "posted",
         SendMode::SendNow => "kept as a task",
         SendMode::AddToTasks => return format!("{what} queued for Send tasks"),
     };

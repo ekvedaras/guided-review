@@ -1,5 +1,6 @@
 use super::active_pr::WritingFact;
 use crate::app_folders::AppFolders;
+use crate::pull_request::HostSite;
 use crate::review_subject::ReviewSubject;
 
 use super::active_pr::ActivePr;
@@ -12,7 +13,7 @@ use crate::tour::ToursOnDisk;
 /// The list behind the PR title: the reviewer's relevant PRs, what each has, and what was typed
 /// to narrow it. It loads in the background, so it starts out loading.
 pub struct PrSwitcher {
-    /// What GitHub listed, newest update first.
+    /// What the hosts listed, newest update first.
     pull_requests: Vec<SwitcherRow>,
     /// The local change sets found on disk, after the PRs.
     local: Vec<SwitcherRow>,
@@ -195,7 +196,8 @@ impl PrSwitcher {
             }
             Err(error) => {
                 self.state = LoadState::Failed(format!(
-                    "Could not list your pull requests from GitHub: {error}"
+                    "Could not list your pull requests from {}: {error}",
+                    HostSite::all_named()
                 ));
                 self.apply_filter();
             }

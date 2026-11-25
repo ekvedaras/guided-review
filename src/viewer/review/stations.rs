@@ -1,6 +1,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::ReviewCore;
+use crate::pull_request::HostSite;
 use crate::viewer::ai_review::AiReview;
 use crate::viewer::ai_review_run::AiReviewRun;
 use crate::viewer::fix_requests::FixState;
@@ -33,8 +34,8 @@ impl ReviewCore {
             self.fixes_station(),
             self.your_review_station(),
         ];
-        if self.subject.pull_request().is_some() {
-            stations.push(self.host_station(now));
+        if let Some(pr) = self.subject.pull_request() {
+            stations.push(self.host_station(pr.host, now));
         }
         Stations::new(stations).with_problems(&self.problems())
     }
@@ -159,8 +160,8 @@ impl ReviewCore {
         }
     }
 
-    fn host_station(&self, now: SystemTime) -> Station {
-        let station = |health, state: String| Station::new(StationKind::Host, health, state);
+    fn host_station(&self, host: HostSite, now: SystemTime) -> Station {
+        let station = |health, state: String| Station::of_host(host, health, state);
         if self.sync_banner().is_some() {
             return station(NotStarted, "viewed marks off".to_owned());
         }

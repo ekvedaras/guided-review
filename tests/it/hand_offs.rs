@@ -924,7 +924,7 @@ fn a_hand_off_that_found_no_thread_is_a_sidebar_problem_until_the_next_one_goes_
         review.problems(),
         [Problem::HandOffNotSent {
             comment: "why ten?".into(),
-            reason: "GitHub shows no thread with the comment".into()
+            reason: "The PR's host shows no thread with the comment".into()
         }]
     );
 

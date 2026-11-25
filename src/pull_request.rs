@@ -110,6 +110,13 @@ impl HostSite {
             Self::GitHub => "GitHub",
         }
     }
+
+    /// The words of a button that opens a page of the host: "Open on GitHub".
+    pub const fn open_on(self) -> &'static str {
+        match self {
+            Self::GitHub => "Open on GitHub",
+        }
+    }
 }
 
 /// A PR: its host, its repo there and its number. Its text form, the subject key, is its page on

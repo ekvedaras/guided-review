@@ -425,7 +425,7 @@ fn a_review_without_a_local_clone_downloads_nothing_and_is_answered_by_name_with
         answer.answered_by,
         AnsweredBy::ByName {
             because: Some(FallbackReason::new(
-                "rust-analyzer needs a local clone, and the code is read from GitHub"
+                "rust-analyzer needs a local clone, and the code is read from the PR's host"
             ))
         }
     );

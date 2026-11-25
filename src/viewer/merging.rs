@@ -107,10 +107,10 @@ pub enum MergeRefusal {
 impl fmt::Display for MergeRefusal {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str(match self {
-            Self::MayNotDisableAutoMerge => "GitHub does not let you turn off this PR's auto-merge",
+            Self::MayNotDisableAutoMerge => "You may not turn off this PR's auto-merge",
             Self::MayNotMerge => "Only people with write access can merge the PR",
             Self::RepoDisallowsAutoMerge => "The repo does not allow auto-merge",
-            Self::MayNotEnableAutoMerge => "GitHub does not let you turn on auto-merge for this PR",
+            Self::MayNotEnableAutoMerge => "You may not turn on auto-merge for this PR",
         })
     }
 }

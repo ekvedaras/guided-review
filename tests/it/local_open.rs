@@ -526,7 +526,7 @@ fn open_of_something_that_is_no_link_key_or_folder_says_what_it_takes() {
     assert!(!run.success);
     assert!(
         run.stderr
-            .contains("neither a GitHub PR link, a local change set key nor a folder"),
+            .contains("neither a PR link, a local change set key nor a folder"),
         "stderr: {}",
         run.stderr
     );

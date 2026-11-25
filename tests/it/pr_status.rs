@@ -1,3 +1,4 @@
+use guided_review::pull_request::HostSite;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -389,11 +390,11 @@ fn the_palette_always_offers_the_checks_page_of_a_pr() {
     assert!(
         review
             .palette_actions(Build::Local)
-            .contains(&PaletteAction::OpenChecksOnGitHub)
+            .contains(&PaletteAction::OpenChecksOnHost(HostSite::GitHub))
     );
     assert_eq!(
-        review.decide(Intent::OpenChecksOnGitHub, WindowMoment::default()),
-        Effect::OpenChecksOnGitHub(PR.parse().unwrap())
+        review.decide(Intent::OpenChecksOnHost, WindowMoment::default()),
+        Effect::OpenChecksOnHost(PR.parse().unwrap())
     );
 }
 
@@ -544,7 +545,7 @@ fn clicking_a_check_opens_its_run_and_one_without_a_page_or_the_more_row_opens_t
     let mut review = pull.open();
     pull.read(&mut review, &host, Instant::now());
     let click = |index| review.decide(Intent::OpenCheck(index), WindowMoment::default());
-    let checks_page = Effect::OpenChecksOnGitHub(PR.parse().unwrap());
+    let checks_page = Effect::OpenChecksOnHost(PR.parse().unwrap());
 
     assert_eq!(
         click(0),

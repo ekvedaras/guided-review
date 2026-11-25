@@ -84,7 +84,7 @@ pub fn viewed_marks_of_a_host_not_answering_fail_as_an_outage(host: HostBuilder)
     let read = marks.viewed_files(&pr()).unwrap_err();
     let write = marks.set_file_viewed(&pr(), &file_path("a.rs"), Viewed::Yes);
 
-    assert!(matches!(read, HostError::NotAnswering(_)), "{read:?}");
+    assert!(matches!(read, HostError::NotAnswering(..)), "{read:?}");
     assert!(
         write.is_err(),
         "a write to a host not answering went through"

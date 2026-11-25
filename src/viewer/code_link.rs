@@ -123,10 +123,7 @@ impl Destination {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Ide { .. } => "Open in IDE",
-            Self::OnHost {
-                site: HostSite::GitHub,
-                ..
-            } => "Open on GitHub",
+            Self::OnHost { site, .. } => site.open_on(),
             Self::Browser(_) => "Open link",
             Self::NotOpenable { .. } => "Cannot open",
         }

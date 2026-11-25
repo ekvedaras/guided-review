@@ -17,7 +17,7 @@ use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::issue::IssueUrl;
-use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName};
+use crate::pull_request::{ChangeTips, HostSite, HostedRepo, PullRequestUrl, RepoName};
 use crate::review_subject::{BranchName, ReviewSubject};
 
 /// Makes a clone of a repo of the host, in a folder that does not exist yet, with the reviewer's own
@@ -294,9 +294,9 @@ pub enum HostError {
     /// a refusal, not a failure to show.
     #[error("the code host has no {0}")]
     NotOffered(Capability),
-    /// A server error, a timeout or no connection: GitHub as a whole is not answering.
-    #[error("GitHub is not answering ({0})")]
-    NotAnswering(OutageCause),
+    /// A server error, a timeout or no connection: the host as a whole is not answering.
+    #[error("{host} is not answering ({cause})", host = .0.name(), cause = .1)]
+    NotAnswering(HostSite, OutageCause),
     /// Built from an `anyhow::Error` by `From`, which tells an outage from the rest.
     #[error(transparent)]
     Other(anyhow::Error),

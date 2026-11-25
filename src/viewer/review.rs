@@ -29,7 +29,7 @@ use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::navigation::{FileSearch, Lookups};
 use crate::pieces::{self, ChangedFile, PieceId};
-use crate::pull_request::{ChangeTips, Sha};
+use crate::pull_request::{ChangeTips, HostSite, Sha};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
@@ -658,6 +658,7 @@ impl ReviewCore {
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let subject = tour.pin().subject()?;
+        let pr_host = subject.pull_request().map(|pr| pr.host);
         let code_on_web =
             subject
                 .pull_request()
@@ -767,8 +768,8 @@ impl ReviewCore {
             viewed_sync: ViewedSync::for_host(host),
             problems: {
                 let mut problems = Problems::default();
-                if let Some(reason) = source.fallback_reason() {
-                    problems.raise(Problem::CodeOnGitHub(reason.to_owned()));
+                if let (Some(reason), Some(host)) = (source.fallback_reason(), pr_host) {
+                    problems.raise(Problem::CodeOnHost(host, reason.to_owned()));
                 }
                 if let Some(backup) = saved_review_kept_as {
                     problems.raise(Problem::SavedReviewNotRead(backup));
@@ -862,12 +863,11 @@ impl ReviewCore {
         }
     }
 
-    /// A local review's boxes send tasks for its agent, a PR's send to GitHub.
+    /// A local review's boxes send tasks for its agent, a PR's send to the PR's host.
     pub fn sending(&self) -> Sending {
-        if self.subject.comments_are_agent_tasks() {
-            Sending::Tasks(&SendMode::LOCAL)
-        } else {
-            Sending::Host
+        match self.subject.pull_request() {
+            Some(pr) if !self.subject.comments_are_agent_tasks() => Sending::Host(pr.host),
+            _ => Sending::Tasks(&SendMode::LOCAL),
         }
     }
 
@@ -1022,19 +1022,19 @@ impl ReviewCore {
 
     pub fn could_not_read(&mut self, read: Read, error: &HostError) {
         let affected = Affected::from(read);
-        if let HostError::NotAnswering(cause) = error {
+        if let HostError::NotAnswering(host, cause) = error {
             self.clear_problem(ProblemKind::NotRead(read));
-            self.host_not_answering(*cause, affected);
+            self.host_not_answering(*host, *cause, affected);
         } else {
             self.host_answered(affected);
             self.raise_problem(Problem::NotRead(read, error.short_reason()));
         }
     }
 
-    /// GitHub does not answer: one problem for all the reads that fail, and the read is tried
+    /// The host does not answer: one problem for all the reads that fail, and the read is tried
     /// again by itself, further off each time it fails.
-    fn host_not_answering(&mut self, cause: OutageCause, affected: Affected) {
-        let retry_in = self.problems.host_not_answering(cause, affected);
+    fn host_not_answering(&mut self, host: HostSite, cause: OutageCause, affected: Affected) {
+        let retry_in = self.problems.host_not_answering(host, cause, affected);
         self.work.want_in(affected.retried_by(), retry_in);
     }
 
@@ -1875,10 +1875,10 @@ impl ReviewCore {
             )
             .chain(self.can_open_pr().then_some(PaletteAction::OpenPr))
             .chain((!self.related_issues().is_empty()).then_some(PaletteAction::OpenIssue))
-            .chain(self.subject.pull_request().into_iter().flat_map(|_| {
+            .chain(self.subject.pull_request().into_iter().flat_map(|pr| {
                 [
-                    PaletteAction::OpenOnGitHub,
-                    PaletteAction::OpenChecksOnGitHub,
+                    PaletteAction::OpenOnHost(pr.host),
+                    PaletteAction::OpenChecksOnHost(pr.host),
                 ]
             }))
             .chain([

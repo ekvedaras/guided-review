@@ -397,12 +397,12 @@ fn only_a_pr_can_be_opened_on_github() {
     let local = feature.open();
     let pr = PullRequest::changing_a_file().open();
 
-    assert!(!local.can_open_on_github());
+    assert!(!local.can_open_on_host());
     assert_eq!(
-        local.decide(Intent::OpenOnGitHub, WindowMoment::default()),
+        local.decide(Intent::OpenOnHost, WindowMoment::default()),
         Effect::Nothing
     );
-    assert!(pr.can_open_on_github());
+    assert!(pr.can_open_on_host());
 }
 
 #[test]

@@ -436,9 +436,9 @@ impl ReviewCore {
         });
         self.clear_problem(ProblemKind::ViewedNotSynced);
         match error {
-            Some(HostError::NotAnswering(cause)) => {
-                self.host_not_answering(cause, Affected::ViewedMarks);
-                Err(HostError::NotAnswering(cause).into())
+            Some(HostError::NotAnswering(host, cause)) => {
+                self.host_not_answering(host, cause, Affected::ViewedMarks);
+                Err(HostError::NotAnswering(host, cause).into())
             }
             Some(error) => {
                 self.host_answered(Affected::ViewedMarks);

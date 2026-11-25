@@ -197,7 +197,7 @@ impl SettingProblem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloneRowProblem {
-    NotOwnerSlashRepo,
+    NotARepoPath,
     SameRepoTwice,
     FolderGone,
     NoRemoteOfRepo,
@@ -206,7 +206,9 @@ pub enum CloneRowProblem {
 impl CloneRowProblem {
     pub fn message(self, clone: &CloneRow) -> String {
         match self {
-            Self::NotOwnerSlashRepo => "Write the repo as owner/repo".to_owned(),
+            Self::NotARepoPath => {
+                "Write the repo as its path on its code host, as owner/repo".to_owned()
+            }
             Self::SameRepoTwice => format!("{} is set twice", clone.repo),
             Self::FolderGone => "This folder is gone".to_owned(),
             Self::NoRemoteOfRepo => {
@@ -495,7 +497,7 @@ impl Settings {
 
     fn check_clone(&self, clone: &CloneRow, rows_before: &[CloneRow]) -> Option<CloneRowProblem> {
         let Some(repo) = clone.hosted_repo() else {
-            return Some(CloneRowProblem::NotOwnerSlashRepo);
+            return Some(CloneRowProblem::NotARepoPath);
         };
         if rows_before.iter().any(|before| before.repo == clone.repo) {
             return Some(CloneRowProblem::SameRepoTwice);

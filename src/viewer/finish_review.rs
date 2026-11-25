@@ -55,7 +55,7 @@ impl fmt::Display for FinishRefusal {
                 f.write_str("Say what needs to change")
             }
             Self::BodyNeeded(_) => f.write_str("Write something, or add comments to the review"),
-            Self::NoAccess(reason) => write!(f, "No access to GitHub: {reason}"),
+            Self::NoAccess(reason) => write!(f, "No access to the PR's host: {reason}"),
             Self::NoPullRequest => f.write_str("A local review has no pull request to send to"),
             Self::NotOffered(capability) => {
                 write!(f, "The pull request's host has no {capability}")

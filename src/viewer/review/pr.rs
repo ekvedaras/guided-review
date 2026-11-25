@@ -118,7 +118,7 @@ impl ReviewCore {
     }
 
     /// Whether the review has a PR page to open.
-    pub fn can_open_on_github(&self) -> bool {
+    pub fn can_open_on_host(&self) -> bool {
         self.subject.has_host_page()
     }
 

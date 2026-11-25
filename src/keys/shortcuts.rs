@@ -146,7 +146,7 @@ pub enum Command {
     ToggleFold,
     Settings,
     Shortcuts,
-    OpenOnGitHub,
+    OpenOnHost,
     OpenIssue,
     OpenPr,
     SwitchPr,
@@ -230,7 +230,7 @@ impl Command {
         Self::ToggleFold,
         Self::Settings,
         Self::Shortcuts,
-        Self::OpenOnGitHub,
+        Self::OpenOnHost,
         Self::OpenIssue,
         Self::OpenPr,
         Self::SwitchPr,
@@ -271,7 +271,7 @@ impl Command {
             Self::AskAboutStep => &[A],
             Self::Settings => &[PRIMARY_COMMA],
             Self::Shortcuts => &[QUESTION],
-            Self::OpenOnGitHub => &[G],
+            Self::OpenOnHost => &[G],
             Self::OpenIssue => &[I],
             Self::OpenPr => &[P],
             Self::SwitchPr => &[PRIMARY_P],
@@ -313,7 +313,7 @@ impl Command {
             Self::ToggleFold => "toggle_fold",
             Self::Settings => "settings",
             Self::Shortcuts => "shortcuts",
-            Self::OpenOnGitHub => "open_on_github",
+            Self::OpenOnHost => "open_on_host",
             Self::OpenIssue => "open_issue",
             Self::OpenPr => "open_pr",
             Self::SwitchPr => "switch_pr",
@@ -324,10 +324,19 @@ impl Command {
         }
     }
 
+    /// A name the command was written under before, still read: `open_on_github`, from before the
+    /// app named code hosts. Settings writes the new name in its place.
+    pub fn former_config_name(self) -> Option<&'static str> {
+        match self {
+            Self::OpenOnHost => Some("open_on_github"),
+            _ => None,
+        }
+    }
+
     pub fn of_config_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|command| command.config_name() == name)
+        Self::ALL.into_iter().find(|command| {
+            command.config_name() == name || command.former_config_name() == Some(name)
+        })
     }
 
     pub fn scope(self) -> KeyScope {
@@ -351,7 +360,7 @@ impl Command {
             | Self::TogglePieceLabels
             | Self::ToggleFold
             | Self::Shortcuts
-            | Self::OpenOnGitHub
+            | Self::OpenOnHost
             | Self::OpenIssue
             | Self::OpenPr
             | Self::ToggleDraft
@@ -396,7 +405,7 @@ impl Command {
             | Self::ToggleFold => ShortcutGroup::View,
             Self::Settings
             | Self::Shortcuts
-            | Self::OpenOnGitHub
+            | Self::OpenOnHost
             | Self::OpenIssue
             | Self::OpenPr
             | Self::SwitchPr
@@ -438,10 +447,8 @@ impl Command {
             Self::ToggleFold => "Open all the pieces of a folded step, or fold them again",
             Self::Settings => "Settings",
             Self::Shortcuts => "This list of shortcuts",
-            Self::OpenOnGitHub => "Open the pull request on GitHub",
-            Self::OpenIssue => {
-                "Open the related issue on GitHub, or list them when there are several"
-            }
+            Self::OpenOnHost => "Open the pull request on its code host",
+            Self::OpenIssue => "Open the related issue, or list them when there are several",
             Self::SwitchPr => "Switch to another pull request or local review",
             Self::OpenPr => "Ask your agent to open a pull request for the branch",
             Self::ToggleDraft => {

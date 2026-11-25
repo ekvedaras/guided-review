@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::app_folders::NotRead;
 use crate::local_reviews_on_disk::UnreadableLocalTour;
+use crate::pull_request::HostSite;
 use crate::update::InTheWay;
 
 use super::host_outage::{Affected, Outage, OutageCause, waiting};
@@ -21,21 +22,21 @@ pub enum Problem {
     NotSaved(String),
     /// A tick or typed text made while the re-pin ran; the re-pinned review will not have it.
     ChangeNotKeptWhileRepinning,
-    /// The threads shown are as GitHub had them at the last read that went through.
+    /// The threads shown are as the host had them at the last read that went through.
     ThreadsNotRead(String),
-    /// GitHub does not answer: one problem for all the reads that failed because of it.
+    /// The host does not answer: one problem for all the reads that failed because of it.
     HostNotAnswering(Outage),
-    /// A read from GitHub failed, so what the screen shows for it is missing or as of an earlier read.
+    /// A read from the host failed, so what the screen shows for it is missing or as of an earlier read.
     NotRead(Read, String),
     /// A code link was clicked and its IDE command could not be run, so nothing opened.
     IdeNotStarted(String),
-    /// The local clone could not give the commits, so code opens on GitHub and not in the IDE.
-    CodeOnGitHub(String),
+    /// The local clone could not give the commits, so code opens on the PR's host and not in the IDE.
+    CodeOnHost(HostSite, String),
     /// The saved review could not be read, so this one starts empty; the old file is kept at the path.
     SavedReviewNotRead(PathBuf),
     /// Parts of the saved review a newer build wrote, which this build leaves in the file as they are.
     SavedReviewPartsNotRead(String),
-    /// Ticks wait in the queue to reach GitHub's viewed marks, and GitHub may show them as unviewed.
+    /// Ticks wait in the queue to reach the host's viewed marks, and the host may show them as unviewed.
     ViewedNotSynced(String),
     /// The AI Refresh ended and the steps marked as old are still as they were.
     TourNotRefreshed(String),
@@ -48,7 +49,7 @@ pub enum Problem {
     FolderNotLookedAt(String),
     /// Not now was clicked on a move offer and the choice could not be written, so the offer comes back.
     MoveNotDeclined(String),
-    /// A comment sent with Ask agent was posted, but GitHub showed no thread for it, so the agent never gets it.
+    /// A comment sent with Ask agent was posted, but the host showed no thread for it, so the agent never gets it.
     HandOffNotSent { comment: String, reason: String },
     /// Another PR was asked for and could not be opened, so this one stays on screen.
     SwitchFailed(String),
@@ -56,11 +57,11 @@ pub enum Problem {
     ShowAgentFailed(String),
     /// Use this agent was clicked and the terminal could not be made the change set's agent.
     UseAgentFailed(String),
-    /// GitHub refused to put the 👀 on the PR or take it off, so its author may read the wrong thing.
+    /// The host refused to put the 👀 on the PR or take it off, so its author may read the wrong thing.
     ReviewingMarkNotChanged(String),
-    /// GitHub did not take the change of the PR between draft and ready.
+    /// The host did not take the change of the PR between draft and ready.
     ReadinessNotChanged(Readiness, String),
-    /// GitHub did not turn auto-merge on or off, or did not merge the PR.
+    /// The host did not turn auto-merge on or off, or did not merge the PR.
     MergingNotChanged(MergeChange, String),
     /// Another `guided-review` runs in place of the release install, so updates never reach the reviewer.
     ReleaseInstallInTheWay(InTheWay),
@@ -84,12 +85,12 @@ pub enum ProblemKind {
     ThreadsNotRead,
     /// Cleared when each read it keeps from going through goes through.
     HostNotAnswering,
-    /// Cleared by a good read of the same thing from GitHub.
+    /// Cleared by a good read of the same thing from the host.
     NotRead(Read),
     /// Cleared by the next IDE command that runs.
     IdeNotStarted,
     /// Raised when the review opens; a review opened on the clone has none.
-    CodeOnGitHub,
+    CodeOnHost,
     /// Cleared by a sync of viewed marks that goes through.
     ViewedNotSynced,
     /// Stays: a Refresh that goes through opens a new review.
@@ -137,7 +138,7 @@ impl Problem {
             Self::HostNotAnswering(_) => ProblemKind::HostNotAnswering,
             Self::NotRead(read, _) => ProblemKind::NotRead(*read),
             Self::IdeNotStarted(_) => ProblemKind::IdeNotStarted,
-            Self::CodeOnGitHub(_) => ProblemKind::CodeOnGitHub,
+            Self::CodeOnHost(..) => ProblemKind::CodeOnHost,
             Self::SavedReviewNotRead(_) => ProblemKind::SavedReviewNotRead,
             Self::SavedReviewPartsNotRead(_) => ProblemKind::SavedReviewPartsNotRead,
             Self::ViewedNotSynced(_) => ProblemKind::ViewedNotSynced,
@@ -175,18 +176,23 @@ impl Problems {
         self.raised.remove(&kind);
     }
 
-    /// A read failed because GitHub does not answer. Returns how long to wait before it is tried again.
-    pub fn host_not_answering(&mut self, cause: OutageCause, affected: Affected) -> Duration {
+    /// A read failed because the host does not answer. Returns how long to wait before it is tried again.
+    pub fn host_not_answering(
+        &mut self,
+        host: HostSite,
+        cause: OutageCause,
+        affected: Affected,
+    ) -> Duration {
         let mut outage = match self.raised.remove(&ProblemKind::HostNotAnswering) {
             Some(Problem::HostNotAnswering(outage)) => outage,
-            _ => Outage::new(cause),
+            _ => Outage::new(host, cause),
         };
         let retry_in = outage.failed(cause, affected);
         self.raise(Problem::HostNotAnswering(outage));
         retry_in
     }
 
-    /// GitHub answered a read, with the data or with an error of its own: it is answering.
+    /// The host answered a read, with the data or with an error of its own: it is answering.
     pub fn host_answered(&mut self, affected: Affected) {
         let Some(Problem::HostNotAnswering(mut outage)) =
             self.raised.remove(&ProblemKind::HostNotAnswering)
@@ -223,7 +229,11 @@ impl Problem {
         match self {
             Self::HostNotAnswering(outage) => Announcement {
                 tone: ToastTone::Neutral,
-                text: format!("GitHub is not answering ({})", outage.cause()),
+                text: format!(
+                    "{} is not answering ({})",
+                    outage.host().name(),
+                    outage.cause()
+                ),
             },
             other => Announcement {
                 tone: ToastTone::Danger,
@@ -249,15 +259,21 @@ pub struct Announcement {
 
 /// The notes to show now that the problems went from `before` to `after`.
 pub fn announcements(before: &[Problem], after: &[Problem]) -> Vec<Announcement> {
-    let is_outage = |problem: &Problem| matches!(problem, Problem::HostNotAnswering(_));
+    let outage_of = |problems: &[Problem]| {
+        problems.iter().find_map(|problem| match problem {
+            Problem::HostNotAnswering(outage) => Some(outage.host()),
+            _ => None,
+        })
+    };
     let new = after
         .iter()
         .filter(|problem| !before.iter().any(|earlier| problem.is_told_by(earlier)))
         .map(Problem::announcement);
-    let back =
-        (before.iter().any(is_outage) && !after.iter().any(is_outage)).then(|| Announcement {
+    let back = outage_of(before)
+        .filter(|_| outage_of(after).is_none())
+        .map(|host| Announcement {
             tone: ToastTone::Success,
-            text: "GitHub is back".to_owned(),
+            text: format!("{} is back", host.name()),
         });
     new.chain(back).collect()
 }
@@ -267,7 +283,8 @@ impl fmt::Display for Problem {
         match self {
             Self::HostNotAnswering(outage) => write!(
                 formatter,
-                "GitHub is not answering ({}). Some things may be out of date; trying again in {}.",
+                "{} is not answering ({}). Some things may be out of date; trying again in {}.",
+                outage.host().name(),
                 outage.cause(),
                 waiting(outage.retry_in())
             ),
@@ -284,7 +301,7 @@ impl fmt::Display for Problem {
             }
             Self::NotRead(Read::PendingReview, reason) => write!(
                 formatter,
-                "Could not look for a pending review on GitHub, so Comment now may be wrong: {reason}"
+                "Could not look for a pending review, so Comment now may be wrong: {reason}"
             ),
             Self::NotRead(Read::Authorship, reason) => write!(
                 formatter,
@@ -302,9 +319,10 @@ impl fmt::Display for Problem {
                 formatter,
                 "Could not start the IDE command, so code links open nothing: {reason}"
             ),
-            Self::CodeOnGitHub(reason) => write!(
+            Self::CodeOnHost(host, reason) => write!(
                 formatter,
-                "Code opens on GitHub, not in the IDE, as the local clone could not give the commits: {reason}"
+                "Code opens on {}, not in the IDE, as the local clone could not give the commits: {reason}",
+                host.name()
             ),
             Self::SavedReviewPartsNotRead(parts) => write!(
                 formatter,
@@ -317,7 +335,7 @@ impl fmt::Display for Problem {
             ),
             Self::ViewedNotSynced(reason) => write!(
                 formatter,
-                "Viewed marks are not synced with GitHub, they are retried on the next sync: {reason}"
+                "Viewed marks are not synced, they are retried on the next sync: {reason}"
             ),
             Self::TourNotRefreshed(reason) => {
                 write!(formatter, "The tour was not refreshed: {reason}")

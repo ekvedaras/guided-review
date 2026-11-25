@@ -1,5 +1,6 @@
-//! A local review has no PR to open on GitHub or to add notes to: it asks its agent to open one.
+//! A local review has no PR to open on its host or to add notes to: it asks its agent to open one.
 
+use guided_review::pull_request::HostSite;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -129,7 +130,10 @@ fn a_local_review_offers_open_pr_and_not_open_on_github() {
     assert_eq!(opened.review.branch_offer(), Some(BranchOffer::OpenPr));
     assert!(opened.review.can_open_pr());
     assert!(offered(&opened.review, PaletteAction::OpenPr));
-    assert!(!offered(&opened.review, PaletteAction::OpenOnGitHub));
+    assert!(!offered(
+        &opened.review,
+        PaletteAction::OpenOnHost(HostSite::GitHub)
+    ));
     assert_eq!(PaletteAction::OpenPr.label(), "Open PR");
     assert_eq!(PaletteAction::OpenPr.command(), Some(Command::OpenPr));
     assert_eq!(Command::OpenPr.default_chords()[0].keystroke(), "p");
@@ -150,7 +154,10 @@ fn a_pr_review_offers_open_on_github_and_not_open_pr() {
 
     assert_eq!(review.branch_offer(), None);
     assert!(!review.can_open_pr());
-    assert!(offered(&review, PaletteAction::OpenOnGitHub));
+    assert!(offered(
+        &review,
+        PaletteAction::OpenOnHost(HostSite::GitHub)
+    ));
     assert!(!offered(&review, PaletteAction::OpenPr));
     assert_eq!(
         review.decide(Intent::OpenPr, WindowMoment::default()),

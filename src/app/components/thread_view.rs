@@ -131,7 +131,7 @@ pub struct ThreadDrafts {
     pub can_ask_agent: bool,
     /// The PR's host has reactions on comments.
     pub can_react: bool,
-    /// A local review's thread: a reply is a follow-up task, and nothing of it is on GitHub.
+    /// A local review's thread: a reply is a follow-up task, and nothing of it is on a host.
     pub sending: Sending,
     pub reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
@@ -1025,14 +1025,15 @@ impl RenderOnce for ThreadElement {
             ))
             .children(marks)
             .child(div().min_w_0().truncate().child(summary));
-        let on_github = self.sending.to_host();
+        let host = self.sending.host();
+        let on_host = host.is_some();
         let conversation_link =
             self.view
                 .thread
                 .comments
                 .first()
-                .filter(|_| on_github)
-                .map(|comment| {
+                .zip(host)
+                .map(|(comment, host)| {
                     let url = comment.url.clone();
                     icon_button(
                         &colors,
@@ -1040,7 +1041,7 @@ impl RenderOnce for ThreadElement {
                         ButtonKind::Ghost,
                         ButtonSize::Small,
                         Icon::ExternalLink,
-                        "Open on GitHub",
+                        host.open_on(),
                     )
                     .on_click(move |_, _, cx| open_link(&url, cx))
                 });
@@ -1128,13 +1129,13 @@ impl RenderOnce for ThreadElement {
                                         "Hand to agent",
                                     )
                                     .tooltip(tooltip(|_| {
-                                        "Your agent handles this comment: it makes the change or answers on the thread. Text GitHub hides is left out."
+                                        "Your agent handles this comment: it makes the change or answers on the thread. Text the PR's page hides is left out."
                                             .into()
                                     }))
                                     .on_click(move |_, _, cx| on_hand_to_agent(&comment_id, cx))
                                 }),
                             )
-                            .when(on_github && self.can_react, |row| {
+                            .when(on_host && self.can_react, |row| {
                                 row.child(Self::reactions(
                                     &colors,
                                     comment,

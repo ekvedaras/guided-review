@@ -96,8 +96,6 @@ From my knowledge of GitLab, not checked against its docs:
 
 ### Left open after step 4
 
-- The switcher's "Loading your pull requests from GitHub..." and "Refreshing from GitHub..." name GitHub while the list is read from every host the app reads.
-- The palette's and title bar's "Open on GitHub" and "Open checks on GitHub" keep GitHub in their names and labels; `open_on_github` is also a key name in `[keys]`, which a rename must keep reading.
 - Snapshot sample data (`app::snapshots`, the staged findings' avatars) stays GitHub's.
 
 ## A local review knows its host
@@ -146,6 +144,16 @@ Issue #140, 2026-11-25. `ReviewThreadsPort::set_reaction` made every host react 
 ## How a PR would merge is the merging port's
 
 Issue #140, 2026-11-25. `OpenPrStatus` held `Merging` (merge state, auto-merge, merge methods, what the viewer may do), so every host's status had to fill it. It is `MergingPort::pull_request_merging` now: the status job reads the status, and only for an open PR on a host with a merging port, how it would merge (`Done::PrStatus { status, merging }`). `PrControls` keeps it apart from the status (`merging_state`), only when the review offers merging, and a rebuild keeps it only then too; a rebuild that newly offers merging shows it after its next read. GitHub reads the two in two queries now, one more request per status read (every 30 s while checks run) on GitHub. Would GitLab fill `Merging`: `detailed_merge_status` for whether it merges now, `merge_when_pipeline_succeeds` for auto-merge, the project's merge method and squash option for the methods, and the user's merge permission (not checked). Approvals are not in it; they would be a capability of their own.
+
+## The UI names the PR's host
+
+Issue #140, 2026-11-25. What the UI said of GitHub it now says of the PR's host, by `HostSite::name` (and `HostSite::open_on`, "Open on GitHub", where a label must be `&'static str`), or in neutral words where no PR is at hand:
+
+- The palette's Open on and Open checks on carry the host (`PaletteAction::OpenOnHost(HostSite)`, `OpenChecksOnHost(HostSite)`); the intents, effects, `Command` and the gpui action are `OpenOnHost`, `OpenChecksOnHost`, `OpenPrOnHost`. The `[keys]` name is `open_on_host`; `Command::former_config_name` keeps `open_on_github` read, the new name wins when both are written, and a key set in Settings drops the old entry (`keymap::open_on_host_*`, `a_key_set_for_open_on_host_drops_the_entry_under_its_old_name`).
+- The title bar's button and the host station are named after the PR's host (`Station::of_host`; `StationKind::Host` alone says "Code host"). A thread's link and its reactions go by `Sending::Host(HostSite)`.
+- An outage names the host that does not answer: `HostError::NotAnswering(HostSite, OutageCause)`, made by the adapter, and `Outage::host` ("GitHub is not answering", "GitHub is back"). `Problem::CodeOnHost(HostSite, reason)` names it too.
+- The switcher waits on and fails for every host the app reads, so it names them all (`HostSite::all_named`, made once, not per frame).
+- Neutral where no PR is at hand: Settings ("code opens on its code host", "Write the repo as its path on its code host, as owner/repo"), the shortcuts sheet, the CLI's subject error, the merge refusals ("You may not turn off this PR's auto-merge"), the comment refusals, no access ("No access to the PR's host"), a comment posted now ("Comment posted").
 
 ## Left open
 

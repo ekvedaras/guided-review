@@ -124,9 +124,9 @@ fn primary_w_closes_the_window_from_anywhere_in_it() {
 
 #[test]
 fn g_opens_the_pull_request_on_github_wherever_the_page_takes_keys() {
-    assert_eq!(Command::OpenOnGitHub.default_chords()[0].keystroke(), "g");
-    assert_eq!(Command::OpenOnGitHub.scope(), KeyScope::Page);
-    assert_eq!(Command::OpenOnGitHub.group(), ShortcutGroup::App);
+    assert_eq!(Command::OpenOnHost.default_chords()[0].keystroke(), "g");
+    assert_eq!(Command::OpenOnHost.scope(), KeyScope::Page);
+    assert_eq!(Command::OpenOnHost.group(), ShortcutGroup::App);
 }
 
 #[test]

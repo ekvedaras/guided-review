@@ -333,3 +333,13 @@ fn how_long_marks_waited_outlives_a_restart() {
         "1 viewed mark waiting · 2 h"
     );
 }
+
+#[test]
+fn the_host_station_is_named_after_the_prs_host() {
+    let (_repo, review) = shop_review();
+
+    let stations = review.stations(&TourAgentState::Unknown, SystemTime::now());
+
+    let host = stations.get(StationKind::Host).unwrap();
+    assert_eq!((host.name, host.short_name), ("GitHub", "GitHub"));
+}

@@ -2,6 +2,7 @@ use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeHost, HostFault, ReadFailure, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
+use guided_review::pull_request::HostSite;
 use guided_review::pull_request::Sha;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -77,21 +78,21 @@ fn classified(error: ureq::Error) -> HostError {
 fn a_server_error_a_timeout_and_no_connection_are_an_outage_and_a_missing_page_is_not() {
     assert!(matches!(
         classified(ureq::Error::StatusCode(503)),
-        HostError::NotAnswering(OutageCause::ServerError(503))
+        HostError::NotAnswering(HostSite::GitHub, OutageCause::ServerError(503))
     ));
     assert!(matches!(
         classified(ureq::Error::Timeout(ureq::Timeout::Global)),
-        HostError::NotAnswering(OutageCause::TimedOut)
+        HostError::NotAnswering(HostSite::GitHub, OutageCause::TimedOut)
     ));
     assert!(matches!(
         classified(ureq::Error::HostNotFound),
-        HostError::NotAnswering(OutageCause::NoConnection)
+        HostError::NotAnswering(HostSite::GitHub, OutageCause::NoConnection)
     ));
     assert!(matches!(
         classified(ureq::Error::Io(
             std::io::ErrorKind::ConnectionRefused.into()
         )),
-        HostError::NotAnswering(OutageCause::NoConnection)
+        HostError::NotAnswering(HostSite::GitHub, OutageCause::NoConnection)
     ));
     for status in [400, 401, 403, 404, 422] {
         assert!(
@@ -111,7 +112,7 @@ fn an_outage_is_known_through_the_context_a_read_adds() {
 
     assert!(matches!(
         HostError::from(error),
-        HostError::NotAnswering(OutageCause::ServerError(502))
+        HostError::NotAnswering(HostSite::GitHub, OutageCause::ServerError(502))
     ));
 }
 

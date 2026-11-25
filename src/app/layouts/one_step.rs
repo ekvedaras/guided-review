@@ -115,7 +115,7 @@ actions!(
         ToggleShortcuts,
         ToggleFindingsList,
         ToggleCommentsList,
-        OpenPrOnGitHub,
+        OpenPrOnHost,
         OpenIssue,
         AskToOpenPr,
         TogglePrSwitcher,
@@ -1104,8 +1104,8 @@ impl OneStepLayout {
             Effect::OpenFinishForm => self.open_finish_form(cx),
             Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
             Effect::OpenPr => self.session.update(cx, ReviewSession::open_pr),
-            Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
-            Effect::OpenChecksOnGitHub(pr) => open_link(&pr.checks_page(), cx),
+            Effect::OpenOnHost(pr) => open_link(&pr.to_string(), cx),
+            Effect::OpenChecksOnHost(pr) => open_link(&pr.checks_page(), cx),
             Effect::OpenCheck(url) => open_link(&url, cx),
             Effect::OpenIssue(link) => {
                 self.issue_list_open = false;
@@ -1489,8 +1489,8 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &ToggleShortcuts, window, cx| {
                 this.act(Intent::ToggleShortcuts, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenPrOnGitHub, window, cx| {
-                this.act(Intent::OpenOnGitHub, window, cx);
+            .on_action(cx.listener(|this, _: &OpenPrOnHost, window, cx| {
+                this.act(Intent::OpenOnHost, window, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenIssue, window, cx| {
                 this.act(Intent::OpenIssue, window, cx);

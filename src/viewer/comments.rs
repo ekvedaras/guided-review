@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::file_path::FilePath;
 use crate::findings::{Anchor, Finding};
 use crate::line_number::{InvalidLineNumber, LineNumber};
-use crate::pull_request::Sha;
+use crate::pull_request::{HostSite, Sha};
 
 use super::line_location::{LineLocation, Side};
 
@@ -165,19 +165,27 @@ impl CommentDraft {
 /// review's agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sending {
-    Host,
-    /// These send actions replace every GitHub one; the first is what Enter does.
+    Host(HostSite),
+    /// These send actions replace every one of the host's; the first is what Enter does.
     Tasks(&'static [SendMode]),
 }
 
 impl Sending {
     pub fn to_host(self) -> bool {
-        matches!(self, Self::Host)
+        matches!(self, Self::Host(_))
+    }
+
+    /// The PR's host a PR review's boxes send to; `None` for a local review's tasks.
+    pub fn host(self) -> Option<HostSite> {
+        match self {
+            Self::Host(host) => Some(host),
+            Self::Tasks(_) => None,
+        }
     }
 
     pub fn tasks(self) -> &'static [SendMode] {
         match self {
-            Self::Host => &[],
+            Self::Host(_) => &[],
             Self::Tasks(modes) => modes,
         }
     }
@@ -255,9 +263,9 @@ impl CommentRefusal {
         Cow::Borrowed(match self {
             Self::TourIsOld => "Update tour to comment",
             Self::CodeMoved => "Code moved, place the comment again",
-            Self::NotInsideHunk => "GitHub takes comments only on lines of the diff",
+            Self::NotInsideHunk => "Comments go only on lines of the diff",
             Self::OlderHeadLine => {
-                "This line is from the code as you last read it: GitHub takes no comment on it, show the full diff to comment"
+                "This line is from the code as you last read it and takes no comment: show the full diff to comment"
             }
             Self::NoLines => "Only an Ask about lines can become a comment",
             Self::AskIsOnOlderCode => {
@@ -273,7 +281,9 @@ impl CommentRefusal {
             Self::AgentLinkOff => {
                 "The agent cannot be reached now: the comment stays here until it can"
             }
-            Self::NoAccess(reason) => return Cow::Owned(format!("No access to GitHub: {reason}")),
+            Self::NoAccess(reason) => {
+                return Cow::Owned(format!("No access to the PR's host: {reason}"));
+            }
         })
     }
 }

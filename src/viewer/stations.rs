@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use super::problems::{Problem, ProblemKind};
+use crate::pull_request::HostSite;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StationKind {
@@ -21,7 +22,7 @@ impl StationKind {
             Self::AiReview => "AI review",
             Self::Fixes => "Fixes",
             Self::YourReview => "Your review",
-            Self::Host => "GitHub",
+            Self::Host => "Code host",
         }
     }
 
@@ -49,6 +50,10 @@ pub enum StationHealth {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Station {
     pub kind: StationKind,
+    /// What the card and the tooltip call it: the PR's host's own name for the host station.
+    pub name: &'static str,
+    /// The name under the station's icon.
+    pub short_name: &'static str,
     pub health: StationHealth,
     /// A few words on how it stands, as "3 findings" or "new commits".
     pub state: String,
@@ -58,8 +63,19 @@ impl Station {
     pub fn new(kind: StationKind, health: StationHealth, state: impl Into<String>) -> Self {
         Self {
             kind,
+            name: kind.name(),
+            short_name: kind.short_name(),
             health,
             state: state.into(),
+        }
+    }
+
+    /// The station of the PR's host, named after it.
+    pub fn of_host(host: HostSite, health: StationHealth, state: impl Into<String>) -> Self {
+        Self {
+            name: host.name(),
+            short_name: host.name(),
+            ..Self::new(StationKind::Host, health, state)
         }
     }
 

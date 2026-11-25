@@ -49,9 +49,9 @@ impl ReviewCore {
 
     /// The threads shown stay as they were, named as possibly old until a read goes through.
     pub fn threads_not_read(&mut self, error: &HostError) {
-        if let HostError::NotAnswering(cause) = error {
+        if let HostError::NotAnswering(host, cause) = error {
             self.clear_problem(ProblemKind::ThreadsNotRead);
-            self.host_not_answering(*cause, Affected::Comments);
+            self.host_not_answering(*host, *cause, Affected::Comments);
         } else {
             self.host_answered(Affected::Comments);
             self.raise_problem(Problem::ThreadsNotRead(error.short_reason()));

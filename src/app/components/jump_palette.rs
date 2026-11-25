@@ -133,7 +133,7 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::CommentsList => Icon::MessageSquare,
         PaletteAction::MarkDone => Icon::CircleCheck,
         PaletteAction::SendTasks => Icon::Send,
-        PaletteAction::OpenOnGitHub | PaletteAction::OpenChecksOnGitHub => Icon::ExternalLink,
+        PaletteAction::OpenOnHost(_) | PaletteAction::OpenChecksOnHost(_) => Icon::ExternalLink,
         PaletteAction::NextUnreadStep | PaletteAction::NextFinding | PaletteAction::OpenIssue => {
             Icon::CircleDot
         }

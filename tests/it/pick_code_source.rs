@@ -192,7 +192,7 @@ fn a_review_opened_on_a_fallen_back_source_names_why_until_one_opens_on_the_clon
     assert!(
         matches!(
             fallen_back.problems().as_slice(),
-            [Problem::CodeOnGitHub(reason)] if reason.contains("/nowhere/shop")
+            [Problem::CodeOnHost(_, reason)] if reason.contains("/nowhere/shop")
         ),
         "{:?}",
         fallen_back.problems()

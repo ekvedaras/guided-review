@@ -208,7 +208,7 @@ pub fn review_threads_of_a_host_not_answering_fail_as_an_outage(host: HostBuilde
     let reply = host.reply_to_thread(&pr(), &ThreadId::new("T1"), "x", SendMode::AddToReview);
     let resolve = host.set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved);
 
-    assert!(matches!(read, HostError::NotAnswering(_)), "{read:?}");
+    assert!(matches!(read, HostError::NotAnswering(..)), "{read:?}");
     assert!(
         reply.is_err(),
         "a reply to a host not answering went through"

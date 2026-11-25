@@ -677,7 +677,7 @@ impl HandOffs {
                 .find(|thread| {
                     !self.holds(&thread.id) && &thread.path == path && ends_with(thread, sent.body)
                 })
-                .ok_or_else(|| "GitHub shows no thread with the comment".to_owned())
+                .ok_or_else(|| "The PR's host shows no thread with the comment".to_owned())
         });
         let (thread, comment, state) = match found {
             Ok(thread) => (
@@ -701,7 +701,7 @@ impl HandOffs {
             threads
                 .iter()
                 .find(|thread| &thread.id == thread_id)
-                .ok_or_else(|| "GitHub shows no such thread".to_owned())
+                .ok_or_else(|| "The PR's host shows no such thread".to_owned())
         });
         let mut sent = sent;
         let mut comment = None;
@@ -1146,7 +1146,7 @@ impl HandOffs {
 pub enum HandToAgentRefused {
     #[error("only a pull request has comments by others to hand to the agent")]
     NotAPullRequest,
-    #[error("the comment is not in the threads read from GitHub")]
+    #[error("the comment is not in the threads read from the PR's host")]
     NoSuchComment,
     #[error("it is your own comment: reply with Ask agent instead")]
     OwnComment,

@@ -47,7 +47,11 @@ impl OneStepLayout {
         let title = review.title().to_owned();
         let local_heading = review.local_heading().map(SharedString::from);
         let is_local = local_heading.is_some();
-        let can_open_on_github = review.can_open_on_github();
+        let host = review
+            .subject()
+            .pull_request()
+            .map(|pr| pr.host)
+            .filter(|_| review.can_open_on_host());
         let status = review.pr_status();
         let merge_in_flight = review.merge_in_flight();
         let merging = review.merging();
@@ -66,10 +70,10 @@ impl OneStepLayout {
         .child("Jump")
         .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump, cx))
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::ToggleJump, window, cx)));
-        let github = can_open_on_github.then(|| {
+        let open_on_host = host.map(|host| {
             button(
                 &colors,
-                "title-bar-github",
+                "title-bar-open-on-host",
                 ButtonKind::Ghost,
                 ButtonSize::Small,
             )
@@ -79,14 +83,14 @@ impl OneStepLayout {
                 ButtonSize::Small,
                 Icon::ExternalLink,
             ))
-            .child("GitHub")
+            .child(host.name())
             .child(button_keys(
                 &colors,
                 ButtonKind::Ghost,
-                Command::OpenOnGitHub,
+                Command::OpenOnHost,
                 cx,
             ))
-            .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)))
+            .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnHost, window, cx)))
         });
         let open_pr = review.can_open_pr().then(|| {
             button(
@@ -223,7 +227,7 @@ impl OneStepLayout {
                     .child(jump)
                     .children(self.issue_button(&colors, cx))
                     .children(open_pr)
-                    .children(github),
+                    .children(open_on_host),
             )
             .when(!is_writing_tour, |bar| {
                 bar.child(page_hairline(&colors, page_share))
@@ -650,7 +654,7 @@ impl OneStepLayout {
                         this.act(Intent::OpenCheck(past_the_list), window, cx);
                     })
                 })
-                .child(format!("and {} more on GitHub", list.hidden))
+                .child(format!("and {} more on the checks page", list.hidden))
         });
         popover(
             div()
