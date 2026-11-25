@@ -9,10 +9,10 @@ use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    Audience, CommentGesture, CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown,
-    Problem, Reaction, ReactionChange, ReactionCount, Read, Resolution, Review, ReviewStateFile,
-    ReviewThread, SendMode, Side, TextBox, ThreadAction, ThreadActionResult, ThreadComment,
-    ThreadId,
+    Audience, Capability, CommentGesture, CommentId, CommentPlace, CommentRefusal,
+    HostCapabilities, LineLocation, Markdown, Problem, Reaction, ReactionChange, ReactionCount,
+    Read, Resolution, Review, ReviewStateFile, ReviewThread, SendMode, Side, TextBox, ThreadAction,
+    ThreadActionResult, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -53,6 +53,10 @@ impl Pull {
     }
 
     fn open(&self) -> Review {
+        self.open_on(crate::support::fake_ports::every_capability())
+    }
+
+    fn open_on(&self, host: HostCapabilities) -> Review {
         let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
@@ -68,13 +72,7 @@ impl Pull {
         let pr: PullRequestUrl = PR.parse().unwrap();
         let state_file =
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr));
-        let mut review = Review::open(
-            tour,
-            &source,
-            state_file,
-            crate::support::fake_ports::every_capability(),
-        )
-        .unwrap();
+        let mut review = Review::open(tour, &source, state_file, host).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
         review.go_forward();
@@ -305,6 +303,38 @@ fn a_reaction_is_added_and_removed_on_a_click() {
             reaction: Reaction::Rocket,
             change
         })
+    );
+}
+
+#[test]
+fn a_host_with_no_reactions_on_comments_offers_none_and_is_asked_for_none() {
+    let pull = Pull::new();
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]))
+        .without(Capability::CommentReactions);
+    let mut review = pull.open_on(HostCapabilities::of(&host));
+    review.pull_threads(&host).unwrap();
+
+    let result = review.act_on_thread(
+        ThreadAction::SetReaction {
+            comment_id: CommentId::new("C1"),
+            reaction: Reaction::Rocket,
+            change: ReactionChange::Add,
+        },
+        &host,
+    );
+
+    assert!(!review.can_react_to_comments());
+    assert!(pull.open().can_react_to_comments(), "a host with them");
+    assert_eq!(
+        result,
+        ThreadActionResult::Refused(CommentRefusal::NotOffered)
+    );
+    assert!(
+        !pull
+            .sent
+            .host_calls()
+            .iter()
+            .any(|call| matches!(call, HostCall::SetReaction { .. }))
     );
 }
 

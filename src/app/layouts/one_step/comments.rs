@@ -320,6 +320,7 @@ impl OneStepLayout {
             ThreadDrafts {
                 can_reply_now: can_comment_now,
                 can_ask_agent,
+                can_react: review.can_react_to_comments(),
                 sending: review.sending(),
                 reply,
                 edits,

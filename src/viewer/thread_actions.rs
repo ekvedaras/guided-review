@@ -3,9 +3,10 @@ use crate::pull_request::{PullRequestUrl, Sha};
 use super::local_thread_store::{LocalThreadStore, ThreadHome};
 use super::local_threads::LocalAuthor;
 
+use super::capability::Capability;
 use super::comments::Audience;
 use super::comments::{CommentRefusal, SendMode};
-use super::ports::{HostError, Resolution, ReviewThreadsPort, ReviewWritesPort};
+use super::ports::{CodeHost, HostError, Resolution};
 use super::reactions::{Reaction, ReactionChange};
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 
@@ -76,10 +77,7 @@ pub struct ThreadActionOutcome {
 }
 
 impl ThreadActionRequest {
-    pub fn run(
-        self,
-        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
-    ) -> ThreadActionOutcome {
+    pub fn run(self, host: &dyn CodeHost) -> ThreadActionOutcome {
         let result = match &self.home {
             ThreadHome::Host(pr) => match self.perform(host, pr) {
                 Ok(result) => result,
@@ -160,7 +158,7 @@ impl ThreadActionRequest {
 
     fn perform(
         &self,
-        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        host: &dyn CodeHost,
         pr: &PullRequestUrl,
     ) -> Result<ThreadActionResult, HostError> {
         if let Some(refusal) = self.refusal_before_sending() {
@@ -193,7 +191,12 @@ impl ThreadActionRequest {
                 comment_id,
                 reaction,
                 change,
-            } => host.set_reaction(comment_id, *reaction, *change)?,
+            } => match host.comment_reactions() {
+                Some(reactions) => {
+                    reactions.set_comment_reaction(comment_id, *reaction, *change)?;
+                }
+                None => return Err(HostError::NotOffered(Capability::CommentReactions)),
+            },
         }
         Ok(ThreadActionResult::Done)
     }

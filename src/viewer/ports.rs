@@ -135,13 +135,24 @@ pub trait PullRequestReactionsPort: Send + Sync {
     ) -> Result<(), HostError>;
 }
 
+/// The viewer's reactions on review comments, which the hand-off's seen mark (👀) is one of.
+/// Optional: Bitbucket and Azure DevOps have none on a comment (not checked).
+pub trait CommentReactionsPort: Send + Sync {
+    fn set_comment_reaction(
+        &self,
+        comment_id: &CommentId,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> Result<(), HostError>;
+}
+
 /// Storing a picture with the host, for a PR description that shows it.
 pub trait PictureUploadPort: Send + Sync {
     /// The address GitHub keeps the picture at, open only to those who can see the PR's repository.
     fn upload_picture(&self, pr: &PullRequestUrl, picture: &Path) -> anyhow::Result<String>;
 }
 
-/// Reading review threads and acting on them: replies, resolving, reactions.
+/// Reading review threads and acting on them: replies, resolving, edits.
 pub trait ReviewThreadsPort: Send + Sync {
     fn review_threads(&self, pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, HostError>;
 
@@ -158,13 +169,6 @@ pub trait ReviewThreadsPort: Send + Sync {
         &self,
         thread_id: &ThreadId,
         resolution: Resolution,
-    ) -> Result<(), HostError>;
-
-    fn set_reaction(
-        &self,
-        comment_id: &CommentId,
-        reaction: Reaction,
-        change: ReactionChange,
     ) -> Result<(), HostError>;
 
     /// Replaces the body of one of the viewer's own comments, sent or still in the pending review.
@@ -248,6 +252,8 @@ pub trait CodeHost:
     fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort>;
 
     fn change_requests(&self) -> Option<&dyn ChangeRequestsPort>;
+
+    fn comment_reactions(&self) -> Option<&dyn CommentReactionsPort>;
 }
 
 impl HostCapabilities {
@@ -263,6 +269,7 @@ impl HostCapabilities {
                     Capability::PictureUploads => host.picture_uploads().is_some(),
                     Capability::IssueTracker => host.issue_tracker().is_some(),
                     Capability::ChangeRequests => host.change_requests().is_some(),
+                    Capability::CommentReactions => host.comment_reactions().is_some(),
                 }),
         )
     }

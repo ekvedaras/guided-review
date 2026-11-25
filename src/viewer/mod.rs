@@ -233,11 +233,11 @@ pub use piece_diff::PieceDiff;
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost,
-    HostError, HostedCodePort, IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort,
-    PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
-    PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, RelevantPullRequestsPort, Resolution,
-    ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort,
-    ViewedState,
+    CommentReactionsPort, HostError, HostedCodePort, IssueDetailsPort, MergingPort, NoAccess,
+    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, RefreshWriter,
+    RelevantPullRequestsPort, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed,
+    ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};

@@ -11,11 +11,12 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AGENT_START_RETRY, AfterLanding, AgentReplied, AgentReplyRefused, AgentReplyRequest,
-    AgentStatus, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, HandOffButton,
-    HandOffId, HandOffState, HandToAgentRefused, LineLocation, Problem, Reaction, ReactionChange,
-    ReplyPlacement, Review, ReviewStateFile, ReviewThread, SeenMark, SendMode, Side, TerminalId,
-    TextBox, ThreadAction, ThreadActionResult, ThreadComment, ThreadHome, ThreadId, ThreadMessage,
-    ThreadView, TourAgentPort, TourAgentState, TourAgents, Work, WorkKind, WorkPorts,
+    AgentStatus, Audience, Capability, CommentGesture, CommentId, CommentPlace, CommentResult,
+    HandOffButton, HandOffId, HandOffState, HandToAgentRefused, LineLocation, Problem, Reaction,
+    ReactionChange, ReplyPlacement, Review, ReviewStateFile, ReviewThread, SeenMark, SendMode,
+    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadComment, ThreadHome,
+    ThreadId, ThreadMessage, ThreadView, TourAgentPort, TourAgentState, TourAgents, Work, WorkKind,
+    WorkPorts,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -1190,6 +1191,22 @@ fn a_delivered_hand_off_puts_eyes_on_the_reviewers_comment() {
         [(CommentId::new("C1"), ReactionChange::Add)]
     );
     assert_eq!(seen_marks(&review), [SeenMark::On]);
+}
+
+#[test]
+fn a_host_with_no_reactions_on_comments_gets_no_seen_mark_and_the_hand_off_still_goes() {
+    let pull = Pull::new();
+    let host =
+        host_with_the_comment_as_a_thread(&pull, "why ten?").without(Capability::CommentReactions);
+
+    let (review, _) = delivered_one(&pull, &host);
+
+    assert_eq!(reactions(&pull.sent), []);
+    assert_eq!(seen_marks(&review), [SeenMark::Off]);
+    assert_eq!(
+        review.hand_offs().all().first().unwrap().state(),
+        &HandOffState::Delivered
+    );
 }
 
 #[test]

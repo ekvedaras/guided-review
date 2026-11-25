@@ -6,9 +6,9 @@ use crate::support::line;
 use guided_review::github::GitHub;
 use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::viewer::{
-    ChangeRequestsPort, CommentId, CommentPlace, HostError, LineLocation, Reaction, ReactionChange,
-    ReactionCount, Resolution, ReviewOutcome, ReviewThreadsPort, ReviewWritesPort, ReviewerKind,
-    SendMode, Side, Stance, ThreadId,
+    ChangeRequestsPort, CommentId, CommentPlace, CommentReactionsPort, HostError, LineLocation,
+    Reaction, ReactionChange, ReactionCount, Resolution, ReviewOutcome, ReviewThreadsPort,
+    ReviewWritesPort, ReviewerKind, SendMode, Side, Stance, ThreadId,
 };
 
 fn page(has_next: bool, cursor: &str, nodes: &str) -> String {
@@ -590,14 +590,14 @@ fn a_reaction_is_added_and_removed_with_githubs_content_name() {
     let github = GitHub::at(&url);
 
     github
-        .set_reaction(
+        .set_comment_reaction(
             &CommentId::new("C1"),
             Reaction::ThumbsUp,
             ReactionChange::Add,
         )
         .unwrap();
     github
-        .set_reaction(
+        .set_comment_reaction(
             &CommentId::new("C1"),
             Reaction::ThumbsUp,
             ReactionChange::Remove,

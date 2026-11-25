@@ -22,8 +22,8 @@ use crate::viewer::{
 };
 use crate::viewer::{
     AvatarPort, ChangeRequestsPort, ChangeTipsPort, CheckRun, CheckState, Checks, ClonePort,
-    CodeHost, CommentId, CommentPlace, HeadBranch, HostError, HostedCodePort, IssueDetails,
-    IssueDetailsPort, IssueState, MergeRoute, MergingPort, NoAccess, OutageCause,
+    CodeHost, CommentId, CommentPlace, CommentReactionsPort, HeadBranch, HostError, HostedCodePort,
+    IssueDetails, IssueDetailsPort, IssueState, MergeRoute, MergingPort, NoAccess, OutageCause,
     PictureUploadPort, PrAuthor, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues,
     PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews,
     PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount,
@@ -973,6 +973,22 @@ impl CodeHost for GitHub {
     fn change_requests(&self) -> Option<&dyn ChangeRequestsPort> {
         Some(self)
     }
+
+    fn comment_reactions(&self) -> Option<&dyn CommentReactionsPort> {
+        Some(self)
+    }
+}
+
+impl CommentReactionsPort for GitHub {
+    fn set_comment_reaction(
+        &self,
+        comment_id: &CommentId,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> Result<(), HostError> {
+        self.change_reaction(comment_id.as_str(), reaction, change)
+            .map_err(|error| error.context("could not change the reaction"))
+    }
 }
 
 impl PullRequestReactionsPort for GitHub {
@@ -1173,16 +1189,6 @@ impl ReviewThreadsPort for GitHub {
         )
         .map_err(|error| error.context(format!("could not change the thread {thread_id}")))?;
         Ok(())
-    }
-
-    fn set_reaction(
-        &self,
-        comment_id: &CommentId,
-        reaction: Reaction,
-        change: ReactionChange,
-    ) -> Result<(), HostError> {
-        self.change_reaction(comment_id.as_str(), reaction, change)
-            .map_err(|error| error.context("could not change the reaction"))
     }
 
     fn edit_comment(&self, comment_id: &CommentId, body: &str) -> Result<(), HostError> {

@@ -14,6 +14,7 @@
 | Picture uploads | `PictureUploadPort` | `picture_uploads` | GitHub's store is undocumented ([PR notes](pr-notes.md)); another host may have none. |
 | Issue tracker | `IssueDetailsPort` | `issue_tracker` | A repo's issues may live in Jira, not on the host. |
 | Requests for changes | `ChangeRequestsPort` | `change_requests` | GitLab has it only in recent versions (not checked); see below. |
+| Reactions on comments | `CommentReactionsPort` | `comment_reactions` | Bitbucket and Azure DevOps have no emoji on a comment (not checked); see below. |
 
 Core, every host of PRs does it: `ChangeTipsPort`, `PullsOfBranchPort`, `PullRequestDescriptionPort`, `PullRequestOriginPort`, `PullRequestStatusPort` (status, checks, draft), `ReviewThreadsPort`, `ReviewWritesPort`. GitLab has each: diff refs, MRs by source branch, the description, draft MRs, pipelines, discussions with resolve, draft notes published as one batch, and approve (from my knowledge of GitLab's API, not checked against its docs). `change_merging` moved out of `PullRequestStatusPort` into `MergingPort`.
 
@@ -138,9 +139,12 @@ before                                       after
 
 Issue #140, 2026-11-25. `ReviewVerdict::RequestChanges` assumed every host has it. GitHub, Bitbucket and Gitea do; GitLab added a request-changes state to its reviews only in recent versions, and a self-managed GitLab may be older (not checked). So it is a capability, `ChangeRequestsPort::request_changes`, handed out by `CodeHost::change_requests`, and not core. `ReviewWritesPort` keeps what every host does: `submit_review` (no verdict) and `approve` (GitLab's approval is a call of its own; a GitLab adapter's `approve` would publish the draft notes and then approve, not checked). `ReviewVerdict` is the reviewer's choice in the finish form and lives in `finish_review`; `FinishRequest::run` turns it into the port call. `CommentDesk::for_host` holds the host's capabilities, so `Review::can_request_changes` is false and `finish_review_request` refuses with `FinishRefusal::NotOffered` on a host without it, before anything is sent; the finish form shows only Comment and Approve there (`Finishing::CommentOrApprove`). GitHub's event names (`COMMENT`, `APPROVE`, `REQUEST_CHANGES`) are the adapter's private `ReviewEvent`.
 
+## Reactions on comments are a capability
+
+Issue #140, 2026-11-25. `ReviewThreadsPort::set_reaction` made every host react to comments. It is `CommentReactionsPort::set_comment_reaction` now, handed out by `CodeHost::comment_reactions`. On a host without it a hand-off puts no seen mark (👀) and is delivered all the same (`SeenMark::Off`, no trouble named), the thread shows no reactions to add (`Review::can_react_to_comments`, from the `CommentDesk`'s capabilities), and a reaction asked anyway is refused with `CommentRefusal::NotOffered` before the host is asked. `DeliveryRequest`, `AgentReplyRequest`, `SeenMarkOff` and `ThreadActionRequest` run with a `&dyn CodeHost`, so each reaches the port through its `Option`. GitLab has award emoji on notes, so its adapter would offer it (not checked).
+
 ## Left open
 
 - Tests of a local review other than `local_review.rs` and `local_guided_tour.rs` that go through `Review::open_basic` with `every_capability()` (for example `basic_tour.rs`, `move_to_pr.rs`) build a local review with a PR host's capabilities; they test reading, not capabilities.
 
-- Comment reactions (the hand-off's seen mark) are still in `ReviewThreadsPort`; a host with no reactions on comments would need them split out too.
 - `PrStatus` holds GitHub's `Merging` (merge state, auto-merge, merge methods). With no `MergingPort` the review hides it, but a GitLab status would have to fill it or the type would need a split.

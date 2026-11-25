@@ -1,7 +1,7 @@
 use super::comments::{CommentPlace, SendMode};
 use super::ports::{
-    ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost, HostError, HostedCodePort,
-    IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
+    ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost, CommentReactionsPort, HostError,
+    HostedCodePort, IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
     PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
     PullRequestStatusPort, PullsOfBranchPort, RelevantPullRequestsPort, Resolution,
     ReviewThreadsPort, ReviewWritesPort, ViewedFilesPort,
@@ -9,7 +9,6 @@ use super::ports::{
 use super::pr_origin::PullRequestOrigin;
 use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
-use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::PullRequestIssues;
 use super::relevant_prs::RelevantPullRequests;
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
@@ -86,6 +85,10 @@ impl CodeHost for NoHost {
     }
 
     fn change_requests(&self) -> Option<&dyn ChangeRequestsPort> {
+        None
+    }
+
+    fn comment_reactions(&self) -> Option<&dyn CommentReactionsPort> {
         None
     }
 }
@@ -177,15 +180,6 @@ impl ReviewThreadsPort for NoHost {
         &self,
         _thread_id: &ThreadId,
         _resolution: Resolution,
-    ) -> Result<(), HostError> {
-        refused()
-    }
-
-    fn set_reaction(
-        &self,
-        _comment_id: &CommentId,
-        _reaction: Reaction,
-        _change: ReactionChange,
     ) -> Result<(), HostError> {
         refused()
     }

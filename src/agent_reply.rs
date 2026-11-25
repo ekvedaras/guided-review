@@ -12,8 +12,7 @@ use anyhow::Context;
 use crate::app_link::{Answer, AppFolder, Request, tell_app};
 use crate::findings::FindingId;
 use crate::viewer::{
-    AgentReplied, HandOffId, ReplyPlacement, ReviewStateFile, ReviewThreadsPort, ReviewWritesPort,
-    ThreadHome, WhyReply,
+    AgentReplied, CodeHost, HandOffId, ReplyPlacement, ReviewStateFile, ThreadHome, WhyReply,
 };
 
 /// What the agent posts on the hand-off's thread.
@@ -79,7 +78,7 @@ pub fn why_reply(
 
 /// Says where the reply went. Nothing is posted for a hand-off the review does not have.
 pub fn agent_reply(
-    host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+    host: &dyn CodeHost,
     folders: &AppFolders,
     subject: &ReviewSubject,
     id: HandOffId,

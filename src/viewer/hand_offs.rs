@@ -15,7 +15,7 @@ use super::local_threads::LocalAuthor;
 
 use super::comments::SendMode;
 use super::hidden_text::HiddenText;
-use super::ports::{HostError, ReviewThreadsPort, ReviewWritesPort};
+use super::ports::{CodeHost, HostError, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
 use super::review::StepId;
 use super::review_thread::{AGENT_MARK, CommentId, ReviewThread, ThreadComment, ThreadId};
@@ -181,15 +181,22 @@ impl SeenMark {
         }
     }
 
-    fn put_on(host: &(impl ReviewThreadsPort + ?Sized), comment: &CommentId) -> Self {
-        match host.set_reaction(comment, Reaction::Eyes, ReactionChange::Add) {
+    /// A host with no reactions on comments gets no mark; the hand-off goes all the same.
+    fn put_on(host: &dyn CodeHost, comment: &CommentId) -> Self {
+        let Some(reactions) = host.comment_reactions() else {
+            return Self::Off;
+        };
+        match reactions.set_comment_reaction(comment, Reaction::Eyes, ReactionChange::Add) {
             Ok(()) => Self::On,
             Err(error) => Self::NotPut(format!("{error:#}")),
         }
     }
 
-    fn take_off(host: &(impl ReviewThreadsPort + ?Sized), comment: &CommentId) -> Self {
-        match host.set_reaction(comment, Reaction::Eyes, ReactionChange::Remove) {
+    fn take_off(host: &dyn CodeHost, comment: &CommentId) -> Self {
+        let Some(reactions) = host.comment_reactions() else {
+            return Self::Off;
+        };
+        match reactions.set_comment_reaction(comment, Reaction::Eyes, ReactionChange::Remove) {
             Ok(()) => Self::Off,
             Err(error) => Self::NotTakenOff(format!("{error:#}")),
         }
@@ -513,11 +520,7 @@ pub(super) struct DeliveryRequest {
 
 impl DeliveryRequest {
     /// A delivered hand-off puts the seen mark on the reviewer's comment.
-    pub(super) fn run(
-        self,
-        agents: &TourAgents,
-        host: &(impl ReviewThreadsPort + ?Sized),
-    ) -> DeliveryOutcome {
+    pub(super) fn run(self, agents: &TourAgents, host: &dyn CodeHost) -> DeliveryOutcome {
         let sent = if self.anyway {
             agents.send_anyway(&self.subject, &self.text)
         } else {
@@ -1269,10 +1272,7 @@ impl AgentReplyRequest {
         &self.home
     }
 
-    pub fn run(
-        &self,
-        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
-    ) -> Result<AgentReplyDone, HostError> {
+    pub fn run(&self, host: &dyn CodeHost) -> Result<AgentReplyDone, HostError> {
         let (placement, working_on_it) = match &self.home {
             ThreadHome::Host(pr) => self.post_on_github(host, pr)?,
             ThreadHome::StateFile(store) => self.keep_locally(store).map_err(|error| {
@@ -1377,7 +1377,7 @@ pub(super) struct SeenMarkOffOutcome {
 }
 
 impl SeenMarkOff {
-    pub(super) fn run(self, host: &(impl ReviewThreadsPort + ?Sized)) -> SeenMarkOffOutcome {
+    pub(super) fn run(self, host: &dyn CodeHost) -> SeenMarkOffOutcome {
         SeenMarkOffOutcome {
             id: self.id,
             seen_mark: SeenMark::take_off(host, &self.comment),

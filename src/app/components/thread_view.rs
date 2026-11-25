@@ -111,6 +111,7 @@ pub struct ThreadElement {
     view: Arc<ThreadView>,
     can_reply_now: bool,
     can_ask_agent: bool,
+    can_react: bool,
     sending: Sending,
     reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
@@ -128,6 +129,8 @@ pub struct ThreadElement {
 pub struct ThreadDrafts {
     pub can_reply_now: bool,
     pub can_ask_agent: bool,
+    /// The PR's host has reactions on comments.
+    pub can_react: bool,
     /// A local review's thread: a reply is a follow-up task, and nothing of it is on GitHub.
     pub sending: Sending,
     pub reply: Option<String>,
@@ -151,6 +154,7 @@ impl ThreadElement {
         let ThreadDrafts {
             can_reply_now,
             can_ask_agent,
+            can_react,
             sending,
             reply,
             edits,
@@ -168,6 +172,7 @@ impl ThreadElement {
             view,
             can_reply_now,
             can_ask_agent,
+            can_react,
             sending,
             reply,
             edits,
@@ -1129,7 +1134,7 @@ impl RenderOnce for ThreadElement {
                                     .on_click(move |_, _, cx| on_hand_to_agent(&comment_id, cx))
                                 }),
                             )
-                            .when(on_github, |row| {
+                            .when(on_github && self.can_react, |row| {
                                 row.child(Self::reactions(
                                     &colors,
                                     comment,

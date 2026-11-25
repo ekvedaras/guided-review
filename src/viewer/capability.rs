@@ -7,16 +7,18 @@ pub enum Capability {
     PictureUploads,
     IssueTracker,
     ChangeRequests,
+    CommentReactions,
 }
 
 impl Capability {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::ViewedMarks,
         Self::Merging,
         Self::PullRequestReactions,
         Self::PictureUploads,
         Self::IssueTracker,
         Self::ChangeRequests,
+        Self::CommentReactions,
     ];
 
     const fn bit(self) -> u8 {
@@ -33,6 +35,7 @@ impl std::fmt::Display for Capability {
             Self::PictureUploads => "picture uploads",
             Self::IssueTracker => "issue tracker",
             Self::ChangeRequests => "requests for changes",
+            Self::CommentReactions => "reactions on comments",
         })
     }
 }

@@ -29,8 +29,8 @@ use guided_review::navigation::{ServerMessage, ServerMessages};
 use guided_review::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeRequestsPort,
-    ChangeTipsPort, Checks, ClonePort, CodeHost, CommentId, CommentPlace, HostError,
-    HostedCodePort, IssueDetails, IssueDetailsPort, MergingPort, NoAccess, NotDelivered,
+    ChangeTipsPort, Checks, ClonePort, CodeHost, CommentId, CommentPlace, CommentReactionsPort,
+    HostError, HostedCodePort, IssueDetails, IssueDetailsPort, MergingPort, NoAccess, NotDelivered,
     OpenPrStatus, PictureUploadPort, PrStatus, PullOfBranch, PullRequestDescriptionPort,
     PullRequestIssues, PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort,
     PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
@@ -545,6 +545,10 @@ impl CodeHost for FakeHost {
     fn change_requests(&self) -> Option<&dyn ChangeRequestsPort> {
         self.offers(Capability::ChangeRequests).then_some(self)
     }
+
+    fn comment_reactions(&self) -> Option<&dyn CommentReactionsPort> {
+        self.offers(Capability::CommentReactions).then_some(self)
+    }
 }
 
 impl HostedCodePort for FakeHost {
@@ -875,25 +879,6 @@ impl ReviewThreadsPort for FakeHost {
         Ok(())
     }
 
-    fn set_reaction(
-        &self,
-        comment_id: &CommentId,
-        reaction: Reaction,
-        change: ReactionChange,
-    ) -> Result<(), HostError> {
-        self.sent.record(HostCall::SetReaction {
-            comment_id: comment_id.clone(),
-            reaction,
-            change,
-        });
-        self.fail_if_connection_lost()?;
-        self.reacted_now.lock().unwrap().insert(
-            (comment_id.clone(), reaction),
-            change == ReactionChange::Add,
-        );
-        Ok(())
-    }
-
     fn edit_comment(&self, comment_id: &CommentId, body: &str) -> Result<(), HostError> {
         self.sent.record(HostCall::EditComment {
             comment_id: comment_id.clone(),
@@ -988,6 +973,27 @@ impl ReviewWritesPort for FakeHost {
 
     fn approve(&self, _pr: &PullRequestUrl, body: &str) -> Result<(), HostError> {
         self.send_review(ReviewVerdict::Approve, body)
+    }
+}
+
+impl CommentReactionsPort for FakeHost {
+    fn set_comment_reaction(
+        &self,
+        comment_id: &CommentId,
+        reaction: Reaction,
+        change: ReactionChange,
+    ) -> Result<(), HostError> {
+        self.sent.record(HostCall::SetReaction {
+            comment_id: comment_id.clone(),
+            reaction,
+            change,
+        });
+        self.fail_if_connection_lost()?;
+        self.reacted_now.lock().unwrap().insert(
+            (comment_id.clone(), reaction),
+            change == ReactionChange::Add,
+        );
+        Ok(())
     }
 }
 

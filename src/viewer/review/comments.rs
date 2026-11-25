@@ -156,6 +156,11 @@ impl ReviewCore {
         self.comment_desk.can_comment_now()
     }
 
+    /// Whether a comment shows the reactions to add, as the PR's host has them.
+    pub fn can_react_to_comments(&self) -> bool {
+        self.comment_desk.can_react()
+    }
+
     /// A reply in a local thread is a follow-up task, so it always reaches the agent too.
     pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
         let (action, reply_body, send_refusal) = match action {

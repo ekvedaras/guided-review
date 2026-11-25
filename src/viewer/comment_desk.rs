@@ -169,6 +169,10 @@ impl CommentDesk {
         self.host.has(Capability::ChangeRequests) && self.can_approve_or_request_changes()
     }
 
+    pub(super) fn can_react(&self) -> bool {
+        self.host.has(Capability::CommentReactions)
+    }
+
     pub(super) fn can_finish_review(&self) -> bool {
         self.can_approve_or_request_changes() || self.pending_review == PendingReview::Exists
     }
@@ -484,6 +488,9 @@ impl CommentDesk {
         let refusal = match &action {
             ThreadAction::DeleteComment { comment_id } => {
                 self.deletion_refusal(threads, comment_id)
+            }
+            ThreadAction::SetReaction { .. } if !self.can_react() => {
+                Some(CommentRefusal::NotOffered)
             }
             _ => None,
         };
