@@ -11,7 +11,7 @@ use crate::ide::{IdeChoice, IdeTemplate};
 use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use crate::local_git::{CloneProblem, LocalGit};
 use crate::navigation::ServerAnswer;
-use crate::pull_request::RepoName;
+use crate::pull_request::HostedRepo;
 
 use crate::keys::Chord;
 use crate::keys::Command;
@@ -129,7 +129,7 @@ impl CloneRow {
         }
     }
 
-    fn repo_name(&self) -> Option<RepoName> {
+    fn hosted_repo(&self) -> Option<HostedRepo> {
         self.repo.parse().ok()
     }
 }
@@ -413,7 +413,7 @@ impl Settings {
     pub fn pick_clone_folder(&mut self, row: usize, folder: PathBuf) {
         let origin = LocalGit::origin_of(&self.in_home(&folder));
         if let (Some(clone), Some(origin)) = (self.edited.clones.get_mut(row), origin) {
-            clone.repo = origin.repo.to_string();
+            clone.repo = origin.to_string();
         }
         self.set_clone_folder(row, folder);
     }
@@ -494,7 +494,7 @@ impl Settings {
     }
 
     fn check_clone(&self, clone: &CloneRow, rows_before: &[CloneRow]) -> Option<CloneRowProblem> {
-        let Some(repo) = clone.repo_name() else {
+        let Some(repo) = clone.hosted_repo() else {
             return Some(CloneRowProblem::NotOwnerSlashRepo);
         };
         if rows_before.iter().any(|before| before.repo == clone.repo) {

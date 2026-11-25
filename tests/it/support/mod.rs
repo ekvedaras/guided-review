@@ -63,6 +63,14 @@ pub fn tarball(files: &[(impl AsRef<str>, impl AsRef<str>, u32)]) -> Vec<u8> {
     tar.into_inner().unwrap().finish().unwrap()
 }
 
+/// acme/shop on GitHub, the repo the fixture clones point at.
+pub fn shop_on_github() -> guided_review::pull_request::HostedRepo {
+    guided_review::pull_request::HostedRepo {
+        host: guided_review::pull_request::HostSite::GitHub,
+        repo: guided_review::pull_request::RepoName::new("acme", "shop"),
+    }
+}
+
 pub fn line(number: usize) -> guided_review::line_number::LineNumber {
     guided_review::line_number::LineNumber::try_from(number).unwrap()
 }

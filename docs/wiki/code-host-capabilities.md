@@ -94,7 +94,6 @@ From my knowledge of GitLab, not checked against its docs:
 ### Left open after step 4
 
 - Everything keyed by `RepoName` has no host level: the state folder (`state/<owner>/<repo>/`, read back as GitHub's in `ReviewStateFile::folders_opened_from_any_repo`), `Codebase`, the clones in `config.toml`.
-- `LocalGit::find` and `configured_clone` take a clone whose remote points at the repo on any host the app reads, not only the PR's host: Settings' clones and the clone offer name a `RepoName` with no host.
 - The switcher's "Loading your pull requests from GitHub..." and "Refreshing from GitHub..." name GitHub while the list is read from every host the app reads.
 - The palette's and title bar's "Open on GitHub" and "Open checks on GitHub" keep GitHub in their names and labels; `open_on_github` is also a key name in `[keys]`, which a rename must keep reading.
 - `PullRequestUrl::short` writes `owner/repo#7`; GitLab writes `group/project!7`.
@@ -117,6 +116,10 @@ Issue #140, 2026-11-25. Reading a PR's code with no clone is `HostedCodePort::co
 ## A repo is a path
 
 Issue #140, 2026-11-25. `RepoName` was `owner/name`; a GitLab project path has any number of groups (`group/sub/project`). It is now a namespace of one segment or more and a name, read from `namespace/name` split at the last `/`, every segment non-empty; `owner()` became `namespace()`. GitHub's form is the same text, so every persisted form of a GitHub repo (state and tour folders `<owner>/<repo>`, `server-checkouts/<owner>/<repo>`, `config.toml` keys) is unchanged. `config.toml`'s `[clones]` and `[merge_methods]` keys and Settings' clone rows are parsed as a `RepoName`, not split at the first `/`. A GitHub issue reference (`owner/repo#12`) reads only GitHub's two segments (`github_web::repo_named`), so `a/b/c#12` names no issue, as before.
+
+## A clone is of a repo on a host
+
+Issue #140, 2026-11-25. `LocalGit::find` and `configured_clone` took a `RepoName` and accepted a clone whose remote pointed at that repo on any host the app reads. They take a `HostedRepo` and accept only a remote of that repo on that host, as do `Config::clone_of`, Settings' clone rows and the clone offer, whose line names the host the code comes from. `HostedRepo` has a text form: `<host key>:namespace/name` (`HostSite::key`, `github`), and a bare `namespace/name` is GitHub's, so every `[clones]` key written before reads as GitHub's, and a GitHub repo is still written bare (`clone_offer::a_clone_of_a_github_repo_is_saved_under_its_owner_and_name_as_before_hosts_were_named`). A second host writes its key, since `HostedRepo`'s `Display` is a `match` on the host.
 
 ## Left open
 

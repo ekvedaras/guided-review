@@ -82,7 +82,7 @@ impl Pull {
 
     fn source(&self) -> CountingSource {
         CountingSource {
-            inner: LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+            inner: LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
                 .unwrap()
                 .unwrap(),
             blob_reads: AtomicUsize::new(0),

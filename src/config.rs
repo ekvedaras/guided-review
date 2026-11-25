@@ -13,12 +13,12 @@ use crate::keys::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, SendChoice, Wr
 use crate::merge_method::MergeMethod;
 use crate::more_lines::MoreLines;
 use crate::navigation::ServerAnswer;
-use crate::pull_request::RepoName;
+use crate::pull_request::{HostedRepo, RepoName};
 
 /// `config.toml` in the config folder.
 #[derive(Default, Deserialize)]
 pub struct Config {
-    /// `"owner/repo" = "~/path/to/clone"`
+    /// `"owner/repo" = "~/path/to/clone"`, a repo on GitHub; `"<host>:<repo>"` names its host.
     #[serde(default)]
     clones: BTreeMap<String, String>,
     #[serde(default)]
@@ -276,10 +276,10 @@ impl Config {
             .collect()
     }
 
-    pub fn clone_of(&self, repo: &RepoName) -> Option<PathBuf> {
+    pub fn clone_of(&self, repo: &HostedRepo) -> Option<PathBuf> {
         self.clones
             .iter()
-            .find(|(name, _)| name.parse::<RepoName>().is_ok_and(|name| name == *repo))
+            .find(|(name, _)| name.parse::<HostedRepo>().is_ok_and(|name| name == *repo))
             .map(|(_, path)| expand_env_home(Path::new(path)))
     }
 }

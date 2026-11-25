@@ -11,7 +11,6 @@ use guided_review::findings::FindingId;
 use guided_review::local_git::LocalGit;
 use guided_review::open_review::open_review;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
-use guided_review::pull_request::RepoName;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
@@ -64,7 +63,7 @@ impl Shop {
     }
 
     fn deliver(&self, review: &mut Review, agents: &TourAgents) {
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let host = FakeHost::with_pull("main-tip", &self.head, &SentLog::default());

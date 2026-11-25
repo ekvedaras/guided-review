@@ -6,7 +6,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     DefinitionKind, FileSearch, FilesWithWord, GitGrep, Import, Lookups, Reach, Word, WordInFile,
 };
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 
 use crate::support::fake_ports::FakeFilesWithWord;
 use crate::support::{FixtureRepo, file_path, line};
@@ -322,7 +322,8 @@ impl Shop {
 
     fn code(&self) -> Arc<dyn CodeSource> {
         Arc::new(
-            LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap(),
+            LocalGit::configured_clone(&crate::support::shop_on_github(), self.repo.path())
+                .unwrap(),
         )
     }
 }
@@ -524,7 +525,7 @@ fn ranked(files: &[(&str, &str)], word_text: &str, from: &str) -> Vec<String> {
         repo.write(path, text);
     }
     let head = Sha::new(&repo.commit("head"));
-    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let code = LocalGit::configured_clone(&crate::support::shop_on_github(), repo.path()).unwrap();
     let paths: Vec<&str> = files.iter().map(|(path, _)| *path).collect();
     let search = FakeFilesWithWord::default().with(word_text, &paths);
     let lookup = Lookups::new(FileSearch::whole_repo(Arc::new(search)))

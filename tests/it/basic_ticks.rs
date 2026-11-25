@@ -3,7 +3,7 @@ use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use crate::support::{FixtureRepo, file_path};
 use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
@@ -52,7 +52,7 @@ impl Shop {
             },
             "Orders cost two".to_owned(),
         );
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_subject(

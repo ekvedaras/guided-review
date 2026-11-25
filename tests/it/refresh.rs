@@ -6,7 +6,7 @@ use guided_review::app_folders::AppFolders;
 use guided_review::claude_cli::ClaudeRefreshWriter;
 use guided_review::local_git::LocalGit;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{JobOutcome, ReplacingJob};
@@ -69,7 +69,7 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }
@@ -280,7 +280,7 @@ fn refresher(shop: &Shop, writer: Writer) -> TourRefresher {
     let source = shop.repo.path().to_path_buf();
     let pick: PickCodeSource = Arc::new(move |_| {
         Ok(Box::new(
-            LocalGit::find(&RepoName::new("acme", "shop"), &source)?.unwrap(),
+            LocalGit::find(&crate::support::shop_on_github(), &source)?.unwrap(),
         ))
     });
     TourRefresher {

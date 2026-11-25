@@ -7,7 +7,7 @@ use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
 use guided_review::pick_code_source::pick_code_source;
-use guided_review::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{Problem, Review, ReviewStateFile};
@@ -45,7 +45,7 @@ impl Shop {
     }
 
     fn clone(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }

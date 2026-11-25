@@ -7,7 +7,7 @@ use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::{FixtureRepo, drafts, on_github};
 use guided_review::local_git::LocalGit;
 use guided_review::opened_subject::TourRepinner;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
@@ -106,7 +106,7 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }
@@ -601,7 +601,7 @@ fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
         subject: shop.pr().into(),
         pick_code_source: Arc::new(move |_| {
             Ok(Box::new(
-                LocalGit::find(&RepoName::new("acme", "shop"), &clone)?.unwrap(),
+                LocalGit::find(&crate::support::shop_on_github(), &clone)?.unwrap(),
             ))
         }),
     };

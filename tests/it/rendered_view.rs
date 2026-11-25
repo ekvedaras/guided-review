@@ -1,7 +1,6 @@
 use crate::support::{FixtureRepo, file_path, line, svg_of};
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     BlockChange, CommentGesture, CommentId, FileView, ImageCache, LineLocation, PageRow, Review,
@@ -51,7 +50,7 @@ impl Pull {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }

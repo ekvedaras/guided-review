@@ -3,7 +3,6 @@ use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::work::{drive_until_idle, kinds};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -34,7 +33,7 @@ impl Pull {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }

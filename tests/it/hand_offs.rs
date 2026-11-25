@@ -6,7 +6,7 @@ use crate::support::work::{drive_until_idle, kinds};
 use crate::support::{file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -60,7 +60,7 @@ impl Pull {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }

@@ -4,7 +4,7 @@ use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::Capability;
@@ -76,7 +76,7 @@ impl Shop {
             ],
         }))
         .unwrap();
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let state_file =
@@ -85,7 +85,7 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }

@@ -16,7 +16,7 @@ use guided_review::line_number::LineNumber;
 use guided_review::line_range::LineRange;
 use guided_review::local_git::LocalGit;
 use guided_review::open_review::open_review;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
@@ -98,7 +98,7 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }

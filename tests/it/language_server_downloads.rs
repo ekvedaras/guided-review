@@ -288,7 +288,7 @@ impl Rig {
     }
 
     fn clone_source(&self) -> LocalGit {
-        LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap()
+        LocalGit::configured_clone(&crate::support::shop_on_github(), self.repo.path()).unwrap()
     }
 
     fn hover_read_from(

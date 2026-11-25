@@ -9,7 +9,6 @@ use crate::support::{FixtureRepo, FixtureRepo as Repo};
 use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
-use guided_review::pull_request::RepoName;
 use guided_review::review_subject::{BranchName, ReviewSubject};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -61,7 +60,7 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }

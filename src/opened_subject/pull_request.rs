@@ -179,7 +179,7 @@ pub(super) fn writer_folder(pr: &PullRequestUrl, folders: &AppFolders) -> PathBu
     own.into_iter()
         .chain(others)
         .chain([folders.home().to_path_buf()])
-        .find_map(|folder| LocalGit::find(&pr.repo, &folder).ok().flatten())
+        .find_map(|folder| LocalGit::find(&pr.hosted_repo(), &folder).ok().flatten())
         .map_or_else(
             || folders.home().to_path_buf(),
             |clone| clone.root().to_path_buf(),

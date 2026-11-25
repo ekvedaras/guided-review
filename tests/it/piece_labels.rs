@@ -4,7 +4,6 @@
 use crate::support::{FixtureRepo, file_path};
 use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Chord, Command, Effect, FileToggle, FileView, Intent, KeyScope, PageRow, PaletteAction,
@@ -116,7 +115,7 @@ impl Pull {
                 "children": []}],
         }))
         .unwrap();
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse().unwrap());

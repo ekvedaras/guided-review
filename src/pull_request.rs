@@ -96,6 +96,13 @@ impl HostSite {
         Self::ALL.map(Self::name).join(", ")
     }
 
+    /// The host's key where a text form names it: `github`.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::GitHub => "github",
+        }
+    }
+
     /// The host's own name, which the UI shows.
     pub const fn name(self) -> &'static str {
         match self {
@@ -133,6 +140,33 @@ impl PullRequestUrl {
 pub struct HostedRepo {
     pub host: HostSite,
     pub repo: RepoName,
+}
+
+/// `<host key>:namespace/name`. A bare `namespace/name` is GitHub's, the one host the app read
+/// before hosts were named, so every key written then (`config.toml`'s `[clones]`) reads the same.
+impl FromStr for HostedRepo {
+    type Err = anyhow::Error;
+
+    fn from_str(text: &str) -> anyhow::Result<Self> {
+        let named = HostSite::ALL.into_iter().find_map(|host| {
+            let repo = text.strip_prefix(host.key())?.strip_prefix(':')?;
+            Some((host, repo))
+        });
+        let (host, repo) = named.unwrap_or((HostSite::GitHub, text));
+        Ok(Self {
+            host,
+            repo: repo.parse()?,
+        })
+    }
+}
+
+/// GitHub's repo is written bare, as it was before hosts were named.
+impl fmt::Display for HostedRepo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.host {
+            HostSite::GitHub => self.repo.fmt(f),
+        }
+    }
 }
 
 /// Empty when not known yet: a tour that was never pinned, a state file from before shas were kept.

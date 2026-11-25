@@ -181,7 +181,7 @@ fn a_pr_review_looks_for_no_branch() {
         .unwrap(),
         "Orders cost two".to_owned(),
     );
-    let source = guided_review::local_git::LocalGit::find(&pr.repo, repo.path())
+    let source = guided_review::local_git::LocalGit::find(&pr.hosted_repo(), repo.path())
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr));
@@ -810,8 +810,9 @@ impl Feature {
             folders: self.repo.folders(),
             change_set: change_set.clone(),
             pick_code_source: std::sync::Arc::new(move |pr, _| {
-                let clone = guided_review::local_git::LocalGit::find(&pr.repo, &repo_path)?
-                    .context("the fixture has a clone")?;
+                let clone =
+                    guided_review::local_git::LocalGit::find(&pr.hosted_repo(), &repo_path)?
+                        .context("the fixture has a clone")?;
                 Ok(Box::new(clone))
             }),
             drop_local_review: std::sync::Arc::new(|change_set, folders| {
@@ -825,7 +826,7 @@ impl Feature {
     /// on disk, made at the PR's tips.
     fn open_the_pr(&self, host: &FakeHost, head: &Sha) -> OpenedReview {
         let pr: PullRequestUrl = SHOP_7.parse().unwrap();
-        let source = guided_review::local_git::LocalGit::find(&pr.repo, self.repo.path())
+        let source = guided_review::local_git::LocalGit::find(&pr.hosted_repo(), self.repo.path())
             .unwrap()
             .unwrap();
         let main = self.repo.git(&["rev-parse", "main"]);

@@ -7,7 +7,7 @@ use crate::support::{FixtureRepo, file_path};
 use guided_review::config::{AskSettings, Config};
 use guided_review::local_git::LocalGit;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AgentLauncher, AgentPort, AskTarget, Asks, Author, LineLocation, Place, Review,
@@ -53,7 +53,7 @@ fn shop_titled(title: &str) -> Shop {
         }],
     }))
     .unwrap();
-    let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
+    let source = LocalGit::find(&crate::support::shop_on_github(), repo.path())
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(

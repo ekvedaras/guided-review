@@ -3,7 +3,6 @@ use guided_review::build::Build;
 use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
 use guided_review::pieces::PieceId;
-use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{Command, JumpPlace, PaletteEntry, Review, ReviewStateFile, Screen};
 use serde_json::{Value, json};
@@ -31,7 +30,7 @@ fn open(steps: Vec<Value>) -> Review {
         "steps": steps,
     }))
     .unwrap();
-    let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
+    let source = LocalGit::find(&crate::support::shop_on_github(), repo.path())
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(

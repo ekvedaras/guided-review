@@ -9,7 +9,7 @@ use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::config::Config;
 use crate::file_path::FilePath;
 use crate::local_work_tree::{LocalWorkTree, OnDisk};
-use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, Sha};
 use crate::review_subject::{LocalChangeSet, WorkTreeRoot};
 
 /// Why a folder set as a repo's clone cannot be used as one.
@@ -58,7 +58,7 @@ impl LocalGit {
         }
     }
 
-    pub fn find(repo: &RepoName, current_dir: &Path) -> anyhow::Result<Option<Self>> {
+    pub fn find(repo: &HostedRepo, current_dir: &Path) -> anyhow::Result<Option<Self>> {
         let current = Self::pr_clone(current_dir);
         if current.is_clone_of(repo) {
             return Ok(Some(current));
@@ -76,7 +76,7 @@ impl LocalGit {
     }
 
     /// The rule a folder set as the clone of `repo` must pass, both when a PR opens and when Settings saves.
-    pub fn configured_clone(repo: &RepoName, folder: &Path) -> Result<Self, CloneProblem> {
+    pub fn configured_clone(repo: &HostedRepo, folder: &Path) -> Result<Self, CloneProblem> {
         if !folder.is_dir() {
             return Err(CloneProblem::FolderGone);
         }
@@ -106,10 +106,10 @@ impl LocalGit {
     ) -> anyhow::Result<()> {
         if !self.has_commit(&tips.head) {
             let pull_ref = format!("+{}:refs/guided-review/{}", pr.head_ref(), pr.number);
-            self.fetch(&pr.repo, &pull_ref)?;
+            self.fetch(&pr.hosted_repo(), &pull_ref)?;
         }
         if !self.has_commit(&tips.base_branch_tip) {
-            self.fetch(&pr.repo, tips.base_branch_tip.as_str())?;
+            self.fetch(&pr.hosted_repo(), tips.base_branch_tip.as_str())?;
         }
         for sha in [&tips.base_branch_tip, &tips.head] {
             if !self.has_commit(sha) {
@@ -127,7 +127,7 @@ impl LocalGit {
             .is_ok()
     }
 
-    fn fetch(&self, repo: &RepoName, what: &str) -> anyhow::Result<()> {
+    fn fetch(&self, repo: &HostedRepo, what: &str) -> anyhow::Result<()> {
         let remote = self
             .remote_names_pointing_at(repo)
             .into_iter()
@@ -146,11 +146,11 @@ impl LocalGit {
         .map(drop)
     }
 
-    fn is_clone_of(&self, repo: &RepoName) -> bool {
+    fn is_clone_of(&self, repo: &HostedRepo) -> bool {
         !self.remote_names_pointing_at(repo).is_empty()
     }
 
-    fn remote_names_pointing_at(&self, repo: &RepoName) -> Vec<String> {
+    fn remote_names_pointing_at(&self, repo: &HostedRepo) -> Vec<String> {
         let Ok(remotes) = self.git(&["config", "--get-regexp", r"^remote\..*\.url$"]) else {
             return Vec::new();
         };
@@ -158,7 +158,7 @@ impl LocalGit {
             .lines()
             .filter_map(|line| line.split_once(' '))
             .filter(|(_, url)| {
-                HostedRepo::of_remote(url.trim()).is_some_and(|remote| remote.repo == *repo)
+                HostedRepo::of_remote(url.trim()).is_some_and(|remote| remote == *repo)
             })
             .filter_map(|(key, _)| key.strip_prefix("remote")?.strip_suffix(".url"))
             .map(|name| name.trim_start_matches('.').to_owned())

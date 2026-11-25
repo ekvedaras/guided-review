@@ -1,6 +1,6 @@
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
     FolderPath, JumpPlace, NextScreen, OverviewStats, PageRow, ReadingPlace, Review, ReviewChange,
@@ -28,7 +28,7 @@ fn open_basic(repo: &FixtureRepo, files: &[&str]) -> Review {
         },
         "Orders cost two".to_owned(),
     );
-    let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
+    let source = LocalGit::find(&crate::support::shop_on_github(), repo.path())
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(

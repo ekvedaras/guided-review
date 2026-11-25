@@ -1,6 +1,5 @@
 use crate::support::FixtureRepo;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{Capture, DiffLine, Review, ReviewStateFile, Side};
 use serde_json::json;
@@ -15,7 +14,7 @@ fn open_review(repo: &FixtureRepo, base: &str, head: &str) -> (Review, LocalGit)
         "steps": [{"id": "all", "title": "All", "why": "w", "pieces": [{"rest": ""}], "children": []}],
     }))
     .unwrap();
-    let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
+    let source = LocalGit::find(&crate::support::shop_on_github(), repo.path())
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(

@@ -25,7 +25,7 @@ fn pick_uncached_code_source(
     tips: &ChangeTips,
     current_dir: &Path,
 ) -> anyhow::Result<Arc<dyn CodeSource>> {
-    let Some(clone) = LocalGit::find(&pr.repo, current_dir)? else {
+    let Some(clone) = LocalGit::find(&pr.hosted_repo(), current_dir)? else {
         return host.code_of(&pr.repo);
     };
     match clone.fetch_missing_commits(pr, tips) {

@@ -5,7 +5,7 @@ use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use crate::support::{FixtureRepo, file_path, line};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -64,7 +64,7 @@ impl Pull {
             "steps": [{"id": "notes", "title": "Notes", "why": "because", "pieces": [{"file": "notes.txt"}], "children": []}],
         }))
         .unwrap();
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let pr: PullRequestUrl = PR.parse().unwrap();

@@ -2,7 +2,7 @@ use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeHost, HostFault, ReadFailure, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     HostError, OutageCause, Problem, Read, Review, ReviewStateFile, ToastTone, announcements,
@@ -29,7 +29,7 @@ impl Pull {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }

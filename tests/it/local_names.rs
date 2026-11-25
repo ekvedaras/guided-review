@@ -2,7 +2,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     Column, DefinitionKind, FileSearch, Lookup, Lookups, Place, Reach, Word,
 };
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use std::sync::Arc;
 
 use crate::support::fake_ports::FakeFilesWithWord;
@@ -42,8 +42,8 @@ impl OneFile {
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_')
             .collect();
-        let code =
-            LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap();
+        let code = LocalGit::configured_clone(&crate::support::shop_on_github(), self.repo.path())
+            .unwrap();
         Lookups::new(FileSearch::whole_repo(Arc::new(self.search.clone())))
             .look_up_at(
                 &code,

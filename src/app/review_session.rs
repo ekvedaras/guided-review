@@ -222,7 +222,7 @@ impl ReviewSession {
         let clone_offer = review
             .subject()
             .pull_request()
-            .and_then(|pr| CloneOffer::for_source(pr.repo.clone(), source.as_ref(), &folders));
+            .and_then(|pr| CloneOffer::for_source(pr.hosted_repo(), source.as_ref(), &folders));
         let mut session = Self {
             sidebar: SidebarRows::of(&review, &TourAgentState::Unknown),
             tour_agent: TourAgentState::Unknown,

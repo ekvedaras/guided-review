@@ -2,7 +2,6 @@ use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
 use crate::support::{FixtureRepo, on_github};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{PieceDiff, Review, ReviewStateFile, Screen, Side};
@@ -68,7 +67,7 @@ impl Shop {
     }
 
     fn open(&self, steps: Vec<Value>) -> Review {
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_subject(

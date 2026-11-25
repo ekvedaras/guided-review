@@ -133,7 +133,7 @@ impl PullRequest {
             },
             "Orders cost two".to_owned(),
         );
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_subject(

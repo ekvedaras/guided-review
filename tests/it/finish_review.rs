@@ -2,7 +2,7 @@ use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::{FixtureRepo, save_typing};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -57,7 +57,7 @@ impl Pull {
             ],
         }))
         .unwrap();
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let pr: PullRequestUrl = PR.parse().unwrap();
@@ -95,7 +95,7 @@ fn nothing_unread_means_no_warning() {
         "steps": [{"id": "all", "title": "All", "why": "because", "pieces": [{"file": "a.txt"}, {"file": "b.txt"}, {"file": "c.txt"}], "children": []}],
     }))
     .unwrap();
-    let source = LocalGit::find(&RepoName::new("acme", "shop"), pull.repo.path())
+    let source = LocalGit::find(&crate::support::shop_on_github(), pull.repo.path())
         .unwrap()
         .unwrap();
     let pr: PullRequestUrl = PR.parse().unwrap();

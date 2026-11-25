@@ -103,12 +103,10 @@ fn pr_review(repo: &FixtureRepo) -> Review {
         "steps": [{"id": "one", "title": "One"}],
     }))
     .unwrap();
-    let source = guided_review::local_git::LocalGit::find(
-        &guided_review::pull_request::RepoName::new("acme", "shop"),
-        repo.path(),
-    )
-    .unwrap()
-    .unwrap();
+    let source =
+        guided_review::local_git::LocalGit::find(&crate::support::shop_on_github(), repo.path())
+            .unwrap()
+            .unwrap();
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &SHOP_7.parse().unwrap());
     Review::open(
         tour,

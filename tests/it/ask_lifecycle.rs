@@ -9,7 +9,7 @@ use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeAgentLauncher, FakeAskProcesses, SentLog};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPool, AskDesk, AskId, Asks, CommentGesture, CommentRefusal,
@@ -82,7 +82,7 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }

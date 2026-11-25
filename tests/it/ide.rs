@@ -73,7 +73,7 @@ fn without_a_template_or_a_local_clone_there_is_no_open_in_ide() {
 #[test]
 fn a_local_clone_says_where_it_is_and_the_github_source_says_it_has_none() {
     let repo = FixtureRepo::cloned_from("acme/shop");
-    let clone = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
+    let clone = LocalGit::find(&crate::support::shop_on_github(), repo.path())
         .unwrap()
         .unwrap();
 

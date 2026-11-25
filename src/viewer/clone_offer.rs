@@ -4,7 +4,7 @@ use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::home::expand_home;
 use crate::local_git::LocalGit;
-use crate::pull_request::RepoName;
+use crate::pull_request::HostedRepo;
 
 use super::ports::ClonePort;
 use super::settings::{SaveOutcome, SettingProblem, Settings};
@@ -38,7 +38,7 @@ pub enum CloneOfferState {
 
 /// The sidebar's offer to clone a repo whose code is read from its code host, so the next reads come from disk.
 pub struct CloneOffer {
-    repo: RepoName,
+    repo: HostedRepo,
     folders: AppFolders,
     folder: PathBuf,
     state: CloneOfferState,
@@ -47,7 +47,7 @@ pub struct CloneOffer {
 impl CloneOffer {
     /// Only when no clone was found: a clone that could not give the commits has a problem of its own.
     pub fn for_source(
-        repo: RepoName,
+        repo: HostedRepo,
         source: &dyn CodeSource,
         folders: &AppFolders,
     ) -> Option<Self> {
@@ -55,7 +55,7 @@ impl CloneOffer {
         has_no_clone.then(|| Self::new(repo, folders))
     }
 
-    pub fn new(repo: RepoName, folders: &AppFolders) -> Self {
+    pub fn new(repo: HostedRepo, folders: &AppFolders) -> Self {
         let home = folders.home();
         let beside_clones = Settings::load(folders).ok().and_then(|settings| {
             settings.clones().iter().find_map(|clone| {
@@ -73,7 +73,7 @@ impl CloneOffer {
             })
             .unwrap_or_else(|| home.to_path_buf());
         Self {
-            folder: parent.join(repo.name()),
+            folder: parent.join(repo.repo.name()),
             repo,
             folders: folders.clone(),
             state: CloneOfferState::Offered,
@@ -94,8 +94,9 @@ impl CloneOffer {
             |in_home| format!("~/{}", in_home.display()),
         );
         format!(
-            "The code comes from GitHub, so it loads slowly. Clone {} to {shown}?",
-            self.repo
+            "The code comes from {}, so it loads slowly. Clone {} to {shown}?",
+            self.repo.host.name(),
+            self.repo.repo
         )
     }
 
@@ -104,7 +105,7 @@ impl CloneOffer {
         self.folder = if LocalGit::configured_clone(&self.repo, &picked).is_ok() {
             picked
         } else {
-            picked.join(self.repo.name())
+            picked.join(self.repo.repo.name())
         };
     }
 
@@ -127,7 +128,7 @@ impl CloneOffer {
 
 /// Blocks on the network; the app runs it off the main thread.
 pub struct CloneJob {
-    repo: RepoName,
+    repo: HostedRepo,
     folders: AppFolders,
     folder: PathBuf,
 }
@@ -135,7 +136,7 @@ pub struct CloneJob {
 impl CloneJob {
     pub fn run(&self, cloner: &dyn ClonePort) -> anyhow::Result<()> {
         if LocalGit::configured_clone(&self.repo, &self.folder).is_err() {
-            cloner.clone_repo(&self.repo, &self.folder)?;
+            cloner.clone_repo(&self.repo.repo, &self.folder)?;
         }
         let mut settings = Settings::load(&self.folders)?;
         let row = settings.add_clone();
