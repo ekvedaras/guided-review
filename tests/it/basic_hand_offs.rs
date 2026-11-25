@@ -1,15 +1,14 @@
 use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
-use crate::support::{FixtureRepo, file_path, line};
+use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
-    AgentStatus, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, HandOffState,
-    Review, ReviewStateFile, ReviewThread, Screen, SendMode, Side, TerminalId, TextBox,
-    ThreadComment, ThreadId, TourAgentPort, TourAgents, WorkPorts,
+    AgentStatus, Audience, CommentGesture, CommentPlace, CommentResult, HandOffState, Review,
+    ReviewStateFile, Screen, SendMode, TerminalId, TextBox, TourAgentPort, TourAgents, WorkPorts,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -87,40 +86,8 @@ impl Pull {
     }
 }
 
-fn thread_on_line_two(comments: Vec<ThreadComment>) -> ReviewThread {
-    ReviewThread {
-        id: ThreadId::new("T1"),
-        is_resolved: false,
-        is_outdated: false,
-        path: file_path("notes.txt"),
-        line: Some(line(2)),
-        start_line: None,
-        side: Side::Head,
-        is_file_comment: false,
-        original_line: Some(line(2)),
-        original_start_line: None,
-        original_commit: None,
-        comments,
-    }
-}
-
-fn comment(body: &str) -> ThreadComment {
-    ThreadComment {
-        avatar_url: None,
-        id: CommentId::new("C1"),
-        reactions: Vec::new(),
-        author: "me".into(),
-        is_bot: false,
-        by_agent: None,
-        by_viewer: true,
-        body: body.into(),
-        url: "https://github.com/acme/shop/pull/7#discussion_C1".into(),
-    }
-}
-
 fn handed_off(pull: &Pull) -> Review {
-    let mut host = FakeHost::with_pull("main-tip", &pull.head, &pull.sent);
-    host.threads = vec![thread_on_line_two(vec![comment("why caps?")])];
+    let host = FakeHost::with_pull("main-tip", &pull.head, &pull.sent);
     let mut review = pull.open();
     let at = review
         .file_page()

@@ -100,7 +100,7 @@ impl ViewedSync {
         })
     }
 
-    /// Takes in what GitHub said. Returns what it unticked, and the error of the network part.
+    /// Takes in what the host said. Returns what it unticked, and the error of the network part.
     pub(super) fn take_in(
         &self,
         state: &mut ReviewState,
@@ -309,7 +309,7 @@ impl SyncOutcome {
         }
     }
 
-    /// The queued marks were pushed, then GitHub's marks read back.
+    /// The queued marks were pushed, then the host's marks read back.
     fn pushed(
         tour_head: &Sha,
         (sent, push_error): Pushed,
@@ -327,7 +327,7 @@ impl SyncOutcome {
         }
     }
 
-    /// After a re-pin: GitHub's marks were read first, then the wishes they did not match pushed.
+    /// After a re-pin: the host's marks were read first, then the wishes they did not match pushed.
     fn baseline_taken(
         tour_head: &Sha,
         wishes: BTreeMap<FilePath, Viewed>,
@@ -343,7 +343,7 @@ impl SyncOutcome {
         }
     }
 
-    /// Records what was sent and what GitHub says. Returns what it unticked, and the error of the
+    /// Records what was sent and what the host says. Returns what it unticked, and the error of the
     /// network part.
     fn land(
         self,
@@ -402,7 +402,7 @@ impl SyncRequest {
         }
     }
 
-    /// GitHub is read first, so only wishes it does not already match are pushed.
+    /// The host is read first, so only wishes it does not already match are pushed.
     fn take_baseline(
         host: &dyn ViewedFilesPort,
         pr: &PullRequestUrl,

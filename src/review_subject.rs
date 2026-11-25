@@ -56,17 +56,30 @@ impl ReviewSubject {
         }
     }
 
-    /// Whether the review has a PR page on GitHub to open.
+    /// The host of its PR, or of its folder's origin for a local change set.
+    pub fn host(&self) -> Option<HostSite> {
+        match self {
+            Self::PullRequest(pr) => Some(pr.host),
+            Self::Local(change_set) => change_set.origin().map(|origin| origin.host),
+        }
+    }
+
+    /// What a prompt calls the host: its name, else "the code host".
+    pub fn host_name(&self) -> &'static str {
+        self.host().map_or("the code host", HostSite::name)
+    }
+
+    /// Whether the review has a PR page on the host to open.
     pub const fn has_host_page(&self) -> bool {
         matches!(self, Self::PullRequest(_))
     }
 
-    /// Whether the review's threads live on GitHub, rather than in the review's state file.
+    /// Whether the review's threads live on the host, rather than in the review's state file.
     pub const fn has_host_threads(&self) -> bool {
         matches!(self, Self::PullRequest(_))
     }
 
-    /// Whether a comment can join a pending review on GitHub, and be sent with a reviewer's note.
+    /// Whether a comment can join a pending review on the host, and be sent with a reviewer's note.
     pub const fn has_pending_review(&self) -> bool {
         matches!(self, Self::PullRequest(_))
     }

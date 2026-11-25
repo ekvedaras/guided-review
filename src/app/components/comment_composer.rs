@@ -53,7 +53,7 @@ pub struct CommentCapabilities {
     pub suggest_change: bool,
     /// The agent link is on, so the comment can also go to the tour agent.
     pub ask_agent: bool,
-    /// A local review's comment is a task, which replaces every GitHub send action.
+    /// A local review's comment is a task, which replaces every send action of the host.
     pub sending: Sending,
 }
 
@@ -66,7 +66,7 @@ pub fn task_button(mode: SendMode) -> (Icon, &'static str) {
     }
 }
 
-/// The send actions a box has: the ones of GitHub, or a local review's tasks, and Suggest change
+/// The send actions a box has: the ones of the host, or a local review's tasks, and Suggest change
 /// where the lines can take one.
 fn offered_actions(capabilities: CommentCapabilities) -> Vec<SendAction> {
     let mut offered = vec![SendAction::AddToReview];
@@ -336,7 +336,7 @@ fn shown(problem: CommentProblem) -> SharedString {
     }
 }
 
-/// A comment GitHub has not taken yet, shown where it will land, with the way out.
+/// A comment the host has not taken yet, shown where it will land, with the way out.
 #[derive(IntoElement)]
 pub struct QueuedCommentNote {
     queued: QueuedComment,

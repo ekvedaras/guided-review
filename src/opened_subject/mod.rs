@@ -1,6 +1,6 @@
 //! A review subject opened to be read: the one place that tells a PR from a local change set for
 //! where the code comes from, how a tour is first made and how it moves on. The CLI's commands, the
-//! app's open and its Update ask an `OpenedSubject`; only the adapters inside know GitHub or git.
+//! app's open and its Update ask an `OpenedSubject`; only the adapters inside know the code host or git.
 
 mod hosts;
 mod local;
@@ -55,7 +55,7 @@ impl OpenedSubject {
     }
 
     /// Makes the basic tour now, unless a tour is on disk already; true when made. A PR's is made at
-    /// the tips GitHub has now, a local change set's from a new snapshot of its folder.
+    /// the tips the host has now, a local change set's from a new snapshot of its folder.
     pub fn make_basic_tour_if_no_tour(&self) -> anyhow::Result<bool> {
         match &self.0 {
             Adapter::PullRequest(opened) => opened.make_basic_tour_if_no_tour(),
@@ -63,7 +63,7 @@ impl OpenedSubject {
         }
     }
 
-    /// What `outline`, `show` and `check` read. A PR is read at the tips GitHub has now; a local change
+    /// What `outline`, `show` and `check` read. A PR is read at the tips the host has now; a local change
     /// set at the snapshot its tour is pinned to, since the folder is not what the reviewer reads.
     pub fn code_to_read(&self) -> anyhow::Result<CodeAtTips> {
         match &self.0 {
@@ -80,7 +80,7 @@ impl OpenedSubject {
         }
     }
 
-    /// `repin`: a PR's guided tour, else its basic one, moves to the PR's head on GitHub; a local
+    /// `repin`: a PR's guided tour, else its basic one, moves to the PR's head on the host; a local
     /// review's shown tour moves to a new snapshot of its folder.
     pub fn repin(&self) -> anyhow::Result<Repin> {
         match &self.0 {
@@ -113,7 +113,7 @@ impl OpenedSubject {
     }
 
     /// Picks the code source again for any tips, as the app does when the tour moves: a PR's clone or
-    /// GitHub, a local change set's own folder, whose git holds the snapshot.
+    /// the host, a local change set's own folder, whose git holds the snapshot.
     pub fn code_source_picker(&self) -> PickCodeSource {
         match &self.0 {
             Adapter::PullRequest(opened) => opened.code_source_picker(),
@@ -164,7 +164,7 @@ impl TourRepinner {
     }
 }
 
-/// Update in the app: the shown tour moves to a PR's head on GitHub, or to a new snapshot of a local
+/// Update in the app: the shown tour moves to a PR's head on the host, or to a new snapshot of a local
 /// change set's folder. It takes the app's ports, not an `OpenedSubject`, so tests put fakes behind
 /// them; the code source the new tips were read with comes back for the review built on them.
 pub fn update_shown_tour(

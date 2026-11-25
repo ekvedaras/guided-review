@@ -140,7 +140,7 @@ impl OpenedPr {
     }
 }
 
-/// Moves the tour at `tour_path` to the PR's head on GitHub; the code source it read the new head with
+/// Moves the tour at `tour_path` to the PR's head on the host; the code source it read the new head with
 /// comes back for the review built on it.
 pub(super) fn repin_to_live_tips(
     folders: &AppFolders,

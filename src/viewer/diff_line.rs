@@ -15,7 +15,7 @@ pub enum LineKind {
     /// hunks above it do not add up to a line, as in a diff that does not match the file.
     Context {
         base_line: Option<LineNumber>,
-        /// Shown on the reviewer's ask, outside GitHub's diff, so GitHub takes no comment on it.
+        /// Shown on the reviewer's ask, outside the host's diff, so the host takes no comment on it.
         is_expanded: bool,
     },
 }
@@ -67,7 +67,7 @@ impl DiffLine {
         matches!(self.kind, LineKind::Removed | LineKind::Added)
     }
 
-    /// Only lines inside a GitHub diff hunk can take a comment.
+    /// Only lines inside a hunk of the host's diff can take a comment.
     pub fn is_inside_hunk(&self) -> bool {
         !matches!(
             self.kind,
@@ -80,7 +80,7 @@ impl DiffLine {
 }
 
 impl DiffLine {
-    /// The one rule for a comment button and for a selection: why GitHub takes no comment on this
+    /// The one rule for a comment button and for a selection: why the host takes no comment on this
     /// row, or `None` when it does. A head line keeps its number when it is commented on from the
     /// change since the read, because that view's head is the PR's head.
     pub fn comment_refusal(&self) -> Option<CommentRefusal> {
@@ -102,7 +102,7 @@ impl DiffLine {
         self.comment_refusal().is_none()
     }
 
-    /// A row shows the comment button when it could be a line of a GitHub diff, so that pressing
+    /// A row shows the comment button when it could be a line of the host's diff, so that pressing
     /// it can say why it takes no comment.
     pub fn offers_comment_button(&self) -> bool {
         match self.view {

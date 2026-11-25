@@ -37,7 +37,7 @@ pub enum NameTarget {
 /// Why the card may show less than the repo holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CardNote {
-    /// The code is read from GitHub, so only the review's changed files were searched.
+    /// The code is read from the host, so only the review's changed files were searched.
     UsagesFromChangedFilesOnly,
     /// More files hold the name than are parsed.
     SearchCutShort,

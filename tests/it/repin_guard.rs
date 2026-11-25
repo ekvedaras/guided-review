@@ -1,13 +1,12 @@
 use crate::support::fake_ports::{FakeHost, SentLog};
-use crate::support::{FixtureRepo, drafts, file_path, line};
+use crate::support::{FixtureRepo, drafts};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    AgentReplied, Audience, CommentGesture, CommentId, CommentPlace, HandOffId, HandOffState,
-    LineLocation, PieceDiff, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side,
-    StepId, TextBox, ThreadComment, ThreadId,
+    AgentReplied, Audience, CommentGesture, CommentPlace, HandOffId, HandOffState, LineLocation,
+    PieceDiff, Problem, Review, ReviewStateFile, SendMode, StepId, TextBox, ThreadId,
 };
 use guided_review::viewer::{JobOutcome, ReplacingJob};
 use serde_json::json;
@@ -97,8 +96,7 @@ impl Pull {
 
     /// A comment on line ten sent with Ask agent, so one hand-off is queued.
     fn hand_off(&self, review: &mut Review) -> HandOffId {
-        let mut host = FakeHost::with_pull("main-tip", &self.head, &self.sent);
-        host.threads = vec![thread_on_line_ten()];
+        let host = FakeHost::with_pull("main-tip", &self.head, &self.sent);
         let place = self.draft_on_line_ten(review);
         review
             .type_in(&TextBox::Draft(place.clone()), "why ten?")
@@ -118,33 +116,6 @@ impl Pull {
             .iter()
             .map(|hand_off| hand_off.state().clone())
             .collect()
-    }
-}
-
-fn thread_on_line_ten() -> ReviewThread {
-    ReviewThread {
-        id: ThreadId::new("T1"),
-        is_resolved: false,
-        is_outdated: false,
-        path: file_path("notes.txt"),
-        line: Some(line(10)),
-        start_line: None,
-        side: Side::Head,
-        is_file_comment: false,
-        original_line: Some(line(10)),
-        original_start_line: None,
-        original_commit: None,
-        comments: vec![ThreadComment {
-            avatar_url: None,
-            id: CommentId::new("C1"),
-            author: "me".into(),
-            is_bot: false,
-            by_agent: None,
-            body: "why ten?".into(),
-            url: String::new(),
-            reactions: Vec::new(),
-            by_viewer: false,
-        }],
     }
 }
 

@@ -230,13 +230,16 @@ fn picking_counts_rows_as_filtered() {
 #[test]
 fn github_that_cannot_be_reached_is_said_in_the_switcher_and_the_list_stays_empty() {
     let host = three_pull_requests();
-    host.inject(HostFault::RelevantListFails);
+    host.inject(HostFault::RelevantListAnswersAnError);
 
     let switcher = loaded(&host, TempDir::new().unwrap().path());
 
     assert_eq!(switcher.visible().count(), 0);
     let notice = switcher.notice().unwrap();
-    assert!(notice.contains("network is down"), "{notice}");
+    assert!(
+        notice.contains(crate::support::fake_ports::HOST_ERROR),
+        "{notice}"
+    );
 }
 
 #[test]
@@ -245,13 +248,16 @@ fn a_failed_refresh_keeps_the_rows_already_listed_and_gives_the_reason() {
     let home = TempDir::new().unwrap();
     let mut switcher = loaded(&host, home.path());
 
-    host.inject(HostFault::RelevantListFails);
+    host.inject(HostFault::RelevantListAnswersAnError);
     switcher.refreshing();
     switcher.loaded(host.relevant_pull_requests(), &folders_in(home.path()));
 
     assert_eq!(visible_urls(&switcher), [BLOG_7, API_31, SHOP_7]);
     let notice = switcher.notice().unwrap();
-    assert!(notice.contains("network is down"), "{notice}");
+    assert!(
+        notice.contains(crate::support::fake_ports::HOST_ERROR),
+        "{notice}"
+    );
     assert!(!switcher.is_refreshing());
 }
 
@@ -304,12 +310,12 @@ fn teams_that_were_not_searched_are_named() {
 #[test]
 fn a_reload_after_a_failure_clears_the_notice_and_keeps_the_filter() {
     let host = three_pull_requests();
-    host.inject(HostFault::RelevantListFails);
+    host.inject(HostFault::RelevantListAnswersAnError);
     let home = TempDir::new().unwrap();
     let mut switcher = loaded(&host, home.path());
     switcher.filter("alice");
 
-    host.heal(&HostFault::RelevantListFails);
+    host.heal(&HostFault::RelevantListAnswersAnError);
     switcher.loaded(host.relevant_pull_requests(), &folders_in(home.path()));
 
     assert_eq!(switcher.notice(), None);

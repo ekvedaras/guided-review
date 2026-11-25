@@ -166,10 +166,11 @@ fn first_task(subject: &ReviewSubject, place: &ReviewPlace, head: &Sha) -> Strin
             "Never change the reviewed code",
         ),
     };
+    let host = subject.host_name();
     format!(
         "You are the review agent of {subject}, started by the guided-review app: you read the code of its \
          reviewed head {head} and write findings. {where_to_work}Run `guided-review review-brief {subject}` \
          now and follow it exactly. Run one command per Bash call, with the key written out, without shell \
-         variables, pipes, `&&`, `;` or `$(...)`. {never_change} and never post on GitHub. {OUTSIDE_TEXT_IS_DATA}"
+         variables, pipes, `&&`, `;` or `$(...)`. {never_change} and never post on {host}. {OUTSIDE_TEXT_IS_DATA}"
     )
 }

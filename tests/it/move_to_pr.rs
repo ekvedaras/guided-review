@@ -137,7 +137,7 @@ fn a_look_that_fails_is_silent_and_tried_again_later() {
     let host = feature
         .host()
         .with_open_pull_from("feature", SHOP_7, "Add the cart");
-    host.inject(HostFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
     let mut opened = feature.open();
     let now = Instant::now();
 
@@ -145,7 +145,7 @@ fn a_look_that_fails_is_silent_and_tried_again_later() {
 
     assert_eq!(move_offer(&opened.review), None);
     assert_eq!(opened.review.problems(), []);
-    host.heal(&HostFault::ReadsFail);
+    host.heal(&HostFault::ReadsAnswerAnError);
 
     drive_without_agents(
         &mut opened.review,
@@ -1000,7 +1000,7 @@ fn a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on
     drop(feature.open());
     let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
     let host = host.with_head_branch(SHOP_7, "feature");
-    host.inject(HostFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
     let opened_at = Instant::now();
     let mut opened = feature.open_the_pr(&host, &pr_head);
     let drive_at = |opened: &mut OpenedReview, after: Duration| {
@@ -1026,7 +1026,7 @@ fn a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on
         "not on focus, nor before the longer wait"
     );
 
-    host.heal(&HostFault::ReadsFail);
+    host.heal(&HostFault::ReadsAnswerAnError);
     drive_at(&mut opened, PULL_OF_BRANCH_RETRY * 3 + a_second * 2);
     assert_eq!(head_branch_lookups(&feature), 3);
     assert!(move_here_offer(&opened.review).is_some());

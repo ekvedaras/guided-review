@@ -34,15 +34,15 @@ impl ReviewCore {
         self.work.next_due()
     }
 
-    /// The window came to the front, or the review opened: GitHub and the clone are read again,
-    /// and what waits to go to GitHub is sent.
+    /// The window came to the front, or the review opened: the host and the clone are read again,
+    /// and what waits to go to the host is sent.
     pub(super) fn pull_from_host(&mut self) {
         for kind in WorkKind::READ_AGAIN_ON_FOCUS {
             self.work.want(kind);
         }
     }
 
-    /// `None` when there is nothing of the kind to do now. Work with GitHub is never done for a local
+    /// `None` when there is nothing of the kind to do now. Work with the host is never done for a local
     /// review, which has no PR.
     fn job_of(&self, kind: WorkKind) -> Option<Job> {
         let pr = || self.subject.pull_request().cloned();
@@ -296,9 +296,9 @@ impl ReviewCore {
         self.work.want(WorkKind::CheckAgentLink);
     }
 
-    /// The tour agent's reply is on GitHub: the hand-off is answered, and the threads and the
+    /// The tour agent's reply is on the host: the hand-off is answered, and the threads and the
     /// pending review are read again so the reply shows under the asked comment. While a re-pin runs it
-    /// is kept for the re-pinned review, which saves it: the agent's reply is on GitHub either way.
+    /// is kept for the re-pinned review, which saves it: the agent's reply is on the host either way.
     pub fn hand_off_replied(
         &mut self,
         id: HandOffId,

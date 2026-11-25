@@ -471,7 +471,7 @@ fn threads_that_could_not_be_read_again_after_an_action_are_named_until_a_read_g
     let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review.pull_threads(&host).unwrap();
-    host.inject(HostFault::ThreadReadsFail);
+    host.inject(HostFault::ThreadReadsAnswerAnError);
 
     let result = review.act_on_thread(
         ThreadAction::Resolve {
@@ -483,9 +483,11 @@ fn threads_that_could_not_be_read_again_after_an_action_are_named_until_a_read_g
     assert_eq!(result, ThreadActionResult::Done);
     assert_eq!(
         review.problems(),
-        [Problem::ThreadsNotRead("network is down".into())]
+        [Problem::ThreadsNotRead(
+            crate::support::fake_ports::HOST_ERROR.into()
+        )]
     );
-    host.heal(&HostFault::ThreadReadsFail);
+    host.heal(&HostFault::ThreadReadsAnswerAnError);
     review.pull_threads(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
@@ -495,15 +497,18 @@ fn a_pr_head_that_could_not_be_read_is_named_until_a_read_goes_through() {
     let pull = Pull::new();
     let host = pull.host();
     let mut review = pull.open();
-    host.inject(HostFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
 
     review.check_pr_head(&host).unwrap_err();
 
     assert_eq!(
         review.problems(),
-        [Problem::NotRead(Read::PrHead, "network is down".into())]
+        [Problem::NotRead(
+            Read::PrHead,
+            crate::support::fake_ports::HOST_ERROR.into()
+        )]
     );
-    host.heal(&HostFault::ReadsFail);
+    host.heal(&HostFault::ReadsAnswerAnError);
     review.check_pr_head(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
@@ -513,7 +518,7 @@ fn a_pr_description_that_could_not_be_read_is_named_until_a_read_goes_through() 
     let pull = Pull::new();
     let host = pull.host();
     let mut review = pull.open();
-    host.inject(HostFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
 
     review.pull_pr_description(&host).unwrap_err();
 
@@ -521,10 +526,10 @@ fn a_pr_description_that_could_not_be_read_is_named_until_a_read_goes_through() 
         review.problems(),
         [Problem::NotRead(
             Read::PrDescription,
-            "network is down".into()
+            crate::support::fake_ports::HOST_ERROR.into()
         )]
     );
-    host.heal(&HostFault::ReadsFail);
+    host.heal(&HostFault::ReadsAnswerAnError);
     review.pull_pr_description(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
@@ -534,7 +539,7 @@ fn a_pending_review_lookup_that_failed_is_named_until_a_read_goes_through() {
     let pull = Pull::new();
     let host = pull.host();
     let mut review = pull.open();
-    host.inject(HostFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
 
     review.pull_pending_review(&host).unwrap_err();
 
@@ -542,10 +547,10 @@ fn a_pending_review_lookup_that_failed_is_named_until_a_read_goes_through() {
         review.problems(),
         [Problem::NotRead(
             Read::PendingReview,
-            "network is down".into()
+            crate::support::fake_ports::HOST_ERROR.into()
         )]
     );
-    host.heal(&HostFault::ReadsFail);
+    host.heal(&HostFault::ReadsAnswerAnError);
     review.pull_pending_review(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
@@ -555,15 +560,18 @@ fn an_authorship_lookup_that_failed_is_named_until_a_read_goes_through() {
     let pull = Pull::new();
     let host = pull.host();
     let mut review = pull.open();
-    host.inject(HostFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
 
     review.pull_viewer_authorship(&host).unwrap_err();
 
     assert_eq!(
         review.problems(),
-        [Problem::NotRead(Read::Authorship, "network is down".into())]
+        [Problem::NotRead(
+            Read::Authorship,
+            crate::support::fake_ports::HOST_ERROR.into()
+        )]
     );
-    host.heal(&HostFault::ReadsFail);
+    host.heal(&HostFault::ReadsAnswerAnError);
     review.pull_viewer_authorship(&host).unwrap();
     assert_eq!(review.problems(), []);
 }

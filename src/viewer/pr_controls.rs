@@ -1,4 +1,4 @@
-//! A PR review's PR as GitHub has it, and what the reviewer asked to change of it: the draft state
+//! A PR review's PR as the host has it, and what the reviewer asked to change of it: the draft state
 //! (`D`) and merging (`Shift+M`), each sent only on the same press again. A local review has none.
 
 use std::time::{Duration, Instant};
@@ -16,7 +16,7 @@ use crate::review_subject::ReviewSubject;
 
 #[derive(Debug)]
 pub(super) struct PrControls {
-    /// `None` until GitHub answers; kept as it was while a read fails.
+    /// `None` until the host answers; kept as it was while a read fails.
     status: Option<PrStatus>,
     readiness: PressAgain<Readiness>,
     /// `None` on a host that has no merging: nothing offers it.
@@ -100,7 +100,7 @@ impl PrControls {
     }
 
     /// A merged or closed PR has nothing to change, so the key does nothing, and nor does it while
-    /// a confirmed change is on its way to GitHub.
+    /// a confirmed change is on its way to the host.
     pub(super) fn ask_to_change_merging(
         &mut self,
         now: Instant,
@@ -169,7 +169,7 @@ impl PrControls {
         self.merging.as_ref()?.to_send()
     }
 
-    /// A change GitHub took shows at once, until GitHub is read back; one it refused is a problem.
+    /// A change the host took shows at once, until the host is read back; one it refused is a problem.
     pub(super) fn readiness_landed(
         &mut self,
         readiness: Readiness,
@@ -183,7 +183,7 @@ impl PrControls {
         Ok(())
     }
 
-    /// A change GitHub took shows at once, until GitHub is read back; one it refused is a problem.
+    /// A change the host took shows at once, until the host is read back; one it refused is a problem.
     pub(super) fn merging_landed(
         &mut self,
         change: MergeChange,

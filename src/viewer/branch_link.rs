@@ -14,7 +14,7 @@ use super::work_agenda::PULL_OF_BRANCH_RETRY;
 /// What a review knows of the other side of Move to PR, and so what it offers. Not saved but the
 /// declines, which live in the local review's state file.
 pub(super) enum BranchLink {
-    /// A local review, and the open PR GitHub last said is opened from its branch.
+    /// A local review, and the open PR the host last said is opened from its branch.
     OfLocalReview {
         change_set: LocalChangeSet,
         pull: Option<PullOfBranch>,
@@ -83,7 +83,7 @@ impl BranchLink {
         }
     }
 
-    /// Only a PR's review with local reviews of its repo on disk asks GitHub for its head branch.
+    /// Only a PR's review with local reviews of its repo on disk asks the host for its head branch.
     pub(super) fn head_branch_to_look_up(&self) -> Option<&PullRequestUrl> {
         match self {
             Self::OfPr {
@@ -198,7 +198,7 @@ pub struct LocalReviewsOfRepo {
 }
 
 impl LocalReviewsOfRepo {
-    /// Reads the tour and state files only: no GitHub and no git.
+    /// Reads the tour and state files only: no host and no git.
     pub fn on_disk(folders: &AppFolders, pr: &PullRequestUrl) -> Self {
         Self {
             folders: folders.clone(),
@@ -233,7 +233,7 @@ fn head_branch_retry_after(failures: u32) -> Duration {
 }
 
 /// The local reviews on disk of the PR's repo whose move to the PR was not declined: one of them may be of
-/// the branch the PR is opened from. Reads the tour and state files only: no GitHub and no git.
+/// the branch the PR is opened from. Reads the tour and state files only: no host and no git.
 pub fn local_reviews_of_repo(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<LocalChangeSet> {
     local_reviews_on_disk(folders)
         .into_iter()

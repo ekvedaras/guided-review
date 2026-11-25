@@ -1,7 +1,12 @@
 use guided_review::pull_request::Sha;
-use guided_review::viewer::{CodeHost, CommentPlace, HostError, LineLocation, ReviewOutcome, Side};
+use guided_review::viewer::{
+    CodeHost, CommentPlace, HostError, LineLocation, ReviewOutcome, SendMode, Side, Stance,
+    Standing, ThreadId,
+};
 
-use crate::host_contract::{HostBuilder, PullOnHost, Reach, pr, reviewers_on_host};
+use crate::host_contract::{
+    HostBuilder, PullOnHost, Reach, SeedComment, SeedThread, pr, reviewers_on_host,
+};
 use crate::support::{file_path, line};
 
 fn place() -> CommentPlace {
@@ -116,6 +121,89 @@ pub fn each_verdict_reads_back_as_the_viewers_last_review(host: HostBuilder) {
             assert!(!has_pending(host.as_ref()), "{outcome:?}");
         }
     }
+}
+
+/// The host posts a comment or reply now as a review of its own, with no body.
+pub fn a_comment_or_reply_posted_now_is_the_viewers_last_review(host: HostBuilder) {
+    let posts: [(&str, Send); 2] = [
+        ("comment", |host, body| {
+            host.comment_now(&pr(), &place(), body)
+        }),
+        ("reply", |host, body| {
+            host.reply_to_thread(&pr(), &ThreadId::new("T1"), body, SendMode::CommentNow)
+                .map(|_| ())
+        }),
+    ];
+    for (what, post) in posts {
+        let host = host(PullOnHost {
+            head: "cart-head",
+            threads: vec![SeedThread {
+                id: "T1",
+                path: "cart.rs",
+                line: 5,
+                resolved: false,
+                comments: vec![SeedComment {
+                    id: "C1",
+                    author: "alice",
+                    body: "why a Vec?",
+                }],
+            }],
+            ..PullOnHost::default()
+        });
+
+        post(host.as_ref(), "typo").unwrap();
+
+        let last = host.reviews(&pr()).unwrap().viewer_last;
+        assert_eq!(
+            last.map(|last| (last.outcome, last.body, last.commit)),
+            Some((
+                ReviewOutcome::Commented,
+                String::new(),
+                Sha::new("cart-head")
+            )),
+            "{what}"
+        );
+    }
+}
+
+/// A review the viewer sends stands as theirs beside the others', in place of being asked for one.
+pub fn a_sent_review_stands_as_the_viewers(host: HostBuilder) {
+    let pull = PullOnHost {
+        head: "cart-head",
+        reviews: vec![("bob", ReviewOutcome::Approved)],
+        asks_viewer_to_review: true,
+        ..PullOnHost::default()
+    };
+    let others = |standings: &[Standing]| -> Vec<Standing> {
+        standings
+            .iter()
+            .filter(|standing| !standing.is_viewer())
+            .cloned()
+            .collect()
+    };
+    let host = host(pull.clone());
+    let before = host.reviews(&pr()).unwrap().standings;
+
+    host.approve(&pr(), "ship it").unwrap();
+
+    let after = host.reviews(&pr()).unwrap().standings;
+    let viewers: Vec<&Stance> = after
+        .iter()
+        .filter(|standing| standing.is_viewer())
+        .map(|standing| &standing.stance)
+        .collect();
+    assert_eq!(
+        viewers,
+        [&Stance::Reviewed {
+            outcome: ReviewOutcome::Approved,
+            commit: Sha::new("cart-head"),
+        }]
+    );
+    assert_eq!(others(&after), others(&before));
+    assert_eq!(
+        others(&before),
+        others(&reviewers_on_host(&pull).standings())
+    );
 }
 
 pub fn someone_elses_review_stands_as_theirs(host: HostBuilder) {

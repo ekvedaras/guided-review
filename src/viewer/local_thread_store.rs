@@ -13,7 +13,7 @@ use crate::pull_request::{PullRequestUrl, Sha};
 use crate::review_subject::ReviewSubject;
 use std::collections::BTreeMap;
 
-/// Where a review's threads are kept: on GitHub for a PR, in its state file for a local review.
+/// Where a review's threads are kept: on the host for a PR, in its state file for a local review.
 #[derive(Debug, Clone)]
 pub enum ThreadHome {
     Host(PullRequestUrl),

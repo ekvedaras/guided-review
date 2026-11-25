@@ -143,7 +143,7 @@ pub struct ChangedFile {
     /// Every change of the file, whichever piece holds it.
     pub hunks: Vec<Hunk>,
     /// Ids of changed symbols no piece could hold: their lines show on no page, so the
-    /// reviewer is told to look at them on GitHub.
+    /// reviewer is told to look at them on the host.
     pub not_shown: Vec<String>,
 }
 

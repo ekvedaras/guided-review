@@ -88,7 +88,7 @@ pub trait PullRequestDescriptionPort: Send + Sync {
 
     fn set_pull_request_description(&self, pr: &PullRequestUrl, body: &str) -> anyhow::Result<()>;
 
-    /// The issues the PR would close, as its description or GitHub's sidebar links them.
+    /// The issues the PR would close, as its description or the host's sidebar links them.
     fn pull_request_issues(&self, pr: &PullRequestUrl) -> Result<PullRequestIssues, HostError>;
 }
 
@@ -128,7 +128,7 @@ pub trait MergingPort: Send + Sync {
     fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), HostError>;
 }
 
-/// The viewer's reactions on the PR itself, which GitHub shows under its description.
+/// The viewer's reactions on the PR itself, which the host shows under its description.
 pub trait PullRequestReactionsPort: Send + Sync {
     fn set_pull_request_reaction(
         &self,
@@ -151,7 +151,7 @@ pub trait CommentReactionsPort: Send + Sync {
 
 /// Storing a picture with the host, for a PR description that shows it.
 pub trait PictureUploadPort: Send + Sync {
-    /// The address GitHub keeps the picture at, open only to those who can see the PR's repository.
+    /// The address the host keeps the picture at, open only to those who can see the PR's repository.
     fn upload_picture(&self, pr: &PullRequestUrl, picture: &Path) -> anyhow::Result<String>;
 }
 
@@ -194,7 +194,7 @@ pub trait ReviewWritesPort: Send + Sync {
     fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, HostError>;
 
     /// Adds a thread to the pending review, or starts one. Fails with `ThreadNotCreated`
-    /// when GitHub answers without a thread.
+    /// when the host answers without a thread.
     fn add_review_thread(
         &self,
         pr: &PullRequestUrl,
@@ -203,7 +203,7 @@ pub trait ReviewWritesPort: Send + Sync {
     ) -> Result<(), HostError>;
 
     /// Posts one comment at once as a review of its own. Fails with `PendingReviewExists`
-    /// when the viewer has a pending review, which GitHub would not post past.
+    /// when the viewer has a pending review, which the host would not post past.
     fn comment_now(
         &self,
         pr: &PullRequestUrl,
@@ -281,7 +281,7 @@ impl HostCapabilities {
 /// A code host failure a caller tells apart from the rest.
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
-    /// No token, or GitHub refused it.
+    /// No token, or the host refused it.
     #[error("{0}")]
     NoAccess(NoAccess),
     /// "User can only have one pending review per pull request."
@@ -323,7 +323,7 @@ impl HostError {
     }
 }
 
-/// Why GitHub cannot be used, and what failed because of it. A refusal names only the reason;
+/// Why the host cannot be used, and what failed because of it. A refusal names only the reason;
 /// a failure shown as such says what was being done first.
 #[derive(Debug)]
 pub struct NoAccess {

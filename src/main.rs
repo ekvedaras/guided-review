@@ -100,8 +100,8 @@ enum Command {
     /// Write the files the release archives' Desktop entries are made of, for every OS
     #[command(hide = true)]
     DesktopEntryTemplate { out: std::path::PathBuf },
-    /// Answer a reviewer's hand-off on its GitHub thread, the reply starting with the robot mark, or a
-    /// question on a finding on its thread
+    /// Answer a reviewer's hand-off on its thread on the host, the reply starting with the robot mark,
+    /// or a question on a finding on its thread
     AgentReply {
         subject: ReviewSubject,
         /// The hand-off id from the message, like `h0`, or the finding's id

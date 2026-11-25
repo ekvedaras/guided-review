@@ -1,10 +1,10 @@
 use guided_review::viewer::{
-    CodeHost, CommentId, HostError, Reaction, ReactionChange, ReactionCount, Resolution,
-    ReviewThread, SendMode, ThreadId,
+    CodeHost, CommentId, CommentPlace, HostError, LineLocation, Reaction, ReactionChange,
+    ReactionCount, Resolution, ReviewThread, SendMode, Side, ThreadId,
 };
 
 use crate::host_contract::{HostBuilder, PullOnHost, Reach, SeedComment, SeedThread, pr};
-use crate::support::line;
+use crate::support::{file_path, line};
 
 fn three_threads() -> Vec<SeedThread> {
     vec![
@@ -159,6 +159,87 @@ pub fn a_reply_reads_back_as_the_last_comment_of_its_thread(host: HostBuilder) {
             others(&before),
             "{mode:?}"
         );
+    }
+}
+
+type NewThread = fn(&dyn CodeHost, &CommentPlace, &str) -> Result<(), HostError>;
+
+/// Where a new thread is, as a caller reads it: path, line, start line, side, on the whole file.
+type ThreadPlace = (String, Option<usize>, Option<usize>, Side, bool);
+
+/// A new thread joins the viewer's pending review or is posted now; the host lists it to its
+/// author either way.
+pub fn a_new_thread_reads_back_with_the_viewers_comment_where_it_was_put(host: HostBuilder) {
+    let at = |path: &str, side, number| LineLocation {
+        path: file_path(path),
+        side,
+        line: line(number),
+    };
+    let places: [(CommentPlace, ThreadPlace); 3] = [
+        (
+            CommentPlace::Lines {
+                start: at("cart.rs", Side::Head, 20),
+                end: at("cart.rs", Side::Head, 22),
+            },
+            ("cart.rs".to_owned(), Some(22), Some(20), Side::Head, false),
+        ),
+        (
+            CommentPlace::Lines {
+                start: at("price.rs", Side::Base, 7),
+                end: at("price.rs", Side::Base, 7),
+            },
+            ("price.rs".to_owned(), Some(7), None, Side::Base, false),
+        ),
+        (
+            CommentPlace::File(file_path("tax.rs")),
+            ("tax.rs".to_owned(), None, None, Side::Head, true),
+        ),
+    ];
+    let writes: [(&str, NewThread); 2] = [
+        ("added to the review", |host, place, body| {
+            host.add_review_thread(&pr(), place, body)
+        }),
+        ("commented now", |host, place, body| {
+            host.comment_now(&pr(), place, body)
+        }),
+    ];
+    for (how, write) in writes {
+        for (place, expected) in &places {
+            let host = host(PullOnHost {
+                threads: three_threads(),
+                ..PullOnHost::default()
+            });
+
+            write(host.as_ref(), place, "why two loops?").unwrap();
+
+            let after = threads_of(host.as_ref());
+            let new: Vec<&ReviewThread> = after
+                .iter()
+                .filter(|thread| !["T1", "T2", "T3"].contains(&thread.id.as_str()))
+                .collect();
+            let [thread] = new.as_slice() else {
+                panic!("{how}: one new thread, not {new:?}");
+            };
+            assert_eq!(
+                (
+                    thread.path.to_string(),
+                    thread.line.map(usize::from),
+                    thread.start_line.map(usize::from),
+                    thread.side,
+                    thread.is_file_comment,
+                ),
+                expected.clone(),
+                "{how}"
+            );
+            let comments: Vec<(&str, bool)> = thread
+                .comments
+                .iter()
+                .map(|comment| (comment.body.as_str(), comment.by_viewer))
+                .collect();
+            assert_eq!(comments, [("why two loops?", true)], "{how}");
+            assert!(!thread.is_resolved, "{how}");
+            assert_eq!(after.len(), 4, "{how}: the other threads stay");
+        }
     }
 }
 

@@ -61,7 +61,7 @@ pub enum Intent {
     /// A local review's ask to its agent to open the PR of its branch.
     OpenPr,
     OpenOnHost,
-    /// GitHub's checks page of the PR.
+    /// The host's checks page of the PR.
     OpenChecksOnHost,
     /// A row of the title bar's check list, by its place in the list; the row past the last is the
     /// "and more" one. Opens the check's run, else the checks page.
@@ -155,7 +155,7 @@ pub enum Effect {
     OpenIssue(IssueLink),
     /// The review is about several issues: the window lists them to pick one.
     ListIssues,
-    /// A check's run, on the page GitHub gave.
+    /// A check's run, on the page the host gave.
     OpenCheck(String),
     /// The window asks the review to change the PR between draft and ready, and says what it answers.
     ChangeReadiness,

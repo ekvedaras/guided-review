@@ -1,6 +1,6 @@
 //! `guided-review agent-reply`: the agent answers a hand-off, or says it is working on it, then the
 //! hand-off takes that on, in the running app when it shows the review, else in the state file. A PR's
-//! answer goes on GitHub; a local review's goes on its local thread in the state file, which only ever
+//! answer goes on the host; a local review's goes on its local thread in the state file, which only ever
 //! changes by a locked read and write of that thread, so the app and this command never write over
 //! each other's thread.
 

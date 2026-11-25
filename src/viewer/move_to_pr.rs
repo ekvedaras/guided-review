@@ -38,7 +38,7 @@ pub struct PrMover {
 }
 
 impl PrMover {
-    /// Blocks on git and on GitHub; the app runs it off the main thread. Nothing is posted: the open
+    /// Blocks on git and on the host; the app runs it off the main thread. Nothing is posted: the open
     /// comments become drafts the reviewer sends or drops.
     pub fn run(&self, offer: &MoveOffer, host: &dyn ChangeTipsPort) -> anyhow::Result<()> {
         self.carry(offer, host)?;

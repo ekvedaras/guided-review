@@ -394,7 +394,7 @@ pub struct ShownLine {
     /// The words that changed, cut to char boundaries already.
     pub changed_words: Vec<Range<usize>>,
     pub code_link: CodeLink,
-    /// Rows outside GitHub's hunks show no button. Rows of the change since the read show one, to
+    /// Rows outside the host's hunks show no button. Rows of the change since the read show one, to
     /// say why they take no comment.
     pub offers_comment_button: bool,
     /// A long line wraps onto more rows instead of being cut at the box's edge.

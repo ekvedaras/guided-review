@@ -1,5 +1,5 @@
 //! Where the reviewer is and what they have read: the reading order and the moves through it, read
-//! ticks per step and file, folds, progress and the viewed marks synced with GitHub.
+//! ticks per step and file, folds, progress and the viewed marks synced with the host.
 
 use super::{
     ReadProgress, ReadUnit, ReadingPlace, ReviewCore, RouteStop, StepId, SummaryStats, TourLead,
@@ -462,7 +462,7 @@ impl ReviewCore {
         }
     }
 
-    /// Changed code no page can show, by piece id: the reviewer has to read it on GitHub.
+    /// Changed code no page can show, by piece id: the reviewer has to read it on the host.
     pub fn changes_not_shown(&self) -> Vec<String> {
         let unplaced = self
             .files

@@ -104,7 +104,7 @@ pub enum HandOffState {
     Queued,
     Delivered,
     Working,
-    /// The agent's reply on GitHub says it is working on it; its answer replaces that reply.
+    /// The agent's reply on the host says it is working on it; its answer replaces that reply.
     WorkingOnIt {
         reply: CommentId,
     },
@@ -160,7 +160,7 @@ impl HandOffState {
     }
 }
 
-/// The 👀 on the reviewer's comment, which says on GitHub that the tour agent has it.
+/// The 👀 on the reviewer's comment, which says on the host that the tour agent has it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SeenMark {
     #[default]
@@ -271,7 +271,7 @@ impl HandedComment {
         }
         if let Some(left_out) = &self.left_out {
             lines.push(format!(
-                "Left out of the comment, since GitHub hides it: {left_out}. The reviewer did not \
+                "Left out of the comment, since it does not show where the reviewer reads it: {left_out}. The reviewer did not \
                  see it, and it is no part of the request."
             ));
         }
@@ -307,7 +307,7 @@ pub struct HandOff {
     /// The thread before this comment, plain replies included.
     thread_so_far: Vec<ThreadMessage>,
     state: HandOffState,
-    /// The comment on GitHub, which carries the seen mark. `None` when the threads read after the send did not show it.
+    /// The comment on the host, which carries the seen mark. `None` when the threads read after the send did not show it.
     #[serde(default)]
     reviewer_comment: Option<CommentId>,
     #[serde(default)]
@@ -492,9 +492,13 @@ impl HandOff {
                  is clean, then `guided-review open {subject}`."
             )
         };
+        let markdown = subject.host().map_or_else(
+            || "Markdown".to_owned(),
+            |host| format!("{} markdown", host.name()),
+        );
         lines.push(format!(
             "Answer with `guided-review agent-reply {subject} {id} --body -` and the answer on stdin, in a quoted heredoc \
-             (`<<'EOF'`). Write it in GitHub markdown: answer the question in the first sentence, then at most 3 bullets, a \
+             (`<<'EOF'`). Write it in {markdown}: answer the question in the first sentence, then at most 3 bullets, a \
              blank line between paragraphs, code names in backticks. If the comment asks for a change to the \
              PR's code, first run `guided-review agent-reply {subject} {id} --working`: it posts \"{WORKING_ON_IT}\" on the \
              thread, and your answer replaces it. Make the change in your folder when it is a clone of the PR's repo on \
@@ -590,7 +594,7 @@ pub(super) enum SentFrom {
     Elsewhere,
 }
 
-/// What a hand-off is made from: the comment as GitHub has it now, in the threads read right after the send.
+/// What a hand-off is made from: the comment as the host has it now, in the threads read right after the send.
 pub(super) struct SentComment<'a> {
     pub place: String,
     pub from: SentFrom,
@@ -690,7 +694,7 @@ impl HandOffs {
         self.push(sent, thread, comment, Vec::new(), state);
     }
 
-    /// The reply joined a thread GitHub already had, so the thread is known and the agent gets what was said in it.
+    /// The reply joined a thread the host already had, so the thread is known and the agent gets what was said in it.
     pub(super) fn record_reply(
         &mut self,
         thread_id: &ThreadId,
@@ -1026,7 +1030,7 @@ impl HandOffs {
         }
     }
 
-    /// The agent's reply is on GitHub, whatever the hand-off was doing before.
+    /// The agent's reply is on the host, whatever the hand-off was doing before.
     pub(super) fn replied(
         &mut self,
         id: HandOffId,
@@ -1156,7 +1160,7 @@ pub enum HandToAgentRefused {
     NotSaved(String),
 }
 
-/// Why a reply from the tour agent is not posted, before GitHub is asked.
+/// Why a reply from the tour agent is not posted, before the host is asked.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AgentReplyRefused {
     #[error("no hand-off {id} {reviewed}; {}", known_ids(.known))]
@@ -1248,7 +1252,7 @@ impl AgentReplyDone {
 #[derive(Debug)]
 enum AgentReplyKind {
     Answer {
-        /// What the agent said, without the robot GitHub needs in front of it.
+        /// What the agent said, without the robot the host needs in front of it.
         said: String,
         replacing: Option<CommentId>,
     },

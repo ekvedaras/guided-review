@@ -7,7 +7,7 @@ use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, Tour, TourPin};
 
 /// Makes the PR's basic tour from the code at `tips` and the PR's own title, and writes it beside the
-/// guided tour's path. It reads nothing from GitHub: the caller gives the title.
+/// guided tour's path. It reads nothing from the host: the caller gives the title.
 ///
 /// Refused while a guided tour is on disk: a guided tour never turns back into a basic one, and a PR
 /// with one opens it.

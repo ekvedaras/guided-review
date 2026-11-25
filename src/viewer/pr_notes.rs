@@ -91,7 +91,7 @@ impl PrNotes {
         })
     }
 
-    /// The description GitHub now holds, when the add went through.
+    /// The description the host now holds, when the add went through.
     pub(super) fn finish(&mut self, outcome: ToNotesOutcome) -> Option<String> {
         match outcome.result {
             Ok(description) => {
@@ -159,7 +159,7 @@ impl Note {
     }
 
     /// The summary as written, its pictures uploaded and its links to other files of the tour's
-    /// `folder` left as their text, since GitHub cannot open those.
+    /// `folder` left as their text, since the host cannot open those.
     pub(super) fn reviewer_summary(summary: &str, folder: &Path) -> Option<Self> {
         let files = local_files(summary, folder);
         let mut contents = vec![summary.as_bytes().to_vec()];

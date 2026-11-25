@@ -127,10 +127,10 @@ struct ViewerSections {
     /// Per file, whether the host said viewed at the last sync. A pull reacts to changes against it.
     #[serde(default, rename = "viewed_on_github")]
     viewed_on_host: KeptSection<BTreeMap<FilePath, Viewed>>,
-    /// Viewed changes GitHub has not taken yet, newest wish per file.
+    /// Viewed changes the host has not taken yet, newest wish per file.
     #[serde(default)]
     unsent_viewed: KeptSection<BTreeMap<FilePath, Viewed>>,
-    /// When viewed marks started to wait for GitHub, in seconds since the epoch, so a restart keeps it.
+    /// When viewed marks started to wait for the host, in seconds since the epoch, so a restart keeps it.
     #[serde(default)]
     viewed_waiting_since: KeptSection<Option<u64>>,
     /// Ticks a re-pin took away; the step was read at that head, so it can show what changed since.
@@ -142,7 +142,7 @@ struct ViewerSections {
     /// What a re-pin took from the file ticks, as `read_before` does for steps.
     #[serde(default)]
     file_read_before: KeptSection<BTreeMap<FilePath, ReadTick>>,
-    /// After a re-pin GitHub's viewed state is taken as it is, so its "not viewed" for files
+    /// After a re-pin the host's viewed state is taken as it is, so its "not viewed" for files
     /// the new commits touched is not read as the reviewer unticking.
     #[serde(default, rename = "github_baseline_due")]
     host_baseline_due: KeptSection<bool>,
@@ -159,10 +159,10 @@ struct ViewerSections {
     /// Ask why: the threads under findings, with the review agent's answers.
     #[serde(default, skip_serializing_if = "no_finding_threads")]
     finding_threads: KeptSection<FindingThreads>,
-    /// Comments GitHub did not take, oldest first.
+    /// Comments the host did not take, oldest first.
     #[serde(default)]
     comment_queue: KeptSection<KeptEntries<QueuedComment>>,
-    /// The PR's body at the last pull, so the summary shows it before GitHub answers.
+    /// The PR's body at the last pull, so the summary shows it before the host answers.
     #[serde(default)]
     pr_description: KeptSection<String>,
     /// The comments sent with Ask agent and where each is with the tour agent.
@@ -482,7 +482,7 @@ impl ReviewState {
         *self.viewer.host_baseline_due
     }
 
-    /// GitHub's state replaces what was seen before; only wishes it does not match yet stay queued.
+    /// The host's state replaces what was seen before; only wishes it does not match yet stay queued.
     pub(super) fn take_host_baseline(
         &mut self,
         on_host: &BTreeMap<FilePath, Viewed>,
@@ -571,7 +571,7 @@ impl ReviewState {
         self.viewer.viewed_on_host.insert(path.clone(), viewed);
     }
 
-    /// A wish that equals what GitHub already says needs no push, so it cancels the queued one.
+    /// A wish that equals what the host already says needs no push, so it cancels the queued one.
     pub(super) fn want_viewed(&mut self, path: &FilePath, viewed: Viewed) {
         if self.was_viewed_on_host(path) == viewed {
             self.viewer.unsent_viewed.remove(path);

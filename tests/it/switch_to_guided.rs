@@ -614,8 +614,7 @@ fn a_comment_queued_while_the_guided_review_is_being_built_is_kept() {
 #[test]
 fn a_hand_off_made_while_the_guided_review_is_being_built_is_kept() {
     let shop = Shop::new();
-    let mut host = FakeHost::with_pull("main-tip", &shop.second, &SentLog::default());
-    host.threads = vec![thread_on_first(vec![mine("why first?")])];
+    let host = FakeHost::with_pull("main-tip", &shop.second, &SentLog::default());
 
     let guided = switched_while(&shop, |basic| {
         let place = comment_box_on_first(basic);

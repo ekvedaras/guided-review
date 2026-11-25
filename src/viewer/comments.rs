@@ -212,7 +212,7 @@ impl SendMode {
     }
 }
 
-/// A comment GitHub did not take yet. It is sent again when GitHub can be reached.
+/// A comment the host did not take yet. It is sent again when the host can be reached.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueuedComment {
     pub draft: CommentDraft,
@@ -225,13 +225,13 @@ pub struct QueuedComment {
 /// Why a comment was not written, with nothing lost: the text stays where it was.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CommentRefusal {
-    /// The tour is for an older head, so its lines may not be where GitHub has them.
+    /// The tour is for an older head, so its lines may not be where the host has them.
     TourIsOld,
     /// A re-pin moved the tour since the comment was written: the text stays, but its line
     /// numbers belong to the old code.
     CodeMoved,
     NotInsideHunk,
-    /// The row is a line of the head the step was read at: GitHub has no such line to comment on.
+    /// The row is a line of the head the step was read at: the host has no such line to comment on.
     OlderHeadLine,
     /// An Ask about a step or the whole tour has no lines a comment could sit on.
     NoLines,
@@ -250,7 +250,7 @@ pub enum CommentRefusal {
     /// An Ask still waiting for its first answer has nothing to put in a comment.
     NoAnswerYet,
     NoAccess(String),
-    /// The send action is not one this review offers: a task in a PR's review, or a GitHub
+    /// The send action is not one this review offers: a task in a PR's review, or a comment to the host
     /// comment in a local review.
     NotOffered,
     /// A local review's comment is a task for its agent, which cannot be reached now.
@@ -298,7 +298,7 @@ impl fmt::Display for CommentRefusal {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CommentProblem {
     Refused(CommentRefusal),
-    /// GitHub answered but made no thread.
+    /// The host answered but made no thread.
     Rejected(Arc<str>),
     Failed(Arc<str>),
 }
@@ -316,10 +316,10 @@ impl fmt::Display for CommentProblem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommentResult {
     Sent,
-    /// GitHub could not be reached; the comment waits in the queue.
+    /// The host could not be reached; the comment waits in the queue.
     Queued(String),
     Refused(CommentRefusal),
-    /// GitHub answered but made no thread. Retrying would only leave more empty pending reviews,
+    /// The host answered but made no thread. Retrying would only leave more empty pending reviews,
     /// so the text stays a draft.
     Rejected(String),
 }

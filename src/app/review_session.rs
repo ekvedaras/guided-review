@@ -1,5 +1,5 @@
 //! The open review on the GPUI side: it owns the `Review`, the rows built from it, and every round trip
-//! to GitHub, the code source and the tour tools. Layouts draw from it and forward the reader's input to it.
+//! to the host, the code source and the tour tools. Layouts draw from it and forward the reader's input to it.
 
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
@@ -107,13 +107,13 @@ pub struct ReviewSession {
     /// The status a title bar scene shows, held over a host read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
     staged_pr_status: Option<(crate::viewer::PrStatus, crate::viewer::Merging)>,
-    /// The issues a title bar scene shows, held over a GitHub read that lands while it is on screen.
+    /// The issues a title bar scene shows, held over a host read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
     staged_related_issues: Vec<(
         crate::viewer::RelatedIssue,
         Option<crate::viewer::IssueDetails>,
     )>,
-    /// The author and branches a title bar scene shows, held over a GitHub read that lands while it is on screen.
+    /// The author and branches a title bar scene shows, held over a host read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
     staged_pr_origin: Option<crate::viewer::PullRequestOrigin>,
     /// The Refresh a banner scene shows under way.
@@ -652,7 +652,7 @@ impl ReviewSession {
         }
     }
 
-    /// Runs a thread action in the background, then shows the threads as GitHub has them.
+    /// Runs a thread action in the background, then shows the threads as the host has them.
     pub fn act_on_thread(
         &mut self,
         action: ThreadAction,
@@ -1062,7 +1062,7 @@ impl ReviewSession {
     }
 
     /// Shows the open screen and the sidebar as if every step were read, without ticking anything,
-    /// so no viewed mark goes to GitHub. The next rebuild of the rows undoes it.
+    /// so no viewed mark goes to the host. The next rebuild of the rows undoes it.
     #[cfg(feature = "snapshots")]
     pub fn stage_all_read(&mut self, cx: &mut Context<Self>) {
         use crate::viewer::{Station, StationHealth, StationKind};
@@ -1089,8 +1089,8 @@ impl ReviewSession {
         cx.notify();
     }
 
-    /// The GitHub station as it stands while viewed marks wait to go through, drawn only: nothing is
-    /// ticked, so no mark goes to GitHub.
+    /// The host station as it stands while viewed marks wait to go through, drawn only: nothing is
+    /// ticked, so no mark goes to the host.
     #[cfg(feature = "snapshots")]
     pub fn stage_viewed_wait(&mut self, is_staged: bool, cx: &mut Context<Self>) {
         self.is_viewed_wait_staged = is_staged;
@@ -1099,7 +1099,7 @@ impl ReviewSession {
     }
 
     /// The sidebar of a re-review of someone else's PR that others reviewed too, drawn only: nothing
-    /// is asked of GitHub, so no 👀 goes on or off. The next rebuild of the rows undoes it.
+    /// is asked of the host, so no 👀 goes on or off. The next rebuild of the rows undoes it.
     #[cfg(feature = "snapshots")]
     pub fn stage_re_review(&mut self, stage: StagedReReview, cx: &mut Context<Self>) {
         self.staged_re_review = Some(stage);
@@ -1190,7 +1190,7 @@ impl ReviewSession {
     }
 
     /// The last screen as it ends when steps were passed unread, without ticking anything, so no
-    /// viewed mark goes to GitHub. The next rebuild of the rows undoes it.
+    /// viewed mark goes to the host. The next rebuild of the rows undoes it.
     #[cfg(feature = "snapshots")]
     pub fn stage_unread_end(&mut self, cx: &mut Context<Self>) {
         self.is_unread_end_staged = true;
@@ -1209,7 +1209,7 @@ impl ReviewSession {
         );
     }
 
-    /// The title bar as GitHub would have it say `status`; `unstage_pr_status` puts back what was read.
+    /// The title bar as the host would have it say `status`; `unstage_pr_status` puts back what was read.
     #[cfg(feature = "snapshots")]
     pub fn stage_pr_status(
         &mut self,
@@ -1229,7 +1229,7 @@ impl ReviewSession {
         cx.notify();
     }
 
-    /// The title bar as GitHub would have it name `issues`; `unstage_related_issues` takes them off.
+    /// The title bar as the host would have it name `issues`; `unstage_related_issues` takes them off.
     #[cfg(feature = "snapshots")]
     pub fn stage_related_issues(
         &mut self,
@@ -1244,7 +1244,7 @@ impl ReviewSession {
         cx.notify();
     }
 
-    /// The title bar as GitHub would have it name `origin`; `unstage_pr_origin` takes it off.
+    /// The title bar as the host would have it name `origin`; `unstage_pr_origin` takes it off.
     #[cfg(feature = "snapshots")]
     pub fn stage_pr_origin(
         &mut self,
@@ -1323,7 +1323,7 @@ impl ReviewSession {
     }
 
     /// The PR in Basic mode with its first two files read. The ticks go into the state file before
-    /// the review opens on it, so no viewed mark is wished for and nothing reaches GitHub.
+    /// the review opens on it, so no viewed mark is wished for and nothing reaches the host.
     #[cfg(feature = "snapshots")]
     pub fn stage_basic_read(&mut self, cx: &mut Context<Self>) {
         let Ok(probe) = Review::open_basic(
@@ -1487,7 +1487,7 @@ impl ReviewSession {
     }
 
     /// The local review whose branch has an open PR, so its sidebar offers Move to the PR. Looking for
-    /// the PR on GitHub would answer nothing for the sample repo, so the answer is given here.
+    /// the PR on the host would answer nothing for the sample repo, so the answer is given here.
     #[cfg(feature = "snapshots")]
     pub fn stage_local_move_offer(&mut self, cx: &mut Context<Self>) {
         self.stage_local(cx);

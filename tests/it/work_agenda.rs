@@ -128,7 +128,7 @@ fn a_read_asked_again_while_one_runs_starts_and_the_older_answer_is_dropped() {
         .find(|work| work.kind() == WorkKind::CheckPrHead)
         .unwrap();
     let offline = pull.host();
-    offline.inject(HostFault::ReadsFail);
+    offline.inject(HostFault::ReadsAnswerAnError);
 
     review.pull_from_host();
     let newer = review

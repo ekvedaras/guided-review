@@ -70,7 +70,7 @@ struct ThreadUi {
     /// The comment whose reaction picker is open.
     picking_reaction: Option<CommentId>,
     is_busy: bool,
-    /// The comment whose new text is on its way to GitHub.
+    /// The comment whose new text is on its way to the host.
     saving_edit: Option<CommentId>,
     problem: Option<String>,
     focus: FocusHandle,
@@ -334,7 +334,7 @@ fn reaction_pill(
         .child(label)
 }
 
-/// Starts an action and shows it as under way until GitHub answers.
+/// Starts an action and shows it as under way until the host answers.
 fn run_action(
     action: ThreadAction,
     ui: &Entity<ThreadUi>,
@@ -951,7 +951,7 @@ pub fn avatar_circle(
 const AVATAR_SIZE: f32 = 20.;
 const AGENT_PERSON_SIZE: f32 = 10.;
 
-/// A line that says the thread is waiting on GitHub, with the dot that breathes while it waits.
+/// A line that says the thread is waiting on the host, with the dot that breathes while it waits.
 fn busy_line(colors: &Colors, text: &'static str) -> gpui::Div {
     div()
         .flex()

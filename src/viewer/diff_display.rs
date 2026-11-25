@@ -150,7 +150,7 @@ pub enum PieceView {
     SinceRead(PieceId),
 }
 
-/// Which change of which piece: the n-th changed hunk of the piece's file, as GitHub cuts them.
+/// Which change of which piece: the n-th changed hunk of the piece's file, as the host cuts them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChangeId {
     piece: PieceView,

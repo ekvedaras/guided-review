@@ -14,12 +14,12 @@ pub enum ReviewVerdict {
     RequestChanges,
 }
 
-/// What finishing does: a PR takes a review on GitHub; a local review sends its queued tasks.
+/// What finishing does: a PR takes a review on the host; a local review sends its queued tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FinishAction {
     FinishReview,
     SendTasks,
-    /// A re-review with nothing new to send ends on the reviewer's say-so, not on GitHub.
+    /// A re-review with nothing new to send ends on the reviewer's say-so, not on the host.
     MarkDone,
 }
 

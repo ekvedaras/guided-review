@@ -130,7 +130,7 @@ type OnTextSpot = Rc<dyn Fn(CodeGesture, TextSpot, &mut Window, &mut App)>;
 /// What the layout talks to outside the window.
 pub struct Collaborators {
     pub host: Arc<dyn CodeHost>,
-    /// `None` opens all code on GitHub.
+    /// `None` opens all code on the host.
     pub ide: Result<Ide, NoIde>,
     pub tour_work: TourWork,
 }
@@ -199,7 +199,7 @@ pub struct OneStepLayout {
     /// switch to another PR) ends a wait for it, so no state has to be carried across the root swap.
     reopen_after_save: ReopenAfterSave,
     restart_guard: RestartGuard,
-    /// `None` opens all code on GitHub.
+    /// `None` opens all code on the host.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
     _use_as_comment_subscription: Subscription,
@@ -1207,7 +1207,7 @@ impl ChecksHover {
     }
 }
 
-/// A key that changes the PR on GitHub says why it does nothing, or what its next press does.
+/// A key that changes the PR on the host says why it does nothing, or what its next press does.
 fn tell_press(step: PressStep, cx: &mut App) {
     match step {
         PressStep::Nothing | PressStep::Sent => {}

@@ -27,18 +27,18 @@ use crate::file_path::FilePath;
 use crate::findings::Finding;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Everything the reviewer writes to GitHub: the drag that opens a comment box, every text box
-/// from its opening to its send, and what GitHub said about the pending review and the PR's author.
+/// Everything the reviewer writes to the host: the drag that opens a comment box, every text box
+/// from its opening to its send, and what the host said about the pending review and the PR's author.
 /// The saved texts live in the review state and change only through its gate, `SavedState`.
 #[derive(Default)]
 pub(super) struct CommentDesk {
     selection: Option<RowSelection>,
-    /// "Comment now" is only offered when GitHub is known to have none.
+    /// "Comment now" is only offered when the host is known to have none.
     pending_review: PendingReview,
     /// Approve and Request changes are only offered when the PR is known to be someone else's.
     authorship: PullRequestAuthorship,
     /// The text of each of the viewer's comments being edited. Not saved: an edit not sent is
-    /// given up with the app, as the comment on GitHub is still whole.
+    /// given up with the app, as the comment on the host is still whole.
     comment_edits: BTreeMap<CommentId, String>,
     /// The comment the reviewer was asked to confirm the deletion of. Not saved: a question
     /// left open is given up with the app.
@@ -53,7 +53,7 @@ pub(super) struct CommentDesk {
 struct BoxActivity {
     /// The comment box that takes the keys.
     composing: Option<CommentPlace>,
-    /// Comment boxes whose text is on its way to GitHub.
+    /// Comment boxes whose text is on its way to the host.
     sending: HashSet<CommentPlace>,
     /// Sending comment boxes whose keys another box took meanwhile; one that does not go leaves
     /// them there.
@@ -94,7 +94,7 @@ enum PullRequestAuthorship {
     OwnedBySomeoneElse,
 }
 
-/// One box the reviewer writes text in, named by what its text becomes on GitHub.
+/// One box the reviewer writes text in, named by what its text becomes on the host.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TextBox {
     /// A new comment on lines or on a file.
@@ -133,7 +133,7 @@ pub enum BoxState {
     Idle,
     /// Takes the keys.
     Composing,
-    /// On its way to GitHub.
+    /// On its way to the host.
     Sending,
 }
 
@@ -689,7 +689,7 @@ impl CommentDesk {
                     }
                     state.drop_reply(thread_id);
                 });
-                // The reply is on GitHub; a draft that fails to clear is saved again with the next typing.
+                // The reply is on the host; a draft that fails to clear is saved again with the next typing.
                 if sent.is_err() {
                     state.save_with_next_typing();
                 }
@@ -756,7 +756,7 @@ impl CommentDesk {
     ) -> FinishResult {
         if outcome.result == FinishResult::Sent {
             self.pending_review = PendingReview::Absent;
-            // The review is on GitHub; a body that fails to clear is saved again with the next typing.
+            // The review is on the host; a body that fails to clear is saved again with the next typing.
             if state.record(|state| state.write_finish_body("")).is_err() {
                 state.save_with_next_typing();
             }
@@ -766,7 +766,7 @@ impl CommentDesk {
 }
 
 /// For a send that ended after its review was dropped, as when the window switched to another PR:
-/// the comment reached GitHub, or failed, and its PR's state file must say so all the same.
+/// the comment reached the host, or failed, and its PR's state file must say so all the same.
 pub fn land_elsewhere(outcome: CommentOutcome, file: &ReviewStateFile) -> anyhow::Result<()> {
     file.update(|state| {
         CommentDesk::default().settle(state, outcome, (SentFrom::Elsewhere, None));

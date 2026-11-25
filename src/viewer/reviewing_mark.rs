@@ -37,7 +37,7 @@ pub(super) struct ReviewingMark {
     /// The latest sent review as first read after the review opened: a later one is sent since.
     earlier_review: EarlierReview,
     is_finished: bool,
-    /// The 👀 was asked for, so it is on GitHub or on its way there.
+    /// The 👀 was asked for, so it is on the host or on its way there.
     is_asked_for: bool,
     to_send: Option<ReactionChange>,
 }
@@ -115,7 +115,7 @@ impl ReviewingMark {
         }
     }
 
-    /// The review closes: true when the mark may be on GitHub, so it has to come off now. Nothing
+    /// The review closes: true when the mark may be on the host, so it has to come off now. Nothing
     /// puts it on again after.
     pub(super) fn close(&mut self) -> bool {
         let is_off = self.is_finished && self.to_send.is_none();
@@ -126,7 +126,7 @@ impl ReviewingMark {
         may_be_on
     }
 
-    /// What GitHub must be told next; `None` when it shows the mark as it should be.
+    /// What the host must be told next; `None` when it shows the mark as it should be.
     pub(super) fn change_to_send(&self) -> Option<ReactionChange> {
         self.to_send
     }

@@ -286,7 +286,7 @@ fn a_step_without_files_never_ticks_from_github() {
 fn a_failed_push_stays_queued_and_is_retried_on_the_next_sync() {
     let shop = Shop::with_pull();
     let host = all_unviewed(&shop);
-    host.inject(HostFault::ViewedPushesFail);
+    host.inject(HostFault::ViewedPushesAnswerAnError);
     let mut review = shop.open();
     review.tick(&"c-only".into()).unwrap();
 
@@ -294,7 +294,7 @@ fn a_failed_push_stays_queued_and_is_retried_on_the_next_sync() {
     assert!(review.not_synced());
     drop(review);
 
-    host.heal(&HostFault::ViewedPushesFail);
+    host.heal(&HostFault::ViewedPushesAnswerAnError);
     let mut review = shop.open();
     assert!(review.not_synced());
     review.sync(&host).unwrap();
@@ -306,17 +306,19 @@ fn a_failed_push_stays_queued_and_is_retried_on_the_next_sync() {
 fn a_sync_that_failed_is_a_problem_in_the_sidebar_until_a_sync_goes_through() {
     let shop = Shop::with_pull();
     let host = all_unviewed(&shop);
-    host.inject(HostFault::ViewedPushesFail);
+    host.inject(HostFault::ViewedPushesAnswerAnError);
     let mut review = shop.open();
     review.tick(&"c-only".into()).unwrap();
 
     assert!(review.sync(&host).is_err());
     assert_eq!(
         review.problems(),
-        [Problem::ViewedNotSynced("network is down".into())]
+        [Problem::ViewedNotSynced(
+            crate::support::fake_ports::HOST_ERROR.into()
+        )]
     );
 
-    host.heal(&HostFault::ViewedPushesFail);
+    host.heal(&HostFault::ViewedPushesAnswerAnError);
     review.sync(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
@@ -327,7 +329,7 @@ fn a_queued_local_edit_beats_what_github_says() {
     let host = all_unviewed(&shop);
     let mut review = shop.open();
     review.sync(&host).unwrap();
-    host.inject(HostFault::ViewedPushesFail);
+    host.inject(HostFault::ViewedPushesAnswerAnError);
     review.tick(&"c-only".into()).unwrap();
     host.set_viewed("c.txt", ViewedState::Unviewed);
     host.set_viewed("a.txt", ViewedState::Viewed);
@@ -335,7 +337,7 @@ fn a_queued_local_edit_beats_what_github_says() {
     assert!(review.sync(&host).is_err());
 
     assert_eq!(ticked(&review), ["a-only", "c-only"]);
-    host.heal(&HostFault::ViewedPushesFail);
+    host.heal(&HostFault::ViewedPushesAnswerAnError);
     review.sync(&host).unwrap();
     assert_eq!(host.viewed_state("c.txt"), ViewedState::Viewed);
 }

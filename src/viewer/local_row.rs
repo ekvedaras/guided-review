@@ -13,7 +13,7 @@ pub struct LocalRow {
     pub uncommitted_files: Option<usize>,
     /// Where the folder is against the snapshot of the review on disk; `None` when there is no review yet.
     pub on_disk: Option<OnDisk>,
-    /// The open PR whose head is the branch, when GitHub said so.
+    /// The open PR whose head is the branch, when the host said so.
     pub open_pr: Option<PullRequestUrl>,
 }
 

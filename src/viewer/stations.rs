@@ -1,5 +1,5 @@
 //! The stations of a review: the work around reading it (the tour, the AI review, the fixes, the
-//! reviewer's own review, GitHub), each with how it stands, for the sidebar's stepper.
+//! reviewer's own review, the host), each with how it stands, for the sidebar's stepper.
 
 use std::time::Duration;
 
@@ -84,7 +84,7 @@ impl Station {
     }
 }
 
-/// The stations in the order the work goes: a local review has no GitHub station.
+/// The stations in the order the work goes: a local review has no host station.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stations {
     stations: Vec<Station>,
@@ -136,7 +136,7 @@ impl Stations {
     }
 
     /// The station whose card names a problem; `None` puts it above the stepper, as it is about
-    /// this Mac. A GitHub problem of a review with no GitHub station goes there too.
+    /// this Mac. A host problem of a review with no host station goes there too.
     pub fn home_of(&self, problem: &Problem) -> Option<StationKind> {
         let home = match problem.kind() {
             ProblemKind::ThreadsNotRead
@@ -199,7 +199,7 @@ const fn short_state(kind: ProblemKind) -> &'static str {
     }
 }
 
-/// How long viewed marks have waited to reach GitHub, said in the sidebar.
+/// How long viewed marks have waited to reach the host, said in the sidebar.
 pub fn waited(time: Duration) -> String {
     match time.as_secs() {
         0..60 => "under a minute".to_owned(),

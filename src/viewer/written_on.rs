@@ -5,7 +5,7 @@ use super::review_thread::ThreadId;
 use crate::tour::StepId;
 
 /// The step each thread the reviewer started was written on. Two steps can show the same context row, and
-/// the thread GitHub sends back has no step, so without this it goes to the first step showing the row.
+/// the thread the host sends back has no step, so without this it goes to the first step showing the row.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub(super) struct WrittenOn(BTreeMap<ThreadId, StepId>);

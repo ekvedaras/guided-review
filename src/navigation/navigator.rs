@@ -159,7 +159,7 @@ pub enum Reach {
     /// A local (a variable or parameter) is looked up in the function that holds it, so no other
     /// file is searched.
     EnclosingFunction,
-    /// The code is read from GitHub, so only the review's changed files are searched.
+    /// The code is read from the host, so only the review's changed files are searched.
     ChangedFiles,
 }
 

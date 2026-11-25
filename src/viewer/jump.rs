@@ -225,7 +225,7 @@ pub enum PaletteAction {
     /// Starts the review agent: the AI review of the subject.
     RunAiReview,
     FinishReview,
-    /// A re-review with nothing new to send: done, with no review on GitHub.
+    /// A re-review with nothing new to send: done, with no review on the host.
     MarkDone,
     /// A local review's finish: its queued tasks go to the change set's agent.
     SendTasks,
@@ -241,9 +241,9 @@ pub enum PaletteAction {
     ConvertToDraft,
     /// Offered only where the PR is a draft and the viewer may change it.
     MarkReadyForReview,
-    /// Offered only where GitHub lets the viewer turn it on and something blocks the merge.
+    /// Offered only where the host lets the viewer turn it on and something blocks the merge.
     EnableAutoMerge,
-    /// Offered only while auto-merge is on and GitHub lets the viewer turn it off.
+    /// Offered only while auto-merge is on and the host lets the viewer turn it off.
     DisableAutoMerge,
     /// Offered only where nothing blocks the merge and the viewer may merge.
     MergeNow,

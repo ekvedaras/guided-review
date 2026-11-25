@@ -51,7 +51,7 @@ pub struct SwitcherRow {
     haystack: String,
 }
 
-/// What a row is: a PR GitHub listed, or a local change set found on disk.
+/// What a row is: a PR the host listed, or a local change set found on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowKind {
     PullRequest(RelevantPullRequest),
@@ -116,7 +116,7 @@ impl Default for PrSwitcher {
 }
 
 impl PrSwitcher {
-    /// Starts on the list GitHub gave last time, when there is one, and keeps each new one for next time.
+    /// Starts on the list the host gave last time, when there is one, and keeps each new one for next time.
     pub fn remembering_in(memory: RememberedPullRequestsFile, folders: &AppFolders) -> Self {
         let mut switcher = Self::default();
         match memory.load() {
@@ -313,7 +313,7 @@ impl PrSwitcher {
         matches!(self.state, LoadState::Loading)
     }
 
-    /// Something the reviewer should know about the list: GitHub could not be reached, or some
+    /// Something the reviewer should know about the list: the host could not be reached, or some
     /// teams were not searched.
     pub fn notice(&self) -> Option<String> {
         match &self.state {

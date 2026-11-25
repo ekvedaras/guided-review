@@ -40,7 +40,7 @@ impl ReviewCore {
         Stations::new(stations).with_problems(&self.problems())
     }
 
-    /// Notes when viewed marks started to wait for GitHub, so the sidebar can say for how long.
+    /// Notes when viewed marks started to wait for the host, so the sidebar can say for how long.
     pub fn time_viewed_wait(&mut self, now: SystemTime) -> anyhow::Result<()> {
         let since = if self.not_synced() {
             self.state

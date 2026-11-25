@@ -1,7 +1,7 @@
 //! The issues a review is about, and where each came from. The first source that names any wins:
-//! the issues GitHub links to the PR, then the ones its description names (`Part of`, closing
-//! keywords GitHub did not link, `Ticket:`), then the one the guided tour names, then the one the
-//! branch is named after. A rebuilt review keeps what GitHub said and reads the rest again.
+//! the issues the host links to the PR, then the ones its description names (`Part of`, closing
+//! keywords the host did not link, `Ticket:`), then the one the guided tour names, then the one the
+//! branch is named after. A rebuilt review keeps what the host said and reads the rest again.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ use super::markdown::Markdown;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelatedIssue {
     pub link: IssueLink,
-    /// Known only for an issue GitHub linked.
+    /// Known only for an issue the host linked.
     pub title: Option<Arc<str>>,
 }
 
@@ -37,7 +37,7 @@ pub enum IssueState {
     Open,
     ClosedAsCompleted,
     ClosedAsNotPlanned,
-    /// Closed for a reason GitHub names that the card does not tell apart, as a duplicate.
+    /// Closed for a reason the host names that the card does not tell apart, as a duplicate.
     Closed,
     /// A pull request named as an issue, as `Part of #12` can, once merged.
     Merged,
@@ -74,7 +74,7 @@ impl IssueDetails {
     }
 }
 
-/// What GitHub says of a PR's issues: the ones it would close, and the branch it is opened from.
+/// What the host says of a PR's issues: the ones it would close, and the branch it is opened from.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullRequestIssues {
     pub linked: Vec<RelatedIssue>,
@@ -83,7 +83,7 @@ pub struct PullRequestIssues {
 
 #[derive(Debug, Default)]
 pub(super) struct RelatedIssues {
-    /// `None` until GitHub answers, and always for a local review.
+    /// `None` until the host answers, and always for a local review.
     on_host: Option<PullRequestIssues>,
     /// The PR's repo, where its head branch's issue is; `None` for a local review.
     pr_repo: Option<RepoName>,
@@ -91,7 +91,7 @@ pub(super) struct RelatedIssues {
     named_by_tour: Option<RelatedIssue>,
     of_local_branch: Option<RelatedIssue>,
     shown: Arc<[RelatedIssue]>,
-    /// What GitHub last said of each shown issue; an issue no longer shown keeps its entry.
+    /// What the host last said of each shown issue; an issue no longer shown keeps its entry.
     details: HashMap<IssueUrl, Arc<IssueDetails>>,
     /// A host with no issue tracker has no details to read: the issues show with no hover card.
     has_tracker: bool,
@@ -149,7 +149,7 @@ impl RelatedIssues {
         );
     }
 
-    /// `None` for a ticket, which GitHub knows nothing of, and for an issue not read yet.
+    /// `None` for a ticket, which the host knows nothing of, and for an issue not read yet.
     pub(super) fn details_of(&self, link: &IssueLink) -> Option<Arc<IssueDetails>> {
         match link {
             IssueLink::GitHub(url) => self.details.get(url).cloned(),
@@ -171,7 +171,7 @@ impl RelatedIssues {
             .collect()
     }
 
-    /// The issues a snapshot scene shows, with what GitHub would say of each; `unstaged` takes them off.
+    /// The issues a snapshot scene shows, with what the host would say of each; `unstaged` takes them off.
     #[cfg(feature = "snapshots")]
     pub(super) fn staged(&mut self, issues: Vec<(RelatedIssue, Option<IssueDetails>)>) {
         let read = issues

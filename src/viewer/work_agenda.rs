@@ -38,7 +38,7 @@ pub const AGENT_START_RETRY: Duration = Duration::from_secs(3);
 pub const AGENT_LINK_RECHECK: Duration = Duration::from_secs(30);
 /// How often a local review's folder is looked at again while the review is open.
 pub const WORKING_TREE_RECHECK: Duration = Duration::from_secs(30);
-/// How long to wait before looking again for the PR of a local review's branch after GitHub did not answer.
+/// How long to wait before looking again for the PR of a local review's branch after the host did not answer.
 pub const PULL_OF_BRANCH_RETRY: Duration = Duration::from_secs(60);
 
 /// The kinds of work, in the order due work of several kinds starts in.
@@ -79,7 +79,7 @@ enum WhileRunning {
 
 impl WorkKind {
     /// What a window coming to the front reads and sends again. A review turns each into work only
-    /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
+    /// when it has a use for it: a PR's work with its host, a local review's look at its folder.
     /// A PR's head branch is not among them: it never changes, so it is looked up once per open.
     pub(super) const READ_AGAIN_ON_FOCUS: [Self; 15] = [
         Self::CheckPrHead,

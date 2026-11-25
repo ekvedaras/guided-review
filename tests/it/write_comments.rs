@@ -15,10 +15,6 @@ use guided_review::viewer::{
 use serde_json::json;
 use std::time::Instant;
 
-fn thread_on_line_ten(body: &str) -> ReviewThread {
-    thread_on_line(10, body)
-}
-
 fn thread_on_line(number: usize, body: &str) -> ReviewThread {
     ReviewThread {
         id: ThreadId::new("T1"),
@@ -364,8 +360,7 @@ fn comment_now_posts_at_once_and_leaves_no_pending_review() {
 #[test]
 fn a_sent_comment_is_replaced_by_its_thread_in_the_same_step_so_the_block_never_vanishes() {
     let pull = Pull::new();
-    let mut host = pull.host();
-    host.threads = vec![thread_on_line_ten("what I sent")];
+    let host = pull.host();
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "what I sent");
@@ -382,8 +377,7 @@ fn a_sent_comment_is_replaced_by_its_thread_in_the_same_step_so_the_block_never_
 #[test]
 fn a_comment_sent_on_a_row_two_steps_show_stays_on_the_step_it_was_written_on() {
     let pull = Pull::close_together();
-    let mut host = pull.host();
-    host.threads = vec![thread_on_line(12, "what I sent")];
+    let host = pull.host();
     let mut review = pull.open_in_two_steps();
     review.go_to(&"second".into());
     let place = comment_on(&mut review, "line 12");
@@ -402,8 +396,7 @@ fn a_comment_sent_on_a_row_two_steps_show_stays_on_the_step_it_was_written_on() 
 #[test]
 fn a_thread_stays_on_the_step_it_was_written_on_after_the_review_is_opened_again() {
     let pull = Pull::close_together();
-    let mut host = pull.host();
-    host.threads = vec![thread_on_line(12, "what I sent")];
+    let host = pull.host();
     let mut review = pull.open_in_two_steps();
     review.go_to(&"second".into());
     let place = comment_on(&mut review, "line 12");
@@ -414,7 +407,10 @@ fn a_thread_stays_on_the_step_it_was_written_on_after_the_review_is_opened_again
     drop(review);
 
     let mut reopened = pull.open_in_two_steps();
-    reopened.set_threads(&host.threads);
+    reopened.set_threads(
+        &guided_review::viewer::ReviewThreadsPort::review_threads(&host, &PR.parse().unwrap())
+            .unwrap(),
+    );
 
     reopened.go_to(&"second".into());
     assert_eq!(reopened.current_step().unwrap().threads.len(), 1);
@@ -442,7 +438,7 @@ fn a_sent_comment_whose_thread_cannot_be_read_back_is_still_sent_and_the_read_is
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "what I sent");
-    host.inject(HostFault::ThreadReadsFail);
+    host.inject(HostFault::ThreadReadsAnswerAnError);
 
     let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
@@ -450,7 +446,9 @@ fn a_sent_comment_whose_thread_cannot_be_read_back_is_still_sent_and_the_read_is
     assert_eq!(drafts(&review), []);
     assert_eq!(
         review.problems(),
-        [Problem::ThreadsNotRead("network is down".into())]
+        [Problem::ThreadsNotRead(
+            crate::support::fake_ports::HOST_ERROR.into()
+        )]
     );
 }
 

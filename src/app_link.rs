@@ -113,7 +113,7 @@ impl From<OpenRequest> for OpenRequestOnTheWire {
 #[serde(rename_all = "snake_case")]
 pub enum Request {
     Open(OpenRequest),
-    /// The tour agent's reply to a hand-off is on GitHub.
+    /// The tour agent's reply to a hand-off is on the host.
     AgentReplied {
         pr: String,
         hand_off: HandOffId,

@@ -52,7 +52,7 @@ pub struct MergeRoute {
     pub head: HeadBranch,
 }
 
-/// What GitHub says of a PR's author and branches. The base can be retargeted, so it is read again.
+/// What the host says of a PR's author and branches. The base can be retargeted, so it is read again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestOrigin {
     pub author: Option<PrAuthor>,

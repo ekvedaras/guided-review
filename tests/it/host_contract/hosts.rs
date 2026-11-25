@@ -72,10 +72,11 @@ pub fn fake_host(pull: PullOnHost) -> Box<dyn CodeHost> {
 
 pub fn github(pull: PullOnHost) -> Box<dyn CodeHost> {
     let api = github_api::serve(&pull);
-    match pull.reach {
-        Reach::NoToken => Box::new(GitHub::without_token_at(&api)),
-        Reach::Answers | Reach::ServerError => Box::new(GitHub::at(&api)),
-    }
+    let github = match pull.reach {
+        Reach::NoToken => GitHub::without_token_at(&api),
+        Reach::Answers | Reach::ServerError => GitHub::at(&api),
+    };
+    Box::new(github.cloning_with(&github_api::gh_cli(pull.reach)))
 }
 
 fn branch(name: &str) -> BranchName {

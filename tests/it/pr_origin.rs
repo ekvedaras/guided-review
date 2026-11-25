@@ -171,7 +171,7 @@ fn a_failed_read_keeps_the_last_answer() {
     let host = shop.host(origin("main", HeadBranch::of_repo(branch("feat/cart"))));
     shop.read(&mut review, &host);
 
-    host.inject(HostFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
     shop.read(&mut review, &host);
 
     assert_eq!(review.merge_route().unwrap().base, branch("main"));

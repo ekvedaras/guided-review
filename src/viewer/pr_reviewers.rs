@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::pull_request::Sha;
 
-/// Someone GitHub lists among a PR's reviewers: a person, or a team asked to review.
+/// Someone the host lists among a PR's reviewers: a person, or a team asked to review.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reviewer {
     name: Arc<str>,
@@ -131,7 +131,7 @@ impl Standing {
     }
 }
 
-/// One review as GitHub lists it among a PR's latest.
+/// One review as the host lists it among a PR's latest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewRecord {
     pub reviewer: Reviewer,
@@ -194,7 +194,7 @@ impl ReviewersOnHost {
     }
 }
 
-/// The PR's reviews as one read of GitHub gives them.
+/// The PR's reviews as one read of the host gives them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullRequestReviews {
     /// The viewer's latest sent review, whatever it said.
@@ -318,7 +318,7 @@ pub struct ReviewerLine {
     pub is_viewer: bool,
 }
 
-/// How a review that is on GitHub ended.
+/// How a review that is on the host ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewOutcome {
     Approved,
@@ -341,7 +341,7 @@ pub const CLAMPED_BODY_LINES: usize = 4;
 /// About what a sidebar line holds times the clamped lines; a longer text wraps past them.
 const LONG_BODY_CHARS: usize = 200;
 
-/// The viewer's latest sent review of a PR, as GitHub holds it.
+/// The viewer's latest sent review of a PR, as the host holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubmittedReview {
     pub outcome: ReviewOutcome,

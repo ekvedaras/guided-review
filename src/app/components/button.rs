@@ -19,7 +19,7 @@ pub enum ButtonKind {
     Secondary,
     /// The accent action beside content that is not the screen's way on, such as Ask.
     Tinted,
-    /// For actions next to content, which should not pull the eye: open on GitHub, fold, cancel.
+    /// For actions next to content, which should not pull the eye: open on the host, fold, cancel.
     Ghost,
     /// A toggle whose option is on.
     Pressed,

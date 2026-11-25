@@ -10,7 +10,7 @@ use super::ports::{CodeHost, HostError, Resolution};
 use super::reactions::{Reaction, ReactionChange};
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 
-/// What the reviewer does to a thread that is already on GitHub.
+/// What the reviewer does to a thread that is already on the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadAction {
     /// Sends the thread's reply draft as it is saved when the request is made, so a key typed
@@ -47,7 +47,7 @@ pub enum ThreadAction {
 pub enum ThreadActionResult {
     Done,
     Refused(CommentRefusal),
-    /// GitHub could not do it. Nothing changed, so the reviewer can try again.
+    /// The host could not do it. Nothing changed, so the reviewer can try again.
     Failed(String),
 }
 
@@ -62,14 +62,14 @@ pub struct ThreadActionRequest {
     pub(super) draft_body: Option<String>,
     /// The tour is behind the PR head: the thread may sit on lines the tour does not show.
     pub(super) freshness: TourFreshness,
-    /// What the review already knows stops the action, so it never reaches GitHub.
+    /// What the review already knows stops the action, so it never reaches the host.
     pub(super) refusal: Option<CommentRefusal>,
 }
 
 pub struct ThreadActionOutcome {
     pub(super) action: ThreadAction,
     pub(super) result: ThreadActionResult,
-    /// The threads as GitHub has them after the action, so the screen shows what GitHub shows;
+    /// The threads as the host has them after the action, so the screen shows what the host shows;
     /// `None` when the action did not go through, so nothing changed.
     pub(super) threads: Option<Result<Vec<ReviewThread>, String>>,
     /// The text of the reply a `Reply` sent.

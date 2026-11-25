@@ -451,7 +451,7 @@ impl OwnAgentHandOff {
 
 /// The tour agents of review subjects, found by a herdr label (`gr.pr=<url>` for a PR), never by a
 /// stored terminal id.
-/// A PR and the branch GitHub said it is opened from; `None` for a fork's.
+/// A PR and the branch the host said it is opened from; `None` for a fork's.
 type KnownHeadBranch = (PullRequestUrl, Option<BranchName>);
 
 #[derive(Clone)]
@@ -464,7 +464,7 @@ pub struct TourAgents {
     /// Tells which branch a PR is opened from, so the reviewer's Claude on it is found. `None`: a PR's
     /// agent is only the terminal with its label.
     head_branches: Option<Arc<dyn PullsOfBranchPort>>,
-    /// Head branches GitHub already told, so a lookup asks it once per PR.
+    /// Head branches the host already told, so a lookup asks it once per PR.
     known_head_branches: Arc<Mutex<Vec<KnownHeadBranch>>>,
 }
 

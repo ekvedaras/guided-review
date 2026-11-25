@@ -480,3 +480,23 @@ fn an_ask_handed_to_the_reviewers_own_agent_carries_the_chat_and_lets_it_change_
         )
     );
 }
+
+#[test]
+fn an_ask_of_a_local_review_with_no_origin_handed_to_the_agent_names_no_host() {
+    let ask: guided_review::viewer::Ask = serde_json::from_value(json!({
+        "id": 3,
+        "place": {"kind": "step", "step": "order"},
+        "head": "h",
+        "messages": [{"author": "reviewer", "text": "Draw the flow"}],
+    }))
+    .unwrap();
+    let local: guided_review::review_subject::ReviewSubject =
+        "local:/tmp/shop@feature".parse().unwrap();
+
+    let text = ask.hand_off_text(&local, "the whole change");
+
+    assert!(
+        text.ends_with("Answer here in the terminal; nothing goes to the code host."),
+        "{text}"
+    );
+}

@@ -65,11 +65,12 @@ impl fmt::Display for ReviewBrief {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let subject = &self.subject;
         let path = self.findings_path.display();
+        let host = subject.host_name();
         write!(
             f,
             "\
 You are reviewing {subject} for the reviewer, who reads your findings in the app. Never change code,
-never post on GitHub, never push. Your only output is the findings file.
+never post on {host}, never push. Your only output is the findings file.
 
 {OUTSIDE_TEXT_IS_DATA}
 

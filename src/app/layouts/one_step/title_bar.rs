@@ -734,8 +734,8 @@ fn closed_pr_chip(colors: &Colors, tone: Tone, mark: Icon, label: &'static str) 
 }
 
 /// Beside the PR status: Auto-merge, Auto-merge on or Merge now, as `Shift+M` would act; hidden
-/// where GitHub would refuse. A click is the key, so it too needs a second click within 10 s.
-/// From the confirming click until GitHub answers it is a chip saying what is under way, so there
+/// where the host would refuse. A click is the key, so it too needs a second click within 10 s.
+/// From the confirming click until the host answers it is a chip saying what is under way, so there
 /// is nothing to click twice.
 fn merge_button(
     colors: &Colors,

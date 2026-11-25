@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -36,6 +36,8 @@ pub struct GitHub {
     /// Where pictures go up, a server of its own on github.com.
     uploads: String,
     token: Option<String>,
+    /// The `gh` program, which clones.
+    gh: PathBuf,
     /// GraphQL mutations address a PR by node id, so it is looked up once per PR.
     pull_request_ids: Arc<Mutex<HashMap<String, String>>>,
     /// The viewer's teams change rarely, so they are read once per app run.
@@ -137,6 +139,7 @@ impl GitHub {
                 api: "https://api.github.com".to_owned(),
                 uploads: "https://uploads.github.com".to_owned(),
                 token,
+                gh: PathBuf::from("gh"),
                 pull_request_ids: Arc::default(),
                 viewer_teams: Arc::default(),
             },
@@ -156,8 +159,18 @@ impl GitHub {
             api: api.to_owned(),
             uploads: api.to_owned(),
             token: None,
+            gh: PathBuf::from("gh"),
             pull_request_ids: Arc::default(),
             viewer_teams: Arc::default(),
+        }
+    }
+
+    /// Clones with `gh` at `program`, not the one on `PATH`.
+    #[must_use]
+    pub fn cloning_with(self, program: &Path) -> Self {
+        Self {
+            gh: program.to_owned(),
+            ..self
         }
     }
 
@@ -1631,11 +1644,11 @@ impl HostedCodePort for GitHub {
 
 impl ClonePort for GitHub {
     fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()> {
-        let output = Command::new("gh")
+        let output = Command::new(&self.gh)
             .args(["repo", "clone", &repo.to_string()])
             .arg(folder)
             .output()
-            .context("could not run gh")?;
+            .with_context(|| format!("could not run {}", self.gh.display()))?;
         if !output.status.success() {
             anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
         }

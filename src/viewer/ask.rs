@@ -151,11 +151,11 @@ impl Ask {
             Author::Reviewer => format!("Reviewer: {}", message.text),
             Author::Ai => format!("Answer:\n{}", quoted(&message.text)),
         }));
-        lines.push(
+        lines.push(format!(
             "Do what the reviewer's last message asks. You may change files in your working folder. \
-             Answer here in the terminal; nothing goes to GitHub."
-                .to_owned(),
-        );
+             Answer here in the terminal; nothing goes to {}.",
+            subject.host_name()
+        ));
         lines.join("\n")
     }
 }

@@ -13,7 +13,7 @@ use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::work_agenda::WorkKind;
 
 impl ReviewCore {
-    /// `None` until GitHub has been read, and for a review with no PR.
+    /// `None` until the host has been read, and for a review with no PR.
     pub fn pr_status(&self) -> Option<PrStatus> {
         self.pr_controls.as_ref()?.status()
     }
@@ -86,12 +86,12 @@ impl ReviewCore {
         step
     }
 
-    /// The confirmed change GitHub has not answered yet.
+    /// The confirmed change the host has not answered yet.
     pub fn merge_in_flight(&self) -> Option<MergeChange> {
         self.merging_to_send()
     }
 
-    /// The title bar of a snapshot scene as if a merge change were sent and GitHub has not answered.
+    /// The title bar of a snapshot scene as if a merge change were sent and the host has not answered.
     #[cfg(feature = "snapshots")]
     pub fn stage_merge_in_flight(&mut self, change: Option<MergeChange>) {
         if let Some(controls) = &mut self.pr_controls {
@@ -121,7 +121,7 @@ impl ReviewCore {
         }
     }
 
-    /// A change GitHub took is read back, so the title bar shows what GitHub shows, checks and all.
+    /// A change the host took is read back, so the title bar shows what the host shows, checks and all.
     fn pr_change_landed(&mut self, kind: ProblemKind, landed: Result<(), Problem>) {
         match landed {
             Ok(()) => {

@@ -403,7 +403,7 @@ impl ReviewCore {
         Ok(())
     }
 
-    /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a
+    /// What the tour agent, the host or the reviewer did to the hand-offs. It is made even while a
     /// re-pin runs, so a hand-off is not delivered twice; only its save is refused then.
     pub(super) fn record_hand_offs<T>(
         &mut self,
@@ -455,7 +455,7 @@ impl ReviewCore {
         result
     }
 
-    /// The thread GitHub sends back shows under the same row on every step that shows it, so the step it
+    /// The thread the host sends back shows under the same row on every step that shows it, so the step it
     /// was written on is kept; the first step showing the row would take it otherwise.
     fn keep_thread_on_this_screen(&mut self, thread: &ThreadId) -> anyhow::Result<()> {
         let Screen::Step(step) = &self.screen else {

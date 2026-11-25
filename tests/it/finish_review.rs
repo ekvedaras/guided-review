@@ -422,7 +422,7 @@ fn finishing_makes_the_review_the_last_one_when_read_again() {
 fn a_last_review_that_could_not_be_read_is_a_problem_until_it_is_read() {
     let pull = Pull::new();
     let host = pull.host();
-    host.inject(HostFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
     let mut review = pull.open();
 
     review.pull_last_review(&host).unwrap_err();
@@ -433,7 +433,7 @@ fn a_last_review_that_could_not_be_read_is_a_problem_until_it_is_read() {
             .any(|problem| problem.to_string().contains("last review"))
     );
 
-    host.heal(&HostFault::ReadsFail);
+    host.heal(&HostFault::ReadsAnswerAnError);
     review.pull_last_review(&host).unwrap();
     assert_eq!(review.problems().len(), 0);
 }

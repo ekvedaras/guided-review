@@ -48,7 +48,7 @@ pub struct CommentsSection {
 pub enum ThreadVisit {
     /// To the screen that shows it, which the window scrolls to its row.
     OnScreen,
-    /// No screen shows it: to its first comment on GitHub.
+    /// No screen shows it: to its first comment on the host.
     OnHost(String),
     /// Neither: the thread is gone, or a local thread no screen shows.
     Nowhere,

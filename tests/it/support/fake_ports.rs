@@ -38,8 +38,8 @@ use guided_review::viewer::{
     PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
     Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
     RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
-    ReviewVerdict, ReviewWritesPort, SendMode, Standing, SubmittedReview, ThreadComment, ThreadId,
-    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    ReviewVerdict, ReviewWritesPort, Reviewer, SendMode, Side, Stance, Standing, SubmittedReview,
+    ThreadComment, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState, Whose,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -155,27 +155,39 @@ impl SentLog {
 pub enum HostFault {
     /// Every write fails as if the network were down: the host is not answering.
     ConnectionLost,
-    /// Changing a file's viewed state fails as if the network were down.
-    ViewedPushesFail,
+    /// Changing a file's viewed state is answered with an error that is no outage.
+    ViewedPushesAnswerAnError,
     /// Every viewed call is refused, as for a token that may not do it.
     TokenRefused(String),
-    /// There is no token at all, so every call is refused, as GitHub refuses every GraphQL call without one.
+    /// There is no token at all: every GraphQL call is refused, as GitHub refuses them without one, and
+    /// the REST reads (tips, title, description, head branch, pulls of a branch) answer, as for a public repo.
     NoToken,
     /// A new thread is answered with `thread: null` and no error.
     NewThreadsAnswerNull,
+    /// A new thread is taken but not listed when the threads are read next.
+    NewThreadsUnlisted,
     /// The next `comment_now` finds a pending review that appeared meanwhile. Used up by it.
     PendingReviewAppearsOnCommentNow,
-    /// Reading the review threads fails as if the network were down.
-    ThreadReadsFail,
-    /// Reading the PR's head, description, pending review and author fails as if the network were down.
-    ReadsFail,
+    /// Reading the review threads is answered with an error that is no outage.
+    ThreadReadsAnswerAnError,
+    /// Reading the PR's head, description, pending review and author is answered with an error that
+    /// is no outage.
+    ReadsAnswerAnError,
     /// Every read of the PR (head, description, threads, viewed files, pending review, author) fails the way
     /// the HTTP client reports it, so the outage is told from the rest by the real `From`.
     ReadsFailWith(ReadFailure),
-    /// Listing the relevant pull requests fails as if the network were down.
-    RelevantListFails,
+    /// Listing the relevant pull requests is answered with an error that is no outage.
+    RelevantListAnswersAnError,
     /// A reply is refused as GitHub does for a thread that was deleted.
     ThreadIsGone,
+}
+
+/// What GitHub answers a GraphQL call it could not run, with HTTP 200: an error, not an outage.
+pub const HOST_ERROR: &str =
+    "GitHub answered with errors: Something went wrong while executing your query.";
+
+fn answered_with_an_error() -> HostError {
+    HostError::Other(anyhow::anyhow!(HOST_ERROR))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,6 +232,10 @@ pub struct FakeHost {
     edited_now: Mutex<BTreeMap<CommentId, String>>,
     deleted_now: Mutex<BTreeSet<CommentId>>,
     replied_now: Mutex<Vec<(ThreadId, ThreadComment)>>,
+    /// New threads, which GitHub lists to their author pending or posted.
+    made_now: Mutex<Vec<ReviewThread>>,
+    /// The ids the next new threads and their comments get, in order.
+    new_thread_ids: Mutex<VecDeque<(ThreadId, CommentId)>>,
     title: Mutex<String>,
     description: Mutex<String>,
     status: Mutex<PrStatus>,
@@ -251,6 +267,8 @@ impl FakeHost {
             edited_now: Mutex::default(),
             deleted_now: Mutex::default(),
             replied_now: Mutex::default(),
+            made_now: Mutex::default(),
+            new_thread_ids: Mutex::default(),
             title: Mutex::new("Hello world".to_owned()),
             description: Mutex::default(),
             status: Mutex::new(PrStatus::Open(OpenPrStatus {
@@ -305,6 +323,15 @@ impl FakeHost {
                 title: title.to_owned(),
             },
         ));
+        self
+    }
+
+    /// The ids GitHub gives the next new threads and their comments, so a test can name them.
+    pub fn naming_new_threads(self, ids: &[(&str, &str)]) -> Self {
+        self.new_thread_ids.lock().unwrap().extend(
+            ids.iter()
+                .map(|(thread, comment)| (ThreadId::new(thread), CommentId::new(comment))),
+        );
         self
     }
 
@@ -425,8 +452,7 @@ impl FakeHost {
         Ok(())
     }
 
-    fn fail_if_reads_fail_with(&self) -> Result<(), HostError> {
-        self.refuse_without_token()?;
+    fn fail_if_read_fails_with(&self) -> Result<(), HostError> {
         let failure = self
             .faults
             .lock()
@@ -440,9 +466,15 @@ impl FakeHost {
     }
 
     fn fail_if_reads_fail(&self) -> Result<(), HostError> {
-        self.fail_if_reads_fail_with()?;
-        if self.is_faulty(&HostFault::ReadsFail) {
-            return Err(anyhow::anyhow!("network is down").into());
+        self.refuse_without_token()?;
+        self.fail_if_public_reads_fail()
+    }
+
+    /// GitHub's REST reads go without a token too, and answer for a public repo.
+    fn fail_if_public_reads_fail(&self) -> Result<(), HostError> {
+        self.fail_if_read_fails_with()?;
+        if self.is_faulty(&HostFault::ReadsAnswerAnError) {
+            return Err(answered_with_an_error());
         }
         Ok(())
     }
@@ -499,7 +531,7 @@ impl PullsOfBranchPort for FakeHost {
             repo.repo,
             branch.as_str()
         ));
-        self.fail_if_reads_fail()?;
+        self.fail_if_public_reads_fail()?;
         Ok(self
             .pulls_of_branches
             .lock()
@@ -528,7 +560,7 @@ impl FakeHost {
             .unwrap()
             .branch_lookups
             .push(format!("head of {}", pr.short()));
-        self.fail_if_reads_fail()?;
+        self.fail_if_public_reads_fail()?;
         let found = self
             .head_branches
             .lock()
@@ -579,17 +611,31 @@ impl HostedCodePort for FakeHost {
     }
 }
 
-/// Clones are the clone offer's to test, with a cloner of its own.
+/// A clone is a git folder whose origin is the repo on GitHub, as `gh repo clone` makes it.
 impl ClonePort for FakeHost {
-    fn clone_repo(&self, repo: &RepoName, _folder: &Path) -> anyhow::Result<()> {
-        anyhow::bail!("FakeHost makes no clone of {repo}")
+    fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()> {
+        self.fail_if_connection_lost()?;
+        let git = |args: &[&std::ffi::OsStr]| {
+            let status = std::process::Command::new("git").args(args).status()?;
+            anyhow::ensure!(status.success(), "git {args:?} failed");
+            anyhow::Ok(())
+        };
+        git(&["init".as_ref(), "-q".as_ref(), folder.as_os_str()])?;
+        git(&[
+            "-C".as_ref(),
+            folder.as_os_str(),
+            "remote".as_ref(),
+            "add".as_ref(),
+            "origin".as_ref(),
+            format!("https://github.com/{repo}.git").as_ref(),
+        ])
     }
 }
 
 impl ChangeTipsPort for FakeHost {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, HostError> {
         self.sent.record(HostCall::TipsOf(pr.clone()));
-        self.fail_if_reads_fail()?;
+        self.fail_if_public_reads_fail()?;
         Ok(ChangeTips {
             base_branch_tip: self.tips.0.clone(),
             head: self.tips.1.clone(),
@@ -599,12 +645,12 @@ impl ChangeTipsPort for FakeHost {
 
 impl PullRequestDescriptionPort for FakeHost {
     fn pull_request_title(&self, _pr: &PullRequestUrl) -> Result<String, HostError> {
-        self.fail_if_reads_fail()?;
+        self.fail_if_public_reads_fail()?;
         Ok(self.title.lock().unwrap().clone())
     }
 
     fn pull_request_description(&self, _pr: &PullRequestUrl) -> Result<String, HostError> {
-        self.fail_if_reads_fail()?;
+        self.fail_if_public_reads_fail()?;
         Ok(self.description_now())
     }
 
@@ -742,7 +788,7 @@ impl ViewedFilesPort for FakeHost {
     fn viewed_files(&self, pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, HostError> {
         self.sent.record(HostCall::ViewedFilesOf(pr.clone()));
         self.check_access()?;
-        self.fail_if_reads_fail_with()?;
+        self.fail_if_read_fails_with()?;
         Ok(self
             .viewed
             .lock()
@@ -768,8 +814,8 @@ impl ViewedFilesPort for FakeHost {
         });
         self.check_access()?;
         self.fail_if_connection_lost()?;
-        if self.is_faulty(&HostFault::ViewedPushesFail) {
-            return Err(anyhow::anyhow!("network is down").into());
+        if self.is_faulty(&HostFault::ViewedPushesAnswerAnError) {
+            return Err(answered_with_an_error());
         }
         let state = match viewed {
             Viewed::Yes => ViewedState::Viewed,
@@ -789,8 +835,8 @@ impl FakeHost {
 
 impl RelevantPullRequestsPort for FakeHost {
     fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, HostError> {
-        if self.is_faulty(&HostFault::RelevantListFails) {
-            return Err(anyhow::anyhow!("network is down").into());
+        if self.is_faulty(&HostFault::RelevantListAnswersAnError) {
+            return Err(answered_with_an_error());
         }
         Ok(self.relevant.lock().unwrap().clone())
     }
@@ -799,9 +845,10 @@ impl RelevantPullRequestsPort for FakeHost {
 impl ReviewThreadsPort for FakeHost {
     fn review_threads(&self, pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, HostError> {
         self.sent.record(HostCall::ThreadsOf(pr.clone()));
-        self.fail_if_reads_fail_with()?;
-        if self.is_faulty(&HostFault::ThreadReadsFail) {
-            return Err(anyhow::anyhow!("network is down").into());
+        self.refuse_without_token()?;
+        self.fail_if_read_fails_with()?;
+        if self.is_faulty(&HostFault::ThreadReadsAnswerAnError) {
+            return Err(answered_with_an_error());
         }
         let resolved = self.resolved_now.lock().unwrap();
         let reacted = self.reacted_now.lock().unwrap();
@@ -809,6 +856,7 @@ impl ReviewThreadsPort for FakeHost {
         let deleted = self.deleted_now.lock().unwrap();
         let replied = self.replied_now.lock().unwrap();
         let mut threads = self.threads.clone();
+        threads.extend(self.made_now.lock().unwrap().iter().cloned());
         for thread in &mut threads {
             thread.comments.extend(
                 replied
@@ -860,15 +908,21 @@ impl ReviewThreadsPort for FakeHost {
             mode,
         });
         self.fail_if_connection_lost()?;
-        let is_known = self.threads.iter().any(|thread| thread.id == *thread_id);
+        let is_known = self
+            .threads
+            .iter()
+            .chain(self.made_now.lock().unwrap().iter())
+            .any(|thread| thread.id == *thread_id);
         if !is_known || self.is_faulty(&HostFault::ThreadIsGone) {
             return Err(anyhow::anyhow!(
                 "GitHub answered with errors: Could not resolve to a PullRequestReviewThread with the id of '{thread_id}'."
             )
             .into());
         }
-        if mode == SendMode::AddToReview {
-            self.has_pending_review.store(true, Ordering::SeqCst);
+        match mode {
+            SendMode::AddToReview => self.has_pending_review.store(true, Ordering::SeqCst),
+            SendMode::CommentNow => self.post_review_now(),
+            SendMode::SendNow | SendMode::AddToTasks => {}
         }
         let replies_so_far = self
             .sent
@@ -877,20 +931,10 @@ impl ReviewThreadsPort for FakeHost {
             .filter(|call| matches!(call, HostCall::Reply { .. }))
             .count();
         let reply = CommentId::new(&format!("R{replies_so_far}"));
-        self.replied_now.lock().unwrap().push((
-            thread_id.clone(),
-            ThreadComment {
-                id: reply.clone(),
-                author: "viewer".to_owned(),
-                avatar_url: None,
-                is_bot: false,
-                by_agent: None,
-                by_viewer: true,
-                body: body.to_owned(),
-                url: format!("https://github.com/acme/shop/pull/7#discussion_r{reply}"),
-                reactions: Vec::new(),
-            },
-        ));
+        self.replied_now
+            .lock()
+            .unwrap()
+            .push((thread_id.clone(), viewers_comment(&reply, body)));
         Ok(reply)
     }
 
@@ -971,6 +1015,7 @@ impl ReviewWritesPort for FakeHost {
         if self.is_faulty(&HostFault::NewThreadsAnswerNull) {
             return Err(HostError::ThreadNotCreated("thread: null".into()));
         }
+        self.make_thread(place, body);
         Ok(())
     }
 
@@ -996,6 +1041,8 @@ impl ReviewWritesPort for FakeHost {
             self.has_pending_review.store(true, Ordering::SeqCst);
             return Err(HostError::ThreadNotCreated("thread: null".into()));
         }
+        self.make_thread(place, body);
+        self.post_review_now();
         Ok(())
     }
 
@@ -1042,18 +1089,100 @@ impl FakeHost {
             body: body.to_owned(),
         });
         self.fail_if_connection_lost()?;
-        self.has_pending_review.store(false, Ordering::SeqCst);
-        *self.last_review.lock().unwrap() = Some(SubmittedReview {
-            outcome: match verdict {
+        self.record_viewers_review(
+            match verdict {
                 ReviewVerdict::Comment => ReviewOutcome::Commented,
                 ReviewVerdict::Approve => ReviewOutcome::Approved,
                 ReviewVerdict::RequestChanges => ReviewOutcome::ChangesRequested,
             },
+            body,
+        );
+        Ok(())
+    }
+
+    /// GitHub posts a comment or reply now as a review of its own, with no body.
+    fn post_review_now(&self) {
+        self.record_viewers_review(ReviewOutcome::Commented, "");
+    }
+
+    /// The viewer's sent review is their last, and stands as theirs in place of any other.
+    fn record_viewers_review(&self, outcome: ReviewOutcome, body: &str) {
+        self.has_pending_review.store(false, Ordering::SeqCst);
+        *self.last_review.lock().unwrap() = Some(SubmittedReview {
+            outcome,
             body: body.to_owned(),
             submitted_at: "2026-11-06T09:00:00Z".to_owned(),
             commit: self.tips.1.clone(),
         });
-        Ok(())
+        let mut standings = self.standings.lock().unwrap();
+        standings.retain(|standing| !standing.is_viewer());
+        standings.push(Standing::of(
+            Reviewer::person(VIEWER_LOGIN, None),
+            Whose::Viewers,
+            Stance::Reviewed {
+                outcome,
+                commit: self.tips.1.clone(),
+            },
+        ));
+    }
+
+    fn make_thread(&self, place: &CommentPlace, body: &str) {
+        if self.is_faulty(&HostFault::NewThreadsUnlisted) {
+            return;
+        }
+        let mut made = self.made_now.lock().unwrap();
+        let fallback = format!("N{}", made.len() + 1);
+        let (id, comment_id) = self
+            .new_thread_ids
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(|| {
+                (
+                    ThreadId::new(&fallback),
+                    CommentId::new(&format!("{fallback}C")),
+                )
+            });
+        let (line, start_line, side, is_file_comment) = match place {
+            CommentPlace::File(_) => (None, None, Side::Head, true),
+            CommentPlace::Lines { start, end } => (
+                Some(end.line),
+                (start != end).then_some(start.line),
+                end.side,
+                false,
+            ),
+        };
+        made.push(ReviewThread {
+            id,
+            is_resolved: false,
+            is_outdated: false,
+            path: place.path().clone(),
+            line,
+            start_line,
+            side,
+            is_file_comment,
+            original_line: line,
+            original_start_line: start_line,
+            original_commit: Some(self.tips.1.as_str().to_owned()),
+            comments: vec![viewers_comment(&comment_id, body)],
+        });
+    }
+}
+
+/// The login `FakeHost` knows the viewer by.
+const VIEWER_LOGIN: &str = "me";
+
+fn viewers_comment(id: &CommentId, body: &str) -> ThreadComment {
+    ThreadComment {
+        id: id.clone(),
+        author: VIEWER_LOGIN.to_owned(),
+        avatar_url: None,
+        is_bot: false,
+        by_agent: None,
+        by_viewer: true,
+        body: body.to_owned(),
+        url: format!("https://github.com/acme/shop/pull/7#discussion_r{id}"),
+        reactions: Vec::new(),
     }
 }
 

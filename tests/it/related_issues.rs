@@ -482,7 +482,7 @@ fn a_failed_read_of_details_keeps_what_was_read_and_a_rebuilt_review_keeps_it_to
     let host = host_with_details(&shop);
     shop.read(&mut review, &host);
 
-    host.inject(HostFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
     shop.read(&mut review, &host);
 
     assert!(

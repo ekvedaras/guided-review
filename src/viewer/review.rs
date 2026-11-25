@@ -212,7 +212,7 @@ pub struct RouteStop {
     pub has_check: bool,
 }
 
-/// What the summary counts about the PR, all of it known without GitHub but the threads.
+/// What the summary counts about the PR, all of it known without the host but the threads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SummaryStats {
     pub steps: usize,
@@ -258,7 +258,7 @@ pub struct ReviewCore {
     /// Folders the reviewer folded. Not saved: a reopened app shows the tree unfolded.
     folded_folders: BTreeSet<FolderPath>,
     subject: ReviewSubject,
-    /// Where code the IDE cannot open goes: the PR's repo on GitHub, or nowhere for a local review.
+    /// Where code the IDE cannot open goes: the PR's repo on the host, or nowhere for a local review.
     code_on_web: CodeOnWeb,
     /// What a local review's overview shows; set by the app from the clone, `None` for a PR.
     local_facts: Option<LocalFacts>,
@@ -266,15 +266,15 @@ pub struct ReviewCore {
     local_heading: Option<Arc<str>>,
     branch_link: BranchLink,
     related_issues: RelatedIssues,
-    /// What GitHub last said of the PR's author and branches; `None` until it answers, and always for a local review.
+    /// What the host last said of the PR's author and branches; `None` until it answers, and always for a local review.
     pr_origin: Option<PullRequestOrigin>,
     base: Sha,
     head: Sha,
-    /// Unknown until GitHub answers.
+    /// Unknown until the host answers.
     pr_head: Option<Sha>,
     /// A local review's folder against the snapshot it reads; unknown until the folder is looked at.
     on_disk: Option<OnDisk>,
-    /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
+    /// What the host last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
     /// Where each reviewer stands, as last read.
     standings: Vec<Standing>,
@@ -290,7 +290,7 @@ pub struct ReviewCore {
     steps_in_reading_order: Vec<Screen>,
     has_uncovered_changes: bool,
     pulled_threads: Vec<ReviewThread>,
-    /// A snapshot scene's threads, kept over the threads GitHub answers with while the scene shows.
+    /// A snapshot scene's threads, kept over the threads the host answers with while the scene shows.
     #[cfg(feature = "snapshots")]
     staged_threads: Vec<ReviewThread>,
     followed_lines: BTreeMap<ThreadId, FollowedLines>,
@@ -1457,7 +1457,7 @@ impl ReviewCore {
     }
 
     /// Puts the Ask's latest answer into the comment box on its lines, after any text already
-    /// there. The reviewer edits and sends it; nothing goes to GitHub here.
+    /// there. The reviewer edits and sends it; nothing goes to the host here.
     fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
         if matches!(
             ask.place,

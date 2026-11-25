@@ -142,7 +142,7 @@ pub(super) fn waiting(duration: Duration) -> String {
     }
 }
 
-/// What the app reads from GitHub that has no problem of its own.
+/// What the app reads from the host that has no problem of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Read {
     PrHead,

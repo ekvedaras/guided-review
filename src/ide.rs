@@ -127,7 +127,7 @@ pub enum NoIde {
     NoClone,
 }
 
-/// Code opens in the IDE only with a local clone and a template; without one it opens on GitHub.
+/// Code opens in the IDE only with a local clone and a template; without one it opens on the host.
 #[derive(Debug, Clone)]
 pub struct Ide {
     template: IdeTemplate,

@@ -5,7 +5,8 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
 use guided_review::viewer::{
@@ -32,6 +33,32 @@ pub fn serve(pull: &PullOnHost) -> String {
         }
     });
     url
+}
+
+/// The `gh` program the adapter clones with: one that makes the clone as `gh repo clone` does, its
+/// origin on github.com, and one that fails as `gh` does when GitHub answers a server error.
+pub fn gh_cli(reach: Reach) -> PathBuf {
+    static FOLDER: OnceLock<tempfile::TempDir> = OnceLock::new();
+    let folder = FOLDER.get_or_init(|| {
+        let folder = tempfile::tempdir().unwrap();
+        for (name, script) in [
+            (
+                "gh",
+                "#!/bin/sh\n[ \"$1 $2\" = \"repo clone\" ] || exit 2\ngit init -q \"$4\" && git -C \"$4\" remote add origin \"https://github.com/$3.git\"\n",
+            ),
+            (
+                "gh-not-answering",
+                "#!/bin/sh\necho \"HTTP 503: Service Unavailable (https://api.github.com/graphql)\" >&2\nexit 1\n",
+            ),
+        ] {
+            crate::support::write_executable(&folder.path().join(name), script);
+        }
+        folder
+    });
+    folder.path().join(match reach {
+        Reach::ServerError => "gh-not-answering",
+        Reach::Answers | Reach::NoToken => "gh",
+    })
 }
 
 struct Request {
@@ -171,7 +198,12 @@ struct Api {
 struct Thread {
     id: String,
     path: String,
-    line: usize,
+    line: Option<u64>,
+    start_line: Option<u64>,
+    /// GitHub's `diffSide`: `LEFT` or `RIGHT`.
+    side: String,
+    /// GitHub's `subjectType`: `LINE` or `FILE`.
+    subject: String,
     resolved: bool,
     comments: Vec<Comment>,
 }
@@ -201,7 +233,10 @@ impl Api {
                 .map(|seed| Thread {
                     id: seed.id.to_owned(),
                     path: seed.path.to_owned(),
-                    line: seed.line,
+                    line: Some(u64::try_from(seed.line).unwrap()),
+                    start_line: None,
+                    side: "RIGHT".to_owned(),
+                    subject: "LINE".to_owned(),
                     resolved: seed.resolved,
                     comments: seed
                         .comments
@@ -476,12 +511,29 @@ impl Api {
         }}}))
     }
 
-    /// A new thread joins the viewer's pending review, as a reply does.
+    /// A new thread joins the viewer's pending review, as a reply does, and is listed to its author
+    /// while pending (not checked against GitHub's docs).
     fn add_thread(&mut self, input: &Value) -> Result<Value, String> {
         Self::is_this_pull_request(input)?;
         let review_id = self.pending_review_id();
+        let thread_id = format!("PRRT_{}", self.made);
+        self.threads.push(Thread {
+            id: thread_id.clone(),
+            path: input["path"].as_str().unwrap().to_owned(),
+            line: input["line"].as_u64(),
+            start_line: input["startLine"].as_u64(),
+            side: input["side"].as_str().unwrap_or("RIGHT").to_owned(),
+            subject: input["subjectType"].as_str().unwrap().to_owned(),
+            resolved: false,
+            comments: vec![Comment {
+                id: format!("PRRC_{}", self.made),
+                author: VIEWER.to_owned(),
+                body: input["body"].as_str().unwrap().to_owned(),
+                reactions: Vec::new(),
+            }],
+        });
         Ok(json!({"addPullRequestReviewThread": {"thread": {
-            "id": format!("PRRT_{}", self.made),
+            "id": thread_id,
             "comments": {"nodes": [{"pullRequestReview": {"id": review_id}}]},
         }}}))
     }
@@ -841,11 +893,11 @@ impl Thread {
             "isOutdated": false,
             "path": self.path,
             "line": self.line,
-            "startLine": null,
+            "startLine": self.start_line,
             "originalLine": self.line,
-            "originalStartLine": null,
-            "diffSide": "RIGHT",
-            "subjectType": "LINE",
+            "originalStartLine": self.start_line,
+            "diffSide": self.side,
+            "subjectType": self.subject,
             "comments": {"nodes": comments},
         })
     }

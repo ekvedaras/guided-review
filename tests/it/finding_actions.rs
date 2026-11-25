@@ -12,8 +12,8 @@ use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentDraft, CommentId, CommentPlace, CommentRefusal, CommentResult, FindingRefusal, FixReply,
-    LineLocation, Page, PageRow, Review, ReviewThread, SendMode, Side, ThreadComment, ThreadId,
+    CommentDraft, CommentPlace, CommentRefusal, CommentResult, FindingRefusal, FixReply,
+    LineLocation, Page, PageRow, Review, SendMode, Side,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -155,33 +155,6 @@ fn a_finding_used_in_a_box_goes_when_its_comment_is_sent_after_the_review_opens_
     assert_eq!(shown_findings(shop.open().page()), ["b"]);
 }
 
-fn thread_on_line_2(id: &str, body: &str) -> ReviewThread {
-    ReviewThread {
-        id: ThreadId::new(id),
-        is_resolved: false,
-        is_outdated: false,
-        path: file_path("README.md"),
-        line: Some(line(2)),
-        start_line: None,
-        side: Side::Head,
-        is_file_comment: false,
-        original_line: Some(line(2)),
-        original_start_line: None,
-        original_commit: None,
-        comments: vec![ThreadComment {
-            avatar_url: None,
-            id: CommentId::new(&format!("{id}-1")),
-            author: "me".into(),
-            is_bot: false,
-            by_agent: None,
-            body: body.into(),
-            url: String::new(),
-            reactions: Vec::new(),
-            by_viewer: true,
-        }],
-    }
-}
-
 /// The findings each thread of the page was made from: `["a"]` per thread.
 fn findings_of_threads(page: &Page) -> Vec<Vec<String>> {
     page.rows()
@@ -203,8 +176,7 @@ fn the_thread_a_used_finding_became_names_the_finding_and_keeps_what_was_said_ab
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
     let mut review = shop.open();
     let sent = SentLog::default();
-    let mut host = FakeHost::with_pull("main-tip", &shop.head, &sent);
-    host.threads = vec![thread_on_line_2("T1", "Say it twice.")];
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
     review.fix_findings(&[id("a")]);
     review
         .fix_replied(
@@ -222,7 +194,10 @@ fn the_thread_a_used_finding_became_names_the_finding_and_keeps_what_was_said_ab
 
     assert_eq!(findings_of_threads(review.page()), [["a"]]);
     let mut reopened = shop.open();
-    reopened.set_threads(&host.threads);
+    reopened.set_threads(
+        &guided_review::viewer::ReviewThreadsPort::review_threads(&host, &PR.parse().unwrap())
+            .unwrap(),
+    );
     let thread = reopened
         .page()
         .rows()
@@ -244,8 +219,7 @@ fn a_finding_used_as_is_whose_send_waits_in_the_queue_is_carried_by_the_queued_c
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
     let mut review = shop.open();
     let sent = SentLog::default();
-    let mut host = FakeHost::with_pull("main-tip", &shop.head, &sent);
-    host.threads = vec![thread_on_line_2("T1", "🤖 Say it twice.")];
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
     host.inject(HostFault::ConnectionLost);
 
     let request = review
