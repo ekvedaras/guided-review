@@ -282,10 +282,10 @@ impl PreparedTable {
             .map(|column| TableColumn {
                 alignment: table.alignments.get(column).copied().unwrap_or_default(),
                 weight: cells_of(column)
-                    .map(|cell| text_units(&cell.text))
+                    .map(|cell| cell.width_units())
                     .fold(Self::LEAST_WEIGHT, f32::max),
                 least_width: cells_of(column)
-                    .flat_map(|cell| cell.text.split_whitespace().map(text_units))
+                    .map(|cell| cell.widest_word_units())
                     .fold(0., f32::max),
             })
             .collect();
@@ -1023,6 +1023,25 @@ impl InlineText {
             .map(|(range, run)| (range.clone(), style_of(colors, run)))
             .collect()
     }
+
+    /// The rounded grounds of its inline code; `None` when it has none.
+    fn code_backgrounds(&self, layout: &TextLayout) -> Option<AnyElement> {
+        (!self.code_ranges.is_empty())
+            .then(|| code_backgrounds(layout.clone(), self.code_ranges.clone()))
+    }
+
+    /// How wide the text is in a table column, in `text_units`.
+    fn width_units(&self) -> f32 {
+        text_units(&self.text)
+    }
+
+    /// The least a table column can be without breaking a word.
+    fn widest_word_units(&self) -> f32 {
+        self.text
+            .split_whitespace()
+            .map(text_units)
+            .fold(0., f32::max)
+    }
 }
 
 /// With `selectable_as`, the text is the next row of that body's prose selection: it draws its
@@ -1058,8 +1077,7 @@ fn styled_text(
                 .map(|range| (range, code_font.clone())),
         );
     let layout = styled.layout().clone();
-    let backgrounds = (!inline.code_ranges.is_empty())
-        .then(|| code_backgrounds(layout.clone(), inline.code_ranges.clone()));
+    let backgrounds = inline.code_backgrounds(&layout);
     let text = selectable_text(styled_links(styled, inline, key), row, layout);
     match backgrounds {
         Some(backgrounds) => div()

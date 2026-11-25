@@ -1247,11 +1247,7 @@ impl ReviewCore {
     }
 
     fn thread_work(&self) -> ThreadWork<'_> {
-        ThreadWork {
-            reply_drafts: self.state.reply_drafts(),
-            comment_edits: self.comment_desk.comment_edits(),
-            delete_asked: self.comment_desk.delete_asked(),
-        }
+        self.comment_desk.thread_work(self.state.reply_drafts())
     }
 
     pub fn current_step(&self) -> Option<StepPage<'_>> {

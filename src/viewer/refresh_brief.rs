@@ -52,16 +52,12 @@ impl RefreshBrief {
             .map(|part| part.piece.id.clone())
             .filter(|id| record.status_of(id) == Some(RepinStatus::New))
             .collect();
-        let new_or_changed_pieces = record
-            .pieces
-            .values()
-            .filter(|status| matches!(status, RepinStatus::New | RepinStatus::Changed))
-            .count();
+        let (new_or_changed_pieces, pieces) = record.new_or_changed_of_all();
         Self {
             stale_steps,
             unplaced_new_pieces,
             new_or_changed_pieces,
-            pieces: record.pieces.len(),
+            pieces,
         }
     }
 

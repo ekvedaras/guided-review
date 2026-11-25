@@ -226,7 +226,7 @@ impl ReviewCore {
     pub fn reviewer_lines(&self) -> Vec<ReviewerLine> {
         self.standings
             .iter()
-            .map(|standing| ReviewerLine::of(standing, self.pr_head.as_ref()))
+            .map(|standing| standing.line(self.pr_head.as_ref()))
             .collect()
     }
 

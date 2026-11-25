@@ -22,6 +22,7 @@ Rust 2024 gpui app.
     - Draw a diagram of the structure before and after, for the maintainer.
 - Never add lines to an allow list to pass the gate. A rename changes a key and may need one; say so in the PR.
 - When the run says allowed errors are fixed, run `scripts/deslop --update-allow`, not the `deslop-please --update-allow` it prints: that one forgets `--all-features` and the other target.
+- Outside CI, `scripts/check` warns, without failing, about lines the change adds to an allow list against the changes base (`scripts/deslop-added <base>`), so a reviewer sees new debt. Each one needs its reason in the PR.
 
 ## Tests
 

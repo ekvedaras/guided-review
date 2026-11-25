@@ -578,14 +578,12 @@ impl Settings {
 
     /// Picking what the secondary is makes the old primary the secondary.
     pub fn set_primary_comment_action(&mut self, action: SendAction) {
-        let choice = self.edited.keys.send_choice().with_primary(action);
-        self.edited.keys.set_send_choice(choice);
+        self.edited.keys.choose_primary(action);
     }
 
     /// Picking what the primary is makes the old secondary the primary.
     pub fn set_secondary_comment_action(&mut self, action: SendAction) {
-        let choice = self.edited.keys.send_choice().with_secondary(action);
-        self.edited.keys.set_send_choice(choice);
+        self.edited.keys.choose_secondary(action);
     }
 
     /// The global `merge_method`; `[merge_methods]` per repo is edited in the config only.

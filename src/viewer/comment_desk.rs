@@ -5,8 +5,7 @@ use super::ask::Ask;
 use super::comment_send::{CommentOutcome, CommentRequest, Origin, Outcome};
 use super::comments::Audience;
 use super::comments::{
-    CommentDraft, CommentPlace, CommentProblem, CommentRefusal, CommentResult, QueuedComment,
-    SendMode,
+    CommentDraft, CommentPlace, CommentProblem, CommentRefusal, CommentResult, SendMode,
 };
 use super::diff_line::DiffLine;
 use super::finish_review::{FinishOutcome, FinishRefusal, FinishRequest, FinishResult};
@@ -22,6 +21,7 @@ use super::suggestion::suggestion_block;
 use super::thread_actions::{
     ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
 };
+use super::threads::ThreadWork;
 use crate::file_path::FilePath;
 use crate::findings::Finding;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -378,8 +378,10 @@ impl CommentDesk {
         outcome: CommentOutcome,
         (from, code): (SentFrom, Option<String>),
     ) -> anyhow::Result<CommentResult> {
-        let from_box =
-            (outcome.request.origin == Origin::Draft).then(|| outcome.request.draft.place.clone());
+        let from_box = outcome
+            .request
+            .is_from_a_box()
+            .then(|| outcome.request.place().clone());
         let result = state.record(|state| self.settle(state, outcome, (from, code)));
         if let Some(place) = from_box {
             self.show_landing(&place, &result);
@@ -416,36 +418,29 @@ impl CommentDesk {
             how,
             threads,
         } = outcome;
-        let place = request.draft.place.clone();
+        let place = request.place().clone();
         match how {
             Outcome::Sent => {
-                if !request.mode.is_task() {
-                    self.pending_review =
-                        PendingReview::exists(request.mode == SendMode::AddToReview);
+                if let Some(is_pending) = request.leaves_a_pending_review() {
+                    self.pending_review = PendingReview::exists(is_pending);
                 }
-                leave(state, &request.origin, &place);
-                if request.audience == Audience::Agent {
+                request.leave(state);
+                if request.audience() == Audience::Agent {
                     state.hand_offs_mut().record_new_thread(
                         place.path(),
-                        &SentComment {
-                            place: place.describe(),
-                            from,
-                            mode: request.mode,
-                            body: &request.draft.body,
-                            code,
-                        },
+                        &request.sent_comment(from, code),
                         threads.as_ref(),
                     );
                 }
                 CommentResult::Sent
             }
             Outcome::Failed(reason) => {
-                keep_for_retry(state, &request, &reason);
+                request.keep_for_retry(state, &reason);
                 CommentResult::Queued(reason)
             }
             Outcome::Rejected(reason) => {
                 self.pending_review = PendingReview::Exists;
-                keep_as_draft(state, &request);
+                request.keep_as_draft(state);
                 CommentResult::Rejected(reason)
             }
             Outcome::Refused(refusal) => {
@@ -512,12 +507,17 @@ impl CommentDesk {
         self.delete_asked = None;
     }
 
-    pub(super) fn delete_asked(&self) -> Option<&CommentId> {
-        self.delete_asked.as_ref()
-    }
-
-    pub(super) fn comment_edits(&self) -> &BTreeMap<CommentId, String> {
-        &self.comment_edits
+    /// What the reviewer has begun in the threads: the reply drafts, kept in the state file, and
+    /// the comment edits and the delete asked about, kept here.
+    pub(super) fn thread_work<'a>(
+        &'a self,
+        reply_drafts: &'a BTreeMap<ThreadId, String>,
+    ) -> ThreadWork<'a> {
+        ThreadWork {
+            reply_drafts,
+            comment_edits: &self.comment_edits,
+            delete_asked: self.delete_asked.as_ref(),
+        }
     }
 
     /// `None` while the box is not open; the finish body counts as open once it has text.
@@ -766,45 +766,6 @@ fn append_to_draft(state: &mut ReviewState, place: &CommentPlace, text: &str) ->
     };
     state.write_draft(place, &body);
     Some(body)
-}
-
-fn leave(state: &mut ReviewState, origin: &Origin, place: &CommentPlace) {
-    match origin {
-        Origin::Draft => state.drop_draft(place),
-        Origin::Queue => state.drop_queued(place).map(|queued| queued.draft),
-    };
-}
-
-fn keep_for_retry(state: &mut ReviewState, request: &CommentRequest, reason: &str) {
-    let place = &request.draft.place;
-    match request.origin {
-        Origin::Draft => {
-            state.drop_draft(place);
-            state.queue_comment(QueuedComment {
-                draft: request.draft.clone(),
-                mode: request.mode,
-                audience: request.audience,
-                failed_because: reason.to_owned(),
-            });
-        }
-        Origin::Queue => {
-            if let Some(queued) = state.queued_at(place) {
-                reason.clone_into(&mut queued.failed_because);
-            }
-        }
-    }
-}
-
-fn keep_as_draft(state: &mut ReviewState, request: &CommentRequest) {
-    let place = &request.draft.place;
-    if request.origin == Origin::Queue {
-        state.drop_queued(place);
-        state.open_draft(place.clone(), request.draft.written_at.as_ref());
-        state.write_draft(place, &request.draft.body);
-        for finding in &request.draft.from_findings {
-            state.draft_carries(place, finding.clone());
-        }
-    }
 }
 
 fn hand_off_reply(

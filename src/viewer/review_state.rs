@@ -191,6 +191,16 @@ pub struct RepinRecord {
 }
 
 impl RepinRecord {
+    /// How many pieces at `to_head` are new or changed, of how many there are.
+    pub fn new_or_changed_of_all(&self) -> (usize, usize) {
+        let new_or_changed = self
+            .pieces
+            .values()
+            .filter(|status| matches!(status, RepinStatus::New | RepinStatus::Changed))
+            .count();
+        (new_or_changed, self.pieces.len())
+    }
+
     pub fn new(
         from_base: &Sha,
         from_head: &Sha,

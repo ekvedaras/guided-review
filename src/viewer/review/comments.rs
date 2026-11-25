@@ -27,7 +27,6 @@ use crate::viewer::thread_actions::{
 };
 use crate::viewer::threads::AgentOfThreads;
 use crate::viewer::typing_save::TypingSave;
-use crate::viewer::used_findings::thread_made_of;
 use crate::viewer::work_agenda::WorkKind;
 
 impl ReviewCore {
@@ -335,16 +334,12 @@ impl ReviewCore {
         &mut self,
         outcome: CommentOutcome,
     ) -> anyhow::Result<CommentResult> {
-        let from_findings = outcome.request.draft.from_findings.clone();
+        let from_findings = outcome.request.findings_carried().to_vec();
         let threads = outcome.threads.clone();
         let made = if from_findings.is_empty() {
             None
         } else {
-            thread_made_of(
-                &outcome.request.draft,
-                threads.as_ref(),
-                &self.pulled_threads,
-            )
+            outcome.thread_made(&self.pulled_threads)
         };
         let hand_offs_before = self.state.hand_offs().all().len();
         let code = self.code_commented_on(&outcome);
@@ -366,7 +361,7 @@ impl ReviewCore {
     /// The lines a task of a local review is about, as the page shows them; a PR's hand-off has none.
     fn code_commented_on(&self, outcome: &CommentOutcome) -> Option<String> {
         self.subject.local()?;
-        let place = &outcome.request.draft.place;
+        let place = outcome.request.place();
         let selected = Page::of(self).selected(&RowSelection::of(place)?)?;
         Some(ask_context::code_lines(selected.lines()))
     }

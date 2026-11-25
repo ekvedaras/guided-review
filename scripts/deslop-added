@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Warns about lines the change adds to .deslop-please/*.allow: new debt, or a key a rename changed.
+# A warning, not a failure: a reviewer judges each one, and the PR says why it is there.
+# Usage: scripts/deslop-added <base-ref>   (compares the base's fork point with the allow lists on disk)
+set -euo pipefail
+
+base="${1:?usage: scripts/deslop-added <base-ref>}"
+
+cd "$(dirname "$0")/.."
+
+fork=$(git merge-base "$base" HEAD)
+
+entries() {
+    grep -v '^#' | sort || true
+}
+
+added=""
+for allow in .deslop-please/*.allow; do
+    now=$(entries < "$allow")
+    if ! git cat-file -e "$fork:$allow" 2>/dev/null; then
+        added="$added  $allow: new, $(printf '%s\n' "$now" | grep -c .) entries"$'\n'
+        continue
+    fi
+    before=$(git show "$fork:$allow" | entries)
+    new=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$now") | grep . || true)
+    if [ -n "$new" ]; then
+        added="$added$(printf '%s\n' "$new" | sed "s|^|  $allow: |")"$'\n'
+    fi
+done
+
+if [ -n "$added" ]; then
+    echo "warning: lines added to the deslop-please allow lists since $base; say why in the PR:"
+    printf '%s' "$added"
+else
+    echo "no lines added to the deslop-please allow lists"
+fi

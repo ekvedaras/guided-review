@@ -55,6 +55,10 @@ echo "== clippy, all features"
 cargo clippy --all-targets --all-features -- -D warnings
 echo "== deslop-please"
 scripts/deslop
+if [ -z "${CI:-}" ]; then
+    echo "== allow-list lines the change adds (a warning only)"
+    scripts/deslop-added "${changes_base:-origin/main}"
+fi
 echo "== test"
 cargo test --all-features ${1:+"$1"}
 echo "ALL GREEN"

@@ -366,26 +366,7 @@ fn highlight_file(configuration: &HighlightConfiguration, source: &str) -> Vec<V
 fn highlight_blade(source: &str) -> Option<Vec<Vec<Span>>> {
     let html = HighlightLanguage::Html.configuration()?;
     let php = HighlightLanguage::Php.configuration()?;
-    let scan = blade::BladeScan::of(source);
-    let mut ranges = highlight_ranges(html, &scan.html_only(source));
-    ranges.extend(scan.marks.iter().cloned());
-    for code in &scan.php {
-        let Some(inner) = source.get(code.range.clone()) else {
-            continue;
-        };
-        let standalone = format!("{}{inner}{}", code.opening, code.closing);
-        let shift = code.opening.len();
-        ranges.extend(
-            highlight_ranges(php, &standalone)
-                .into_iter()
-                .filter(|(range, _)| range.start >= shift && range.end <= shift + inner.len())
-                .map(|(range, capture)| {
-                    let start = code.range.start + range.start - shift;
-                    (start..start + range.len(), capture)
-                }),
-        );
-    }
-    ranges.sort_by_key(|(range, _)| range.start);
+    let ranges = blade::BladeScan::of(source).coloured(source, html, php);
     Some(split_into_lines(source, &ranges))
 }
 

@@ -1,9 +1,13 @@
 //! Sending one comment: to GitHub, or into a local review's state file, on a background thread.
 
-use super::comments::{Audience, CommentDraft, CommentRefusal, SendMode};
+use super::comments::{Audience, CommentDraft, CommentRefusal, QueuedComment, SendMode};
+use super::hand_offs::{SentComment, SentFrom};
 use super::local_thread_store::{LocalThreadStore, ThreadHome};
 use super::ports::{ChangeTipsPort, GitHubError, ReviewThreadsPort, ReviewWritesPort};
-use super::review_thread::ReviewThread;
+use super::review_state::ReviewState;
+use super::review_thread::{ReviewThread, ThreadId};
+use super::used_findings::thread_made_of;
+use crate::findings::Finding;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::viewer::comments::CommentPlace;
 
@@ -15,10 +19,10 @@ pub(super) enum Origin {
 
 /// Everything sending one comment needs, owned, so it can run on a background thread.
 pub struct CommentRequest {
-    pub(super) origin: Origin,
-    pub(super) draft: CommentDraft,
-    pub(super) mode: SendMode,
-    pub(super) audience: Audience,
+    origin: Origin,
+    draft: CommentDraft,
+    mode: SendMode,
+    audience: Audience,
     tour_head: Sha,
     home: ThreadHome,
 }
@@ -36,6 +40,13 @@ pub(super) enum Outcome {
     Failed(String),
     Rejected(String),
     Refused(CommentRefusal),
+}
+
+impl CommentOutcome {
+    /// The thread the comment became, among the threads read after it went in.
+    pub(super) fn thread_made(&self, known_before: &[ReviewThread]) -> Option<ThreadId> {
+        thread_made_of(&self.request.draft, self.threads.as_ref(), known_before)
+    }
 }
 
 impl CommentRequest {
@@ -63,6 +74,74 @@ impl CommentRequest {
 
     pub const fn audience(&self) -> Audience {
         self.audience
+    }
+
+    pub(super) fn is_from_a_box(&self) -> bool {
+        self.origin == Origin::Draft
+    }
+
+    pub(super) fn findings_carried(&self) -> &[Finding] {
+        &self.draft.from_findings
+    }
+
+    /// Whether GitHub holds a pending review once this comment is sent; `None` for a task, which
+    /// leaves GitHub's review as it was.
+    pub(super) fn leaves_a_pending_review(&self) -> Option<bool> {
+        (!self.mode.is_task()).then_some(self.mode == SendMode::AddToReview)
+    }
+
+    pub(super) fn sent_comment(&self, from: SentFrom, code: Option<String>) -> SentComment<'_> {
+        SentComment {
+            place: self.draft.place.describe(),
+            from,
+            mode: self.mode,
+            body: &self.draft.body,
+            code,
+        }
+    }
+
+    /// The draft or queued comment it was sent from is done with.
+    pub(super) fn leave(&self, state: &mut ReviewState) {
+        let place = &self.draft.place;
+        match self.origin {
+            Origin::Draft => state.drop_draft(place),
+            Origin::Queue => state.drop_queued(place).map(|queued| queued.draft),
+        };
+    }
+
+    /// A send that failed goes to the queue, or stays in it with the new reason.
+    pub(super) fn keep_for_retry(&self, state: &mut ReviewState, reason: &str) {
+        let place = &self.draft.place;
+        match self.origin {
+            Origin::Draft => {
+                state.drop_draft(place);
+                state.queue_comment(QueuedComment {
+                    draft: self.draft.clone(),
+                    mode: self.mode,
+                    audience: self.audience,
+                    failed_because: reason.to_owned(),
+                });
+            }
+            Origin::Queue => {
+                if let Some(queued) = state.queued_at(place) {
+                    reason.clone_into(&mut queued.failed_because);
+                }
+            }
+        }
+    }
+
+    /// A queued comment GitHub rejected opens as a draft again, so the reviewer can fix it; a
+    /// comment from a box stays in its box.
+    pub(super) fn keep_as_draft(&self, state: &mut ReviewState) {
+        let place = &self.draft.place;
+        if self.origin == Origin::Queue {
+            state.drop_queued(place);
+            state.open_draft(place.clone(), self.draft.written_at.as_ref());
+            state.write_draft(place, &self.draft.body);
+            for finding in &self.draft.from_findings {
+                state.draft_carries(place, finding.clone());
+            }
+        }
     }
 
     /// Looks at the PR's head again first: the tour may have fallen behind since the last check.
