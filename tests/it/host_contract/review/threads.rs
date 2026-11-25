@@ -1,6 +1,9 @@
-use guided_review::viewer::{CodeHost, HostError, Resolution, ReviewThread, SendMode, ThreadId};
+use guided_review::viewer::{
+    CodeHost, CommentId, HostError, Reaction, ReactionChange, ReactionCount, Resolution,
+    ReviewThread, SendMode, ThreadId,
+};
 
-use super::{HostBuilder, PullOnHost, Reach, SeedComment, SeedThread, pr};
+use crate::host_contract::{HostBuilder, PullOnHost, Reach, SeedComment, SeedThread, pr};
 use crate::support::line;
 
 fn three_threads() -> Vec<SeedThread> {
@@ -157,6 +160,87 @@ pub fn a_reply_reads_back_as_the_last_comment_of_its_thread(host: HostBuilder) {
             "{mode:?}"
         );
     }
+}
+
+pub fn a_reply_to_a_thread_the_pr_does_not_have_fails(host: HostBuilder) {
+    let host = host(PullOnHost {
+        threads: three_threads(),
+        ..PullOnHost::default()
+    });
+
+    let reply = host.reply_to_thread(&pr(), &ThreadId::new("T9"), "hello?", SendMode::AddToReview);
+
+    assert!(reply.is_err(), "{reply:?}");
+    assert_eq!(threads_of(host.as_ref()).len(), 3);
+}
+
+pub fn an_edited_comment_reads_back_with_its_new_body_and_a_deleted_one_is_gone(host: HostBuilder) {
+    let host = host(PullOnHost {
+        threads: three_threads(),
+        ..PullOnHost::default()
+    });
+    let reply = host
+        .reply_to_thread(&pr(), &ThreadId::new("T1"), "a set", SendMode::AddToReview)
+        .unwrap();
+
+    host.edit_comment(&reply, "a set would lose the order")
+        .unwrap();
+    let edited = thread(&threads_of(host.as_ref()), "T1")
+        .comments
+        .last()
+        .map(|comment| (comment.id.clone(), comment.body.clone()));
+    host.delete_comment(&reply).unwrap();
+    let after_delete: Vec<CommentId> = thread(&threads_of(host.as_ref()), "T1")
+        .comments
+        .iter()
+        .map(|comment| comment.id.clone())
+        .collect();
+
+    assert_eq!(
+        edited,
+        Some((reply, "a set would lose the order".to_owned()))
+    );
+    assert_eq!(after_delete, [CommentId::new("C1"), CommentId::new("C2")]);
+}
+
+pub fn a_reaction_on_a_comment_reads_back_as_the_viewers_and_a_removed_one_is_gone(
+    host: HostBuilder,
+) {
+    let host = host(PullOnHost {
+        threads: three_threads(),
+        ..PullOnHost::default()
+    });
+    let reactions = host
+        .comment_reactions()
+        .expect("the host offers reactions on comments");
+    let reactions_on_c1 = || -> Vec<ReactionCount> {
+        thread(&threads_of(host.as_ref()), "T1").comments[0]
+            .reactions
+            .clone()
+    };
+
+    reactions
+        .set_comment_reaction(&CommentId::new("C1"), Reaction::Eyes, ReactionChange::Add)
+        .unwrap();
+    let added = reactions_on_c1();
+    reactions
+        .set_comment_reaction(
+            &CommentId::new("C1"),
+            Reaction::Eyes,
+            ReactionChange::Remove,
+        )
+        .unwrap();
+    let removed = reactions_on_c1();
+
+    assert_eq!(
+        added,
+        [ReactionCount {
+            reaction: Reaction::Eyes,
+            count: 1,
+            viewer_has_reacted: true,
+        }]
+    );
+    assert_eq!(removed, []);
 }
 
 pub fn a_resolved_thread_reads_back_resolved_and_an_unresolved_one_open(host: HostBuilder) {

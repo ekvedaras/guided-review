@@ -43,13 +43,24 @@ On a rebuild (re-pin, refresh, reload, switch to guided) the new review takes th
 
 ## Host contract
 
-Issue #140 step 3, 2026-11-25. `tests/it/host_contract/` holds shared cases per port (viewed marks, review threads), each written once over a builder that makes a host holding a given PR, and `every_case_for!` runs every case against `FakeHost` and the GitHub adapter. GitHub runs against `github_api.rs`, GitHub's GraphQL API for one PR held in memory and answered in GitHub's shapes, two nodes a page, never the network. `capabilities.rs` checks that GitHub offers every capability and `NoHost` none. A new host gets a builder in `hosts.rs` and one more name in `every_case_for!`.
+Issue #140 step 3, 2026-11-25. `tests/it/host_contract/` holds shared cases per port, each written once over a builder that makes a host holding a given PR (`PullOnHost`: title, description, author, branches and fork, tips, status, merging, closing issues, reviews, a web pending review, code, viewed files, threads, and whether the host answers), and `every_case_for!` runs every case against `FakeHost` and the GitHub adapter. GitHub runs against `github_api.rs`, GitHub's GraphQL API and the REST calls the adapter makes (the PR, pulls of a branch, the repo, contents, compare, picture uploads) for one PR held in memory and answered in GitHub's shapes, two nodes a page, never the network. `capabilities.rs` checks that GitHub offers every capability and `NoHost` none, and that `NoHost` refuses to clone. A new host gets a builder in `hosts.rs` and one more name in `every_case_for!`.
+
+Every port of `CodeHost` and every capability port has cases (2026-11-25, later the same day): change tips, pulls of a branch, relevant PRs, description with title and closing issues, origin, status and readiness, merging, reactions on the PR and on comments, picture uploads, issue details, review threads with edits and deletes, review writes (pending review, reviews and standings, authorship, new threads, comment now, every verdict), and code read on the host. Each port has a case for a host not answering, and the GraphQL ports one for no token. The cases are grouped by what they are about, since one folder of 18 files was wider than deslop-please allows: `pull_request/` (tips, branch, relevant PRs, description, origin, status, merging, reactions on the PR), `review/` (threads, the viewer's review, viewed marks) and `repo/` (code, issues, picture uploads).
 
 What the contract found, fixed in the fake to match GitHub:
 
 - A reply never showed in `FakeHost`'s threads; a hand-off test had seeded the reply itself to make up for it.
 - `FakeHost` had no way to have no token at all: `TokenRefused` refuses only viewed marks. `HostFault::NoToken` refuses every call.
 - `ConnectionLost`, "every write fails", let a viewed mark through.
+
+What the cases for every port found (later the same day):
+
+- `ConnectionLost` failed as `Other("network is down")`; GitHub fails as `NotAnswering`. It is `NotAnswering(GitHub, NoConnection)` now, and the tests that read its text say "GitHub is not answering (no connection)".
+- A reply to a thread the PR does not have went through on `FakeHost`; GitHub refuses it. No test replied to a thread it had not set up.
+- A reaction taken off a comment left a count of 0 in `FakeHost`'s threads; GitHub lists no reaction nobody gave.
+- `FakeHost` uploaded a file that is no picture, and one it could not read; GitHub's adapter refuses both before it sends anything.
+- `FakeHost`'s title was always "Hello world"; `with_title` sets it.
+- The GitHub adapter's `comment_now` adds a thread and sends the review it went into. With a pending review there, GitHub adds the thread to it (as it does for every Add to review), so `comment_now` sent the reviewer's whole pending review, where the port says `PendingReviewExists`. The app offers Comment now only with no pending review, so only one started on the web in between met it. `comment_now` now looks for a pending review first and refuses, one more request per comment posted now. That GitHub adds a thread with no review id to the pending review is from the app's own Add to review, not checked against GitHub's docs.
 
 ## URLs and clones behind the host
 
@@ -165,5 +176,8 @@ What keeps GitHub's name in generic code on purpose: `HostSite::GitHub` and the 
 
 - Doc comments in generic code still say GitHub where they mean the PR's host (about 300 lines outside the adapter); words for maintainers, no behaviour.
 - The agents' prompts (review brief, review agent, Ask, hand-off) say "never post on GitHub" and "GitHub markdown". Right for every PR the app reads today; a second host needs them to name the PR's host.
-- Tests of a local review other than `local_review.rs` and `local_guided_tour.rs` that go through `Review::open_basic` with `every_capability()` (for example `basic_tour.rs`, `move_to_pr.rs`) build a local review with a PR host's capabilities; they test reading, not capabilities.
-
+- `GitHub::clone_repo` (`gh repo clone`) has no contract case. It runs the `gh` on the test process's `PATH`, and the integration tests run in one process, so a fake `gh` would mean changing `PATH` under every other test that runs a program (`std::env::set_var` is `unsafe` in Rust 2024 for that reason); no CLI command clones, so it cannot run in a child process either. A seam would be the program it runs, given to `GitHub`.
+- New threads are not read back. Neither `FakeHost` nor `github_api.rs` lists a thread made by `add_review_thread` or `comment_now` in `review_threads`, and whether GitHub lists a pending thread to its author is not checked.
+- `FakeHost` keeps no review for a comment or reply posted now, and its standings do not change when the viewer sends a review. GitHub's comment now is a review of its own, so it becomes `viewer_last`, and the viewer's review joins the standings. No case reads them after a send.
+- Reads without a token: GitHub's REST reads (tips, title, description, head branch, pulls of a branch, code) go without one and answer for a public repo; `HostFault::NoToken` refuses them. Cases check no token only on GraphQL ports.
+- `ReadsFail`, `ThreadReadsFail`, `ViewedPushesFail` and `RelevantListFails` still fail as `Other("network is down")`, where GitHub would say it is not answering; the tests that use them read a failure, not an outage.

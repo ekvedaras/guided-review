@@ -1,6 +1,6 @@
 use guided_review::viewer::{HostError, Viewed, ViewedState, ViewedState::*};
 
-use super::{HostBuilder, PullOnHost, Reach, pr};
+use crate::host_contract::{HostBuilder, PullOnHost, Reach, pr};
 use crate::support::file_path;
 
 fn viewed_states(host: &dyn guided_review::viewer::CodeHost) -> Vec<(String, ViewedState)> {

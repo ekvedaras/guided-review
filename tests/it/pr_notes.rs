@@ -251,7 +251,10 @@ fn a_failed_add_says_why_and_can_be_tried_again() {
     let Some(NotesButton::Failed(reason)) = review.notes_button(&diagram()) else {
         panic!("{:?}", review.notes_button(&diagram()));
     };
-    assert!(reason.contains("network is down"), "{reason}");
+    assert!(
+        reason.contains("GitHub is not answering (no connection)"),
+        "{reason}"
+    );
     host.heal(&HostFault::ConnectionLost);
     let request = review.start_adding_to_notes(&diagram()).unwrap();
     review.apply_to_notes(request.run(&host)).unwrap();
@@ -417,7 +420,10 @@ fn a_failed_upload_leaves_the_description_alone_and_says_why() {
     let Some(NotesButton::Failed(reason)) = review.notes_button(&before_png(&shop)) else {
         panic!("{:?}", review.notes_button(&before_png(&shop)));
     };
-    assert!(reason.contains("network is down"), "{reason}");
+    assert!(
+        reason.contains("GitHub is not answering (no connection)"),
+        "{reason}"
+    );
     assert_eq!(host.description_now(), "");
 }
 

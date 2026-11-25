@@ -26,18 +26,20 @@ use guided_review::code_source::CodeSource;
 use guided_review::file_path::FilePath;
 use guided_review::issue::IssueUrl;
 use guided_review::navigation::{ServerMessage, ServerMessages};
-use guided_review::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{
+    ChangeTips, HostSite, HostedRepo, PullRequestUrl, RepoName, Sha,
+};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeRequestsPort,
     ChangeTipsPort, Checks, ClonePort, CodeHost, CommentId, CommentPlace, CommentReactionsPort,
     HostError, HostedCodePort, IssueDetails, IssueDetailsPort, MergingPort, NoAccess, NotDelivered,
-    OpenPrStatus, PictureUploadPort, PrStatus, PullOfBranch, PullRequestDescriptionPort,
-    PullRequestIssues, PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort,
-    PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
-    ReactionCount, Readiness, RelevantPullRequests, RelevantPullRequestsPort, Resolution,
-    ReviewOutcome, ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, SendMode,
-    Standing, SubmittedReview, ThreadComment, ThreadId, TurnStopper, Viewed, ViewedFile,
-    ViewedFilesPort, ViewedState,
+    OpenPrStatus, OutageCause, PictureUploadPort, PrStatus, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin, PullRequestOriginPort,
+    PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
+    Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
+    RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
+    ReviewVerdict, ReviewWritesPort, SendMode, Standing, SubmittedReview, ThreadComment, ThreadId,
+    TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 /// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
@@ -151,7 +153,7 @@ impl SentLog {
 /// Something going wrong on GitHub's side, or on the way to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostFault {
-    /// Every write fails as if the network were down.
+    /// Every write fails as if the network were down: the host is not answering.
     ConnectionLost,
     /// Changing a file's viewed state fails as if the network were down.
     ViewedPushesFail,
@@ -218,6 +220,7 @@ pub struct FakeHost {
     edited_now: Mutex<BTreeMap<CommentId, String>>,
     deleted_now: Mutex<BTreeSet<CommentId>>,
     replied_now: Mutex<Vec<(ThreadId, ThreadComment)>>,
+    title: Mutex<String>,
     description: Mutex<String>,
     status: Mutex<PrStatus>,
     merging: Mutex<Merging>,
@@ -248,6 +251,7 @@ impl FakeHost {
             edited_now: Mutex::default(),
             deleted_now: Mutex::default(),
             replied_now: Mutex::default(),
+            title: Mutex::new("Hello world".to_owned()),
             description: Mutex::default(),
             status: Mutex::new(PrStatus::Open(OpenPrStatus {
                 readiness: Readiness::Ready,
@@ -301,6 +305,11 @@ impl FakeHost {
                 title: title.to_owned(),
             },
         ));
+        self
+    }
+
+    pub fn with_title(self, title: &str) -> Self {
+        title.clone_into(&mut self.title.lock().unwrap());
         self
     }
 
@@ -408,7 +417,10 @@ impl FakeHost {
     fn fail_if_connection_lost(&self) -> Result<(), HostError> {
         self.refuse_without_token()?;
         if self.is_faulty(&HostFault::ConnectionLost) {
-            return Err(anyhow::anyhow!("network is down").into());
+            return Err(HostError::NotAnswering(
+                HostSite::GitHub,
+                OutageCause::NoConnection,
+            ));
         }
         Ok(())
     }
@@ -588,7 +600,7 @@ impl ChangeTipsPort for FakeHost {
 impl PullRequestDescriptionPort for FakeHost {
     fn pull_request_title(&self, _pr: &PullRequestUrl) -> Result<String, HostError> {
         self.fail_if_reads_fail()?;
-        Ok("Hello world".to_owned())
+        Ok(self.title.lock().unwrap().clone())
     }
 
     fn pull_request_description(&self, _pr: &PullRequestUrl) -> Result<String, HostError> {
@@ -715,6 +727,12 @@ impl PictureUploadPort for FakeHost {
             pr: pr.clone(),
             name: name.clone(),
         });
+        anyhow::ensure!(
+            guided_review::image_facts::media_type(&name).is_some(),
+            "{name} is no picture GitHub takes"
+        );
+        std::fs::read(picture)
+            .map_err(|error| anyhow::anyhow!("could not read {name}: {error}"))?;
         self.fail_if_connection_lost()?;
         Ok(format!("https://github.com/user-attachments/assets/{name}"))
     }
@@ -815,11 +833,13 @@ impl ReviewThreadsPort for FakeHost {
                     comment
                         .reactions
                         .retain(|count| count.reaction != *reaction);
-                    comment.reactions.push(ReactionCount {
-                        reaction: *reaction,
-                        count: usize::from(*on),
-                        viewer_has_reacted: *on,
-                    });
+                    if *on {
+                        comment.reactions.push(ReactionCount {
+                            reaction: *reaction,
+                            count: 1,
+                            viewer_has_reacted: true,
+                        });
+                    }
                 }
             }
         }
@@ -840,9 +860,10 @@ impl ReviewThreadsPort for FakeHost {
             mode,
         });
         self.fail_if_connection_lost()?;
-        if self.is_faulty(&HostFault::ThreadIsGone) {
+        let is_known = self.threads.iter().any(|thread| thread.id == *thread_id);
+        if !is_known || self.is_faulty(&HostFault::ThreadIsGone) {
             return Err(anyhow::anyhow!(
-                "GitHub answered with errors: Could not resolve to a PullRequestReviewThread"
+                "GitHub answered with errors: Could not resolve to a PullRequestReviewThread with the id of '{thread_id}'."
             )
             .into());
         }

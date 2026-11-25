@@ -280,7 +280,7 @@ fn a_failed_finish_says_why() {
 
     assert_eq!(
         review.finish_review(ReviewVerdict::Approve, "", &host),
-        FinishResult::Failed("network is down".into())
+        FinishResult::Failed("GitHub is not answering (no connection)".into())
     );
 }
 

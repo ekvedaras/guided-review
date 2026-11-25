@@ -458,7 +458,10 @@ fn a_failed_action_says_why_and_changes_nothing() {
         &host,
     );
 
-    assert_eq!(result, ThreadActionResult::Failed("network is down".into()));
+    assert_eq!(
+        result,
+        ThreadActionResult::Failed("GitHub is not answering (no connection)".into())
+    );
     assert!(!shown_thread(&review).is_resolved);
 }
 
@@ -1029,7 +1032,7 @@ fn an_edit_that_fails_keeps_the_new_text_and_says_why() {
     let result = review.act_on_thread(edit("C1"), &host);
 
     assert!(
-        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("network is down")),
+        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("GitHub is not answering (no connection)")),
         "{result:?}"
     );
     assert_eq!(edit_box_of(&review, "C1").as_deref(), Some("why not?"));
@@ -1182,7 +1185,7 @@ fn a_deletion_that_fails_keeps_the_comment_and_says_why() {
     let result = review.act_on_thread(delete("C1"), &host);
 
     assert!(
-        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("network is down")),
+        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("GitHub is not answering (no connection)")),
         "{result:?}"
     );
     assert_eq!(shown_thread(&review).comments.len(), 1);

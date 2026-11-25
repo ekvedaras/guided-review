@@ -356,7 +356,7 @@ fn a_change_that_github_does_not_take_is_a_problem_and_leaves_the_status_as_it_w
         review.problems(),
         [Problem::ReadinessNotChanged(
             Readiness::Draft,
-            "network is down".to_owned()
+            "GitHub is not answering (no connection)".to_owned()
         )]
     );
 }

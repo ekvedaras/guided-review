@@ -1232,7 +1232,7 @@ fn eyes_github_refuses_are_named_under_the_thread_and_the_hand_off_still_goes() 
     assert!(
         line.starts_with("Delivered to the agent")
             && line.contains("👀")
-            && line.contains("network is down"),
+            && line.contains("GitHub is not answering (no connection)"),
         "{line}"
     );
 }

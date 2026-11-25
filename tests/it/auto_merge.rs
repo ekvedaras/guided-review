@@ -341,7 +341,7 @@ fn a_change_github_does_not_take_is_a_problem_and_leaves_the_status_as_it_was() 
         review.problems(),
         [Problem::MergingNotChanged(
             MergeChange::EnableAutoMerge(MergeMethod::Merge),
-            "network is down".to_owned()
+            "GitHub is not answering (no connection)".to_owned()
         )]
     );
 }

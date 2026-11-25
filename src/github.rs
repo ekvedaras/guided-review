@@ -1385,14 +1385,17 @@ impl ReviewWritesPort for GitHub {
             .map(|_| ())
     }
 
-    /// A thread in a new pending review, posted right away. GitHub posts nothing past an existing
-    /// pending review, so the caller checks for one first.
+    /// A thread in a new pending review, posted right away. GitHub would add the thread to the
+    /// viewer's pending review and this would post all of it, so a pending review refuses it.
     fn comment_now(
         &self,
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
     ) -> Result<(), HostError> {
+        if self.pending_review_id(pr)?.is_some() {
+            return Err(HostError::PendingReviewExists);
+        }
         let reported = self.add_thread_to_pending_review(pr, place, body)?;
         let review_id = self
             .review_holding_new_comment(pr, reported)

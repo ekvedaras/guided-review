@@ -386,6 +386,7 @@ fn an_insufficient_scopes_answer_names_the_repo_scope() {
 #[test]
 fn comment_now_submits_the_review_the_thread_went_into() {
     let (url, asked) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED.into(),
         r#"{"data":{"submitPullRequestReview":{"clientMutationId":null}}}"#.into(),
@@ -397,7 +398,7 @@ fn comment_now_submits_the_review_the_thread_went_into() {
 
     GitHub::at(&url).comment_now(&pr(), &place, "x").unwrap();
 
-    let input = &asked_as_json(&asked)[2]["variables"]["input"];
+    let input = &asked_as_json(&asked)[3]["variables"]["input"];
     assert_eq!(
         *input,
         serde_json::json!({"pullRequestReviewId": "REVIEW_1", "event": "COMMENT"})
@@ -409,6 +410,7 @@ const THREAD_ADDED_WITHOUT_REVIEW: &str = r#"{"data":{"addPullRequestReviewThrea
 #[test]
 fn comment_now_without_a_review_id_from_github_sends_the_viewers_pending_review() {
     let (url, asked) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED_WITHOUT_REVIEW.into(),
         PENDING.into(),
@@ -422,7 +424,7 @@ fn comment_now_without_a_review_id_from_github_sends_the_viewers_pending_review(
     GitHub::at(&url).comment_now(&pr(), &place, "x").unwrap();
 
     assert_eq!(
-        asked_as_json(&asked)[3]["variables"]["input"],
+        asked_as_json(&asked)[4]["variables"]["input"],
         serde_json::json!({"pullRequestReviewId": "REVIEW_7", "event": "COMMENT"})
     );
 }
@@ -430,6 +432,7 @@ fn comment_now_without_a_review_id_from_github_sends_the_viewers_pending_review(
 #[test]
 fn comment_now_whose_review_cannot_be_found_says_where_the_comment_is_and_sends_nothing_more() {
     let (url, asked) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED_WITHOUT_REVIEW.into(),
         NO_PENDING.into(),
@@ -447,13 +450,14 @@ fn comment_now_whose_review_cannot_be_found_says_where_the_comment_is_and_sends_
         format!("{error:#}").contains("look for it on GitHub"),
         "{error:#}"
     );
-    assert_eq!(asked_as_json(&asked).len(), 3);
+    assert_eq!(asked_as_json(&asked).len(), 4);
 }
 
 #[test]
 fn a_comment_now_that_could_not_be_posted_or_taken_back_says_it_waits_in_the_pending_review() {
     let failed = r#"{"errors":[{"message":"something broke"}],"data":null}"#;
     let (url, _) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED.into(),
         failed.into(),
@@ -768,6 +772,7 @@ fn a_reply_github_answers_with_one_pending_review_per_user_is_told_apart() {
 fn a_comment_now_whose_send_meets_one_pending_review_says_it_waits_in_the_pending_review() {
     let failed = r#"{"errors":[{"message":"something broke"}],"data":null}"#;
     let (url, _) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED.into(),
         ONE_PENDING_REVIEW.into(),
