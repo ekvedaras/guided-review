@@ -50,3 +50,31 @@ Inside `viewer` the rule is: a value type (a line's place, a screen, a thread as
 - `tangle viewer::page::Page,…,review::ReviewCore,…`: the same Page/ReviewCore knot as the first cycle above.
 
 Open as of 2026-11-25: 144 entries on macOS.
+
+## 2026-11-25: field leaks of the shared viewer types, wave 2
+
+Commit `7798bb32`. 22 field leaks fixed on each target; the macOS allow list went from 144 to 122 entries, and `scripts/deslop --update-allow` only removed lines. Behaviour is unchanged: the full test suite passed before and after.
+
+### What changed, and why
+
+- **`ReviewCore`, 13 of its 23 leaks.** `Review` (`review/kept.rs`) keeps the page and derefs to `ReviewCore`; the work agenda, the replacing jobs, the stations, Ask why, the carry-on after a re-pin and the take-over from a basic review were written as `impl Review` and worked on `ReviewCore`'s fields through `Deref`, with `work_mut` and `jobs_mut` as ways round the page drop. That logic is now `impl ReviewCore`. `Review` keeps only what is about the page: it forwards, without dropping the page, the changes that are no input of it (end of screen seen, `due_work`, `pull_from_github`, `due_job`, `job_did`), and it lands a job (`land_job`, now in `review.rs`), since a job's outcome carries the `Review` that replaces it. `ReviewCore::job_failed` no longer returns `AfterJob`: that return made `ReviewCore` know its own replacement, which merged the jobs tangle into the Page tangle.
+- The app asks `ReviewCore` what it wants: `job_progress` and `job_is_running` (not `jobs()`), `has_last_review`, and the count `findings_done` returns (not `ai_review().counts()`). `switched_from_basic(carrier)` replaces the two setters `TourSwitcher` called; `steps_carried_read_ticks_are` is a snapshot scene's only.
+- **`TourPin`, all 5.** Callers cut the pinned diff, compared the head and moved the pin by hand. The pin now `cut`s its own diff, `move_to`s new commits (keeping `previous_head`), and answers `needs_pinning`, `is_at_head` and `names_a_subject`; callers that need both commits take `pinned_tips()`. `tour` now uses `pieces` and `code_source`, neither of which uses `tour`.
+- **`TourWriting`, 2 of 3.** The loading screen, the station and the guided-tour line matched on `stage` and `status` and read `terminal`. It now says `failure`, `phase` (`WritingPhase`: waits for you, starting, writing), `status_line` (moved from the loading screen), `last_lines`, `waits_for_an_agent` and `runs_in(terminal)`.
+- **`ActivePr`**: `shows_key` for the four agent-reply commands, `is_shown` in the PR switcher, `is_switching` and `is_switching_to`. Its three entries stay (below).
+- **`Asks`, its 1.** `asked_lines_shown_on` and `ids_where` replace walking `all()` from `AskDesk` and `ReviewCore`.
+- The kept page now drops in a few more places: `start_job`, `land_job` and Ask why to the review agent go through `DerefMut` before they know whether they change anything. The page is built again from the same review, so nothing shown changes.
+
+### Left, and why
+
+- `ReviewCore::screen` and `::subject`: every view reads which screen is open and what is reviewed, as values. The lint counts a method on a borrowed value (`==`, `clone`, `short`) as a leak; returning copies would only hide that.
+- `ReviewCore::display_options` and `::ask_desk`: `DisplayOptions` and `AskDesk` are the deep modules the app works with (the first deepening pass made `AskDesk` the Ask panel's interface and left display options outside the save gate). Forwarding their interfaces through `ReviewCore` would widen the widest type in the crate and hide nothing.
+- `ReviewCore::guided_tour`: the app learns the guided tour's progress from the tour agent and tells the review; the setter is that interface.
+- `ReviewCore::ai_review_run`, `::pr_origin`, `::steps_started_read`: only snapshot scenes set them now.
+- `ReviewCore::working_copy`: one setter, from `ReviewBuilder`, for a fact it reads from disk; for the single-use wave.
+- `ReviewSession` (5): the session owns the `Review`, its rows, the sidebar rows, the clone offer and the old head, and the layout and the Ask panel read the review and the rows in 82 places. A method per drawn fact would move the layout's reading onto the session, not narrow it.
+- `ActivePr::shown` and `::switching`: what is left reads the subject as a value to name it (Back to, Opening). `ActivePr::replies_for_reopened`: `take_replies_for_reopened` hands the held replies over; the lint reads `mem::take` as a getter.
+- `TourWriting::screen`: `screen_is` is the event "the agent's screen shows these lines", from `ActivePr::writer_screen` and a scene.
+- Not looked at in this wave: `FileBlock`, `CommentRequest::draft`, `NameHover`, the fields of `DisplayOptions`, `CommentDesk::selection`, `Page`.
+
+Open as of 2026-11-25: 122 entries on macOS. `move_to_pr::a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on_focus` failed once in a loaded full test run and passed alone three times and in the gate; it times its retries from `Instant::now()` taken before the PR opens.
