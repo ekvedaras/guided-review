@@ -20,13 +20,15 @@ pub use rows::{
 
 use super::ask::{Place, ShownOn};
 use super::comments::CommentPlace;
+use super::diff_line::DiffLine;
 use super::file_block::FileBlock;
-use super::focused_change::PageChange;
+use super::focused_change::{PageChange, index_of_focus};
 use super::jump::{JumpPlace, JumpTarget};
+use super::line_location::LineLocation;
 use super::overview::OverviewPage;
-use super::review::{ReviewCore, Screen};
+use super::review::ReviewCore;
 use super::row_selection::{RowSelection, SelectedLines};
-use super::step_page::{DiffLine, LineLocation};
+use super::screen::Screen;
 use crate::file_path::FilePath;
 use crate::local_facts::LocalChange;
 use crate::pieces::PieceId;
@@ -107,7 +109,7 @@ impl Page {
         let focused = review
             .display_options()
             .focused_change()
-            .and_then(|focus| focus.find_in(&changes));
+            .and_then(|focus| index_of_focus(focus, &changes));
         let mut line_rows = HashMap::new();
         let mut pieces = Vec::new();
         for (index, row) in rows.iter().enumerate() {

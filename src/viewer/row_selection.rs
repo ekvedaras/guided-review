@@ -1,5 +1,6 @@
 use super::comments::{CommentPlace, CommentRefusal};
-use super::step_page::{DiffLine, LineLocation};
+use super::diff_line::DiffLine;
+use super::line_location::LineLocation;
 
 /// A drag over rows of one file: where the mouse went down and where it is now.
 /// The rows in between belong to it, whatever hunk or side they sit in.
@@ -74,6 +75,14 @@ pub struct SelectedLines {
 }
 
 impl SelectedLines {
+    /// The place a comment on these lines has.
+    pub fn comment_place(&self) -> CommentPlace {
+        CommentPlace::Lines {
+            start: self.first().clone(),
+            end: self.last().clone(),
+        }
+    }
+
     /// `None` for no rows, so a selection always has a first and a last.
     pub(super) fn new(lines: Vec<DiffLine>) -> Option<Self> {
         let first = lines.first()?.location.clone();

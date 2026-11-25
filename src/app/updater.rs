@@ -5,9 +5,9 @@ use gpui::{App, AppContext, Context, Entity, EventEmitter, Global, SharedString,
 
 use crate::github::GitHub;
 use crate::update::{
-    InTheWay, Installed, ReleaseInstall, SkillLink, Target, Update, UpdateOffer, Version,
-    find_update,
+    InTheWay, Installed, ReleaseInstall, SkillLink, Target, Update, UpdateOffer, find_update,
 };
+use crate::version::Version;
 use crate::viewer::ToastTone;
 
 use super::components::toast_stack::post_toast;

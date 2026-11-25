@@ -6,10 +6,10 @@ use crate::support::fake_ports::{
     FakeGitHub, GitHubCall, GitHubFault, ReadFailure, SentLog, blocked_merging,
 };
 use crate::support::work::drive_without_agents;
+use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
-use guided_review::update::Build;
 use guided_review::viewer::{
     CHECKS_SHOWN, CheckRun, CheckState, Checks, Command, Effect, Intent, OpenPrStatus,
     PaletteAction, PrStatus, PressStep, Problem, Read, Readiness, Review, ReviewStateFile,

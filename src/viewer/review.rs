@@ -7,22 +7,24 @@ mod guided_tour;
 
 pub use ask_why::{DEFAULT_WHY_QUESTION, WhyAsked};
 pub use finding_outcome::{FindingRefusal, FindingsBatch};
+mod comments;
 mod jobs;
 mod kept;
 mod names;
+mod pr;
 mod pr_controls;
+mod reading;
 mod run_ai_review;
 mod stations;
 mod work;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
-use crate::issue::IssueLink;
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::navigation::{FileSearch, Lookups};
@@ -37,120 +39,72 @@ use crate::config::AskSettings;
 
 use super::ai_review::AiReview;
 use super::ai_review_run::{AiReviewRun, ReviewAgentLife};
-use super::ask::{Ask, Asks, Place, ShownOn};
+use super::ask::{Ask, AskId, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
-use super::branch_link::{BranchLink, BranchOffer, LocalReviewsOfRepo};
+use super::branch_link::BranchLink;
+use super::carried::ReadCarrier;
 use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
-use super::comment_desk::{CommentBox, CommentDesk, CommentGesture, TextBox, TourFreshness};
-use super::comments::{
-    CommentOutcome, CommentPlace, CommentProblem, CommentRefusal, CommentRequest, CommentResult,
-    QueuedComment, SendMode, Sending,
-};
+use super::comment_desk::{CommentDesk, CommentGesture};
+use super::comment_send::CommentRequest;
+use super::comments::Audience;
+use super::comments::{CommentPlace, CommentRefusal, SendMode, Sending};
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
+use super::diff_line::DiffLine;
 use super::disk_news::DiskNews;
 use super::display_options::DisplayOptions;
 use super::file_block::FileBlock;
 use super::file_tree::{FileTree, FolderPath, TreeRow};
 use super::finding_placement::{FindingHome, FindingPlacement, FindingView};
-use super::finish_review::{
-    ApproveWarning, FinishAction, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
-    ReviewVerdict, SubmittedReview,
-};
+use super::finish_review::FinishAction;
+use super::github_outage::Read;
 use super::github_outage::{Affected, OutageCause};
 use super::guided_tour::GuidedTourProgress;
-use super::hand_offs::{
-    AgentReplied, Audience, HandOff, HandOffId, HandOffState, HandOffs, HandToAgentRefused,
-    SentFrom,
-};
-use super::hidden_text::HiddenText;
+use super::hand_offs::{AgentReplied, HandOffId};
 use super::highlight::{HighlightRequest, Highlights};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
-use super::local_threads::ThreadHome;
+use super::local_thread_store::ThreadHome;
 use super::markdown::Markdown;
+use super::move_offer::MoveFrom;
 use super::name_desk::NameDesk;
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
-use super::page::Page;
-use super::ports::{AgentLaunch, GitHubError, PullOfBranch};
+use super::piece_diff::PieceDiff;
+use super::ports::{AgentLaunch, GitHubError};
 use super::pr_controls::PrControls;
-use super::pr_notes::{Note, NoteSubject, NotesButton, PrNotes, ToNotes, ToNotesOutcome};
-use super::pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
-use super::pr_reviewers::{PullRequestReviews, ReviewerLine, StanceAge, Standing, YourReview};
-use super::problems::{Problem, ProblemKind, Problems, Read};
-use super::reactions::ReactionChange;
-use super::refresh::RefreshBrief;
-use super::related_issues::{IssueDetails, RelatedIssue, RelatedIssues};
-use super::replacing_jobs::{ReplacingJob, ReplacingJobs};
+use super::pr_notes::PrNotes;
+use super::pr_origin::PullRequestOrigin;
+use super::pr_reviewers::Standing;
+use super::pr_reviewers::SubmittedReview;
+use super::problems::{Problem, ProblemKind, Problems};
+use super::refresh_brief::RefreshBrief;
+use super::related_issues::RelatedIssues;
+use super::replacing_jobs::{AfterJob, JobOutcome, ReplacingJob, ReplacingJobs, StartedJob};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
-use super::reviewing_mark::{ReviewingMark, ReviewingMarkRemoval};
+use super::review_thread::{ReviewThread, ThreadId};
+use super::reviewing_mark::ReviewingMark;
 use super::row_selection::{RowSelection, SelectedLines};
 use super::saved_state::SavedState;
-use super::step_page::{
-    DiffLine, FilePage, LineLocation, PieceDiff, SafetyNetPage, SinceRead, StepPage,
-};
-use super::switch_to_guided::ReadCarrier;
-use super::thread_actions::{
-    ThreadAction, ThreadActionOutcome, ThreadActionRequest, ThreadActionResult,
-};
-use super::threads::{
-    self, AgentOfThreads, CommentId, ReviewThread, ThreadId, ThreadPlacement, ThreadWork,
-};
-use super::typing_save::TypingSave;
-use super::used_findings::{FindingsOfThreads, thread_made_of};
-use super::viewed_sync::{Coverage, SyncOutcome, SyncRequest, ViewedSync};
-use super::work_agenda::{PUSH_DEBOUNCE, WorkAgenda, WorkKind};
+use super::step_page::{FilePage, SafetyNetPage, SinceRead, StepPage};
+use super::thread_actions::TourFreshness;
+use super::threads::{self, ThreadPlacement, ThreadWork};
+use super::used_findings::FindingsOfThreads;
+use super::viewed_sync::ViewedSync;
+use super::work_agenda::WorkAgenda;
 use crate::app_folders::AppFolders;
+use crate::build::Build;
 use crate::file_path::FilePath;
 use crate::findings::{Finding, FindingId};
 use crate::ide::{Ide, NoIde};
 use crate::repin::RepinStatus;
-use crate::update::Build;
 
 pub use crate::tour::StepId;
 
-/// What a read tick says was read: a guided tour's step, or a basic tour's whole file.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ReadSubject {
-    Step(StepId),
-    File(FilePath),
-}
+use super::screen::{NextScreen, ReadSubject, Screen};
+
 pub use kept::Review;
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Screen {
-    Summary,
-    /// A basic tour's first screen, in place of the summary.
-    Overview,
-    /// One changed file of a basic tour, in place of a step.
-    File(FilePath),
-    Step(StepId),
-    /// After the last step: every change no step shows.
-    SafetyNet,
-}
-
-impl Screen {
-    /// What an Ask about lines of this screen records as the screen it was shown on; the
-    /// summary and the overview show no lines.
-    pub fn shown_on(&self) -> Option<ShownOn> {
-        match self {
-            Self::Step(step) => Some(ShownOn::Step { step: step.clone() }),
-            Self::SafetyNet => Some(ShownOn::SafetyNet),
-            Self::File(path) => Some(ShownOn::File { path: path.clone() }),
-            Self::Summary | Self::Overview => None,
-        }
-    }
-
-    fn sent_from(&self) -> SentFrom {
-        match self {
-            Self::Step(step) => SentFrom::Step(step.clone()),
-            Self::File(path) => SentFrom::File(path.clone()),
-            Self::Summary | Self::Overview | Self::SafetyNet => SentFrom::Elsewhere,
-        }
-    }
-}
 
 /// One row of the step tree. Rows come in reading order, so indenting by `depth` draws the tree.
 pub struct SidebarEntry<'a> {
@@ -277,19 +231,6 @@ pub struct ReadingPlace {
     pub file_count: usize,
     pub has_previous: bool,
     pub next: Option<NextScreen>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum NextScreen {
-    /// Its title is markdown.
-    Step {
-        title: String,
-    },
-    /// A basic tour's next file.
-    File {
-        path: FilePath,
-    },
-    SafetyNet,
 }
 
 /// What the sidebar counts for the safety net, cheap enough to ask on every change.
@@ -468,20 +409,133 @@ impl Review {
     /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
     /// `None` when the lines cannot be suggested on, are not on the screen, or there is no draft.
     pub fn suggest_change(&mut self, place: &CommentPlace) -> anyhow::Result<Option<String>> {
-        let Some(rows) = RowSelection::of(place).and_then(|lines| self.page().selected(&lines))
-        else {
+        let page = Arc::clone(self.page());
+        let Some(rows) = RowSelection::of(place).and_then(|lines| page.selected(&lines)) else {
             return Ok(None);
         };
-        CommentDesk::suggest_change(&mut self.state, place, rows.lines())
+        self.suggest_lines(place, rows.lines())
     }
 
+    /// A review reopened after a re-pin goes on with what the one it replaces was doing; see
+    /// `ReviewCore::carry_on_from`.
+    pub fn carry_on_from(&mut self, replaced: Self) {
+        ReviewCore::carry_on_from(self, replaced.into_core());
+    }
+
+    /// A job's outcome carries the review built to replace this one, so the review, not its core,
+    /// lands it.
+    pub fn land_job(&mut self, outcome: JobOutcome) -> AfterJob {
+        let Some(started) = self.landed_job(outcome.job()) else {
+            return AfterJob::Nothing;
+        };
+        let stays = AfterJob::Stays { toast: None };
+        match outcome {
+            JobOutcome::Repin(Ok(replacement))
+            | JobOutcome::Refresh(Ok(replacement))
+            | JobOutcome::Reload(Ok(replacement)) => AfterJob::Reopen {
+                replacement: Box::new(replacement),
+                screen: self.screen().clone(),
+            },
+            JobOutcome::SwitchToGuided(Ok(replacement)) => AfterJob::Reopen {
+                replacement: Box::new(replacement),
+                screen: Screen::Summary,
+            },
+            JobOutcome::Repin(Err(error)) => {
+                self.writes_here_again();
+                self.job_failed(ReplacingJob::Repin, &error, None);
+                stays
+            }
+            JobOutcome::Refresh(Err(error)) => {
+                self.job_failed(
+                    ReplacingJob::Refresh,
+                    &error,
+                    Some(Problem::TourNotRefreshed(format!("{error:#}"))),
+                );
+                stays
+            }
+            JobOutcome::Reload(Err(error)) => {
+                self.job_failed(
+                    ReplacingJob::Reload,
+                    &error,
+                    Some(Problem::TourNotReloaded(format!("{error:#}"))),
+                );
+                stays
+            }
+            JobOutcome::SwitchToGuided(Err(error)) => {
+                self.job_failed(ReplacingJob::SwitchToGuided, &error, None);
+                AfterJob::Stays {
+                    toast: Some(format!("Could not switch to the guided tour: {error:#}")),
+                }
+            }
+            JobOutcome::MoveToPr(moved) => {
+                let StartedJob::MoveToPr(started) = started else {
+                    return AfterJob::Nothing;
+                };
+                match moved {
+                    Ok(()) => {
+                        self.job_ended_the_review();
+                        match started.from {
+                            MoveFrom::TheLocalReview => AfterJob::ShowPr {
+                                moved_away: self.subject().clone(),
+                                pr: started.offer.pr,
+                            },
+                            MoveFrom::ThePr => AfterJob::DropAndReopen(started.change_set.into()),
+                        }
+                    }
+                    Err(error) => {
+                        self.writes_here_again();
+                        self.job_failed(ReplacingJob::MoveToPr, &error, None);
+                        AfterJob::Stays {
+                            toast: Some(started.failure_text(&error)),
+                        }
+                    }
+                }
+            }
+            JobOutcome::DropReview(Ok(())) => {
+                self.job_ended_the_review();
+                AfterJob::Dropped(self.subject().clone())
+            }
+            JobOutcome::DropReview(Err(error)) => {
+                self.writes_here_again();
+                self.job_failed(
+                    ReplacingJob::DropReview,
+                    &error,
+                    Some(Problem::ReviewNotDropped(format!("{error:#}"))),
+                );
+                stays
+            }
+        }
+    }
+
+    /// Opens the Ask panel on a place, with notes on the answers whose code changed since.
+    pub fn open_ask(
+        &mut self,
+        place: Place,
+        label: String,
+        settings: &AskSettings,
+        now: Instant,
+        processes: &mut dyn AskProcesses,
+    ) {
+        let clone = self.asks().clone_folder().cloned();
+        let target = self.ask_target(place, label, clone, settings);
+        let head = self.head().clone();
+        self.check_asks_for_code_changes();
+        self.change_asks(|desk| desk.open(target, &head, now, processes));
+    }
+
+    fn check_asks_for_code_changes(&mut self) {
+        let changed = self.asks_whose_code_changed();
+        self.change_asks(|desk| desk.code_changed_is(changed));
+    }
+}
+
+impl ReviewCore {
     /// A review reopened after a re-pin goes on with what the one it replaces was doing: what its
     /// comment boxes were doing (which takes the keys, which are sending and why a send did not
     /// go), its work, whose outcomes still land here, its branch link and PR controls, which those
     /// outcomes filled, and which screen's end the window saw. What the config and the disk say is
     /// `ReviewBuilder`'s, which built this review.
-    pub fn carry_on_from(&mut self, replaced: Self) {
-        let replaced = replaced.into_core();
+    fn carry_on_from(&mut self, replaced: Self) {
         let switched_to_guided =
             matches!(replaced.tour, Tour::Basic(_)) && matches!(self.tour, Tour::Guided(_));
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
@@ -502,7 +556,8 @@ impl Review {
             self.take_over_from_basic(&replaced.state);
             self.follow_file_asks_into_the_guided_tour();
         }
-        self.check_asks_for_code_changes();
+        let changed = self.asks_whose_code_changed();
+        self.ask_desk.code_changed_is(changed);
         for (id, replied) in replaced.replies_after_repin {
             if let Err(error) = self.hand_off_replied(id, &replied) {
                 eprintln!("could not carry the reply to {id} into the re-pinned review: {error:#}");
@@ -510,23 +565,23 @@ impl Review {
         }
     }
 
-    /// Opens the Ask panel on a place, with notes on the answers whose code changed since.
-    pub fn open_ask(
+    fn suggest_lines(
         &mut self,
-        place: Place,
-        label: String,
-        settings: &AskSettings,
-        now: Instant,
-        processes: &mut dyn AskProcesses,
-    ) {
-        let clone = self.ask_desk.clone_folder().cloned();
-        let target = self.ask_target(place, label, clone, settings);
-        let head = self.head().clone();
-        self.check_asks_for_code_changes();
-        self.change_asks(|desk| desk.open(target, &head, now, processes));
+        place: &CommentPlace,
+        lines: &[DiffLine],
+    ) -> anyhow::Result<Option<String>> {
+        CommentDesk::suggest_change(&mut self.state, place, lines)
     }
 
-    pub(super) fn takes_over_from_basic_with(&mut self, carrier: ReadCarrier) {
+    fn asks_whose_code_changed(&self) -> HashSet<AskId> {
+        self.ask_desk.ids_where(|ask| self.code_changed_since(ask))
+    }
+
+    /// This review replaces the basic review of its subject: its steps start with the read ticks
+    /// carried from that review's files, and `carrier` carries the files it reads until it hands
+    /// its whole state over.
+    pub(in crate::viewer) fn switched_from_basic(&mut self, carrier: ReadCarrier) {
+        self.steps_started_read = Some(self.progress().read);
         self.read_carrier = Some(carrier);
     }
 
@@ -558,7 +613,7 @@ impl Review {
             .steps()
             .into_iter()
             .map(|step| {
-                let shown = super::step_page::pieces_of(step, guided, &self.files);
+                let shown = super::piece_diff::pieces_of(step, guided, &self.files);
                 (
                     step.id.clone(),
                     shown.iter().map(|piece| piece.id.clone()).collect(),
@@ -581,17 +636,6 @@ impl Review {
         if let Err(error) = moved {
             eprintln!("could not save the Asks moved into the guided tour: {error:#}");
         }
-    }
-
-    fn check_asks_for_code_changes(&mut self) {
-        let changed = self
-            .ask_desk
-            .all()
-            .iter()
-            .filter(|ask| self.code_changed_since(ask))
-            .map(|ask| ask.id)
-            .collect();
-        self.change_asks(|desk| desk.code_changed_is(changed));
     }
 }
 
@@ -835,6 +879,13 @@ impl ReviewCore {
         self.seen_end_of.as_ref() == Some(&self.screen)
     }
 
+    /// The window had the end of the screen on show.
+    fn saw_end_of_screen(&mut self) {
+        if !self.has_seen_end_of_screen() {
+            self.seen_end_of = Some(self.screen.clone());
+        }
+    }
+
     pub const fn ai_review(&self) -> &AiReview {
         &self.ai_review
     }
@@ -1007,36 +1058,6 @@ impl ReviewCore {
             })
     }
 
-    /// What GitHub said of the PR opened from a local review's branch.
-    pub fn pull_of_branch_is(&mut self, found: Option<PullOfBranch>) {
-        self.branch_link.pull_of_branch_is(found);
-    }
-
-    /// The local reviews on disk that are of this PR's repo, so the review looks for one of the PR's branch.
-    /// A PR's head branch never changes, so it is looked up once here, never again on focus.
-    pub(super) fn local_reviews_of_repo_are(&mut self, reviews: LocalReviewsOfRepo) {
-        self.branch_link.local_reviews_are(reviews);
-        self.work.want(WorkKind::LookUpHeadBranch);
-    }
-
-    /// The lasting line of the sidebar, or Open PR, from what is known of the other side of the branch.
-    pub fn branch_offer(&self) -> Option<BranchOffer> {
-        self.branch_link.offer(&self.state)
-    }
-
-    /// Not now, on either side's offer, unless the move runs. A decline that could not be written to
-    /// the state file is a problem, as the offer then comes back at the next open.
-    pub fn decline_the_move(&mut self) {
-        if self.jobs.is_running(ReplacingJob::MoveToPr) {
-            return;
-        }
-        let declined = self.branch_link.decline(&mut self.state);
-        match declined {
-            Ok(()) => self.clear_problem(ProblemKind::MoveNotDeclined),
-            Err(error) => self.raise_problem(Problem::MoveNotDeclined(format!("{error:#}"))),
-        }
-    }
-
     /// What a local review's folder is against its snapshot, once the folder was looked at.
     pub fn working_tree_is(&mut self, on_disk: OnDisk) {
         self.working_copy = WorkingCopy::of(on_disk == OnDisk::Same);
@@ -1197,71 +1218,6 @@ impl ReviewCore {
         )
     }
 
-    /// What GitHub last said of the issue; `None` for a ticket and until it answers.
-    pub fn issue_details(&self, link: &IssueLink) -> Option<Arc<IssueDetails>> {
-        self.related_issues.details_of(link)
-    }
-
-    /// The issues the review is about, best source first; empty when none names one.
-    pub fn related_issues(&self) -> Arc<[RelatedIssue]> {
-        self.related_issues.shown()
-    }
-
-    /// The branch the review's change goes into and the one it comes from: a PR's as GitHub last said,
-    /// a local review's from git (its branch and the repo's default branch). `None` until either is known.
-    pub fn merge_route(&self) -> Option<MergeRoute> {
-        match &self.local_facts {
-            Some(facts) => Some(MergeRoute {
-                base: facts.default_branch.without_remote(),
-                head: HeadBranch::of_repo(facts.branch.clone()),
-            }),
-            None => self.pr_origin.as_ref().map(|origin| origin.route.clone()),
-        }
-    }
-
-    /// Who opened the PR; `None` for a local review, for a PR GitHub has not answered for yet, and for
-    /// one whose author's account is gone.
-    pub fn pr_author(&self) -> Option<&PrAuthor> {
-        self.pr_origin.as_ref()?.author.as_ref()
-    }
-
-    /// What the author and route chip says when hovered: "ada wants to merge feat/x into main".
-    pub fn merge_route_sentence(&self) -> Option<String> {
-        let MergeRoute { base, head } = self.merge_route()?;
-        Some(match (&self.local_facts, self.pr_author()) {
-            (Some(_), _) => format!("Reviewing {head} against {base}"),
-            (None, Some(author)) => format!("{} wants to merge {head} into {base}", author.login),
-            (None, None) => format!("Merges {head} into {base}"),
-        })
-    }
-
-    /// The author and branches a snapshot scene shows, as if GitHub said them of the PR.
-    #[cfg(feature = "snapshots")]
-    pub fn stage_pr_origin(&mut self, origin: Option<PullRequestOrigin>) {
-        self.pr_origin = origin;
-    }
-
-    /// The issues a snapshot scene shows, as if GitHub linked them to the PR.
-    #[cfg(feature = "snapshots")]
-    pub fn stage_related_issues(&mut self, issues: Vec<(RelatedIssue, Option<IssueDetails>)>) {
-        self.related_issues.staged(issues);
-    }
-
-    #[cfg(feature = "snapshots")]
-    pub fn unstage_related_issues(&mut self) {
-        self.related_issues.unstaged();
-    }
-
-    /// Whether the review has a PR page to open.
-    pub fn can_open_on_github(&self) -> bool {
-        self.subject.has_github_page()
-    }
-
-    /// A local review whose branch has no open PR yet, so its agent can be asked to open one.
-    pub fn can_open_pr(&self) -> bool {
-        self.branch_link.can_open_pr()
-    }
-
     pub fn summary(&self) -> &[String] {
         self.tour.guided().map_or(&[], |guided| &guided.summary)
     }
@@ -1279,69 +1235,6 @@ impl ReviewCore {
             .map_or("", |guided| &guided.reviewer_summary)
     }
 
-    /// The PR's body, under the summary: the one GitHub gave last, until it answers again.
-    /// `None` for a PR with no description.
-    pub fn pr_description(&self) -> Option<Markdown> {
-        let body = self.state.pr_description();
-        (!body.trim().is_empty()).then(|| Markdown::parse(body).nested_one_level())
-    }
-
-    /// What the PR's description hides from its reader; `None` when it hides nothing.
-    pub fn pr_description_hidden_text(&self) -> Option<HiddenText> {
-        HiddenText::hiding(self.state.pr_description())
-    }
-
-    /// `None` when the tour has no such diagram, picture or summary, or the review has no PR.
-    pub fn notes_button(&self, subject: &NoteSubject) -> Option<NotesButton> {
-        self.subject.pull_request()?;
-        let note = self.note(subject)?;
-        Some(
-            self.pr_notes
-                .button(subject, self.state.pr_description(), &note),
-        )
-    }
-
-    /// `None` while the subject is being added, or when the description holds it.
-    pub fn start_adding_to_notes(&mut self, subject: &NoteSubject) -> Option<ToNotes> {
-        let note = self.note(subject)?;
-        if note.is_in(self.state.pr_description()) {
-            return None;
-        }
-        self.pr_notes
-            .start(self.subject.pull_request()?, subject, note)
-    }
-
-    pub fn apply_to_notes(&mut self, outcome: ToNotesOutcome) -> anyhow::Result<()> {
-        match self.pr_notes.finish(outcome) {
-            Some(description) => self.set_pr_description(&description),
-            None => Ok(()),
-        }
-    }
-
-    fn note(&self, subject: &NoteSubject) -> Option<Note> {
-        match subject {
-            NoteSubject::StepDiagram(step) => {
-                let found = self.step(step)?;
-                Some(Note::diagram(&found.title, found.diagram.as_deref()?))
-            }
-            NoteSubject::SummaryPicture(path) => {
-                let summary = self.reviewer_summary()?;
-                let (_, alt) = summary
-                    .pictures()
-                    .into_iter()
-                    .find(|(picture, _)| picture == path)?;
-                Note::picture(path, alt)
-            }
-            NoteSubject::ReviewerSummary => {
-                let summary = self.reviewer_summary_text();
-                if summary.trim().is_empty() {
-                    return None;
-                }
-                Note::reviewer_summary(summary, &self.tour_files)
-            }
-        }
-    }
-
     /// Kept in the state file only when it changed, since every window focus pulls it again.
     pub fn set_pr_description(&mut self, body: &str) -> anyhow::Result<()> {
         self.clear_problem(ProblemKind::NotRead(Read::PrDescription));
@@ -1354,11 +1247,7 @@ impl ReviewCore {
     }
 
     fn thread_work(&self) -> ThreadWork<'_> {
-        ThreadWork {
-            reply_drafts: self.state.reply_drafts(),
-            comment_edits: self.comment_desk.comment_edits(),
-            delete_asked: self.comment_desk.delete_asked(),
-        }
+        self.comment_desk.thread_work(self.state.reply_drafts())
     }
 
     pub fn current_step(&self) -> Option<StepPage<'_>> {
@@ -1777,53 +1666,6 @@ impl ReviewCore {
         self.display_options.display(links)
     }
 
-    /// Where a screen sits in the reading order, without building the order; the safety net is last.
-    pub fn reading_position(&self, screen: &Screen) -> Option<usize> {
-        match screen {
-            Screen::SafetyNet => Some(self.steps_in_reading_order.len()),
-            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::Step(_) => self
-                .steps_in_reading_order
-                .iter()
-                .position(|shown| shown == screen),
-        }
-    }
-
-    fn reading_order(&self) -> Vec<Screen> {
-        let has_safety_net = self.has_uncovered_changes || !self.threads.in_safety_net().is_empty();
-        self.steps_in_reading_order
-            .iter()
-            .cloned()
-            .chain(has_safety_net.then_some(Screen::SafetyNet))
-            .collect()
-    }
-
-    pub fn set_threads(&mut self, threads: &[ReviewThread]) {
-        self.clear_problem(ProblemKind::ThreadsNotRead);
-        self.github_answered(Affected::Comments);
-        self.pulled_threads = threads.to_vec();
-        #[cfg(feature = "snapshots")]
-        self.pulled_threads
-            .extend(self.staged_threads.iter().cloned());
-        self.place_threads();
-    }
-
-    /// Outdated threads hang under the lines they were followed to; the others stay after the code.
-    pub fn set_followed_lines(&mut self, followed: BTreeMap<ThreadId, FollowedLines>) {
-        self.followed_lines = followed;
-        self.place_threads();
-    }
-
-    /// The threads shown stay as they were, named as possibly old until a read goes through.
-    pub fn threads_not_read(&mut self, error: &GitHubError) {
-        if let GitHubError::NotAnswering(cause) = error {
-            self.clear_problem(ProblemKind::ThreadsNotRead);
-            self.github_not_answering(*cause, Affected::Comments);
-        } else {
-            self.github_answered(Affected::Comments);
-            self.raise_problem(Problem::ThreadsNotRead(error.short_reason()));
-        }
-    }
-
     /// Placed by the rows a step shows, which depend on the files read at head, so again when those arrive.
     fn place_threads(&mut self) {
         let links = self.links();
@@ -1857,116 +1699,6 @@ impl ReviewCore {
         self.findings = findings;
     }
 
-    pub fn toggle_thread_fold(&mut self, thread_id: &ThreadId) {
-        if !self.thread_fold_flipped.remove(thread_id) {
-            self.thread_fold_flipped.insert(thread_id.clone());
-        }
-    }
-
-    pub fn pending_review_is(&mut self, exists: bool) {
-        self.clear_problem(ProblemKind::NotRead(Read::PendingReview));
-        self.github_answered(Affected::PendingReview);
-        self.comment_desk.pending_review_is(exists);
-    }
-
-    pub fn reviews_are(&mut self, reviews: PullRequestReviews) {
-        self.clear_problem(ProblemKind::NotRead(Read::LastReview));
-        self.github_answered(Affected::LastReview);
-        self.reviewing_mark
-            .last_review_is(reviews.viewer_last.as_ref());
-        self.last_review = reviews.viewer_last;
-        self.standings = reviews.standings;
-        self.want_reviewing_mark_sent();
-    }
-
-    /// Where the viewer stands: by GitHub's standing, else by the last review sent. `None` when the
-    /// viewer neither reviewed nor is asked to.
-    pub fn your_review(&self) -> Option<YourReview> {
-        let age = if self.last_review_is_old() {
-            StanceAge::BeforeNewCommits
-        } else {
-            StanceAge::Current
-        };
-        YourReview::of(
-            self.standings.iter().find(|standing| standing.is_viewer()),
-            self.last_review.as_ref(),
-            age,
-            self.is_marked_done(),
-        )
-    }
-
-    /// The sidebar's reviews: the viewer first, then what blocks the PR, then what lets it through.
-    pub fn reviewer_lines(&self) -> Vec<ReviewerLine> {
-        self.standings
-            .iter()
-            .map(|standing| ReviewerLine::of(standing, self.pr_head.as_ref()))
-            .collect()
-    }
-
-    fn want_reviewing_mark_sent(&mut self) {
-        if self.reviewing_mark.change_to_send().is_some() {
-            self.work.want(WorkKind::ChangeReviewingMark);
-        }
-    }
-
-    fn reviewing_mark_landed(&mut self, change: ReactionChange, result: Result<(), GitHubError>) {
-        match result {
-            Ok(()) => {
-                self.clear_problem(ProblemKind::ReviewingMarkNotChanged);
-                self.reviewing_mark.sent(change);
-            }
-            Err(error) => {
-                self.raise_problem(Problem::ReviewingMarkNotChanged(error.short_reason()));
-            }
-        }
-    }
-
-    /// The review is closing: the reviewing mark comes off, if it is on, by the job returned. It is
-    /// run at once, since nothing is left to run it later.
-    pub fn close(&mut self) -> Option<ReviewingMarkRemoval> {
-        let may_be_on = self.reviewing_mark.close();
-        let pr = self.subject.pull_request()?;
-        may_be_on.then(|| ReviewingMarkRemoval::of(pr.clone()))
-    }
-
-    /// A re-review can end with nothing to send: the reviewer's last review saw an older commit, and
-    /// no pending review waits to go.
-    pub fn can_mark_done(&self) -> bool {
-        self.subject.pull_request().is_some()
-            && self
-                .last_review
-                .as_ref()
-                .is_some_and(|last| last.commit != self.head)
-            && self.comment_desk.can_comment_now()
-            && !self.is_marked_done()
-    }
-
-    /// Done with this head without a new review on GitHub: saved, and the 👀 comes off.
-    pub fn mark_done(&mut self) -> anyhow::Result<()> {
-        let head = self.head.clone();
-        let saved = self.state.change(|state| state.mark_done(&head));
-        self.reviewing_mark.done();
-        self.want_reviewing_mark_sent();
-        saved
-    }
-
-    pub fn is_marked_done(&self) -> bool {
-        self.state.is_done_at(&self.head)
-    }
-
-    /// The viewer's latest sent review, from this app or the GitHub web page.
-    pub fn last_review(&self) -> Option<&SubmittedReview> {
-        self.last_review.as_ref()
-    }
-
-    /// The PR has commits the last review did not see. Not so while the PR's head is unknown.
-    pub fn last_review_is_old(&self) -> bool {
-        match (&self.last_review, &self.pr_head) {
-            (Some(review), Some(pr_head)) => review.commit != *pr_head,
-            _ => false,
-        }
-    }
-
     /// "Comment now" shows only when there is surely no pending review.
     fn tour_freshness(&self) -> TourFreshness {
         if self.old_head().is_some() {
@@ -1974,297 +1706,6 @@ impl ReviewCore {
         } else {
             TourFreshness::Current
         }
-    }
-
-    pub fn can_comment_now(&self) -> bool {
-        self.comment_desk.can_comment_now()
-    }
-
-    /// A reply in a local thread is a follow-up task, so it always reaches the agent too.
-    pub fn thread_action_request(&self, action: ThreadAction) -> ThreadActionRequest {
-        let (action, reply_body, send_refusal) = match action {
-            ThreadAction::Reply {
-                thread_id,
-                mode,
-                audience,
-            } => {
-                let reply_body = self.state.reply_draft(&thread_id).map(str::to_owned);
-                let audience = if mode.is_task() {
-                    Audience::Agent
-                } else {
-                    audience
-                };
-                let action = ThreadAction::Reply {
-                    thread_id,
-                    mode,
-                    audience,
-                };
-                (action, reply_body, self.send_refusal(mode))
-            }
-            other => (other, None, None),
-        };
-        let mut request = self.comment_desk.thread_action_request(
-            (self.thread_home(), &self.head),
-            &self.pulled_threads,
-            action,
-            reply_body,
-            self.tour_freshness(),
-        );
-        if send_refusal.is_some() {
-            request.refusal = send_refusal;
-        }
-        request
-    }
-
-    /// Asks the reviewer to confirm deleting one of their own comments, which a deletion needs.
-    pub fn ask_to_delete(&mut self, comment_id: &CommentId) {
-        self.comment_desk
-            .ask_to_delete(&self.pulled_threads, comment_id);
-    }
-
-    /// The reviewer said no, or looked away.
-    pub fn withdraw_delete(&mut self) {
-        self.comment_desk.withdraw_delete();
-    }
-
-    /// The text in the box as typed so far; `None` while it is not open.
-    pub fn text_of(&self, text_box: &TextBox) -> Option<&str> {
-        self.comment_desk.text_of(&self.state, text_box)
-    }
-
-    /// Opens a reply box, or the edit of one of the viewer's own comments on its current text;
-    /// nothing opens for a comment someone else wrote.
-    pub fn open_box(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
-        self.comment_desk
-            .open(&mut self.state, &self.pulled_threads, text_box)
-    }
-
-    /// For every key: changes the text in memory only. `typing_save` takes it to disk, off the UI thread.
-    pub fn type_in(&mut self, text_box: &TextBox, text: &str) -> anyhow::Result<()> {
-        self.comment_desk.type_in(&mut self.state, text_box, text)
-    }
-
-    /// The reviewer leaves the box (Escape): a box with nothing written goes, a written one stays.
-    pub fn leave(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
-        self.comment_desk.leave(&mut self.state, text_box)
-    }
-
-    pub fn discard(&mut self, text_box: &TextBox) -> anyhow::Result<()> {
-        self.comment_desk.discard(&mut self.state, text_box)
-    }
-
-    /// Whatever came of it, the next hand-off may go now.
-    pub fn apply_thread_action(&mut self, outcome: ThreadActionOutcome) -> ThreadActionResult {
-        self.work.want(WorkKind::DeliverHandOff);
-        self.comment_desk
-            .apply_thread_action(&mut self.state, &outcome, self.screen.sent_from());
-        self.show_pulled_threads(outcome.threads.as_ref());
-        if outcome.result == ThreadActionResult::Done {
-            match &outcome.action {
-                ThreadAction::Resolve { thread_id } => self.fold_thread(thread_id, true),
-                ThreadAction::Unresolve { thread_id } => self.fold_thread(thread_id, false),
-                _ => {}
-            }
-        }
-        outcome.result
-    }
-
-    fn fold_thread(&mut self, thread_id: &ThreadId, folded: bool) {
-        let Some(thread) = self
-            .pulled_threads
-            .iter()
-            .find(|thread| &thread.id == thread_id)
-        else {
-            return;
-        };
-        if thread.is_folded_by_default() == folded {
-            self.thread_fold_flipped.remove(thread_id);
-        } else {
-            self.thread_fold_flipped.insert(thread_id.clone());
-        }
-    }
-
-    fn show_pulled_threads(&mut self, threads: Option<&Result<Vec<ReviewThread>, String>>) {
-        match threads {
-            Some(Ok(threads)) => self.set_threads(threads),
-            Some(Err(reason)) => self.raise_problem(Problem::ThreadsNotRead(reason.clone())),
-            None => {}
-        }
-    }
-
-    pub fn viewer_authorship_is(&mut self, authored: bool) {
-        self.clear_problem(ProblemKind::NotRead(Read::Authorship));
-        self.github_answered(Affected::Authorship);
-        self.comment_desk.viewer_authorship_is(authored);
-        self.reviewing_mark.viewer_authorship_is(authored);
-        self.want_reviewing_mark_sent();
-    }
-
-    /// GitHub refuses both on the viewer's own PR, so the buttons show only when the PR is surely someone else's.
-    /// A local review gives no verdict.
-    pub fn can_approve_or_request_changes(&self) -> bool {
-        self.finishes_with_send_tasks().is_none()
-            && self.comment_desk.can_approve_or_request_changes()
-    }
-
-    /// On the viewer's own PR there is no verdict to give, so finishing only makes sense with comments
-    /// to send; a local review's finish sends its queued tasks, so it needs some.
-    pub fn can_finish_review(&self) -> bool {
-        match self.finishes_with_send_tasks() {
-            Some(queued) => queued > 0,
-            None => self.comment_desk.can_finish_review(),
-        }
-    }
-
-    /// What finishing the review does now; `None` when there is nothing to finish.
-    pub fn finish_action(&self) -> Option<FinishAction> {
-        if self.can_mark_done() {
-            return Some(FinishAction::MarkDone);
-        }
-        if self.is_marked_done() {
-            return None;
-        }
-        self.can_finish_review().then(|| {
-            if self.finishes_with_send_tasks().is_some() {
-                FinishAction::SendTasks
-            } else {
-                FinishAction::FinishReview
-            }
-        })
-    }
-
-    /// A local review finishes with Send tasks, never with a review on GitHub: how many tasks it
-    /// would send. `None` for a PR.
-    pub fn finishes_with_send_tasks(&self) -> Option<usize> {
-        self.subject
-            .comments_are_agent_tasks()
-            .then(|| self.queued_tasks())
-    }
-
-    /// What the reviewer has not looked at: steps with no read tick and the pieces of the safety net.
-    pub fn approve_warning(&self) -> Option<ApproveWarning> {
-        if self.finishes_with_send_tasks().is_some() {
-            return None;
-        }
-        let progress = self.progress();
-        let unread_safety_net_pieces = self.tour.guided().map_or(0, |guided| {
-            coverage::safety_net(guided, &self.files)
-                .iter()
-                .map(|part| part.piece.id.to_string())
-                .collect::<BTreeSet<_>>()
-                .len()
-        });
-        let unread = progress.total - progress.read;
-        let warning = match &self.tour {
-            Tour::Guided(_) => ApproveWarning {
-                unread_steps: unread,
-                unread_files: 0,
-                unread_safety_net_pieces,
-            },
-            Tour::Basic(_) => ApproveWarning {
-                unread_steps: 0,
-                unread_files: unread,
-                unread_safety_net_pieces,
-            },
-        };
-        (warning.unread_steps + warning.unread_files + warning.unread_safety_net_pieces > 0)
-            .then_some(warning)
-    }
-
-    pub fn finish_review_request(
-        &self,
-        verdict: ReviewVerdict,
-        body: &str,
-    ) -> Result<FinishRequest, FinishRefusal> {
-        let Some(pr) = self.subject.pull_request() else {
-            return Err(FinishRefusal::NoPullRequest);
-        };
-        self.comment_desk.finish_review_request(pr, verdict, body)
-    }
-
-    /// A sent review is read back, so the finish button shows it.
-    pub fn apply_finish(&mut self, outcome: FinishOutcome) -> FinishResult {
-        let result = self.comment_desk.apply_finish(&mut self.state, outcome);
-        if result == FinishResult::Sent {
-            self.work.want(WorkKind::PullReviews);
-        }
-        result
-    }
-
-    pub fn begin_selection(&mut self, row: LineLocation) {
-        self.comment_desk.begin_selection(row);
-    }
-
-    pub fn extend_selection(&mut self, row: LineLocation) {
-        self.comment_desk.extend_selection(row);
-    }
-
-    pub fn is_selecting(&self) -> bool {
-        self.comment_desk.row_selection().is_some()
-    }
-
-    /// The drag in progress, for a view that knows its rows and draws them without building the page.
-    pub fn row_selection(&self) -> Option<&RowSelection> {
-        self.comment_desk.row_selection()
-    }
-
-    pub fn cancel_selection(&mut self) {
-        self.comment_desk.cancel_selection();
-    }
-
-    /// The drag ends: when the rows of the page can take a comment, a comment box opens on them.
-    fn finish_selection(&mut self, page: &Page) -> Result<Option<CommentPlace>, CommentRefusal> {
-        let freshness = self.tour_freshness();
-        self.comment_desk
-            .finish_selection(&mut self.state, page.lines(), freshness, &self.head)
-    }
-
-    /// The comment box of a picture opens on the whole file, under the same rules as on lines.
-    fn begin_file_comment(&mut self, path: &FilePath) -> Result<CommentPlace, CommentRefusal> {
-        let freshness = self.tour_freshness();
-        self.comment_desk
-            .begin_file_comment(&mut self.state, path, freshness, &self.head)
-    }
-
-    pub fn queued_comments(&self) -> &[QueuedComment] {
-        self.state.comment_queue()
-    }
-
-    /// The save of what was typed since the last save, to run in the background; `None` when nothing is unsaved.
-    pub fn typing_save(&mut self) -> Option<TypingSave> {
-        self.state.typing_save()
-    }
-
-    /// "Suggest change" shows only when the range starts and ends on lines of the head.
-    pub fn can_suggest_change(&self, place: &CommentPlace) -> bool {
-        CommentDesk::can_suggest_change(place)
-    }
-
-    /// The comment boxes open on this review, each with what it is doing; each hangs under the
-    /// last line of its place, or under the picture of its file.
-    pub fn comment_boxes(&self) -> impl Iterator<Item = CommentBox<'_>> {
-        let agent_out_of_reach = SendMode::LOCAL
-            .iter()
-            .find_map(|mode| self.send_refusal(*mode))
-            .filter(|refusal| *refusal == CommentRefusal::AgentLinkOff);
-        self.comment_desk
-            .comment_boxes(&self.state, self.tour_freshness())
-            .map(move |mut comment_box| {
-                if comment_box.problem.is_none() {
-                    comment_box.problem = agent_out_of_reach.clone().map(CommentProblem::Refused);
-                }
-                comment_box
-            })
-    }
-
-    pub fn comment_box(&self, place: &CommentPlace) -> Option<CommentBox<'_>> {
-        self.comment_boxes()
-            .find(|comment_box| &comment_box.draft.place == place)
-    }
-
-    /// The comment box that takes the keys.
-    pub fn composing(&self) -> Option<&CommentPlace> {
-        self.comment_desk.composing()
     }
 
     /// The box shows as sending until `apply_comment` takes the outcome. `None` when there is no such draft.
@@ -2287,73 +1728,11 @@ impl ReviewCore {
             .start_sending(&self.state, place, mode, audience, (&self.head, home))
     }
 
-    /// The reviewer hands someone else's comment to the tour agent, to handle as the reviewer would ask.
-    pub fn hand_to_agent(&mut self, comment: &CommentId) -> Result<(), HandToAgentRefused> {
-        if self.subject().pull_request().is_none() {
-            return Err(HandToAgentRefused::NotAPullRequest);
-        }
-        let threads = &self.pulled_threads;
-        let from = self.screen.sent_from();
-        self.state
-            .record(|state| state.hand_offs_mut().hand_over(threads, comment, from))
-            .map_err(|error| HandToAgentRefused::NotSaved(format!("{error:#}")))??;
-        self.work.want(WorkKind::DeliverHandOff);
-        Ok(())
-    }
-
-    fn agent_of_threads(&self) -> AgentOfThreads<'_> {
-        AgentOfThreads {
-            hand_offs: self.state.hand_offs(),
-            takes_others_comments: self.subject().pull_request().is_some(),
-        }
-    }
-
-    pub fn hand_offs(&self) -> &HandOffs {
-        self.state.hand_offs()
-    }
-
-    /// How many tasks wait for Send tasks.
-    pub fn queued_tasks(&self) -> usize {
-        self.state.hand_offs().waiting_for_send_tasks().count()
-    }
-
-    /// The finish of a local review: every queued task goes to the agent in one message, in
-    /// reading order, each with its own hand-off state.
-    pub fn send_tasks(&mut self) -> anyhow::Result<()> {
-        let order = self.reading_order();
-        let threads = self.pulled_threads.clone();
-        let reading_place = |task: &HandOff, thread: &ReviewThread| {
-            let screen = task.step().map_or_else(
-                || Screen::File(thread.path.clone()),
-                |step| Screen::Step(step.clone()),
-            );
-            let nth = order.iter().position(|shown| *shown == screen);
-            (nth.is_none(), nth, thread.original_line)
-        };
-        self.record_hand_offs(|hand_offs| hand_offs.send_queued_tasks(&threads, reading_place))?;
-        self.work.want(WorkKind::DeliverHandOff);
-        Ok(())
-    }
-
     /// A change kept in memory stays shown when its save fails; the failure goes to stderr.
     pub(super) fn record_reporting(&mut self, what: &str, change: impl FnOnce(&mut ReviewState)) {
         if let Err(error) = self.state.record(change) {
             eprintln!("could not save {what}: {error:#}");
         }
-    }
-
-    /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a
-    /// re-pin runs, so a hand-off is not delivered twice; only its save is refused then.
-    fn record_hand_offs<T>(
-        &mut self,
-        change: impl FnOnce(&mut HandOffs) -> T,
-    ) -> anyhow::Result<T> {
-        self.state.record(|state| change(state.hand_offs_mut()))
-    }
-
-    /// The oldest comment in the queue, to send again.
-    pub fn queued_comment_request(&self) -> Option<CommentRequest> {
-        CommentDesk::queued_comment_request(&self.state, &self.head, self.thread_home())
     }
 
     /// The window was asked for another PR and could not open it; named until another switch succeeds.
@@ -2363,70 +1742,6 @@ impl ReviewCore {
 
     pub fn state_file(&self) -> ReviewStateFile {
         self.state.file().clone()
-    }
-
-    /// A comment sent from its box. Whatever came of it, the next hand-off may go now.
-    pub fn apply_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
-        let result = self.land_comment(outcome);
-        self.work.want(WorkKind::DeliverHandOff);
-        result
-    }
-
-    fn land_comment(&mut self, outcome: CommentOutcome) -> anyhow::Result<CommentResult> {
-        let from_findings = outcome.request.draft.from_findings.clone();
-        let threads = outcome.threads.clone();
-        let made = if from_findings.is_empty() {
-            None
-        } else {
-            thread_made_of(
-                &outcome.request.draft,
-                threads.as_ref(),
-                &self.pulled_threads,
-            )
-        };
-        let hand_offs_before = self.state.hand_offs().all().len();
-        let code = self.code_commented_on(&outcome);
-        let result = self.comment_desk.apply_comment(
-            &mut self.state,
-            outcome,
-            (self.screen.sent_from(), code),
-        );
-        self.note_new_hand_off(hand_offs_before);
-        self.show_pulled_threads(threads.as_ref());
-        match result {
-            Ok(CommentResult::Sent) => self.decide_used(from_findings, made.as_ref())?,
-            Ok(CommentResult::Queued(_)) => self.decide_used(from_findings, None)?,
-            _ => {}
-        }
-        result
-    }
-
-    /// The lines a task of a local review is about, as the page shows them; a PR's hand-off has none.
-    fn code_commented_on(&self, outcome: &CommentOutcome) -> Option<String> {
-        self.subject.local()?;
-        let place = &outcome.request.draft.place;
-        let selected = Page::of(self).selected(&RowSelection::of(place)?)?;
-        Some(ask_context::code_lines(selected.lines()))
-    }
-
-    fn note_new_hand_off(&mut self, hand_offs_before: usize) {
-        let Some(newest) = self
-            .state
-            .hand_offs()
-            .all()
-            .get(hand_offs_before..)
-            .and_then(<[_]>::last)
-        else {
-            return;
-        };
-        match (newest.thread(), newest.state()) {
-            (None, HandOffState::Failed(reason)) => {
-                let comment = newest.comment().chars().take(60).collect();
-                let reason = reason.clone();
-                self.raise_problem(Problem::HandOffNotSent { comment, reason });
-            }
-            _ => self.clear_problem(ProblemKind::HandOffNotSent),
-        }
     }
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
@@ -2445,11 +1760,6 @@ impl ReviewCore {
             base: &self.base,
             head: &self.head,
         }
-    }
-
-    /// Ids the tour does not hold are ignored: the sidebar only offers real steps.
-    pub fn go_to(&mut self, id: &StepId) {
-        self.go_to_screen(Screen::Step(id.clone()));
     }
 
     /// The cmd+k list for what the reviewer has typed so far.
@@ -2571,449 +1881,6 @@ impl ReviewCore {
             .collect()
     }
 
-    /// A folded step opens for the session so the file or symbol the reviewer asked for is on screen.
-    pub fn jump_to(&mut self, target: &JumpTarget) {
-        self.go_to_screen(target.screen.clone());
-        if let Screen::Step(id) = &target.screen
-            && self.is_folded(id)
-        {
-            self.toggle_fold(id);
-        }
-    }
-
-    pub fn go_to_summary(&mut self) {
-        self.go_to_screen(Screen::Summary);
-    }
-
-    pub fn go_to_overview(&mut self) {
-        self.go_to_screen(Screen::Overview);
-    }
-
-    /// Ids of files the tour does not hold are ignored, like ids of steps.
-    pub fn go_to_file(&mut self, path: &FilePath) {
-        self.go_to_screen(Screen::File(path.clone()));
-    }
-
-    pub fn go_to_safety_net(&mut self) {
-        self.go_to_screen(Screen::SafetyNet);
-    }
-
-    fn go_to_screen(&mut self, screen: Screen) {
-        if self.reading_order().contains(&screen) {
-            self.screen = screen;
-        }
-    }
-
-    /// False when there is no screen after this one.
-    pub fn go_forward(&mut self) -> bool {
-        self.step_by(1)
-    }
-
-    /// For the scroll script, which scrolls through every piece, so a folded step is opened.
-    pub fn go_forward_unfolded(&mut self) -> bool {
-        if !self.go_forward() {
-            return false;
-        }
-        if let Screen::Step(id) = self.screen.clone()
-            && self.is_folded(&id)
-        {
-            self.toggle_fold(&id);
-        }
-        true
-    }
-
-    /// The Next button: on to the next screen that is not a step already read, which the sidebar
-    /// still reaches. False when there is none.
-    pub fn go_on(&mut self) -> bool {
-        match self.onward_screen() {
-            Some(screen) => {
-                self.screen = screen;
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn onward_screen(&self) -> Option<Screen> {
-        let reading_order = self.reading_order();
-        let here = reading_order
-            .iter()
-            .position(|screen| screen == &self.screen)?;
-        reading_order
-            .into_iter()
-            .skip(here + 1)
-            .find(|screen| !self.is_read_screen(screen))
-    }
-
-    fn is_read_screen(&self, screen: &Screen) -> bool {
-        match screen {
-            Screen::Step(id) => self.is_ticked(id),
-            Screen::File(path) => self.is_file_ticked(path),
-            Screen::Summary | Screen::Overview | Screen::SafetyNet => false,
-        }
-    }
-
-    fn is_unread_screen(&self, screen: &Screen) -> bool {
-        match screen {
-            Screen::Step(id) => !self.is_ticked(id),
-            Screen::File(path) => !self.is_file_ticked(path),
-            Screen::Summary | Screen::Overview | Screen::SafetyNet => false,
-        }
-    }
-
-    /// False on the summary, the first screen.
-    pub fn go_back(&mut self) -> bool {
-        self.step_by(-1)
-    }
-
-    /// The first step after the open screen that is not read yet, starting over from the top.
-    /// False when every step is read.
-    pub fn go_to_next_unread(&mut self) -> bool {
-        let reading_order = self.reading_order();
-        let here = reading_order
-            .iter()
-            .position(|screen| screen == &self.screen)
-            .unwrap_or(0);
-        let after = reading_order.iter().skip(here + 1);
-        let next = after
-            .chain(reading_order.iter().take(here + 1))
-            .find(|screen| self.is_unread_screen(screen))
-            .cloned();
-        match next {
-            Some(screen) if screen != self.screen => {
-                self.screen = screen;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    pub fn tour_lead(&self) -> TourLead {
-        let progress = self.progress();
-        if progress.total == 0 {
-            return TourLead::Nowhere;
-        }
-        let finish = self.finish_action();
-        if let Tour::Basic(_) = &self.tour {
-            return match self.first_unread_file() {
-                _ if progress.is_complete() => TourLead::FinishFiles {
-                    files: progress.total,
-                    finish,
-                },
-                Some(first) if progress.read == 0 => TourLead::StartFile(first),
-                Some(next) => TourLead::ContinueFile(next),
-                None => TourLead::Nowhere,
-            };
-        }
-        if progress.is_complete() {
-            return TourLead::Finish {
-                steps: progress.total,
-                finish,
-            };
-        }
-        match self.first_unread_step() {
-            Some(first) if progress.read == 0 => TourLead::Start(first),
-            Some(next) => TourLead::Continue(next),
-            None => TourLead::Nowhere,
-        }
-    }
-
-    pub fn route(&self) -> Vec<RouteStop> {
-        fn count(steps: &[Step]) -> usize {
-            steps.iter().map(|step| 1 + count(&step.children)).sum()
-        }
-        let steps = self.tour.guided().map_or(&[][..], |guided| &guided.steps);
-        steps
-            .iter()
-            .map(|step| RouteStop {
-                id: step.id.clone(),
-                title: step.title.clone(),
-                why: step.why.clone(),
-                details: count(&step.children),
-                is_read: self.is_ticked(&step.id),
-                has_check: step.check.is_some(),
-            })
-            .collect()
-    }
-
-    pub fn summary_stats(&self) -> SummaryStats {
-        SummaryStats {
-            steps: self.progress().total,
-            files: self.files.len(),
-            added_lines: self.files.iter().map(|file| file.added).sum(),
-            removed_lines: self.files.iter().map(|file| file.removed).sum(),
-            open_threads: self
-                .pulled_threads
-                .iter()
-                .filter(|thread| !thread.is_resolved)
-                .count(),
-        }
-    }
-
-    /// The first step in reading order that is not read yet.
-    pub fn first_unread_step(&self) -> Option<UnreadStep> {
-        self.steps_in_reading_order.iter().find_map(|screen| {
-            let Screen::Step(id) = screen else {
-                return None;
-            };
-            (!self.is_ticked(id)).then(|| UnreadStep {
-                id: id.clone(),
-                title: self.step(id).map_or_default(|step| step.title.clone()),
-            })
-        })
-    }
-
-    pub fn is_file_ticked(&self, path: &FilePath) -> bool {
-        self.state.file_read_tick(path).is_some()
-    }
-
-    /// The file on screen, if it is not read yet: the footer ticks it on the way on.
-    pub fn file_to_tick_on_screen(&self) -> Option<FilePath> {
-        match &self.screen {
-            Screen::File(path) if !self.is_file_ticked(path) => Some(path.clone()),
-            _ => None,
-        }
-    }
-
-    pub fn is_read(&self, subject: &ReadSubject) -> bool {
-        match subject {
-            ReadSubject::Step(id) => self.is_ticked(id),
-            ReadSubject::File(path) => self.is_file_ticked(path),
-        }
-    }
-
-    /// The first file in reading order that is not read yet; none in a guided tour.
-    pub fn first_unread_file(&self) -> Option<UnreadFile> {
-        self.steps_in_reading_order.iter().find_map(|screen| {
-            let Screen::File(path) = screen else {
-                return None;
-            };
-            (!self.is_file_ticked(path)).then(|| UnreadFile { path: path.clone() })
-        })
-    }
-
-    /// Only a PR has viewed marks on GitHub to keep in step with the ticks.
-    fn want_viewed_synced(&mut self) {
-        if self.subject.syncs_viewed_marks() {
-            self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
-        }
-    }
-
-    /// Only files of this tour can be read; a file the tour does not hold is ignored. Viewed
-    /// marks follow it one to one.
-    pub fn tick_file(&mut self, path: &FilePath) -> anyhow::Result<()> {
-        self.want_viewed_synced();
-        if !self.reading_order().contains(&Screen::File(path.clone())) {
-            return Ok(());
-        }
-        let coverage = self.coverage();
-        let subject = ReadSubject::File(path.clone());
-        self.state.change(|state| {
-            state.tick_file(path, &self.head);
-            self.viewed_sync.wish_after_tick(state, &coverage, &subject);
-        })
-    }
-
-    pub fn untick_file(&mut self, path: &FilePath) -> anyhow::Result<()> {
-        self.want_viewed_synced();
-        let coverage = self.coverage();
-        let subject = ReadSubject::File(path.clone());
-        self.state.change(|state| {
-            state.untick_file(path);
-            self.viewed_sync
-                .wish_after_untick(state, &coverage, &subject);
-        })
-    }
-
-    pub fn is_ticked(&self, id: &StepId) -> bool {
-        self.state.read_tick(id).is_some()
-    }
-
-    /// The tick is kept in memory even when saving fails, so the reviewer loses nothing this session.
-    /// Viewed marks sync once no other tick or untick came for `PUSH_DEBOUNCE`.
-    pub fn tick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.want_viewed_synced();
-        if !self.reading_order().contains(&Screen::Step(id.clone())) {
-            return Ok(());
-        }
-        let coverage = self.coverage();
-        let subject = ReadSubject::Step(id.clone());
-        self.state.change(|state| {
-            state.tick(id, &self.head);
-            self.fold_flipped.remove(id);
-            self.viewed_sync.wish_after_tick(state, &coverage, &subject);
-        })
-    }
-
-    pub fn untick(&mut self, id: &StepId) -> anyhow::Result<()> {
-        self.want_viewed_synced();
-        let coverage = self.coverage();
-        let subject = ReadSubject::Step(id.clone());
-        self.state.change(|state| {
-            state.untick(id);
-            self.fold_flipped.remove(id);
-            self.viewed_sync
-                .wish_after_untick(state, &coverage, &subject);
-        })
-    }
-
-    /// Skim, ticked and gone steps fold; the reviewer can flip that for the session without losing the tick.
-    pub fn is_folded(&self, id: &StepId) -> bool {
-        let folds_by_default = self.is_ticked(id)
-            || self
-                .step(id)
-                .is_some_and(|step| step.skim || self.is_gone(step));
-        folds_by_default != self.fold_flipped.contains(id)
-    }
-
-    /// Opens or folds every file box of the step at once.
-    pub fn toggle_fold(&mut self, id: &StepId) {
-        if !self.fold_flipped.remove(id) {
-            self.fold_flipped.insert(id.clone());
-        }
-        let step = Screen::Step(id.clone());
-        self.box_fold_flipped.retain(|(screen, _)| *screen != step);
-    }
-
-    /// A folded step still lists its file boxes, each folded on its own. The box of a file screen
-    /// starts open.
-    pub fn is_box_folded(&self, screen: &Screen, path: &FilePath) -> bool {
-        let folds_by_default = match screen {
-            Screen::Step(id) => self.is_folded(id),
-            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => false,
-        };
-        folds_by_default
-            != self
-                .box_fold_flipped
-                .contains(&(screen.clone(), path.clone()))
-    }
-
-    /// Folds or opens each of the boxes, leaving one already as asked alone.
-    pub fn set_boxes_folded(&mut self, screen: &Screen, paths: &[FilePath], folded: bool) {
-        for path in paths {
-            if self.is_box_folded(screen, path) != folded {
-                self.toggle_box_fold(screen, path);
-            }
-        }
-    }
-
-    pub fn toggle_box_fold(&mut self, screen: &Screen, path: &FilePath) {
-        let key = (screen.clone(), path.clone());
-        if !self.box_fold_flipped.remove(&key) {
-            self.box_fold_flipped.insert(key);
-        }
-    }
-
-    pub fn read_unit(&self) -> ReadUnit {
-        match &self.tour {
-            Tour::Guided(_) => ReadUnit::Steps,
-            Tour::Basic(_) => ReadUnit::Files,
-        }
-    }
-
-    /// Only steps of this tour count: ticks of steps a refresh removed stay in the file but not here.
-    pub fn progress(&self) -> ReadProgress {
-        let reading_order = self.reading_order();
-        let subjects = reading_order.iter().filter_map(|screen| match screen {
-            Screen::Step(id) => Some(ReadSubject::Step(id.clone())),
-            Screen::File(path) => Some(ReadSubject::File(path.clone())),
-            Screen::Summary | Screen::Overview | Screen::SafetyNet => None,
-        });
-        ReadProgress {
-            read: subjects
-                .clone()
-                .filter(|subject| self.is_read(subject))
-                .count(),
-            total: subjects.count(),
-        }
-    }
-
-    /// The banner text while viewed sync is off; ticks keep working without it.
-    pub fn sync_banner(&self) -> Option<&str> {
-        self.viewed_sync.banner()
-    }
-
-    /// Drives the "not synced" dot.
-    pub fn not_synced(&self) -> bool {
-        self.viewed_sync.not_synced(&self.state)
-    }
-
-    /// `None` for a local review: GitHub has no viewed marks of it.
-    pub fn sync_request(&self) -> Option<SyncRequest> {
-        let pr = self.subject.pull_request()?;
-        Some(
-            self.viewed_sync
-                .request(&self.state, &self.coverage(), pr, &self.head),
-        )
-    }
-
-    /// An error means something stays queued or unread; the next sync tries again.
-    /// An answer for another head, e.g. from before a re-pin, is dropped: the next sync asks again.
-    pub fn apply_sync(&mut self, outcome: SyncOutcome) -> anyhow::Result<()> {
-        if self.viewed_sync.is_off() || !outcome.is_for(&self.head) {
-            return Ok(());
-        }
-        let coverage = self.coverage();
-        let mut error = None;
-        let saved = self.state.record(|state| {
-            let (unticked, sync_error) = self
-                .viewed_sync
-                .take_in(state, &coverage, &self.head, outcome);
-            for subject in &unticked {
-                if let ReadSubject::Step(step) = subject {
-                    self.fold_flipped.remove(step);
-                }
-            }
-            error = sync_error;
-        });
-        self.clear_problem(ProblemKind::ViewedNotSynced);
-        match error {
-            Some(GitHubError::NotAnswering(cause)) => {
-                self.github_not_answering(cause, Affected::ViewedMarks);
-                Err(GitHubError::NotAnswering(cause).into())
-            }
-            Some(error) => {
-                self.github_answered(Affected::ViewedMarks);
-                let settled = self.viewed_sync.settle(error);
-                if let Err(error) = &settled {
-                    self.raise_problem(Problem::ViewedNotSynced(error.root_cause().to_string()));
-                }
-                settled
-            }
-            None => {
-                self.github_answered(Affected::ViewedMarks);
-                saved
-            }
-        }
-    }
-
-    fn coverage(&self) -> Coverage {
-        match &self.tour {
-            Tour::Guided(guided) => Coverage::of(guided, &self.files),
-            Tour::Basic(_) => Coverage::of_files(self.files.iter().map(|file| &file.path)),
-        }
-    }
-
-    /// Changed code no page can show, by piece id: the reviewer has to read it on GitHub.
-    pub fn changes_not_shown(&self) -> Vec<String> {
-        let unplaced = self
-            .files
-            .iter()
-            .flat_map(|file| file.not_shown.iter().cloned());
-        let outside_their_file = self.files.iter().flat_map(|file| {
-            file.pieces
-                .iter()
-                .filter(|piece| {
-                    !self
-                        .files
-                        .iter()
-                        .any(|other| other.path == *piece.id.path())
-                })
-                .map(|piece| piece.id.to_string())
-        });
-        unplaced.chain(outside_their_file).collect()
-    }
-
     /// What went wrong that the reviewer must know about, until it is put right.
     pub fn problems(&self) -> Vec<Problem> {
         let not_saved = self.state.not_saved().map(Problem::NotSaved);
@@ -3028,63 +1895,21 @@ impl ReviewCore {
             .collect()
     }
 
-    pub fn reading_place(&self) -> ReadingPlace {
-        let reading_order = self.reading_order();
-        let position = reading_order
-            .iter()
-            .position(|screen| screen == &self.screen);
-        let is_step = |screen: &&Screen| matches!(screen, Screen::Step(_));
-        let is_file = |screen: &&Screen| matches!(screen, Screen::File(_));
-        let next = self.onward_screen().and_then(|screen| match &screen {
-            Screen::Step(id) => Some(NextScreen::Step {
-                title: self.step(id)?.title.clone(),
-            }),
-            Screen::SafetyNet => Some(NextScreen::SafetyNet),
-            Screen::File(path) => Some(NextScreen::File { path: path.clone() }),
-            Screen::Summary | Screen::Overview => None,
-        });
-        ReadingPlace {
-            step_number: match (&self.screen, position) {
-                (Screen::Step(_), Some(position)) => Some(
-                    reading_order
-                        .iter()
-                        .take(position + 1)
-                        .filter(is_step)
-                        .count(),
-                ),
-                _ => None,
-            },
-            step_count: reading_order.iter().filter(is_step).count(),
-            file_number: match (&self.screen, position) {
-                (Screen::File(_), Some(position)) => Some(
-                    reading_order
-                        .iter()
-                        .take(position + 1)
-                        .filter(is_file)
-                        .count(),
-                ),
-                _ => None,
-            },
-            file_count: reading_order.iter().filter(is_file).count(),
-            has_previous: position.is_some_and(|position| position > 0),
-            next,
+    /// What finishing the review does now; `None` when there is nothing to finish.
+    pub fn finish_action(&self) -> Option<FinishAction> {
+        if self.can_mark_done() {
+            return Some(FinishAction::MarkDone);
         }
-    }
-
-    fn step_by(&mut self, offset: isize) -> bool {
-        let reading_order = self.reading_order();
-        let next = reading_order
-            .iter()
-            .position(|screen| screen == &self.screen)
-            .and_then(|position| position.checked_add_signed(offset))
-            .and_then(|position| reading_order.get(position));
-        match next {
-            Some(screen) => {
-                self.screen = screen.clone();
-                true
+        if self.is_marked_done() {
+            return None;
+        }
+        self.can_finish_review().then(|| {
+            if self.finishes_with_send_tasks().is_some() {
+                FinishAction::SendTasks
+            } else {
+                FinishAction::FinishReview
             }
-            None => false,
-        }
+        })
     }
 }
 

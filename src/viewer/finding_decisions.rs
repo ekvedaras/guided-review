@@ -1,12 +1,12 @@
 //! What the reviewer decided about the findings of an AI review: used in a comment, or dismissed.
 //! A decided finding is not shown again; a dismissed one is told to the review agent on a second run.
 
-use crate::viewer::kept_values::KeptEntries;
+use super::kept_values::KeptEntries;
 use serde::{Deserialize, Serialize};
 
 use crate::findings::{Finding, FindingId};
 
-use super::threads::ThreadId;
+use super::review_thread::ThreadId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fate {

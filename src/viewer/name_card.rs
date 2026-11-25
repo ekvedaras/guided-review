@@ -1,6 +1,8 @@
 //! The Definition card: what a name hovered in a diff line means at its commit, as the card draws
 //! it. It is built once when a lookup lands, so drawing it parses and ranks nothing.
 
+use super::name_highlights::USAGES_SHOWN;
+use super::name_highlights::usages_in_card_order;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -17,9 +19,6 @@ use super::code_link::CodeLink;
 use super::highlight::Capture;
 use super::jump::JumpTarget;
 use super::name_highlights::NameHighlights;
-
-/// How many usages the card lists; the rest are counted.
-pub const USAGES_SHOWN: usize = 20;
 
 /// Where a click on a definition or a usage goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -407,28 +406,6 @@ impl DefinitionCard {
             }),
         })
     }
-}
-
-/// The usages the card counts: those in the review's files first, then by path and line; the
-/// hovered line is left out.
-pub(super) fn usages_in_card_order<'a>(
-    lookup: &'a Lookup,
-    hovered: &Place,
-    is_changed: &dyn Fn(&FilePath) -> bool,
-) -> Vec<&'a Usage> {
-    let mut usages: Vec<&Usage> = lookup
-        .usages
-        .iter()
-        .filter(|usage| usage.place != *hovered)
-        .collect();
-    usages.sort_by_key(|usage| {
-        (
-            !is_changed(&usage.place.path),
-            usage.place.path.as_str(),
-            usage.place.line.get(),
-        )
-    });
-    usages
 }
 
 fn by_file<'a>(sorted: &[&'a Usage]) -> Vec<Vec<&'a Usage>> {

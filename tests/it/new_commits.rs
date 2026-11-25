@@ -6,13 +6,14 @@ use crate::support::app_path::AppPath;
 use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::{FixtureRepo, drafts, on_github};
 use guided_review::local_git::LocalGit;
+use guided_review::opened_subject::TourRepinner;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
 use guided_review::viewer::{
     CommentGesture, CommentPlace, CommentRefusal, PageRow, PieceDiff, Problem, Review,
-    ReviewStateFile, Side, StepId, TextBox, ThreadId, TourRepinner, ViewedState, repin_tour,
+    ReviewStateFile, Side, StepId, TextBox, ThreadId, ViewedState, repin_tour,
 };
 use guided_review::viewer::{JobOutcome, ReplacingJob};
 use serde_json::json;

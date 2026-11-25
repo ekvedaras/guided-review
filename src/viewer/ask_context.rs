@@ -9,11 +9,12 @@ use std::collections::HashMap;
 use super::ask::{Place, ShownOn};
 use super::code_link::CodeLinks;
 use super::diff_display::{DiffDisplay, FilesAtHead, MoreContext};
+use super::diff_line::DiffLine;
 use super::highlight::Highlights;
+use super::line_location::{LineLocation, Side};
+use super::piece_diff::PieceDiff;
 use super::row_selection::RowSelection;
-use super::step_page::{
-    DiffLine, FilePage, LineLocation, PieceDiff, SafetyNetPage, Side, StepPage,
-};
+use super::step_page::{FilePage, SafetyNetPage, StepPage};
 
 pub(super) fn system_prompt(pr: &str) -> String {
     format!(

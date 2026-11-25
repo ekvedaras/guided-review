@@ -1,4 +1,5 @@
-use crate::viewer::kept_values::KeptEntries;
+use super::kept_values::KeptEntries;
+use crate::prompt_safety::shell_word;
 use std::fmt;
 use std::sync::Arc;
 
@@ -9,25 +10,16 @@ use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 
-use super::local_threads::{LocalAuthor, LocalThreadStore, ThreadHome};
+use super::local_thread_store::{LocalThreadStore, ThreadHome};
+use super::local_threads::LocalAuthor;
 
 use super::comments::SendMode;
 use super::hidden_text::HiddenText;
 use super::ports::{GitHubError, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
 use super::review::StepId;
-use super::threads::{AGENT_MARK, CommentId, ReviewThread, ThreadComment, ThreadId};
+use super::review_thread::{AGENT_MARK, CommentId, ReviewThread, ThreadComment, ThreadId};
 use super::tour_agent::{AgentStatus, SendOutcome, TourAgents, TourKind};
-
-/// The word as a shell reads it as it is, or in single quotes when a character in it would split or expand.
-pub(super) fn shell_word(text: &str) -> String {
-    let plain = |c: char| c.is_ascii_alphanumeric() || "_./:@%+=,-".contains(c);
-    if !text.is_empty() && text.chars().all(plain) {
-        text.to_owned()
-    } else {
-        format!("'{}'", text.replace('\'', "'\\''"))
-    }
-}
 
 const WORKING_ON_IT: &str = "Working on it…";
 
@@ -76,15 +68,6 @@ fn tasks_message(
          ids> --around`."
     ));
     lines.join("\n")
-}
-
-/// Who a comment is for. The plain send actions are for the PR's author; only Ask agent also
-/// reaches the tour agent.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Audience {
-    #[default]
-    Author,
-    Agent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

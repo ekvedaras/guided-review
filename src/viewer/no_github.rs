@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use super::comments::{CommentPlace, SendMode};
-use super::finish_review::ReviewVerdict;
 use super::merging::MergeChange;
+use super::ports::ReviewVerdict;
 use super::ports::{
     ChangeTipsPort, GitHubError, IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch,
     PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
@@ -14,7 +14,7 @@ use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::{IssueDetails, PullRequestIssues};
-use super::threads::{CommentId, ReviewThread, ThreadId};
+use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use crate::issue::IssueUrl;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};

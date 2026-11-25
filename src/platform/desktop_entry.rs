@@ -6,17 +6,12 @@ use std::sync::Arc;
 use anyhow::Context;
 
 use super::Os;
-use super::linux::desktop_file;
-use super::macos::app_bundle;
-use crate::update::Version;
 
 /// Names the app to the OS: the macOS bundle id, the Linux desktop file and window app id.
 pub const APP_ID: &str = "io.github.ekvedaras.guided-review";
 
 /// Set on the run the login shell makes, so it does not relaunch again.
 pub const IN_LOGIN_SHELL: &str = "GUIDED_REVIEW_IN_LOGIN_SHELL";
-
-pub use app_bundle::info_plist;
 
 /// What the OS launcher starts: the App bundle on macOS, a desktop file and its icon on Linux. A
 /// release carries its files; placing them from the release the bin link names keeps it current.
@@ -94,12 +89,6 @@ impl Os {
     pub fn desktop_entry(self, home: &Path, bin_link: &Path) -> Arc<dyn DesktopEntry> {
         (self.adapter().desktop_entry)(home, bin_link)
     }
-}
-
-/// What the release workflow packs for every OS's entry, so each archive takes its own.
-pub fn write_desktop_entry_templates(out: &Path, version: Version) -> anyhow::Result<()> {
-    app_bundle::write_template(out, version)?;
-    desktop_file::write_template(out)
 }
 
 /// Puts `content` at `path` unless it is already there; says whether it wrote.

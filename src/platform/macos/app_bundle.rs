@@ -6,7 +6,7 @@ use anyhow::Context;
 
 use crate::app_icon::ICON_COMPOSER_FILES;
 use crate::platform::desktop_entry::{APP_ID, DesktopEntry, EntryPlaced, put_file, replace};
-use crate::update::Version;
+use crate::version::Version;
 
 /// The bundle's folder name, in a release archive and in [`APPLICATIONS`].
 pub const BUNDLE_FOLDER: &str = "Guided Review.app";

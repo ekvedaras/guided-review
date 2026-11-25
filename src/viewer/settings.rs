@@ -13,12 +13,12 @@ use crate::local_git::{CloneProblem, LocalGit};
 use crate::navigation::ServerAnswer;
 use crate::pull_request::RepoName;
 
-use super::chord::Chord;
-use super::keymap::{KeyChanges, KeyProblem, Keymap, WrittenKeys};
-use super::merging::MergeMethod;
-use super::more_lines::{MoreLines, MoreLinesEntry};
-use super::send_action::{SendAction, SendChoice};
-use super::shortcuts::Command;
+use crate::keys::Chord;
+use crate::keys::Command;
+use crate::keys::{KeyChanges, KeyProblem, Keymap, WrittenKeys};
+use crate::keys::{SendAction, SendChoice};
+use crate::merge_method::MergeMethod;
+use crate::more_lines::{MoreLines, MoreLinesEntry};
 
 /// The reviewer's settings in `config.toml` in the config folder, as the Settings panel shows and edits them.
 /// Save writes only the keys that changed, so the reviewer's comments and key order survive.
@@ -578,14 +578,12 @@ impl Settings {
 
     /// Picking what the secondary is makes the old primary the secondary.
     pub fn set_primary_comment_action(&mut self, action: SendAction) {
-        let choice = self.edited.keys.send_choice().with_primary(action);
-        self.edited.keys.set_send_choice(choice);
+        self.edited.keys.choose_primary(action);
     }
 
     /// Picking what the primary is makes the old secondary the primary.
     pub fn set_secondary_comment_action(&mut self, action: SendAction) {
-        let choice = self.edited.keys.send_choice().with_secondary(action);
-        self.edited.keys.set_send_choice(choice);
+        self.edited.keys.choose_secondary(action);
     }
 
     /// The global `merge_method`; `[merge_methods]` per repo is edited in the config only.

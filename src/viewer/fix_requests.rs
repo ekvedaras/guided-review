@@ -2,7 +2,8 @@
 //! fixed in a commit, or not fixed with the reason. A fixed finding is closed: it is decided like a
 //! used or dismissed one, and this keeps the commit.
 
-use crate::viewer::kept_values::KeptEntries;
+use super::kept_values::KeptEntries;
+use crate::prompt_safety::shell_word;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,6 @@ use crate::findings::{Finding, FindingId};
 use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 
-use super::hand_offs::shell_word;
 use super::tour_agent::{AgentStatus, SendOutcome, TourAgents, TourKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

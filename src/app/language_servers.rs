@@ -8,6 +8,7 @@ use gpui::{App, Global};
 
 use crate::app::components::toast_stack::post_toast;
 use crate::app_folders::AppFolders;
+use crate::codebase::Codebase;
 use crate::config::Config;
 use crate::github::GitHub;
 use crate::navigation::{
@@ -65,7 +66,7 @@ pub fn use_language_servers(review: &mut Review, folders: &AppFolders, cx: &mut 
     if cfg!(feature = "snapshots") {
         return;
     }
-    let codebase = review.subject().codebase();
+    let codebase = Codebase::of(review.subject());
     if !cx.has_global::<ActiveLanguageServers>() {
         let managed = ManagedServers::new(
             ServerFolders {

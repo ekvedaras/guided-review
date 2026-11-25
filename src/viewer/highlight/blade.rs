@@ -1,25 +1,46 @@
 use std::ops::Range;
 
-use super::Capture;
+use tree_sitter_highlight::HighlightConfiguration;
+
+use super::{Capture, highlight_ranges};
 
 /// No Blade grammar exists for tree-sitter 0.27, so a Blade file is read in two layers: its Blade
 /// parts are found here by scanning, and what is left over is plain HTML for the HTML grammar.
 #[derive(Debug, Default)]
 pub(super) struct BladeScan {
     /// Parts coloured by the scan itself: directive names, delimiters, comments.
-    pub marks: Vec<(Range<usize>, Capture)>,
+    marks: Vec<(Range<usize>, Capture)>,
     /// PHP written inside Blade, to be coloured with the PHP grammar.
-    pub php: Vec<PhpCode>,
+    php: Vec<PhpCode>,
     /// Everything Blade owns, hidden from the HTML grammar.
     blade: Vec<Range<usize>>,
 }
 
 /// A stretch of PHP and the opening that makes it parse as a statement on its own.
 #[derive(Debug)]
-pub(super) struct PhpCode {
-    pub range: Range<usize>,
-    pub opening: String,
-    pub closing: &'static str,
+struct PhpCode {
+    range: Range<usize>,
+    opening: String,
+    closing: &'static str,
+}
+
+impl PhpCode {
+    /// Coloured on its own, with its opening and closing, then shifted back to its place in `source`.
+    fn coloured(&self, source: &str, php: &HighlightConfiguration) -> Vec<(Range<usize>, Capture)> {
+        let Some(inner) = source.get(self.range.clone()) else {
+            return Vec::new();
+        };
+        let standalone = format!("{}{inner}{}", self.opening, self.closing);
+        let shift = self.opening.len();
+        highlight_ranges(php, &standalone)
+            .into_iter()
+            .filter(|(range, _)| range.start >= shift && range.end <= shift + inner.len())
+            .map(|(range, capture)| {
+                let start = self.range.start + range.start - shift;
+                (start..start + range.len(), capture)
+            })
+            .collect()
+    }
 }
 
 impl BladeScan {
@@ -33,8 +54,25 @@ impl BladeScan {
         scan
     }
 
+    /// Every coloured stretch of a Blade file in source order: the HTML around the Blade parts,
+    /// the parts the scan coloured itself, and the PHP inside them.
+    pub fn coloured(
+        &self,
+        source: &str,
+        html: &HighlightConfiguration,
+        php: &HighlightConfiguration,
+    ) -> Vec<(Range<usize>, Capture)> {
+        let mut ranges = highlight_ranges(html, &self.html_only(source));
+        ranges.extend(self.marks.iter().cloned());
+        for code in &self.php {
+            ranges.extend(code.coloured(source, php));
+        }
+        ranges.sort_by_key(|(range, _)| range.start);
+        ranges
+    }
+
     /// The source with Blade parts blanked out, byte for byte, so HTML spans keep their offsets.
-    pub fn html_only(&self, source: &str) -> String {
+    fn html_only(&self, source: &str) -> String {
         let mut bytes = source.as_bytes().to_vec();
         for range in &self.blade {
             for byte in bytes.get_mut(range.clone()).into_iter().flatten() {

@@ -6,12 +6,13 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use super::diff_display::{ChangeId, MoreContext};
+use super::display_options::Focus;
 use super::jump::{PaletteAction, PaletteGroup};
 use super::piece_labels::{LabelSwitch, PieceLabels};
 use super::rendered_view::{FileView, ViewSwitch};
 use super::review::Review;
+use crate::build::Build;
 use crate::file_path::FilePath;
-use crate::update::Build;
 
 /// One change of the screen as the page shows it: the changed lines with the unchanged lines around
 /// them, and what hangs under them.
@@ -95,36 +96,6 @@ impl PageChange {
 
     pub(super) fn is_in_view(&self, visible: &Range<usize>) -> bool {
         self.rows.start < visible.end && visible.start < self.rows.end
-    }
-}
-
-/// What has the focus: a changed hunk, or a file box shown rendered, which has no hunks but must
-/// keep the focus so the key that rendered it can switch it back.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Focus {
-    /// The `part`-th of the page changes that hold `id`. Lines shown that join the parts again
-    /// leave fewer parts; the focus goes to the last.
-    Change {
-        id: ChangeId,
-        part: usize,
-    },
-    RenderedFile(FilePath),
-}
-
-impl Focus {
-    /// The index of the change it is on among the page's changes.
-    pub(super) fn find_in(&self, changes: &[PageChange]) -> Option<usize> {
-        let holding: Vec<usize> = changes
-            .iter()
-            .enumerate()
-            .filter(|(_, change)| change.holds(self))
-            .map(|(index, _)| index)
-            .collect();
-        let part = match self {
-            Self::Change { part, .. } => *part,
-            Self::RenderedFile(_) => 0,
-        };
-        holding.get(part).or_else(|| holding.last()).copied()
     }
 }
 
@@ -366,4 +337,19 @@ impl Review {
             .focus_change(change.focus_target());
         change.first_row()
     }
+}
+
+/// The index of the change the focus is on among the page's changes.
+pub(super) fn index_of_focus(focus: &Focus, changes: &[PageChange]) -> Option<usize> {
+    let holding: Vec<usize> = changes
+        .iter()
+        .enumerate()
+        .filter(|(_, change)| change.holds(focus))
+        .map(|(index, _)| index)
+        .collect();
+    let part = match focus {
+        Focus::Change { part, .. } => *part,
+        Focus::RenderedFile(_) => 0,
+    };
+    holding.get(part).or_else(|| holding.last()).copied()
 }

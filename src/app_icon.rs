@@ -3,7 +3,7 @@
 use resvg::tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
 use sha2::{Digest, Sha256};
 
-use crate::update::Build;
+use crate::build::Build;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppIcon {

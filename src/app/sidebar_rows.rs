@@ -264,7 +264,7 @@ impl SidebarRows {
             }),
             reviews: Arc::new(SidebarReviews::of(review)),
             finish: SidebarFinish {
-                has_last_review: review.last_review().is_some(),
+                has_last_review: review.has_last_review(),
                 can_mark_done: review.can_mark_done(),
                 is_marked_done: review.is_marked_done(),
             },

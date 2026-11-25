@@ -16,6 +16,8 @@ use crate::timestamp::UtcTimestamp;
 use crate::tour::Tour;
 
 use super::ask::{Ask, AskStore};
+use super::carried::CarriedReads;
+use super::carried::MovedReview;
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
 use super::finding_decisions::{Fate, FindingDecisions};
 use super::finding_threads::{FindingThreads, NoQuestion, WhyAuthor, WhyReply};
@@ -23,11 +25,10 @@ use super::fix_requests::{FixReply, FixRequests, NoFixQuestion, NoFixRequest};
 use super::hand_offs::{AgentReplied, AgentReplyRefused, HandOffId, HandOffs};
 use super::kept_values::{KeptEntries, KeptSection};
 use super::local_threads::LocalThreads;
-use super::move_to_pr::MovedReview;
 use super::ports::Viewed;
-use super::review::{ReadSubject, StepId};
-use super::switch_to_guided::CarriedReads;
-use super::threads::ThreadId;
+use super::review_thread::ThreadId;
+use super::screen::ReadSubject;
+use crate::tour::StepId;
 
 fn no_finding_decisions(section: &KeptSection<FindingDecisions>) -> bool {
     section.skips_when(FindingDecisions::is_empty)
@@ -190,6 +191,16 @@ pub struct RepinRecord {
 }
 
 impl RepinRecord {
+    /// How many pieces at `to_head` are new or changed, of how many there are.
+    pub fn new_or_changed_of_all(&self) -> (usize, usize) {
+        let new_or_changed = self
+            .pieces
+            .values()
+            .filter(|status| matches!(status, RepinStatus::New | RepinStatus::Changed))
+            .count();
+        (new_or_changed, self.pieces.len())
+    }
+
     pub fn new(
         from_base: &Sha,
         from_head: &Sha,

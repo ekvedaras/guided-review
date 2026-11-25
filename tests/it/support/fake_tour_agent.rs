@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::ops::ControlFlow;
 use std::sync::Mutex;
 
+use guided_review::claude_cli::{review_agent_denied_tools, review_agent_tools};
 use guided_review::review_subject::ReviewSubject;
 use std::path::PathBuf;
 
@@ -422,10 +423,10 @@ impl TourAgentPort for FakeTourAgent {
         self.record(TourAgentCall::StartReview {
             name: start.name.clone(),
             subject: start.subject.clone(),
-            folder: start.folder.clone(),
+            folder: start.place.folder().to_path_buf(),
             first_task: start.first_task.clone(),
-            tools: start.tools.clone(),
-            denied_tools: start.denied_tools.clone(),
+            tools: review_agent_tools(&start.place, &start.findings, start.skill.as_deref()),
+            denied_tools: review_agent_denied_tools(),
         });
         let mut terminals = self.terminals.lock().unwrap();
         let terminal = TerminalId::new(format!("t{}", 100 + terminals.len()));

@@ -4,12 +4,13 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use guided_review::app_folders::Mover;
+use guided_review::build::Build;
 use guided_review::github::GitHub;
 use guided_review::platform::{EntryPlaced, Os, info_plist};
 use guided_review::update::{
-    Build, Cpu, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update, Version,
-    find_update,
+    Cpu, InTheWay, ReleaseAsset, ReleaseInstall, SkillLink, Target, Update, find_update,
 };
+use guided_review::version::Version;
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
@@ -233,11 +234,11 @@ fn while_there_is_a_release_install_only_it_moves_the_app_folders() {
     let home = Home::with_release_installed();
 
     assert_eq!(
-        home.install().folder_mover(&home.bin_link()),
+        Mover::of(&home.install(), &home.bin_link()),
         Mover::ThisBinary
     );
     assert_eq!(
-        home.install().folder_mover(&home.source_build()),
+        Mover::of(&home.install(), &home.source_build()),
         Mover::AnotherBinary
     );
 }
@@ -249,7 +250,7 @@ fn with_no_release_install_a_source_build_moves_the_app_folders() {
     };
 
     assert_eq!(
-        home.install().folder_mover(&home.source_build()),
+        Mover::of(&home.install(), &home.source_build()),
         Mover::ThisBinary
     );
 }

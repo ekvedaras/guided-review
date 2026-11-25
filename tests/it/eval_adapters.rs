@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use guided_review::claude_cli::{ClaudeEvalWriter, ClaudeTourJudge};
-use guided_review::config::Config;
 use guided_review::eval::{EvalWriter, JudgeInput, Rule, Score, TourJudge, WriterBrief};
+use guided_review::instructions::InstructionsKind;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::pull_request::PullRequestUrl;
 use tempfile::TempDir;
@@ -69,7 +69,7 @@ fn the_writer_runs_with_the_reviewers_summary_instructions_off() {
         &script,
         format!(
             "#!/bin/sh\necho \"${}\" > \"{}/off\"\ncat > /dev/null\necho '{{\"type\":\"result\",\"is_error\":false,\"result\":\"done\"}}'\n",
-            Config::SUMMARY_INSTRUCTIONS_OFF_ENV,
+            InstructionsKind::Summary.off_env(),
             dir.path().display()
         ),
     );

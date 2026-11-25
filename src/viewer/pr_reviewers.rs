@@ -2,8 +2,6 @@ use std::sync::Arc;
 
 use crate::pull_request::Sha;
 
-use super::finish_review::{ReviewOutcome, SubmittedReview};
-
 /// Someone GitHub lists among a PR's reviewers: a person, or a team asked to review.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reviewer {
@@ -83,6 +81,39 @@ impl Standing {
         self.whose == Whose::Viewers
     }
 
+    fn is_by(&self, reviewer: &Reviewer) -> bool {
+        self.reviewer.name() == reviewer.name()
+    }
+
+    fn status(&self) -> ReviewerStatus {
+        match &self.stance {
+            Stance::Reviewed { outcome, .. } => ReviewerStatus::of(*outcome),
+            Stance::Requested => ReviewerStatus::Waiting,
+        }
+    }
+
+    /// The sidebar's row for this reviewer; a review of a commit before `pr_head` is marked old.
+    pub(super) fn line(&self, pr_head: Option<&Sha>) -> ReviewerLine {
+        let age = match (&self.stance, pr_head) {
+            (Stance::Reviewed { commit, .. }, Some(head)) if head != commit => {
+                StanceAge::BeforeNewCommits
+            }
+            _ => StanceAge::Current,
+        };
+        ReviewerLine {
+            name: if self.is_viewer() {
+                "You".into()
+            } else {
+                Arc::clone(&self.reviewer.name)
+            },
+            avatar_url: self.reviewer.avatar_url.clone(),
+            kind: self.reviewer.kind,
+            status: self.status(),
+            age,
+            is_viewer: self.is_viewer(),
+        }
+    }
+
     /// The viewer first, then what blocks the PR, then what lets it through, then the rest.
     fn rank(&self) -> u8 {
         if self.is_viewer() {
@@ -134,9 +165,7 @@ impl ReviewersOnGitHub {
         let is_author = |reviewer: &Reviewer| self.author_login.as_deref() == Some(reviewer.name());
         let mut standings: Vec<Standing> = Vec::new();
         let is_listed = |standings: &[Standing], reviewer: &Reviewer| {
-            standings
-                .iter()
-                .any(|standing| standing.reviewer.name() == reviewer.name())
+            standings.iter().any(|standing| standing.is_by(reviewer))
         };
         for record in self.verdicts.iter().chain(&self.latest) {
             if is_author(&record.reviewer) || is_listed(&standings, &record.reviewer) {
@@ -210,10 +239,9 @@ impl YourReview {
         age: StanceAge,
         is_marked_done: bool,
     ) -> Option<Self> {
-        let status = match (standing.map(|standing| &standing.stance), last_sent) {
-            (Some(Stance::Reviewed { outcome, .. }), _) => ReviewerStatus::of(*outcome),
-            (Some(Stance::Requested), None) => ReviewerStatus::Waiting,
-            (_, Some(last)) => ReviewerStatus::of(last.outcome),
+        let status = match (standing.map(Standing::status), last_sent) {
+            (Some(ReviewerStatus::Waiting) | None, Some(last)) => ReviewerStatus::of(last.outcome),
+            (Some(status), _) => status,
             (None, None) => return None,
         };
         Some(Self {
@@ -290,30 +318,50 @@ pub struct ReviewerLine {
     pub is_viewer: bool,
 }
 
-impl ReviewerLine {
-    pub(super) fn of(standing: &Standing, pr_head: Option<&Sha>) -> Self {
-        let (status, age) = match &standing.stance {
-            Stance::Reviewed { outcome, commit } => {
-                let status = ReviewerStatus::of(*outcome);
-                let age = match pr_head {
-                    Some(head) if head != commit => StanceAge::BeforeNewCommits,
-                    _ => StanceAge::Current,
-                };
-                (status, age)
-            }
-            Stance::Requested => (ReviewerStatus::Waiting, StanceAge::Current),
-        };
-        Self {
-            name: if standing.is_viewer() {
-                "You".into()
-            } else {
-                Arc::clone(&standing.reviewer.name)
-            },
-            avatar_url: standing.reviewer.avatar_url.clone(),
-            kind: standing.reviewer.kind,
-            status,
-            age,
-            is_viewer: standing.is_viewer(),
+/// How a review that is on GitHub ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewOutcome {
+    Approved,
+    ChangesRequested,
+    Commented,
+    /// Someone took the review back; it no longer counts for or against the PR.
+    Dismissed,
+}
+
+impl SubmittedReview {
+    /// Too tall for the sidebar as it is, so it is shown clamped to `CLAMPED_BODY_LINES`.
+    pub fn body_is_long(&self) -> bool {
+        self.body.lines().count() > CLAMPED_BODY_LINES
+            || self.body.chars().count() > LONG_BODY_CHARS
+    }
+}
+
+impl ReviewOutcome {
+    /// From GitHub's `PullRequestReviewState`. A pending review is not sent, so it has no outcome.
+    pub fn from_github_state(state: &str) -> Option<Self> {
+        match state {
+            "APPROVED" => Some(Self::Approved),
+            "CHANGES_REQUESTED" => Some(Self::ChangesRequested),
+            "COMMENTED" => Some(Self::Commented),
+            "DISMISSED" => Some(Self::Dismissed),
+            _ => None,
         }
     }
+}
+
+pub const CLAMPED_BODY_LINES: usize = 4;
+
+/// About what a sidebar line holds times the clamped lines; a longer text wraps past them.
+const LONG_BODY_CHARS: usize = 200;
+
+/// The viewer's latest sent review of a PR, as GitHub holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmittedReview {
+    pub outcome: ReviewOutcome,
+    /// What the reviewer wrote with it; empty when nothing.
+    pub body: String,
+    /// GitHub's UTC time, like `2026-11-05T13:35:33Z`.
+    pub submitted_at: String,
+    /// The PR's head when the review was sent.
+    pub commit: Sha,
 }

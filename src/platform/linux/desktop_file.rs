@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 
 use crate::app_icon::{AppIcon, Look};
+use crate::build::Build;
 use crate::platform::desktop_entry::{APP_ID, DesktopEntry, EntryPlaced, put_file};
-use crate::update::Build;
 
 /// Linux launchers name no app they start, so the desktop file's Exec sets this to the app id.
 const LAUNCHED_APP: &str = "GUIDED_REVIEW_LAUNCHED_APP";

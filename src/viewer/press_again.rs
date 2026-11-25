@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::shortcuts::Command;
+use crate::keys::Command;
 
 /// How soon the second press must follow the first to go ahead.
 pub const CONFIRM_WITHIN: Duration = Duration::from_secs(10);

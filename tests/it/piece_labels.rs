@@ -2,10 +2,10 @@
 //! or shown per file, and the keys `R` and `L` that act on the focused change's file.
 
 use crate::support::{FixtureRepo, file_path};
+use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
-use guided_review::update::Build;
 use guided_review::viewer::{
     Chord, Command, Effect, FileToggle, FileView, Intent, KeyScope, PageRow, PaletteAction,
     PieceLabels, Review, ReviewStateFile, ShortcutGroup, WindowMoment,

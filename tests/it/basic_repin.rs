@@ -1,13 +1,14 @@
 use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::{FakeGitHub as ServedGitHub, FixtureRepo, GuidedReview, Run, file_path};
 use guided_review::local_git::LocalGit;
+use guided_review::opened_subject::TourRepinner;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::repin::RepinStatus;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
-    GuidedTourProgress, PageRow, ReadSubject, RefreshBrief, Review, ReviewStateFile, TourRepinner,
-    TreeRowKind, repin_tour,
+    GuidedTourProgress, PageRow, ReadSubject, RefreshBrief, Review, ReviewStateFile, TreeRowKind,
+    repin_tour,
 };
 use serde_json::Value;
 use std::path::PathBuf;

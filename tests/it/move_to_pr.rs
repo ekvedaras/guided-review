@@ -799,6 +799,10 @@ impl Feature {
                     .context("the fixture has a clone")?;
                 Ok(Box::new(clone))
             }),
+            drop_local_review: std::sync::Arc::new(|change_set, folders| {
+                guided_review::opened_subject::OpenedChangeSet::new(change_set, folders)
+                    .drop_review()
+            }),
         }
     }
 
@@ -1181,7 +1185,7 @@ fn update_and_not_now_are_refused_while_a_move_runs() {
     local.review.decline_the_move();
 
     assert!(move_offer(&local.review).is_some(), "the offer stays");
-    assert!(local.review.jobs().is_running(ReplacingJob::MoveToPr));
+    assert!(local.review.job_is_running(ReplacingJob::MoveToPr));
 }
 
 #[test]

@@ -2,6 +2,7 @@
 //! dropped. The review decides what each outcome makes due next; the app only runs each `Work`
 //! with the ports and lands its outcome, and tests drive the same loop in line.
 
+use crate::viewer::github_outage::Affected;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -11,10 +12,10 @@ use crate::local_work_tree::OnDisk;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
-use super::comments::{CommentOutcome, CommentRequest};
+use super::comment_send::{CommentOutcome, CommentRequest};
 use super::fix_requests::{FixDeliveryOutcome, FixDeliveryRequest};
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
-use super::local_threads::ThreadHome;
+use super::local_thread_store::ThreadHome;
 use super::merging::MergeChange;
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{GitHubError, GitHubPort, PullOfBranch};
@@ -23,8 +24,8 @@ use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::ReactionChange;
 use super::related_issues::{IssueDetails, PullRequestIssues};
+use super::review_thread::{ReviewThread, ThreadId};
 use super::reviewing_mark::REVIEWING_MARK;
-use super::threads::{ReviewThread, ThreadId};
 use super::tour_agent::{TourAgentState, TourAgents};
 use super::viewed_sync::{SyncOutcome, SyncRequest};
 
@@ -444,4 +445,19 @@ pub enum AfterLanding {
     /// A look at herdr after the link was off: what the sidebar says now, and when it is not off
     /// any more, the tour agent to follow.
     TourAgentIs(TourAgentState),
+}
+
+impl Affected {
+    /// The work that reads it again.
+    pub(super) fn retried_by(self) -> WorkKind {
+        match self {
+            Self::NewCommits => WorkKind::CheckPrHead,
+            Self::Description => WorkKind::PullPrDescription,
+            Self::Comments => WorkKind::PullThreads,
+            Self::ViewedMarks => WorkKind::SyncViewed,
+            Self::PendingReview | Self::Authorship => WorkKind::PullPendingReview,
+            Self::LastReview => WorkKind::PullReviews,
+            Self::PrStatus => WorkKind::PullPrStatus,
+        }
+    }
 }

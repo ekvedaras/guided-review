@@ -8,7 +8,7 @@ use std::sync::Arc;
 use guided_review::platform::{
     DesktopEntry, EntryPlaced, Os, Relaunch, write_desktop_entry_templates,
 };
-use guided_review::update::Version;
+use guided_review::version::Version;
 use tempfile::TempDir;
 
 const OUR_APP: &str = "io.github.ekvedaras.guided-review";

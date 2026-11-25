@@ -36,7 +36,7 @@ impl Keymap {
         let planned = |action: SendAction, role: SendRole, keyed_as: SendAction| PlannedSend {
             action,
             role,
-            chord: self.first_chord(keyed_as.command()),
+            chord: self.first_chord(Command::from(keyed_as)),
         };
         let mut plan = vec![planned(primary, SendRole::Primary, choice.primary())];
         if secondary != primary {
@@ -131,8 +131,14 @@ impl KeyChanges {
         self.send_choice
     }
 
-    pub fn set_send_choice(&mut self, choice: SendChoice) {
-        self.send_choice = choice;
+    /// Picking the secondary's action as primary swaps the two.
+    pub fn choose_primary(&mut self, action: SendAction) {
+        self.send_choice = self.send_choice.with_primary(action);
+    }
+
+    /// Picking the primary's action as secondary swaps the two.
+    pub fn choose_secondary(&mut self, action: SendAction) {
+        self.send_choice = self.send_choice.with_secondary(action);
     }
 
     /// The keys the command has while no entry names it.

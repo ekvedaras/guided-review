@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::Review;
+use super::ReviewCore;
 use crate::viewer::ai_review::AiReview;
 use crate::viewer::ai_review_run::AiReviewRun;
 use crate::viewer::fix_requests::FixState;
@@ -8,7 +8,7 @@ use crate::viewer::guided_tour::GuidedTourProgress;
 use crate::viewer::pr_reviewers::StanceAge;
 use crate::viewer::stations::{Station, StationHealth, StationKind, Stations, waited};
 use crate::viewer::tour_agent::{AgentStatus, TourAgentState};
-use crate::viewer::tour_writing::WritingStage;
+use crate::viewer::tour_writing::WritingPhase;
 
 use StationHealth::{Done, Failed, NotStarted, Waiting, Working};
 
@@ -24,7 +24,7 @@ fn counted(count: usize, one: &str, many: &str) -> String {
     }
 }
 
-impl Review {
+impl ReviewCore {
     /// How each station of the review stands, for the sidebar's stepper.
     pub fn stations(&self, tour_agent: &TourAgentState, now: SystemTime) -> Stations {
         let mut stations = vec![
@@ -60,14 +60,14 @@ impl Review {
         if self.is_basic() {
             return match &self.guided_tour {
                 GuidedTourProgress::NotAsked => station(NotStarted, "not written"),
-                GuidedTourProgress::Writing(writing) => match (&writing.stage, writing.status) {
-                    (_, Some(AgentStatus::WaitingForYou)) => {
-                        station(Waiting, "agent waits for you")
-                    }
-                    (WritingStage::Starting, _) if writing.latest_step().is_none() => {
+                GuidedTourProgress::Writing(writing) => match writing.phase() {
+                    WritingPhase::WaitsForYou => station(Waiting, "agent waits for you"),
+                    WritingPhase::Starting if writing.latest_step().is_none() => {
                         station(Working, "starting")
                     }
-                    _ => station(Working, "being written"),
+                    WritingPhase::Starting | WritingPhase::Writing => {
+                        station(Working, "being written")
+                    }
                 },
                 GuidedTourProgress::Ready => station(Waiting, "ready to switch to"),
                 GuidedTourProgress::Failed(_) => station(Failed, "not written"),

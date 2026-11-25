@@ -4,8 +4,8 @@ use crate::viewer::guided_tour::{
     GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage,
 };
 use crate::viewer::jump::PaletteAction;
-use crate::viewer::tour_agent::{AgentStatus, TourAgentState};
-use crate::viewer::tour_writing::{TourWriting, WritingStage};
+use crate::viewer::tour_agent::TourAgentState;
+use crate::viewer::tour_writing::{TourWriting, WritingPhase};
 
 impl ReviewCore {
     pub fn guided_tour_progress(&self) -> &GuidedTourProgress {
@@ -18,7 +18,8 @@ impl ReviewCore {
         self.guided_tour = progress;
     }
 
-    /// The switch from a basic tour carried read ticks to this many steps; the summary says so.
+    /// A snapshot scene's count of steps the switch from a basic tour carried read ticks to.
+    #[cfg(feature = "snapshots")]
     pub fn steps_carried_read_ticks_are(&mut self, count: usize) {
         self.steps_started_read = Some(count);
     }
@@ -87,14 +88,12 @@ impl ReviewCore {
         match &self.guided_tour {
             GuidedTourProgress::NotAsked | GuidedTourProgress::Ready => None,
             GuidedTourProgress::Writing(writing) => Some(GuidedTourStage {
-                line: match (&writing.stage, writing.status) {
-                    (_, Some(AgentStatus::WaitingForYou)) => {
+                line: match writing.phase() {
+                    WritingPhase::WaitsForYou => {
                         "Guided tour: the tour agent waits for you in its terminal"
                     }
-                    (WritingStage::Starting, _) => "Guided tour: asking the tour agent to write it",
-                    (WritingStage::Writing | WritingStage::Failed(_), _) => {
-                        "Guided tour: the tour agent is writing it"
-                    }
+                    WritingPhase::Starting => "Guided tour: asking the tour agent to write it",
+                    WritingPhase::Writing => "Guided tour: the tour agent is writing it",
                 }
                 .to_owned(),
                 activity: writing.latest_step(),

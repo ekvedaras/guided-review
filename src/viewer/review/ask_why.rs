@@ -7,17 +7,14 @@ use std::time::Instant;
 use super::finding_outcome::FindingRefusal;
 use super::{Review, ReviewCore};
 use crate::config::AskSettings;
-use crate::findings::{Anchor, Finding, FindingId};
+use crate::findings::{Finding, FindingId};
 use crate::prompt_safety::quoted;
 use crate::viewer::ai_review_run::ReviewAgentLife;
-use crate::viewer::ask::{Place, ShownOn};
 use crate::viewer::ask_desk::AskProcesses;
 use crate::viewer::ask_target::AskTarget;
-use crate::viewer::finding_placement::FindingHome;
 use crate::viewer::finding_threads::{
     FindingThread, WhyDeliveryOutcome, WhyDeliveryRequest, WhyReply, WhyState,
 };
-use crate::viewer::step_page::{LineLocation, Side};
 use crate::viewer::tour_agent::AgentStatus;
 
 /// Where a question about a finding went.
@@ -46,18 +43,11 @@ impl Review {
             "" => DEFAULT_WHY_QUESTION,
             typed => typed,
         };
-        if !self.review_agent.is_alive() {
+        if !self.review_agent_is_alive() {
             self.ask_in_panel(&finding, question, settings, now, processes);
             return Ok(WhyAsked::InAskPanel);
         }
-        if self.state.finding_threads().is_asking(id) {
-            return Err(FindingRefusal::BeingAsked);
-        }
-        self.state
-            .record(|state| state.finding_threads_mut().ask(finding, question))
-            .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
-        self.place_threads();
-        Ok(WhyAsked::ToReviewAgent)
+        self.ask_review_agent_why(finding, question)
     }
 
     /// A fresh Ask on the finding's place, told the finding, takes the question.
@@ -73,7 +63,7 @@ impl Review {
         let label = place
             .lines_label()
             .unwrap_or_else(|| finding.anchor.to_string());
-        let clone = self.ask_desk.clone_folder().cloned();
+        let clone = self.asks().clone_folder().cloned();
         let mut target = self.ask_target(place, label, clone, settings);
         if let AskTarget::Ready { context, .. } = &mut target {
             write!(
@@ -95,6 +85,26 @@ impl Review {
 }
 
 impl ReviewCore {
+    fn review_agent_is_alive(&self) -> bool {
+        self.review_agent.is_alive()
+    }
+
+    /// The question goes onto the finding's thread, for the review agent that reported it.
+    fn ask_review_agent_why(
+        &mut self,
+        finding: Finding,
+        question: &str,
+    ) -> Result<WhyAsked, FindingRefusal> {
+        if self.state.finding_threads().is_asking(&finding.id) {
+            return Err(FindingRefusal::BeingAsked);
+        }
+        self.state
+            .record(|state| state.finding_threads_mut().ask(finding, question))
+            .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
+        self.place_threads();
+        Ok(WhyAsked::ToReviewAgent)
+    }
+
     /// The questions that wait, as one message, once the review agent is idle.
     pub fn why_delivery(&self) -> Option<WhyDeliveryRequest> {
         if self.review_agent != ReviewAgentLife::Alive(Some(AgentStatus::Idle)) {
@@ -118,52 +128,6 @@ impl ReviewCore {
         self.state.record(|state| state.why_replied(id, reply))??;
         self.place_threads();
         Ok(())
-    }
-
-    /// The lines of a finding on the screen that shows it; its step or file for a finding on a file; the
-    /// whole tour for one on the whole change.
-    pub(super) fn ask_place_of_finding(&self, finding: &Finding) -> Place {
-        let home = self.findings.home_of(&finding.id);
-        let shown_on = match home {
-            Some(FindingHome::Step(step)) => Some(ShownOn::Step { step: step.clone() }),
-            Some(FindingHome::SafetyNet) => Some(ShownOn::SafetyNet),
-            Some(FindingHome::File(path)) => Some(ShownOn::File { path: path.clone() }),
-            Some(FindingHome::Change) | None => None,
-        };
-        match (&finding.anchor, shown_on) {
-            (Anchor::Lines { file, side, lines }, Some(shown_on)) => {
-                let at = |line| LineLocation {
-                    path: file.clone(),
-                    side: Side::from(*side),
-                    line,
-                };
-                let (start, end) = (at(lines.start), at(lines.end));
-                let pieces = self
-                    .pieces_shown_on(shown_on.clone())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|piece| {
-                        piece.lines().any(|line| {
-                            line.location.path == start.path
-                                && line.location.side == start.side
-                                && (start.line..=end.line).contains(&line.location.line)
-                        })
-                    })
-                    .map(|piece| piece.id)
-                    .collect();
-                Place::Lines {
-                    shown_on,
-                    start,
-                    end,
-                    pieces,
-                }
-            }
-            (Anchor::File { .. }, Some(ShownOn::Step { step })) => Place::Step { step },
-            (Anchor::File { file }, Some(ShownOn::File { .. })) => {
-                Place::File { path: file.clone() }
-            }
-            _ => Place::Tour,
-        }
     }
 
     pub fn finding_thread(&self, id: &FindingId) -> Option<&FindingThread> {

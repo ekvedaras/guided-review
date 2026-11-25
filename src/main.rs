@@ -20,7 +20,6 @@ use guided_review::github::GitHub;
 use guided_review::instructions::SummaryInstructions;
 use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject};
 use guided_review::outline::Outline;
-use guided_review::pieces;
 use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_brief::ReviewBrief;
@@ -30,7 +29,8 @@ use guided_review::test_pairing::SubjectCandidates;
 use guided_review::timestamp::UtcTimestamp;
 use guided_review::tour::{GuidedTour, StepId, Tour, ToursOnDisk};
 use guided_review::tour_check;
-use guided_review::update::{AppVersion, ReleaseInstall, Version};
+use guided_review::update::{AppVersion, ReleaseInstall};
+use guided_review::version::Version;
 use guided_review::viewer::CheckoutPort;
 use guided_review::viewer::FixReply;
 use guided_review::viewer::{RefreshBrief, ReviewStateFile};
@@ -381,7 +381,7 @@ fn check_findings(subject: &ReviewSubject) -> anyhow::Result<()> {
     let mut findings = FindingsFile::load_of(&path, subject)?;
 
     let code = opened.code_to_read()?;
-    if findings.pin.head.is_empty() {
+    if findings.pin.needs_pinning() {
         // The agent's checkout, in its own folder or the worktree it made, stands at the reviewed head,
         // which a PR may have moved past since.
         let agent_head = std::env::current_dir()
@@ -392,11 +392,11 @@ fn check_findings(subject: &ReviewSubject) -> anyhow::Result<()> {
             &code.merge_base()?,
             agent_head.as_ref().unwrap_or(&code.tips.head),
         );
-    } else if findings.pin.head != code.tips.head {
+    } else if !findings.pin.is_at_head(&code.tips.head) {
         println!("warning: {}", subject.moved_on());
     }
     findings.save(&path)?;
-    let files = pieces::cut(code.source.as_ref(), &findings.pin.base, &findings.pin.head)?;
+    let files = findings.pin.cut(code.source.as_ref())?;
 
     let report = findings_check::check(&findings, &files);
     print!("{report}");
@@ -414,19 +414,19 @@ fn check(subject: &ReviewSubject) -> anyhow::Result<()> {
     let mut tour = GuidedTour::load_of(&tour_path, subject)?;
 
     let code = opened.code_to_read()?;
-    if tour.pin.head.is_empty() {
+    if tour.pin.needs_pinning() {
         tour.pin
             .pin_to(subject, &code.merge_base()?, &code.tips.head);
     } else {
-        if tour.pin.pr.is_empty() && tour.pin.local.is_none() {
+        if !tour.pin.names_a_subject() {
             tour.pin.name_subject(subject);
         }
-        if tour.pin.head != code.tips.head {
+        if !tour.pin.is_at_head(&code.tips.head) {
             println!("warning: {}; run `guided-review repin`", subject.moved_on());
         }
     }
     tour.save(&tour_path)?;
-    let files = pieces::cut(code.source.as_ref(), &tour.pin.base, &tour.pin.head)?;
+    let files = tour.pin.cut(code.source.as_ref())?;
 
     let report = tour_check::check(&tour, &files, &summary_instructions()?);
     print!("{report}");
@@ -451,7 +451,7 @@ fn refresh(subject: &ReviewSubject, done: bool) -> anyhow::Result<()> {
     }
     let tour = GuidedTour::load_of(&Tour::path_for(&folders, subject), subject)?;
     let code = opened(subject)?.code_at(&tour.pin)?;
-    let files = pieces::cut(code.source.as_ref(), &tour.pin.base, &tour.pin.head)?;
+    let files = tour.pin.cut(code.source.as_ref())?;
     print!(
         "{}",
         RefreshBrief::of(&tour, &files, state_file.load()?.last_repin())

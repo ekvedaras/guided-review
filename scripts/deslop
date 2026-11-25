@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# deslop-please: architectural lints (module cycles, tangles, field leaks, shallow modules, wide directories, long files).
+# Usage: scripts/deslop                  check this machine's target against its allow list
+#        scripts/deslop --update-allow   rewrite every allow list from the code as it is now
+# The allow lists in .deslop-please/ hold the debt that existed on 2026-11-25, one file per target triple,
+# since code behind a `cfg` differs per OS (docs/wiki/deslop-please.md). New errors fail; fixed ones never do.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+version=0.1.4
+
+if [ -x "$HOME/.cargo/bin/cargo" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+command -v cargo >/dev/null 2>&1 || { echo "cargo not found" >&2; exit 127; }
+
+if ! cargo install --list | grep -qx "deslop-please v$version:"; then
+    cargo install "deslop-please@$version" --locked
+fi
+
+# --all-features: the configuration the tests build, which also holds the snapshots code.
+lint() {
+    local target=$1
+    shift
+    deslop-please --all-features --target "$target" "$@"
+}
+
+case "${1:-}" in
+    "")
+        host=$(rustc -vV | sed -n 's/^host: //p')
+        allow=".deslop-please/$host.allow"
+        if [ ! -f "$allow" ]; then
+            echo "no allow list for $host: create it with scripts/deslop --update-allow on a machine that builds for it" >&2
+            exit 1
+        fi
+        lint "$host" --allow "$allow"
+        ;;
+    --update-allow)
+        for allow in .deslop-please/*.allow; do
+            lint "$(basename "$allow" .allow)" --update-allow "$allow"
+        done
+        ;;
+    *)
+        echo "usage: scripts/deslop [--update-allow]" >&2
+        exit 2
+        ;;
+esac

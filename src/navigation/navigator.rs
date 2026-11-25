@@ -2,13 +2,15 @@
 //! card ask it and know no adapter; the by-name lookup (`Lookups`) is its first adapter.
 
 use std::fmt;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::code_source::CodeSource;
 use crate::codebase::Codebase;
+use crate::file_path::FilePath;
 use crate::pull_request::Sha;
 
-use super::{Column, Lookup, Place, Word};
+use super::{Column, Definition, Place, Usage, Word};
 
 /// A name at a place: the line and column of its first letter in the file at `sha`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,4 +150,38 @@ pub trait CodeNavigator: Send + Sync {
         request: &NavigationRequest,
         waiting: &dyn Fn(Waiting),
     ) -> anyhow::Result<Answer>;
+}
+
+/// Which files a lookup can see.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    WholeRepo,
+    /// A local (a variable or parameter) is looked up in the function that holds it, so no other
+    /// file is searched.
+    EnclosingFunction,
+    /// The code is read from GitHub, so only the review's changed files are searched.
+    ChangedFiles,
+}
+
+/// Where a word is defined and used at a commit, definitions best match first.
+#[derive(Debug, Clone)]
+pub struct Lookup {
+    pub word: Word,
+    pub definitions: Vec<Definition>,
+    /// By file, then line.
+    pub usages: Arc<[Usage]>,
+    pub reach: Reach,
+    /// More files hold the word than were parsed, so definitions and usages may be missing.
+    pub cut_short: bool,
+    /// Files a language server named that are not in the repo's git: where each is on disk.
+    pub on_disk_files: Arc<[(FilePath, std::path::PathBuf)]>,
+}
+
+impl Lookup {
+    /// Where a place's file is on disk when git does not hold it.
+    pub fn on_disk(&self, path: &FilePath) -> Option<&Path> {
+        self.on_disk_files
+            .iter()
+            .find_map(|(file, disk)| (file == path).then_some(disk.as_path()))
+    }
 }

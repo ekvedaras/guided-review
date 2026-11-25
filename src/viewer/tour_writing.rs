@@ -13,6 +13,14 @@ pub struct TourWriting {
     has_worked: bool,
 }
 
+/// Where a writing stands while it may still give a tour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WritingPhase {
+    WaitsForYou,
+    Starting,
+    Writing,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WritingStage {
     Starting,
@@ -34,6 +42,52 @@ impl TourWriting {
 
     pub fn has_failed(&self) -> bool {
         matches!(self.stage, WritingStage::Failed(_))
+    }
+
+    /// Why it ended without a tour; `None` while it may still write one.
+    pub fn failure(&self) -> Option<&str> {
+        match &self.stage {
+            WritingStage::Failed(reason) => Some(reason),
+            WritingStage::Starting | WritingStage::Writing => None,
+        }
+    }
+
+    /// Where a writing that has not failed stands, for the lines that say so. The agent waiting
+    /// for the reviewer comes first, whatever its stage.
+    pub fn phase(&self) -> WritingPhase {
+        match (&self.stage, self.status) {
+            (_, Some(AgentStatus::WaitingForYou)) => WritingPhase::WaitsForYou,
+            (WritingStage::Starting, _) => WritingPhase::Starting,
+            (WritingStage::Writing | WritingStage::Failed(_), _) => WritingPhase::Writing,
+        }
+    }
+
+    /// No agent has taken the task yet, and the writing has not failed.
+    pub fn waits_for_an_agent(&self) -> bool {
+        self.terminal.is_none() && !self.has_failed()
+    }
+
+    pub fn runs_in(&self, terminal: &TerminalId) -> bool {
+        self.terminal.as_ref() == Some(terminal)
+    }
+
+    /// What the loading screen says of the agent.
+    pub fn status_line(&self) -> String {
+        let Some(terminal) = &self.terminal else {
+            return "Starting a tour agent in herdr...".to_owned();
+        };
+        match self.status {
+            None | Some(AgentStatus::Unreported) => format!("Tour agent {terminal}: starting"),
+            Some(AgentStatus::WaitingForYou) => format!(
+                "Tour agent {terminal} waits for you in its terminal: show the agent to answer it"
+            ),
+            Some(status) => format!("Tour agent {terminal}: {status}"),
+        }
+    }
+
+    /// The agent's last screen lines, top first.
+    pub fn last_lines(&self) -> impl Iterator<Item = &str> {
+        self.screen.iter().map(String::as_str)
     }
 
     /// The tour was written, but opening it failed.

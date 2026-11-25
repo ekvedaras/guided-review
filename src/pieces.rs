@@ -16,47 +16,7 @@ use crate::pull_request::Sha;
 use crate::symbols::{Slot, Symbol, Symbols};
 
 pub use crate::piece_id::PieceId;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PieceKind {
-    Class,
-    Interface,
-    Trait,
-    Enum,
-    TypeAlias,
-    Const,
-    Component,
-    Test,
-    Method,
-    Function,
-    Imports,
-    Top,
-    File,
-    Hunk,
-    Image,
-}
-
-impl fmt::Display for PieceKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Class => "class",
-            Self::Interface => "interface",
-            Self::Trait => "trait",
-            Self::Enum => "enum",
-            Self::TypeAlias => "type",
-            Self::Const => "const",
-            Self::Component => "component",
-            Self::Test => "test",
-            Self::Method => "method",
-            Self::Function => "function",
-            Self::Imports => "imports",
-            Self::Top => "top",
-            Self::File => "file",
-            Self::Hunk => "hunk",
-            Self::Image => "image",
-        })
-    }
-}
+pub use crate::piece_kind::PieceKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PieceStatus {
@@ -395,7 +355,7 @@ impl<'a> CutContext<'a> {
                 .push(line);
         }
         for line in &diff.added {
-            let slot = pairing.head.slot_at(line.number.into());
+            let slot = pairing.head_slot_of_added_line(line.number.into());
             SymbolChange::entry_for(&mut changes, self.path, slot)
                 .added
                 .push(line);
@@ -434,6 +394,29 @@ impl<'a> SymbolPairing<'a> {
             }
             other => other,
         }
+    }
+
+    fn head_slot_of_added_line(&self, head_line: usize) -> Slot {
+        self.head.slot_at(head_line)
+    }
+
+    /// The symbol a slot pair names at base and at head, `None` on a side that lacks it.
+    fn symbols_in(&self, slots: &SlotPair) -> (Option<&'a Symbol>, Option<&'a Symbol>) {
+        (
+            symbol_in(self.base, &slots.base),
+            symbol_in(self.head, &slots.head),
+        )
+    }
+
+    fn tokens_in(&self, slots: &SlotPair) -> (Vec<&'a str>, Vec<&'a str>) {
+        (
+            self.base.tokens_in(&slots.base),
+            self.head.tokens_in(&slots.head),
+        )
+    }
+
+    fn has_same_text_in(&self, slots: &SlotPair) -> bool {
+        self.base.text_in(&slots.base) == self.head.text_in(&slots.head)
     }
 
     fn slots_of(&self, head_slot: &Slot) -> SlotPair {
@@ -490,14 +473,12 @@ fn symbol_piece(
     file_status: PieceStatus,
 ) -> Option<(usize, Piece)> {
     let slots = pairing.slots_of(&change.slot);
-    let in_base = symbol_in(pairing.base, &slots.base);
-    let in_head = symbol_in(pairing.head, &slots.head);
+    let (in_base, in_head) = pairing.symbols_in(&slots);
     let (kind, status) = kind_and_status(&change.slot, in_base, in_head, file_status)?;
     let position = in_head
         .or(in_base)
         .map_or_else(|| change.first_line(), |symbol| symbol.first_line);
-    let base_tokens = pairing.base.tokens_in(&slots.base);
-    let head_tokens = pairing.head.tokens_in(&slots.head);
+    let (base_tokens, head_tokens) = pairing.tokens_in(&slots);
     let mark = mark_for(change, &slots, pairing, base_tokens == head_tokens);
     let moved_body = match (&change.slot, status) {
         (Slot::Symbol(_), PieceStatus::Added) => Some(head_tokens.join(TOKEN_SEPARATOR)),
@@ -542,7 +523,7 @@ fn mark_for(
     }
     let moved = matches!(change.slot, Slot::Symbol(_))
         && change.moves_code()
-        && pairing.base.text_in(&slots.base) == pairing.head.text_in(&slots.head);
+        && pairing.has_same_text_in(slots);
     Some(if moved {
         PieceMark::Moved
     } else {

@@ -18,11 +18,11 @@ fn a_local_review_is_opted_in_as_the_repo_of_its_origin_which_its_pr_reviews_sha
     let pull_request: PullRequestUrl = "https://github.com/acme/shop/pull/7".parse().unwrap();
 
     assert_eq!(
-        local.codebase(),
-        ReviewSubject::from(pull_request).codebase()
+        Codebase::of(&local),
+        Codebase::of(&ReviewSubject::from(pull_request))
     );
     assert_eq!(
-        local.codebase(),
+        Codebase::of(&local),
         Codebase::GitHub(RepoName::new("acme", "shop"))
     );
 }
@@ -52,13 +52,13 @@ fn a_folder_with_no_github_origin_is_opted_in_by_its_folder() {
     std::fs::create_dir(here.path().join("shop")).unwrap();
     std::fs::create_dir(there.path().join("shop")).unwrap();
 
-    let here_key = local_in(&here.path().join("shop"), None).codebase();
-    let there_key = local_in(&there.path().join("shop"), None).codebase();
+    let here_key = Codebase::of(&local_in(&here.path().join("shop"), None));
+    let there_key = Codebase::of(&local_in(&there.path().join("shop"), None));
 
     assert!(matches!(here_key, Codebase::Folder(_)), "{here_key}");
     assert_ne!(here_key, there_key);
     assert_eq!(
         here_key,
-        local_in(&here.path().join("shop"), None).codebase()
+        Codebase::of(&local_in(&here.path().join("shop"), None))
     );
 }

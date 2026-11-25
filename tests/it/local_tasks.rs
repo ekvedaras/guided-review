@@ -7,13 +7,13 @@ use crate::support::fake_ports::{FakeGitHub, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use crate::support::{FakeGitHub as ServedGitHub, FixtureRepo, GuidedReview, Run, file_path};
+use guided_review::build::Build;
 use guided_review::findings::{Finding, FindingsFile};
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
-use guided_review::update::Build;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, Audience, CommentGesture, CommentPlace, CommentProblem,
     CommentRefusal, CommentResult, Effect, FinishRefusal, HandOffButton, HandOffState,

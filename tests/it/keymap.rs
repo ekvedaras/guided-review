@@ -490,8 +490,11 @@ fn no_choice_of_primary_and_secondary_gives_two_send_actions_one_key() {
 
             assert_eq!(chords.len(), count, "{config}");
             assert_eq!(count, 5, "{config}");
-            assert_eq!(keys(&keymap, primary.command()), ["primary-enter"]);
-            assert_eq!(keys(&keymap, secondary.command()), ["primary-shift-enter"]);
+            assert_eq!(keys(&keymap, Command::from(primary)), ["primary-enter"]);
+            assert_eq!(
+                keys(&keymap, Command::from(secondary)),
+                ["primary-shift-enter"]
+            );
         }
     }
 }

@@ -1,13 +1,15 @@
 use std::time::Instant;
 
 use super::ReviewCore;
+use crate::merge_method::MergeMethod;
 use crate::viewer::github_outage::Affected;
-use crate::viewer::merging::{MergeChange, MergeMethod};
+use crate::viewer::github_outage::Read;
+use crate::viewer::merging::MergeChange;
 use crate::viewer::ports::GitHubError;
 use crate::viewer::pr_controls::PrControls;
 use crate::viewer::pr_status::{CHECKS_RECHECK, Checks, PrStatus, Readiness};
 use crate::viewer::press_again::PressStep;
-use crate::viewer::problems::{Problem, ProblemKind, Read};
+use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::work_agenda::WorkKind;
 
 impl ReviewCore {

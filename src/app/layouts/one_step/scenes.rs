@@ -26,7 +26,9 @@ use crate::line_number::LineNumber;
 use crate::navigation::{Definition, DefinitionKind, Lookup, Place, Reach, Usage};
 use crate::pull_request::RepoName;
 use crate::review_subject::{BranchName, ReviewSubject};
-use crate::update::{Build, InTheWay, ReleaseAsset, Target, Update, UpdateOffer, Version};
+use crate::update::running_build;
+use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer};
+use crate::version::Version;
 use crate::viewer::{
     AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
     HoveredName, LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability,
@@ -843,7 +845,7 @@ impl OneStepLayout {
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
             Scene::JumpPalette => {
-                let groups = self.session.read(cx).review().palette("", Build::running());
+                let groups = self.session.read(cx).review().palette("", running_build());
                 self.jump
                     .update(cx, |palette, cx| palette.open(groups, window, cx));
             }
@@ -1239,7 +1241,7 @@ impl OneStepLayout {
                     .session
                     .read(cx)
                     .review()
-                    .palette(query, Build::running());
+                    .palette(query, running_build());
                 self.jump.update(cx, |palette, cx| {
                     palette.open(Vec::new(), window, cx);
                     palette.stage_query(query, groups);

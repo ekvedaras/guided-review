@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crate::pr_status::{PR, Pull};
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, blocked_merging};
 use crate::support::work::drive_without_agents;
-use guided_review::update::Build;
+use guided_review::build::Build;
 use guided_review::viewer::{
     AutoMerge, Checks, Command, Effect, Intent, MergeChange, MergeMethod, MergeMethods, MergeOffer,
     MergeRefusal, Mergeability, Merging, OpenPrStatus, PaletteAction, PrStatus, PressStep, Problem,

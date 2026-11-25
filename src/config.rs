@@ -9,11 +9,11 @@ use crate::codebase::Codebase;
 use crate::home::expand_home;
 use crate::ide::IdeTemplate;
 use crate::instructions::{Agent, Instructions, InstructionsChoice, InstructionsKind};
+use crate::keys::{KeyChanges, KeyProblem, Keymap, ResolvedKeymap, SendChoice, WrittenKeys};
+use crate::merge_method::MergeMethod;
+use crate::more_lines::MoreLines;
 use crate::navigation::ServerAnswer;
 use crate::pull_request::RepoName;
-use crate::viewer::{
-    KeyChanges, KeyProblem, Keymap, MergeMethod, MoreLines, ResolvedKeymap, SendChoice, WrittenKeys,
-};
 
 /// `config.toml` in the config folder.
 #[derive(Default, Deserialize)]
@@ -163,16 +163,7 @@ impl AskEffortChoice {
     }
 }
 
-impl AskSettings {
-    pub fn from_config_text(text: &str) -> anyhow::Result<Self> {
-        Ok(Config::from_text(text)?.ask_settings())
-    }
-}
-
 impl Config {
-    pub const SUMMARY_INSTRUCTIONS_OFF_ENV: &'static str = "GUIDED_REVIEW_SUMMARY_INSTRUCTIONS_OFF";
-    pub const REVIEW_INSTRUCTIONS_OFF_ENV: &'static str = "GUIDED_REVIEW_REVIEW_INSTRUCTIONS_OFF";
-
     pub fn from_text(text: &str) -> anyhow::Result<Self> {
         Self::parse(text, "the config")
     }
@@ -296,6 +287,25 @@ impl Config {
                     .is_some_and(|(owner, name)| RepoName::new(owner, name) == *repo)
             })
             .map(|(_, path)| expand_env_home(Path::new(path)))
+    }
+}
+
+impl Config {
+    /// What a launch of an agent goes by: a config that cannot be read is no instructions and a warning.
+    pub fn read_instructions<A: Agent>(folders: &AppFolders) -> Instructions<A> {
+        match Self::load_from(folders) {
+            Ok(config) => config.instructions(folders),
+            Err(error) => Instructions::config_not_read(&error),
+        }
+    }
+
+    /// The skill a launch of an agent runs, after saying what could not be read.
+    pub fn skill_for_launch<A: Agent>(folders: &AppFolders) -> Option<String> {
+        let instructions = Self::read_instructions::<A>(folders);
+        if let Some(warning) = instructions.warning() {
+            eprintln!("warning: {warning}");
+        }
+        instructions.skill().map(str::to_owned)
     }
 }
 

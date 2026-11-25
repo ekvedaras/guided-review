@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::support::fake_ports::{FakeAgentLauncher, FakeAskStore, SentLog};
 use crate::support::{FixtureRepo, file_path};
-use guided_review::config::AskSettings;
+use guided_review::config::{AskSettings, Config};
 use guided_review::local_git::LocalGit;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::pull_request::{RepoName, Sha};
@@ -322,8 +322,9 @@ fn what_the_context_takes_from_the_tour_and_the_diff_is_quoted_line_by_line() {
 
 #[test]
 fn config_overrides_the_ask_model_and_effort() {
-    let settings =
-        AskSettings::from_config_text("ask_model = \"sonnet\"\nask_effort = \"high\"\n").unwrap();
+    let settings = Config::from_text("ask_model = \"sonnet\"\nask_effort = \"high\"\n")
+        .unwrap()
+        .ask_settings();
 
     assert_eq!(
         (settings.model.as_str(), settings.effort.as_str()),

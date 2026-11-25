@@ -10,7 +10,7 @@ use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Audience, CommentGesture, CommentId, CommentPlace, CommentProblem, CommentRefusal,
     CommentResult, LineLocation, Problem, Review, ReviewStateFile, ReviewThread, SendMode, Side,
-    TextBox, ThreadComment, ThreadId, WorkKind,
+    TextBox, ThreadComment, ThreadId, WorkKind, land_elsewhere,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -689,12 +689,11 @@ fn a_comment_sent_while_the_window_switched_away_still_leaves_the_draft_in_its_o
     let outcome = request.run(&github);
     drop(review);
 
-    outcome
-        .land_in(&ReviewStateFile::for_subject(
-            &pull.repo.folders(),
-            &ReviewSubject::from(pull.pr()),
-        ))
-        .unwrap();
+    land_elsewhere(
+        outcome,
+        &ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pull.pr())),
+    )
+    .unwrap();
 
     assert_eq!(drafts(&pull.open()), []);
 }
@@ -713,12 +712,11 @@ fn a_comment_that_failed_while_the_window_switched_away_waits_in_the_queue_of_it
     let outcome = request.run(&github);
     drop(review);
 
-    outcome
-        .land_in(&ReviewStateFile::for_subject(
-            &pull.repo.folders(),
-            &ReviewSubject::from(pull.pr()),
-        ))
-        .unwrap();
+    land_elsewhere(
+        outcome,
+        &ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pull.pr())),
+    )
+    .unwrap();
 
     let reopened = pull.open();
     assert_eq!(drafts(&reopened), []);

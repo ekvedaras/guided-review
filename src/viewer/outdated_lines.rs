@@ -6,8 +6,8 @@ use crate::line_number::LineNumber;
 use crate::line_range::LineRange;
 use crate::pull_request::Sha;
 
-use super::step_page::Side;
-use super::threads::{ReviewThread, ThreadId};
+use super::line_location::Side;
+use super::review_thread::{ReviewThread, ThreadId};
 
 /// Where an outdated thread's lines are at the tour's head, followed from the commit it was written on.
 /// GitHub stops naming a line once the code under a comment changes.

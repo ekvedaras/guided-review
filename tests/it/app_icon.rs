@@ -1,5 +1,5 @@
 use guided_review::app_icon::{self, AppIcon, Look};
-use guided_review::update::Build;
+use guided_review::build::Build;
 use image::Rgba;
 
 const SIZE: u16 = 64;

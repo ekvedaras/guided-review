@@ -4,12 +4,13 @@
 use std::time::Instant;
 
 use super::jump::PaletteAction;
-use super::merging::{AutoMerge, MergeChange, MergeMethod, MergeOffer};
+use super::merging::{AutoMerge, MergeChange, MergeOffer};
 use super::ports::GitHubError;
 use super::pr_status::{PrStatus, Readiness};
 use super::press_again::{PressAgain, PressStep};
 use super::problems::Problem;
-use super::shortcuts::Command;
+use crate::keys::Command;
+use crate::merge_method::MergeMethod;
 use crate::review_subject::ReviewSubject;
 
 #[derive(Debug, Default)]

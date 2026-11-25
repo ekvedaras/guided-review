@@ -4,7 +4,7 @@ use std::ops::{Range, RangeInclusive};
 use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
 use crate::language::Language;
-use crate::pieces::PieceKind;
+use crate::piece_kind::PieceKind;
 
 pub struct Symbol {
     /// `Order::total`

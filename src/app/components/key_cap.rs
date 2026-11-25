@@ -3,7 +3,6 @@ use gpui::{Div, IntoElement, ParentElement, Styled, div, px};
 use crate::platform::Os;
 use crate::viewer::{Chord, Key, KeyCap};
 
-use super::button::ButtonKind;
 use super::icon::{Icon, sized_icon};
 use super::palette::{Colors, INNER_RADIUS};
 
@@ -33,16 +32,6 @@ impl KeyLabel {
 pub enum CapGround {
     Page,
     Accent,
-}
-
-impl CapGround {
-    /// A cap inside a button stands on that button's ground.
-    pub fn of(kind: ButtonKind) -> Self {
-        match kind {
-            ButtonKind::Primary => Self::Accent,
-            _ => Self::Page,
-        }
-    }
 }
 
 pub fn key_cap(colors: &Colors, key: KeyLabel) -> impl IntoElement {

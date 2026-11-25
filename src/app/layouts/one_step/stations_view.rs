@@ -7,16 +7,25 @@ use gpui::{
     ParentElement, Pixels, Rgba, SharedString, StatefulInteractiveElement, Styled, div, px,
 };
 
-use super::OneStepLayout;
-use crate::app::components::button::{ButtonKind, ButtonSize, icon_button};
+use super::{OneStepLayout, ai_review_icon};
+use crate::app::components::button::{
+    ButtonKind, ButtonSize, button_keys, icon_button, icon_label_button,
+};
+use crate::app::components::guided_tour_banner::switch_button;
 use crate::app::components::icon::{Icon, sized_icon};
+use crate::app::components::markdown_view::InlineMarkdown;
 use crate::app::components::motion::{pulse, shimmer_text};
 use crate::app::components::palette::{CARD_RADIUS, Colors, INNER_RADIUS, Tone};
 use crate::app::components::reviews_block::ReviewsBlock;
+use crate::app::components::toast_stack::post_toast;
 use crate::app::components::tooltip::tooltip;
 use crate::app::review_session::ReviewSession;
-use crate::app::sidebar_rows::{SidebarProblem, SidebarRows};
-use crate::viewer::{AiReviewAction, Intent, Station, StationHealth, StationKind};
+use crate::app::sidebar_rows::{
+    SidebarAiReview, SidebarGuidedTour, SidebarProblem, SidebarRows, SidebarTourAgent, WriteOffer,
+};
+use crate::viewer::{
+    AiReviewAction, Command, Intent, Station, StationHealth, StationKind, ToastTone,
+};
 
 /// The round icon of a station in the stepper.
 const NODE_SIZE: f32 = 32.;
@@ -577,5 +586,298 @@ impl OneStepLayout {
                 this.picked_station = Some(kind);
                 cx.notify();
             }))
+    }
+
+    /// What the review agent left: its findings by severity, or why its file was not read.
+    /// The AI review's card: what it found or why it failed, then the findings and the run.
+    fn ai_review_block(
+        colors: &Colors,
+        ai_review: &SidebarAiReview,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let list = (ai_review.has_findings || ai_review.has_dismissed_findings).then(|| {
+            icon_label_button(
+                colors,
+                "findings-list",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::ListChecks,
+                "Findings list",
+            )
+            .child(button_keys(
+                colors,
+                ButtonKind::Secondary,
+                Command::FindingsList,
+                cx,
+            ))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::ToggleFindingsList, window, cx);
+            }))
+        });
+        let show_agent = (ai_review.is_failure && ai_review.can_show_agent).then(|| {
+            icon_label_button(
+                colors,
+                "show-failed-review-agent",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Terminal,
+                "Show agent",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::show_review_agent);
+            }))
+        });
+        let next = ai_review.has_findings.then(|| {
+            icon_label_button(
+                colors,
+                "next-finding",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::ArrowRight,
+                "Next finding",
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.act(Intent::NextFinding, window, cx);
+            }))
+        });
+        let action = ai_review
+            .action
+            .filter(|action| *action != AiReviewAction::RunAgain)
+            .map(|action| {
+                icon_label_button(
+                    colors,
+                    "sidebar-run-ai-review",
+                    ButtonKind::Secondary,
+                    ButtonSize::Small,
+                    ai_review_icon(action),
+                    action.label(),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.act(Intent::RunAiReview, window, cx);
+                }))
+            });
+        div()
+            .id("ai-review")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .text_xs()
+            // The card's head says the run's state; the line adds the findings by severity or why it failed.
+            .when(
+                ai_review.is_failure || ai_review.has_findings || ai_review.has_dismissed_findings,
+                |block| {
+                    block.child(
+                        div()
+                            .text_color(if ai_review.is_failure {
+                                colors.text
+                            } else {
+                                colors.muted_text
+                            })
+                            .child(ai_review.line.clone()),
+                    )
+                },
+            )
+            .when(
+                next.is_some() || list.is_some() || action.is_some() || show_agent.is_some(),
+                |block| {
+                    block.child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_2()
+                            .children(action)
+                            .children(show_agent)
+                            .children(next)
+                            .children(list),
+                    )
+                },
+            )
+    }
+
+    /// The fixes' card: Send fixes, while findings wait to go to the tour agent.
+    fn send_fixes_button(
+        colors: &Colors,
+        fixes_to_send: usize,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
+        (fixes_to_send > 0).then(|| {
+            div()
+                .flex()
+                .child(
+                    icon_label_button(
+                        colors,
+                        "send-fixes",
+                        ButtonKind::Primary,
+                        ButtonSize::Small,
+                        Icon::Zap,
+                        "Send fixes",
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let refused = this.session.update(cx, ReviewSession::send_fixes);
+                        if let Some((_, refusal)) = refused.first() {
+                            post_toast(cx, ToastTone::Neutral, refusal.to_string());
+                        }
+                    })),
+                )
+                .into_any_element()
+        })
+    }
+
+    /// The tour's card when the tour agent cannot be used as it is: why it is off, with Retry, or the
+    /// agents to pick from. An agent that is there says its state in the card's head.
+    fn tour_agent_block(
+        colors: &Colors,
+        agent: &SidebarTourAgent,
+        cx: &Context<Self>,
+    ) -> Option<impl IntoElement> {
+        if agent.can_show || !agent.is_shown {
+            return None;
+        }
+        let retry = agent.can_retry.then(|| {
+            icon_label_button(
+                colors,
+                "retry-tour-agent-link",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Refresh,
+                "Try again",
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.session.update(cx, ReviewSession::retry_agent_link);
+            }))
+        });
+        let choices = agent.choices.iter().map(|terminal| {
+            let chosen = terminal.clone();
+            icon_label_button(
+                colors,
+                SharedString::from(format!("use-agent-{terminal}")),
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Terminal,
+                format!("Use this agent: {terminal}"),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let chosen = chosen.clone();
+                this.session
+                    .update(cx, |session, cx| session.use_tour_agent(chosen, cx));
+            }))
+        });
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(if agent.can_retry {
+                            colors.text
+                        } else {
+                            colors.muted_text
+                        })
+                        .child(InlineMarkdown::new("tour-agent-line", &agent.line)),
+                )
+                .children(retry)
+                .children(choices),
+        )
+    }
+
+    /// A basic review's guided tour in the sidebar: Write guided tour while nothing is asked, the stage
+    /// of the writing with Show agent and Try again, and the banner once it is ready.
+    fn guided_tour_block(
+        colors: &Colors,
+        guided_tour: &SidebarGuidedTour,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let write = guided_tour.write.map(|offer| {
+            let button = icon_label_button(
+                colors,
+                "sidebar-write-guided-tour",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Sparkles,
+                "Write guided tour",
+            );
+            match offer {
+                WriteOffer::Available => {
+                    div().child(button.on_click(cx.listener(|this, _, window, cx| {
+                        this.act(Intent::WriteGuidedTour, window, cx);
+                    })))
+                }
+                WriteOffer::Refused(refusal) => div()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_1()
+                    .child(button.opacity(0.5).cursor_not_allowed())
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.muted_text)
+                            .child(refusal.reason()),
+                    ),
+            }
+        });
+        let stage = guided_tour.stage.as_ref().map(|stage| {
+            let try_again = stage.can_try_again.then(|| {
+                icon_label_button(
+                    colors,
+                    "try-guided-tour-again",
+                    ButtonKind::Secondary,
+                    ButtonSize::Small,
+                    Icon::Refresh,
+                    "Try again",
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.act(Intent::WriteGuidedTour, window, cx);
+                }))
+            });
+            // The card's head says how a writing goes; only a failure has more to say, its reason.
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2()
+                .when(stage.can_try_again, |block| {
+                    block.child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.text)
+                            .child(SharedString::from(stage.line.clone())),
+                    )
+                })
+                .children(stage.activity.clone().map(|activity| {
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .line_clamp(2)
+                        .child(SharedString::from(activity))
+                }))
+                .children(try_again)
+        });
+        let banner = guided_tour.banner.as_ref().map(|banner| {
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_1()
+                .child(div().text_xs().child(banner.text))
+                .child(switch_button(
+                    colors,
+                    "sidebar-switch-to-guided-tour",
+                    banner,
+                    Box::new(cx.listener(|this, _, window, cx| {
+                        this.act(Intent::SwitchToGuidedTour, window, cx);
+                    })),
+                ))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .children(banner)
+            .children(stage)
+            .children(write)
     }
 }

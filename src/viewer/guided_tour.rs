@@ -1,7 +1,7 @@
 //! What the viewer knows of the guided tour of a PR the reviewer reads as a basic tour: not asked,
 //! being written, ready to switch to, or failed. The banner and the actions are decided here.
 
-use super::tour_writing::{TourWriting, WritingStage};
+use super::tour_writing::TourWriting;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GuidedTourProgress {
@@ -15,9 +15,9 @@ pub enum GuidedTourProgress {
 
 impl GuidedTourProgress {
     pub(super) fn of_writing(writing: &TourWriting) -> Self {
-        match &writing.stage {
-            WritingStage::Failed(reason) => Self::Failed(reason.clone()),
-            WritingStage::Starting | WritingStage::Writing => Self::Writing(writing.clone()),
+        match writing.failure() {
+            Some(reason) => Self::Failed(reason.to_owned()),
+            None => Self::Writing(writing.clone()),
         }
     }
 }

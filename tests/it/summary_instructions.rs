@@ -1,6 +1,6 @@
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run};
 use guided_review::config::Config;
-use guided_review::instructions::SummaryInstructions;
+use guided_review::instructions::{InstructionsKind, SummaryInstructions, TourWriter};
 use guided_review::tour::GuidedTour;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -162,7 +162,7 @@ fn the_eval_variable_turns_instructions_off_whatever_the_config_says() {
     shop.guided_review_file("summary.md", "default text\n");
 
     let run = GuidedReview::new(&shop.repo, &shop.github)
-        .with_env(Config::SUMMARY_INSTRUCTIONS_OFF_ENV, Path::new("1"))
+        .with_env(InstructionsKind::Summary.off_env(), Path::new("1"))
         .run(&["outline", PR]);
 
     assert!(run.success, "{}", run.stderr);
@@ -343,7 +343,7 @@ fn the_eval_variable_turns_a_skill_off_too() {
     shop.config("summary_instructions = { skill = \"recap\" }\n");
 
     let run = GuidedReview::new(&shop.repo, &shop.github)
-        .with_env(Config::SUMMARY_INSTRUCTIONS_OFF_ENV, Path::new("1"))
+        .with_env(InstructionsKind::Summary.off_env(), Path::new("1"))
         .run(&["outline", PR]);
 
     assert!(
@@ -374,7 +374,7 @@ fn a_launch_runs_the_skill_the_config_asks_for() {
     let shop = Shop::with_pull();
     shop.config("summary_instructions = { skill = \"recap\" }\n");
 
-    let instructions = SummaryInstructions::of(&shop.repo.folders());
+    let instructions = Config::read_instructions::<TourWriter>(&shop.repo.folders());
 
     assert_eq!(instructions.skill(), Some("recap"));
     assert_eq!(instructions.warning(), None);
@@ -384,7 +384,7 @@ fn a_launch_runs_the_skill_the_config_asks_for() {
 fn a_launch_runs_no_skill_when_the_config_names_none() {
     let shop = Shop::with_pull();
 
-    let instructions = SummaryInstructions::of(&shop.repo.folders());
+    let instructions = Config::read_instructions::<TourWriter>(&shop.repo.folders());
 
     assert_eq!(instructions.skill(), None);
     assert_eq!(instructions.warning(), None);
@@ -395,7 +395,7 @@ fn a_launch_with_an_unreadable_config_runs_no_skill_and_says_why() {
     let shop = Shop::with_pull();
     shop.config("this is not toml");
 
-    let instructions = SummaryInstructions::of(&shop.repo.folders());
+    let instructions = Config::read_instructions::<TourWriter>(&shop.repo.folders());
 
     assert_eq!(instructions.skill(), None);
     assert!(

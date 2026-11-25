@@ -6,7 +6,7 @@ use std::sync::Arc;
 use guided_review::platform::{
     DesktopEntry, EntryPlaced, Os, Relaunch, info_plist, write_desktop_entry_templates,
 };
-use guided_review::update::Version;
+use guided_review::version::Version;
 use tempfile::TempDir;
 
 fn version(text: &str) -> Version {

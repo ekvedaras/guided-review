@@ -80,10 +80,7 @@ fn a_second_job_never_starts_while_one_runs() {
     assert_eq!(review.start_job(ReplacingJob::Repin), None);
     assert_eq!(review.start_job(ReplacingJob::Refresh), None);
     assert_eq!(review.start_job(ReplacingJob::SwitchToGuided), None);
-    assert_eq!(
-        review.jobs().progress(ReplacingJob::Repin),
-        JobProgress::Idle
-    );
+    assert_eq!(review.job_progress(ReplacingJob::Repin), JobProgress::Idle);
 }
 
 #[test]
@@ -95,10 +92,10 @@ fn refresh_while_an_update_runs_does_nothing() {
     assert_eq!(review.start_job(ReplacingJob::Refresh), None);
 
     assert_eq!(
-        review.jobs().progress(ReplacingJob::Refresh),
+        review.job_progress(ReplacingJob::Refresh),
         JobProgress::Idle
     );
-    assert!(review.jobs().is_running(ReplacingJob::Repin));
+    assert!(review.job_is_running(ReplacingJob::Repin));
 }
 
 #[test]
@@ -107,7 +104,7 @@ fn a_failed_update_says_why_offers_try_again_and_the_review_takes_changes_again(
     let mut review = pull.open();
     review.start_job(ReplacingJob::Repin).unwrap();
     assert_eq!(
-        review.jobs().progress(ReplacingJob::Repin),
+        review.job_progress(ReplacingJob::Repin),
         JobProgress::Running { activity: None }
     );
     assert!(review.tick(&notes()).is_err());
@@ -116,7 +113,7 @@ fn a_failed_update_says_why_offers_try_again_and_the_review_takes_changes_again(
 
     assert!(matches!(after, AfterJob::Stays { toast: None }));
     assert_eq!(
-        review.jobs().progress(ReplacingJob::Repin),
+        review.job_progress(ReplacingJob::Repin),
         JobProgress::Failed("GitHub did not answer".into())
     );
     review.tick(&notes()).unwrap();
@@ -124,7 +121,7 @@ fn a_failed_update_says_why_offers_try_again_and_the_review_takes_changes_again(
 
     review.start_job(ReplacingJob::Repin).unwrap();
     assert_eq!(
-        review.jobs().progress(ReplacingJob::Repin),
+        review.job_progress(ReplacingJob::Repin),
         JobProgress::Running { activity: None }
     );
 }
@@ -142,10 +139,7 @@ fn after_an_update_the_built_review_takes_the_place_of_this_one_on_the_screen_sh
         panic!("the review is not replaced");
     };
     assert_eq!(screen, Screen::Step(notes()));
-    assert_eq!(
-        review.jobs().progress(ReplacingJob::Repin),
-        JobProgress::Idle
-    );
+    assert_eq!(review.job_progress(ReplacingJob::Repin), JobProgress::Idle);
 }
 
 #[test]
@@ -185,7 +179,7 @@ fn a_failed_refresh_is_a_problem_and_its_banner_offers_try_again() {
     review.start_job(ReplacingJob::Refresh).unwrap();
     review.job_did(ReplacingJob::Refresh, "Read app/Pricing.php".to_owned());
     assert_eq!(
-        review.jobs().progress(ReplacingJob::Refresh),
+        review.job_progress(ReplacingJob::Refresh),
         JobProgress::Running {
             activity: Some("Read app/Pricing.php".into())
         }
@@ -199,7 +193,7 @@ fn a_failed_refresh_is_a_problem_and_its_banner_offers_try_again() {
         [Problem::TourNotRefreshed("claude stopped".into())]
     );
     assert_eq!(
-        review.jobs().progress(ReplacingJob::Refresh),
+        review.job_progress(ReplacingJob::Refresh),
         JobProgress::Failed("claude stopped".into())
     );
 }
@@ -213,7 +207,7 @@ fn what_a_job_did_is_kept_only_while_it_runs() {
     review.job_did(ReplacingJob::Repin, "Read app/Cart.php".to_owned());
 
     assert_eq!(
-        review.jobs().progress(ReplacingJob::Refresh),
+        review.job_progress(ReplacingJob::Refresh),
         JobProgress::Running { activity: None }
     );
 }
@@ -282,7 +276,7 @@ fn a_failure_carried_into_the_rebuilt_review_still_shows() {
     reloaded.carry_on_from(review);
 
     assert_eq!(
-        reloaded.jobs().progress(ReplacingJob::Repin),
+        reloaded.job_progress(ReplacingJob::Repin),
         JobProgress::Failed("offline".into())
     );
     assert!(reloaded.start_job(ReplacingJob::Repin).is_some());
@@ -297,11 +291,8 @@ fn an_outcome_of_a_job_that_is_not_running_changes_nothing() {
     let after = review.land_job(JobOutcome::Repin(Err(failed("offline"))));
 
     assert!(matches!(after, AfterJob::Nothing));
-    assert!(review.jobs().is_running(ReplacingJob::Refresh));
-    assert_eq!(
-        review.jobs().progress(ReplacingJob::Repin),
-        JobProgress::Idle
-    );
+    assert!(review.job_is_running(ReplacingJob::Refresh));
+    assert_eq!(review.job_progress(ReplacingJob::Repin), JobProgress::Idle);
 }
 
 #[test]

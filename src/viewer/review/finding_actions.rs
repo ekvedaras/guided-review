@@ -3,14 +3,18 @@ use super::finding_outcome::{FindingRefusal, FindingsBatch};
 use crate::file_path::FilePath;
 use crate::findings::{Anchor, Finding, FindingId};
 use crate::viewer::ai_review::AiReview;
-use crate::viewer::comment_desk::TourFreshness;
-use crate::viewer::comments::{CommentPlace, CommentRefusal, CommentRequest, SendMode};
+use crate::viewer::ask::{Place, ShownOn};
+use crate::viewer::comment_send::CommentRequest;
+use crate::viewer::comments::Audience;
+use crate::viewer::comments::{CommentPlace, CommentRefusal, SendMode};
 use crate::viewer::finding_decisions::Fate;
+use crate::viewer::finding_placement::FindingHome;
 use crate::viewer::finding_threads::WhyAuthor;
 use crate::viewer::findings_list::{FindingLine, FindingsList};
 use crate::viewer::fix_requests::{FixNote, FixReply, FixState, FixTiming};
-use crate::viewer::hand_offs::Audience;
-use crate::viewer::threads::ThreadId;
+use crate::viewer::line_location::{LineLocation, Side};
+use crate::viewer::review_thread::ThreadId;
+use crate::viewer::thread_actions::TourFreshness;
 use crate::viewer::work_agenda::WorkKind;
 
 /// A finding to fix, with what the reviewer wants of the fix when they said.
@@ -392,6 +396,52 @@ impl ReviewCore {
             .dismissed()
             .cloned()
             .collect()
+    }
+
+    /// The lines of a finding on the screen that shows it; its step or file for a finding on a file; the
+    /// whole tour for one on the whole change.
+    pub(super) fn ask_place_of_finding(&self, finding: &Finding) -> Place {
+        let home = self.findings.home_of(&finding.id);
+        let shown_on = match home {
+            Some(FindingHome::Step(step)) => Some(ShownOn::Step { step: step.clone() }),
+            Some(FindingHome::SafetyNet) => Some(ShownOn::SafetyNet),
+            Some(FindingHome::File(path)) => Some(ShownOn::File { path: path.clone() }),
+            Some(FindingHome::Change) | None => None,
+        };
+        match (&finding.anchor, shown_on) {
+            (Anchor::Lines { file, side, lines }, Some(shown_on)) => {
+                let at = |line| LineLocation {
+                    path: file.clone(),
+                    side: Side::from(*side),
+                    line,
+                };
+                let (start, end) = (at(lines.start), at(lines.end));
+                let pieces = self
+                    .pieces_shown_on(shown_on.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|piece| {
+                        piece.lines().any(|line| {
+                            line.location.path == start.path
+                                && line.location.side == start.side
+                                && (start.line..=end.line).contains(&line.location.line)
+                        })
+                    })
+                    .map(|piece| piece.id)
+                    .collect();
+                Place::Lines {
+                    shown_on,
+                    start,
+                    end,
+                    pieces,
+                }
+            }
+            (Anchor::File { .. }, Some(ShownOn::Step { step })) => Place::Step { step },
+            (Anchor::File { file }, Some(ShownOn::File { .. })) => {
+                Place::File { path: file.clone() }
+            }
+            _ => Place::Tour,
+        }
     }
 
     /// The code lines of a finding's anchor on the screen that shows them; none when no screen does.

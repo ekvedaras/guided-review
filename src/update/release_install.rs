@@ -8,9 +8,10 @@ use anyhow::Context;
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
-use super::{ReleasesPort, Update, Version};
-use crate::app_folders::Mover;
+use super::{ReleasesPort, Update};
+use crate::build::Build;
 use crate::platform::{DesktopEntry, EntryPlaced, Os};
+use crate::version::Version;
 
 /// The way the README installs a release: each version unpacked in its own folder under
 /// `~/.local/share/guided-review/<version>/`, with `~/.local/bin/guided-review` and
@@ -45,51 +46,18 @@ pub enum InTheWay {
     },
 }
 
-/// Which build of the app runs: the release install, which updates itself, or one built from source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Build {
-    Release,
-    /// Built from source, as by `cargo install`: never updated, so marked `DEV`.
-    Local,
-    /// The snapshot build, marked `TEST` in its pictures.
-    Test,
-}
-
-impl Build {
-    /// The mark beside the app's name; the release has none.
-    pub fn badge(self) -> Option<&'static str> {
-        match self {
-            Self::Release => None,
-            Self::Local => Some("DEV"),
-            Self::Test => Some("TEST"),
+/// Which build runs, looked up once: the snapshot build is `Test` wherever it lies.
+pub fn running_build() -> Build {
+    static BUILD: OnceLock<Build> = OnceLock::new();
+    *BUILD.get_or_init(|| {
+        if cfg!(feature = "snapshots") {
+            return Build::Test;
         }
-    }
-
-    pub fn takes_updates(self) -> bool {
-        self == Self::Release
-    }
-
-    /// A window's title, which the Window menu and Mission Control show, with the badge after it.
-    pub fn marked_title(self, title: String) -> String {
-        match self.badge() {
-            Some(badge) => format!("{title} ({badge})"),
-            None => title,
+        match (std::env::home_dir(), crate::platform::running_binary()) {
+            (Some(home), Ok(exe)) => ReleaseInstall::in_home(&home).build_of(&exe),
+            _ => Build::Local,
         }
-    }
-
-    /// Which build runs, looked up once: the snapshot build is `Test` wherever it lies.
-    pub fn running() -> Self {
-        static BUILD: OnceLock<Build> = OnceLock::new();
-        *BUILD.get_or_init(|| {
-            if cfg!(feature = "snapshots") {
-                return Self::Test;
-            }
-            match (std::env::home_dir(), crate::platform::running_binary()) {
-                (Some(home), Ok(exe)) => ReleaseInstall::in_home(&home).build_of(&exe),
-                _ => Self::Local,
-            }
-        })
-    }
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,15 +92,9 @@ impl ReleaseInstall {
         }
     }
 
-    /// The release install moves the app folders while there is one; on a machine with none, a
-    /// source build is the only binary, so it does.
-    pub fn folder_mover(&self, exe: &Path) -> Mover {
-        let is_one = self.linked_into_versions(&self.bin_link).is_some();
-        if self.runs(exe) || !is_one {
-            Mover::ThisBinary
-        } else {
-            Mover::AnotherBinary
-        }
+    /// Whether a release is installed: the bin link leads into the release folders.
+    pub fn has_a_release(&self) -> bool {
+        self.linked_into_versions(&self.bin_link).is_some()
     }
 
     pub fn runs(&self, exe: &Path) -> bool {

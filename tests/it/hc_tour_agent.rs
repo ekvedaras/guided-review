@@ -1,12 +1,13 @@
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
+use guided_review::claude_cli::{review_agent_denied_tools, review_agent_tools};
 use guided_review::hc_tour_agent::HcTourAgents;
 use guided_review::platform::Os;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     AgentLinkOff, AgentRole, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, ReviewAgentStart,
-    SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
+    ReviewPlace, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
 };
 use tempfile::TempDir;
 
@@ -695,12 +696,18 @@ fn a_review_agent_is_labelled_for_review_and_started_with_the_tools_it_may_and_m
         .start_review(&ReviewAgentStart {
             subject: pr(),
             name: "review-acme-shop-7".to_owned(),
-            folder: PathBuf::from("/worktrees/7"),
+            place: ReviewPlace::TourAgentFolder(PathBuf::from("/worktrees/7")),
             first_task: "You are the review agent".to_owned(),
-            tools: "Grep,Glob".to_owned(),
-            denied_tools: "Bash(git push:*)".to_owned(),
+            findings: PathBuf::from("/tours/findings.json"),
+            skill: None,
         })
         .unwrap();
+    let tools = review_agent_tools(
+        &ReviewPlace::TourAgentFolder(PathBuf::from("/worktrees/7")),
+        Path::new("/tours/findings.json"),
+        None,
+    );
+    let denied = review_agent_denied_tools();
 
     assert_eq!(started, TerminalId::new("t9"));
     assert_eq!(
@@ -710,7 +717,7 @@ fn a_review_agent_is_labelled_for_review_and_started_with_the_tools_it_may_and_m
              --label app=guided-review --label gr.review={PR} --label gr.started-by=app \
              --label herdr.space=guided-review --label herdr.tab=review-acme-shop-7 \
              -- env PATH= claude You are the review agent --permission-mode auto \
-             --allowedTools Grep,Glob --disallowedTools Bash(git push:*)"
+             --allowedTools {tools} --disallowedTools {denied}"
         )]
     );
 }

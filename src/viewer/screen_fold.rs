@@ -5,7 +5,8 @@ use std::collections::BTreeSet;
 
 use super::jump::PaletteAction;
 use super::page::{Page, PageRow};
-use super::review::{Review, Screen};
+use super::review::Review;
+use super::screen::Screen;
 use crate::file_path::FilePath;
 use crate::tour::StepId;
 

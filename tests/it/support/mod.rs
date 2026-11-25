@@ -69,7 +69,7 @@ pub fn line(number: usize) -> guided_review::line_number::LineNumber {
 
 /// The app folders of a throwaway home: the XDG defaults, whatever XDG variables the test runs with.
 pub fn folders_in(home: &Path) -> AppFolders {
-    guided_review::platform::app_folders(home, |_| None)
+    AppFolders::xdg_of(home, |_| None)
 }
 
 /// Writes `script` to `path` as a file that runs. A child spawned by another test thread holds

@@ -8,10 +8,7 @@ mod pull_request;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub use local::{
-    OpenedChangeSet, UnreadableLocalTour, clean_snapshot_refs, local_reviews_of_repo,
-    local_reviews_on_disk, unreadable_local_tours,
-};
+pub use local::OpenedChangeSet;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
@@ -23,7 +20,8 @@ use crate::repin::Repin;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin};
 use crate::viewer::{
-    ChangeTipsPort, GitHubPort, NoGitHub, PickCodeSource, Review, ReviewBuilder, ReviewStateFile,
+    ChangeTipsPort, GitHubPort, NoGitHub, PickCodeSource, RepinnedTour, Review, ReviewBuilder,
+    ReviewStateFile,
 };
 use pull_request::OpenedPr;
 
@@ -140,6 +138,27 @@ impl OpenedSubject {
             Adapter::PullRequest(opened) => opened.folders(),
             Adapter::Local(opened) => opened.folders(),
         }
+    }
+}
+
+/// The "Update tour" button's work: what the CLI's `repin` does, then a fresh `Review` on the result.
+pub struct TourRepinner {
+    pub folders: AppFolders,
+    pub subject: ReviewSubject,
+    pub pick_code_source: PickCodeSource,
+}
+
+impl TourRepinner {
+    /// Blocks on the network and on git; the app runs it off the main thread.
+    pub fn run(&self, github: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
+        let (tour, source) =
+            update_shown_tour(&self.subject, &self.folders, github, &self.pick_code_source)?;
+        let review =
+            ReviewBuilder::new(&self.folders, &self.subject).build(tour, source.as_ref())?;
+        Ok(RepinnedTour {
+            review,
+            source: source.into(),
+        })
     }
 }
 

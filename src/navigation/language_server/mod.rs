@@ -4,6 +4,7 @@
 
 mod answers;
 mod checkout;
+mod downloads;
 mod hover;
 mod managed;
 mod notices;

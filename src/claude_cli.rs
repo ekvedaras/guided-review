@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
-use crate::config::Config;
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
+use crate::instructions::InstructionsKind;
 use crate::json::at;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::review_subject::ReviewSubject;
@@ -390,7 +390,7 @@ impl EvalWriter for ClaudeEvalWriter {
             .args(["--disallowedTools", &eval_writer_blocked(brief.evals)])
             .args(["--append-system-prompt", brief.skill])
             .env(Tour::TOURS_DIR_ENV, brief.tours_dir)
-            .env(Config::SUMMARY_INSTRUCTIONS_OFF_ENV, "1")
+            .env(InstructionsKind::Summary.off_env(), "1")
             .current_dir(std::env::temp_dir());
         run_headless(
             command,

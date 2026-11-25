@@ -10,11 +10,13 @@ use futures::channel::mpsc::unbounded;
 use gpui::{App, AsyncApp, Entity};
 
 use super::components::pr_switcher::PrSwitching;
-use crate::instructions::SummaryInstructions;
+use crate::config::Config;
+use crate::instructions::TourWriter;
 use crate::opened_subject::writer_folder;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
-    ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, WriteDecision, WriterHandOver,
+    ActivePr, AgentStatus, TerminalId, TourAgentPort, TourAgents, TourWriting, WriteDecision,
+    WriterHandOver,
 };
 
 const SCREEN_LINES: usize = 20;
@@ -70,7 +72,7 @@ fn hand_over(switching: &PrSwitching, pr: ReviewSubject, task: WriterTask, cx: &
     let port = Arc::clone(&switching.agents);
     let agents = TourAgents::new(Arc::clone(&port))
         .finding_head_branches_with(Arc::clone(&switching.head_branches))
-        .with_summary_skill(SummaryInstructions::skill_for_launch(&switching.folders))
+        .with_summary_skill(Config::skill_for_launch::<TourWriter>(&switching.folders))
         .starting_in(writer_folder(&pr, &switching.folders));
     cx.spawn(async move |cx| {
         loop {
@@ -92,9 +94,9 @@ fn hand_over(switching: &PrSwitching, pr: ReviewSubject, task: WriterTask, cx: &
                 }
                 Ok(WriterHandOver::Waiting(_)) => {
                     let is_still_wanted = active.read_with(cx, |active, _| {
-                        active.writing_of(&pr).is_some_and(|writing| {
-                            writing.terminal.is_none() && !writing.has_failed()
-                        })
+                        active
+                            .writing_of(&pr)
+                            .is_some_and(TourWriting::waits_for_an_agent)
                     });
                     if !is_still_wanted {
                         return;
@@ -231,7 +233,7 @@ async fn follow(
         let (is_on, is_watched) = active.read_with(cx, |active, _| {
             let is_on = active
                 .writing_of(pr)
-                .is_some_and(|writing| writing.terminal.as_ref() == Some(&terminal));
+                .is_some_and(|writing| writing.runs_in(&terminal));
             let is_watched = active.loading().is_some_and(|(loading, _)| loading == pr);
             (is_on, is_watched)
         });

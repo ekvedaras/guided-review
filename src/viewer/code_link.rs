@@ -7,7 +7,7 @@ use crate::line_number::LineNumber;
 use crate::pieces::ChangedFile;
 use crate::pull_request::{RepoName, Sha};
 
-use super::step_page::{LineLocation, Side};
+use super::line_location::{LineLocation, Side};
 
 /// A file or a line of the PR's code that the reader can open. Where it opens is only the
 /// `CodeOpener`'s call, so it holds no URL a view could open on its own.

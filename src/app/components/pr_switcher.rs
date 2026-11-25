@@ -467,7 +467,7 @@ impl PrSwitcherView {
     }
 
     fn pick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.switching.active.read(cx).switching_to().is_some() {
+        if self.switching.active.read(cx).is_switching() {
             return;
         }
         let selected = self.switching.list.read(cx).selected();

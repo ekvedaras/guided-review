@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use super::comments::{CommentPlace, SendMode};
-use super::finish_review::ReviewVerdict;
 use super::github_outage::OutageCause;
 use super::merging::MergeChange;
 use super::pr_origin::PullRequestOrigin;
@@ -12,7 +11,7 @@ use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::{IssueDetails, PullRequestIssues};
-use super::threads::{CommentId, ReviewThread, ThreadId};
+use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use crate::issue::IssueUrl;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
@@ -389,4 +388,22 @@ pub trait RefreshWriter: Send + Sync {
     /// thin. An `Ok` says only that the AI ran to its end, not that it refreshed the tour.
     fn refresh(&self, subject: &ReviewSubject, on_line: &mut dyn FnMut(&str))
     -> anyhow::Result<()>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewVerdict {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+impl ReviewVerdict {
+    /// The `PullRequestReviewEvent` value GitHub's GraphQL API uses.
+    pub fn github_name(self) -> &'static str {
+        match self {
+            Self::Comment => "COMMENT",
+            Self::Approve => "APPROVE",
+            Self::RequestChanges => "REQUEST_CHANGES",
+        }
+    }
 }

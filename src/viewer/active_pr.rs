@@ -1,7 +1,7 @@
 use super::app_state::{AppState, AppStateFile};
 use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{AgentReplied, HandOffId};
-use super::pr_switcher::WritingFact;
+use super::tour_agent::OpenOrigin;
 use super::tour_agent::{AgentStatus, TerminalId, TourAgentPort};
 use super::tour_writing::TourWriting;
 use crate::review_subject::ReviewSubject;
@@ -38,16 +38,6 @@ struct Build {
 /// Names one build, so its result can be told from the result of an older one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildTicket(u64);
-
-/// Who asked to open a PR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OpenOrigin {
-    /// The reviewer, or an agent they started: the window goes where they ask.
-    Reviewer,
-    /// A tour agent the app started. It writes or fixes tours on its own time, so its open never pulls
-    /// the window away from what the reviewer reads.
-    AppStartedAgent,
-}
 
 /// What an open request of a PR comes to.
 pub enum OpenOutcome {
@@ -159,6 +149,13 @@ impl ActivePr {
         self.shown.as_ref()
     }
 
+    /// Whether the window shows the subject whose key is `key`, as a command names it.
+    pub fn shows_key(&self, key: &str) -> bool {
+        self.shown
+            .as_ref()
+            .is_some_and(|shown| shown.to_string() == key)
+    }
+
     /// Dropping the review on screen goes through its open session, which then writes nothing more.
     pub fn is_shown(&self, subject: &ReviewSubject) -> bool {
         self.shown.as_ref() == Some(subject)
@@ -171,6 +168,14 @@ impl ActivePr {
     /// The PR the window is about to show: picked, or being built.
     pub fn switching_to(&self) -> Option<&ReviewSubject> {
         self.switching.as_ref()
+    }
+
+    pub fn is_switching(&self) -> bool {
+        self.switching.is_some()
+    }
+
+    pub fn is_switching_to(&self, subject: &ReviewSubject) -> bool {
+        self.switching.as_ref() == Some(subject)
     }
 
     /// The reviewer picked a PR to switch to. This is known before the app's open request is answered,
@@ -485,4 +490,13 @@ impl ActivePr {
             .find(|(writing, _)| writing == pr)
             .map(|(_, writing)| writing)
     }
+}
+
+/// A tour agent the app started writing a guided tour of the PR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WritingFact {
+    None,
+    Writing,
+    /// The writing ended without a tour.
+    Failed,
 }

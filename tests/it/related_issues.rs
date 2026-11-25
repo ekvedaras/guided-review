@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
 use crate::support::work::drive_without_agents;
+use guided_review::build::Build;
 use guided_review::issue::{IssueLink, IssueUrl};
 use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
@@ -11,7 +12,6 @@ use guided_review::open_review::open_review;
 use guided_review::pull_request::RepoName;
 use guided_review::review_subject::{BranchName, ReviewSubject};
 use guided_review::tour::GuidedTour;
-use guided_review::update::Build;
 use guided_review::viewer::{
     Command, Effect, Intent, IssueDetails, IssueState, PaletteAction, PullRequestIssues,
     RelatedIssue, Review, ReviewStateFile, WindowMoment,

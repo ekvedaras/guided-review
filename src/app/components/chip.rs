@@ -1,4 +1,5 @@
-use crate::update::Build;
+use crate::build::Build;
+use crate::update::running_build;
 use gpui::{AnimationElement, Div, ElementId, ParentElement, Styled, div, phi, px};
 
 use super::motion::{BANNER_DROP, Edge, STATE, slide_in};
@@ -28,7 +29,7 @@ pub fn build_chip(colors: &Colors) -> Option<Div> {
     if crate::app::snapshots::hides_build_badge() {
         return None;
     }
-    let build = Build::running();
+    let build = running_build();
     build.badge().map(|badge| {
         let tone = match build {
             Build::Test => Tone::Neutral,

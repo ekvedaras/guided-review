@@ -39,17 +39,18 @@ use gpui::{
 use gpui_platform::application;
 
 use crate::app_folders::AppFolders;
+use crate::app_icon::AppIcon;
 use crate::app_link::{Answer, AppListener, BUILD_WAIT, OpenRequest, Request};
 use crate::findings::FindingId;
 use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
+use crate::local_reviews_on_disk::clean_snapshot_refs;
 use crate::open_review::{OpenedReview, open_review};
-use crate::opened_subject::clean_snapshot_refs;
 use crate::platform::{self, Os};
 use crate::review_subject::ReviewSubject;
 use crate::review_worktree::GitReviewWorktrees;
 use crate::tour::{Tour, ToursOnDisk};
-use crate::update::Build;
+use crate::update::running_build;
 use crate::viewer::{
     ActivePr, AfterClose, AgentReplied, AppStateFile, AppWindow, BuildTicket, Command, FailedBuild,
     Finished, HandOffId, KeyScope, Keymap, OpenDecision, OpenOrigin, OpenOutcome, PrSwitcher,
@@ -59,7 +60,6 @@ use crate::viewer::{
 };
 use crate::viewer::{FixReply, WhyReply};
 use components::ask_panel::AskPanel;
-pub use components::ask_panel::AskSetup;
 use components::comment_composer::CommentComposer;
 use components::findings_sheet::FindingsSheet;
 use components::jump_palette::JumpPalette;
@@ -169,7 +169,7 @@ pub fn serve(listener: AppListener, folders: AppFolders) {
         };
         let appearance = Appearance::of_system(cx);
         cx.set_global(appearance);
-        platform::start(focus, appearance.look(), Quit, cx);
+        platform::start(focus, AppIcon::of(running_build(), appearance.look()), Quit, cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
         components::toast_stack::Toaster::install(cx);
         let configured = keymap::configured_keymap();
@@ -629,8 +629,8 @@ fn mark_replied(
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
     };
-    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
-    let window = window.filter(|_| shown.as_deref() == Some(pr.as_str()));
+    let is_shown = active.read_with(cx, |active, _| active.shows_key(&pr));
+    let window = window.filter(|_| is_shown);
     let Some(window) = window else {
         if let Ok(replied_pr) = pr.parse::<ReviewSubject>() {
             active.update(cx, |active, cx| {
@@ -674,8 +674,8 @@ fn take_fix_reply(
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
     };
-    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
-    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+    let is_shown = active.read_with(cx, |active, _| active.shows_key(&pr));
+    let Some(window) = window.filter(|_| is_shown) else {
         return Answer::NotShown { pr };
     };
     let taken = cx.update(|cx| {
@@ -702,8 +702,8 @@ fn take_why_reply(
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
     };
-    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
-    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+    let is_shown = active.read_with(cx, |active, _| active.shows_key(&pr));
+    let Some(window) = window.filter(|_| is_shown) else {
         return Answer::NotShown { pr };
     };
     let taken = cx.update(|cx| {
@@ -723,8 +723,8 @@ async fn read_findings(screen: &SharedScreen, pr: String, cx: &mut AsyncApp) -> 
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
     };
-    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
-    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+    let is_shown = active.read_with(cx, |active, _| active.shows_key(&pr));
+    let Some(window) = window.filter(|_| is_shown) else {
         return Answer::NotShown { pr };
     };
     let catch_up = cx.update(|cx| window.update(cx, |layout, _, cx| layout.findings_catch_up(cx)));
@@ -1231,7 +1231,7 @@ fn window_title(opened: &OpenedReview) -> String {
 }
 
 fn marked_with_build(title: String) -> String {
-    Build::running().marked_title(title)
+    running_build().marked_title(title)
 }
 
 fn new_layout(

@@ -7,12 +7,12 @@ use crate::support::fake_ports::{FakeGitHub as FakePorts, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_without_agents;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
+use guided_review::build::Build;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{StepId, Tour};
-use guided_review::update::Build;
 use guided_review::viewer::{
     AgentStatus, BranchOffer, Command, Effect, Intent, NoteSubject, OwnAgentHandOff, PageRow,
     PaletteAction, Review, ReviewStateFile, TerminalId, ToastTone, TourAgentPort, TourAgents,

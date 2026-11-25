@@ -10,7 +10,7 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use serde_json::Value;
 
-use crate::claude_cli::tour_agent_tools;
+use crate::claude_cli::{review_agent_denied_tools, review_agent_tools, tour_agent_tools};
 use crate::json::at;
 use crate::platform::{HerdrRaise, Os, RaiseFailed};
 use crate::review_subject::ReviewSubject;
@@ -360,14 +360,15 @@ impl TourAgentPort for HcTourAgents {
     }
 
     fn start_review(&self, start: &ReviewAgentStart) -> anyhow::Result<TerminalId> {
+        let tools = review_agent_tools(&start.place, &start.findings, start.skill.as_deref());
         self.run_agent(&RunAgent {
             role: AgentRole::Review,
             subject: &start.subject,
             name: &start.name,
-            folder: &start.folder,
+            folder: start.place.folder(),
             first_task: &start.first_task,
-            tools: &start.tools,
-            denied_tools: Some(&start.denied_tools),
+            tools: &tools,
+            denied_tools: Some(&review_agent_denied_tools()),
         })
     }
 

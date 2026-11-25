@@ -10,8 +10,8 @@ use crate::tour::Tour;
 use super::diff_display::DiffDisplay;
 use super::finding_threads::{FindingThread, FindingThreads};
 use super::fix_requests::{FixNote, FixRequests, FixState};
+use super::line_location::{LineLocation, Side};
 use super::review::StepId;
-use super::step_page::{LineLocation, Side};
 use super::threads::{hangs_under_a_row, step_pieces};
 use crate::file_path::FilePath;
 

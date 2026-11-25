@@ -2,12 +2,12 @@
 
 use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use guided_review::build::Build;
 use guided_review::findings::{Finding, FindingId};
 use guided_review::open_review::open_review;
 use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
-use guided_review::update::Build;
 use guided_review::viewer::{
     Batch, Command, CommentRefusal, CommentResult, Effect, FindingRefusal, FindingsList, Intent,
     Overlay, PaletteAction, Review, Screen, SendMode, WindowMoment,

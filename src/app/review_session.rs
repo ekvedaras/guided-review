@@ -4,6 +4,7 @@
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
 use crate::navigation::ServerAnswer;
+use crate::opened_subject::TourRepinner;
 use crate::viewer::{FixNote, FixReply, FixTiming, Settings, WhyReply, catch_up_findings};
 use std::collections::{HashMap, HashSet};
 use std::ops::{ControlFlow, Range};
@@ -38,7 +39,8 @@ use crate::viewer::{
     LineLocation, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour,
     ReplacingJob, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId,
     TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourRepinner, TourSwitcher, WorkPorts, announcements, line_count,
+    TourRefresher, TourReloader, TourSwitcher, WorkPorts, announcements, land_elsewhere,
+    line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -313,11 +315,11 @@ impl ReviewSession {
     }
 
     pub fn is_moving(&self) -> bool {
-        self.review.jobs().is_running(ReplacingJob::MoveToPr)
+        self.review.job_is_running(ReplacingJob::MoveToPr)
     }
 
     pub fn repin_progress(&self) -> JobProgress {
-        self.review.jobs().progress(ReplacingJob::Repin)
+        self.review.job_progress(ReplacingJob::Repin)
     }
 
     pub fn refresh_progress(&self) -> JobProgress {
@@ -325,7 +327,7 @@ impl ReviewSession {
         if let Some(staged) = &self.staged_refresh {
             return staged.clone();
         }
-        self.review.jobs().progress(ReplacingJob::Refresh)
+        self.review.job_progress(ReplacingJob::Refresh)
     }
 
     pub fn image_pictures(&self, path: &FilePath) -> Option<Rc<ImagePictures>> {
@@ -624,7 +626,7 @@ impl ReviewSession {
             });
             // The window switched to another PR while this was in flight; the comment is not lost.
             if let (Err(_), Some(outcome)) = (applied, outcome)
-                && let Err(error) = outcome.land_in(&state_file)
+                && let Err(error) = land_elsewhere(outcome, &state_file)
             {
                 eprintln!("could not save the result of a comment that was sending: {error:#}");
             }
@@ -2070,10 +2072,7 @@ impl ReviewSession {
     /// The review agent says its findings are on disk: how many the review shows now.
     pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
         let folders = self.tour_work.repinner.folders.clone();
-        self.change(cx, |review| {
-            review.findings_done(&folders);
-            review.ai_review().counts().total()
-        })
+        self.change(cx, |review| review.findings_done(&folders))
     }
 
     /// Loads the pictures of the screen once each, off the main thread. A load that ends after `reopen`

@@ -4,10 +4,10 @@ use std::sync::Arc;
 use crate::support::fake_checkouts::FakeCheckouts;
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::{FixtureRepo, folders_in};
+use guided_review::build::Build;
 use guided_review::open_review::open_review;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
-use guided_review::update::Build;
 use guided_review::viewer::{
     AgentLinkOff, AgentStatus, AiReviewAction, AiReviewRefusal, AiReviewRun, Effect, Intent,
     PageRow, PaletteAction, Refusal, Review, ReviewAgents, TerminalId, TourAgentPort,

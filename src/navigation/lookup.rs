@@ -9,25 +9,9 @@ use crate::pull_request::Sha;
 
 use super::local::Local;
 use super::{
-    Answer, AnsweredBy, CodeNavigator, Column, Definition, GitGrep, Import, NavigationRequest,
-    Place, Usage, Waiting, Word, WordInFile,
+    Answer, AnsweredBy, CodeNavigator, Column, Definition, FilesWithWord, GitGrep, Import, Lookup,
+    NavigationRequest, Place, Reach, Usage, Waiting, Word, WordInFile,
 };
-
-/// Finds the files at a commit that hold a word, so only those are parsed.
-pub trait FilesWithWord: Send + Sync {
-    fn files_with(&self, sha: &Sha, word: &Word) -> anyhow::Result<Vec<FilePath>>;
-}
-
-/// Which files a lookup can see.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Reach {
-    WholeRepo,
-    /// A local (a variable or parameter) is looked up in the function that holds it, so no other
-    /// file is searched.
-    EnclosingFunction,
-    /// The code is read from GitHub, so only the review's changed files are searched.
-    ChangedFiles,
-}
 
 /// Which files a lookup parses.
 pub enum FileSearch {
@@ -61,29 +45,6 @@ impl FileSearch {
             Self::WholeRepo(_) => Reach::WholeRepo,
             Self::ChangedFiles(_) => Reach::ChangedFiles,
         }
-    }
-}
-
-/// Where a word is defined and used at a commit, definitions best match first.
-#[derive(Debug, Clone)]
-pub struct Lookup {
-    pub word: Word,
-    pub definitions: Vec<Definition>,
-    /// By file, then line.
-    pub usages: Arc<[Usage]>,
-    pub reach: Reach,
-    /// More files hold the word than were parsed, so definitions and usages may be missing.
-    pub cut_short: bool,
-    /// Files a language server named that are not in the repo's git: where each is on disk.
-    pub on_disk_files: Arc<[(FilePath, std::path::PathBuf)]>,
-}
-
-impl Lookup {
-    /// Where a place's file is on disk when git does not hold it.
-    pub fn on_disk(&self, path: &FilePath) -> Option<&Path> {
-        self.on_disk_files
-            .iter()
-            .find_map(|(file, disk)| (file == path).then_some(disk.as_path()))
     }
 }
 

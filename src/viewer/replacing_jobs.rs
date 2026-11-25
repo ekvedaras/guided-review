@@ -11,8 +11,9 @@ use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 
 use super::move_offer::StartedMove;
-use super::new_commits::RepinnedTour;
-use super::review::Screen;
+use super::review::Review;
+use super::screen::Screen;
+use crate::code_source::CodeSource;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReplacingJob {
@@ -186,4 +187,9 @@ impl ReplacingJobs {
     pub(super) const fn review_ended(&mut self) {
         self.reload_wanted = false;
     }
+}
+
+pub struct RepinnedTour {
+    pub review: Review,
+    pub source: Arc<dyn CodeSource>,
 }

@@ -1,4 +1,5 @@
-use super::review::{Review, Screen};
+use super::review::Review;
+use super::screen::Screen;
 
 /// Which way along the tour the reader went to reach the screen on show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,13 +1,13 @@
 //! Where the findings of an AI review show: on their lines in the step, on the safety net, on the summary.
 
 use crate::support::FixtureRepo;
+use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
 use guided_review::open_review::open_review;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::tour::{BasicTour, TourPin};
-use guided_review::update::Build;
 use guided_review::viewer::{
     Effect, Intent, LineKind, Page, PageRow, PaletteAction, Review, ReviewStateFile, Screen,
     WindowMoment,

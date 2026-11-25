@@ -1,13 +1,14 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 
-use super::shortcuts::Command;
 use crate::file_path::FilePath;
+use crate::keys::Command;
 use crate::pieces::{ChangedFile, PieceId};
 use crate::tour::GuidedTour;
 
-use super::review::Screen;
-use super::step_page::{LineLocation, pieces_of};
+use super::line_location::LineLocation;
+use super::piece_diff::pieces_of;
+use super::screen::Screen;
 
 /// Where on its screen a jump lands.
 #[derive(Debug, Clone, PartialEq, Eq)]
