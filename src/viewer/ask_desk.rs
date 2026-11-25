@@ -133,19 +133,14 @@ impl AskDesk {
 
     /// The selected lines with Asks on a screen, which get a marker under their last row.
     pub fn asked_lines_on(&self, screen: &Screen) -> Vec<Place> {
-        let Some(shown_on) = screen.shown_on() else {
-            return Vec::new();
-        };
-        let mut places: Vec<Place> = Vec::new();
-        for ask in self.asks.all() {
-            let Place::Lines { shown_on: of, .. } = &ask.place else {
-                continue;
-            };
-            if *of == shown_on && !ask.messages.is_empty() && !places.contains(&ask.place) {
-                places.push(ask.place.clone());
-            }
-        }
-        places
+        screen
+            .shown_on()
+            .map_or_default(|shown_on| self.asks.asked_lines_shown_on(&shown_on))
+    }
+
+    /// The Asks that `wanted` picks.
+    pub fn ids_where(&self, wanted: impl Fn(&Ask) -> bool) -> HashSet<AskId> {
+        self.asks.ids_where(wanted)
     }
 
     /// What the Ask panel is open on; `None` while it is closed.

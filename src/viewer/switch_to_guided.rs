@@ -1,7 +1,6 @@
 use anyhow::Context as _;
 
 use crate::app_folders::AppFolders;
-use crate::pieces;
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Tour};
@@ -27,7 +26,7 @@ impl TourSwitcher {
             GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
         let source = (self.pick_code_source)(&guided.pin.pinned_tips())?;
         let state_file = ReviewStateFile::for_subject(&self.folders, &self.subject);
-        let files = pieces::cut(source.as_ref(), &guided.pin.base, &guided.pin.head)?;
+        let files = guided.pin.cut(source.as_ref())?;
         let reads = state_file.load()?.file_read_heads();
         let heads = reads.values().cloned().chain(self.basic_head()).collect();
         let carrier = ReadCarrier::of(&guided, &files, &heads, source.as_ref())?;
@@ -35,9 +34,7 @@ impl TourSwitcher {
         state_file.update(|state| state.carry_file_reads_into_steps(&carried))?;
         let mut review = ReviewBuilder::new(&self.folders, &self.subject)
             .build(Tour::Guided(guided), source.as_ref())?;
-        let started_read = review.progress().read;
-        review.steps_carried_read_ticks_are(started_read);
-        review.takes_over_from_basic_with(carrier);
+        review.switched_from_basic(carrier);
         self.delete_basic_file()?;
         Ok(RepinnedTour {
             review,

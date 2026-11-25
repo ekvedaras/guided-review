@@ -109,7 +109,7 @@ pub fn repin(
     if !tour.pin().is_pinned() {
         bail!("the tour is not pinned to commits yet; run `guided-review check` first");
     }
-    let old_files = pieces::cut(source, &tour.pin().base, &tour.pin().head)?;
+    let old_files = tour.pin().cut(source)?;
     let new_files = pieces::cut(source, new_base, new_head)?;
     let old: Vec<&Piece> = old_files.iter().flat_map(|file| &file.pieces).collect();
     let new: Vec<&Piece> = new_files.iter().flat_map(|file| &file.pieces).collect();
@@ -134,11 +134,7 @@ pub fn repin(
         .guided()
         .map_or_default(|guided| line_ranges_in_changed_files(guided, &matching, &old, &new));
 
-    let pin = tour.pin_mut();
-    if pin.head != *new_head {
-        pin.previous_head = Some(std::mem::replace(&mut pin.head, new_head.clone()));
-    }
-    pin.base = new_base.clone();
+    tour.pin_mut().move_to(new_base, new_head);
     if let Tour::Guided(guided) = tour {
         retarget(
             &mut guided.steps,

@@ -302,7 +302,7 @@ pub use tour_agent::{
     ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort, TourAgentStart, TourAgentState,
     TourAgents, TourKind, WriterHandOver,
 };
-pub use tour_writing::{TourWriting, WritingStage};
+pub use tour_writing::{TourWriting, WritingPhase, WritingStage};
 pub use typing_save::TypingSave;
 pub use used_findings::UsedFinding;
 pub use viewed_sync::{SyncOutcome, SyncRequest};

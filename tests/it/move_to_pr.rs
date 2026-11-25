@@ -1185,7 +1185,7 @@ fn update_and_not_now_are_refused_while_a_move_runs() {
     local.review.decline_the_move();
 
     assert!(move_offer(&local.review).is_some(), "the offer stays");
-    assert!(local.review.jobs().is_running(ReplacingJob::MoveToPr));
+    assert!(local.review.job_is_running(ReplacingJob::MoveToPr));
 }
 
 #[test]

@@ -11,7 +11,6 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::local_work_tree::LocalWorkTree;
 use crate::make_basic_tour::make_basic_tour;
-use crate::pieces;
 use crate::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use crate::repin::repin;
 use crate::review_subject::{LocalChangeSet, ReviewSubject, WorkTreeRoot};
@@ -91,17 +90,23 @@ impl PrMover {
     /// The local review's ticks carried by the re-pin rule from its pin to the PR's, and its open
     /// threads as drafts at the PR's head.
     fn worked_out(&self, pr_tour: &Tour, source: &dyn CodeSource) -> anyhow::Result<MovedReview> {
-        let pin = pr_tour.pin();
+        let to = pr_tour.pin().pinned_tips();
         let local = ReviewSubject::from(self.change_set.clone());
         let mut local_tour = Tour::load_of(&Tour::shown_path_for(&self.folders, &local), &local)?;
-        let (from_base, from_head) = (local_tour.pin().base.clone(), local_tour.pin().head.clone());
-        let repinned = repin(&mut local_tour, source, &pin.base, &pin.head)?;
+        let from = local_tour.pin().pinned_tips();
+        let repinned = repin(&mut local_tour, source, &to.base_branch_tip, &to.head)?;
         let mut local_state = ReviewStateFile::for_subject(&self.folders, &local).load()?;
         local_state.record_repin(
-            RepinRecord::new(&from_base, &from_head, &pin.base, &pin.head, &repinned),
+            RepinRecord::new(
+                &from.base_branch_tip,
+                &from.head,
+                &to.base_branch_tip,
+                &to.head,
+                &repinned,
+            ),
             &repinned,
         );
-        let files = pieces::cut(source, &pin.base, &pin.head)?;
+        let files = pr_tour.pin().cut(source)?;
         let in_the_pr = |path: &FilePath| files.iter().any(|file| file.path == *path);
         let (mut kept, mut changed) = local_state.file_reads_after_repin();
         let (steps_kept, steps_changed) =
@@ -113,7 +118,7 @@ impl PrMover {
         let file_ticks: BTreeMap<FilePath, Sha> = kept
             .into_keys()
             .filter(|path| in_the_pr(path))
-            .map(|path| (path, pin.head.clone()))
+            .map(|path| (path, to.head.clone()))
             .collect();
         let file_read_before: BTreeMap<FilePath, Sha> = changed
             .into_iter()
@@ -130,11 +135,11 @@ impl PrMover {
             }
         };
         Ok(MovedReview {
-            head: pin.head.clone(),
+            head: to.head.clone(),
             file_ticks,
             file_read_before,
             steps,
-            comments: local_state.local_threads().moved_to(source, &pin.head),
+            comments: local_state.local_threads().moved_to(source, &to.head),
         })
     }
 }

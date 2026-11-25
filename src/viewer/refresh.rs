@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
-use crate::pull_request::ChangeTips;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
 
@@ -41,11 +40,7 @@ impl TourRefresher {
         }
         let tour =
             GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
-        let pinned = ChangeTips {
-            base_branch_tip: tour.pin.base.clone(),
-            head: tour.pin.head.clone(),
-        };
-        let source = (self.pick_code_source)(&pinned)?;
+        let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
         let review = ReviewBuilder::new(&self.folders, &self.subject)
             .build(Tour::Guided(tour), source.as_ref())?;
         if !review.refresh_brief().is_empty() {

@@ -1,12 +1,13 @@
 use std::cell::OnceCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+use std::time::Instant;
 
 use super::ReviewCore;
 use crate::viewer::ask_desk::AskDesk;
 use crate::viewer::page::Page;
-use crate::viewer::replacing_jobs::ReplacingJobs;
-use crate::viewer::work_agenda::WorkAgenda;
+use crate::viewer::replacing_jobs::{ReplacingJob, StartedJob};
+use crate::viewer::work_agenda::Work;
 
 /// The open review, with the page of its screen built once and kept until the review changes.
 ///
@@ -38,9 +39,7 @@ impl Review {
     /// The window had the end of the screen on show. No input of the page, so the page is kept:
     /// the window reports this on every frame.
     pub fn saw_end_of_screen(&mut self) {
-        if !self.review.has_seen_end_of_screen() {
-            self.review.seen_end_of = Some(self.review.screen.clone());
-        }
+        self.review.saw_end_of_screen();
     }
 
     /// Asks change on every line an answer streams in, and the page shows only which lines have
@@ -54,14 +53,24 @@ impl Review {
         result
     }
 
-    /// The work agenda is no input of the page, so it changes without dropping the page.
-    pub(super) fn work_mut(&mut self) -> &mut WorkAgenda {
-        &mut self.review.work
+    /// The work agenda is no input of the page, so work falls due and is wanted without dropping
+    /// the page.
+    pub fn due_work(&mut self, now: Instant) -> Vec<Work> {
+        self.review.due_work(now)
     }
 
-    /// Nor are the replacing jobs.
-    pub(super) fn jobs_mut(&mut self) -> &mut ReplacingJobs {
-        &mut self.review.jobs
+    pub fn pull_from_github(&mut self) {
+        self.review.pull_from_github();
+    }
+
+    /// Nor are the replacing jobs. A due job is a reload asked for while another job ran, which
+    /// changes nothing else until it lands.
+    pub fn due_job(&mut self) -> Option<StartedJob> {
+        self.review.due_job()
+    }
+
+    pub fn job_did(&mut self, job: ReplacingJob, activity: String) {
+        self.review.job_did(job, activity);
     }
 }
 

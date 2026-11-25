@@ -43,18 +43,11 @@ impl Review {
             "" => DEFAULT_WHY_QUESTION,
             typed => typed,
         };
-        if !self.review_agent.is_alive() {
+        if !self.review_agent_is_alive() {
             self.ask_in_panel(&finding, question, settings, now, processes);
             return Ok(WhyAsked::InAskPanel);
         }
-        if self.state.finding_threads().is_asking(id) {
-            return Err(FindingRefusal::BeingAsked);
-        }
-        self.state
-            .record(|state| state.finding_threads_mut().ask(finding, question))
-            .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
-        self.place_threads();
-        Ok(WhyAsked::ToReviewAgent)
+        self.ask_review_agent_why(finding, question)
     }
 
     /// A fresh Ask on the finding's place, told the finding, takes the question.
@@ -70,7 +63,7 @@ impl Review {
         let label = place
             .lines_label()
             .unwrap_or_else(|| finding.anchor.to_string());
-        let clone = self.ask_desk.clone_folder().cloned();
+        let clone = self.asks().clone_folder().cloned();
         let mut target = self.ask_target(place, label, clone, settings);
         if let AskTarget::Ready { context, .. } = &mut target {
             write!(
@@ -92,6 +85,26 @@ impl Review {
 }
 
 impl ReviewCore {
+    fn review_agent_is_alive(&self) -> bool {
+        self.review_agent.is_alive()
+    }
+
+    /// The question goes onto the finding's thread, for the review agent that reported it.
+    fn ask_review_agent_why(
+        &mut self,
+        finding: Finding,
+        question: &str,
+    ) -> Result<WhyAsked, FindingRefusal> {
+        if self.state.finding_threads().is_asking(&finding.id) {
+            return Err(FindingRefusal::BeingAsked);
+        }
+        self.state
+            .record(|state| state.finding_threads_mut().ask(finding, question))
+            .map_err(|error| FindingRefusal::NotKept(format!("{error:#}")))?;
+        self.place_threads();
+        Ok(WhyAsked::ToReviewAgent)
+    }
+
     /// The questions that wait, as one message, once the review agent is idle.
     pub fn why_delivery(&self) -> Option<WhyDeliveryRequest> {
         if self.review_agent != ReviewAgentLife::Alive(Some(AgentStatus::Idle)) {

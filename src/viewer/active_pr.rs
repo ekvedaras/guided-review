@@ -149,6 +149,13 @@ impl ActivePr {
         self.shown.as_ref()
     }
 
+    /// Whether the window shows the subject whose key is `key`, as a command names it.
+    pub fn shows_key(&self, key: &str) -> bool {
+        self.shown
+            .as_ref()
+            .is_some_and(|shown| shown.to_string() == key)
+    }
+
     /// Dropping the review on screen goes through its open session, which then writes nothing more.
     pub fn is_shown(&self, subject: &ReviewSubject) -> bool {
         self.shown.as_ref() == Some(subject)
@@ -161,6 +168,14 @@ impl ActivePr {
     /// The PR the window is about to show: picked, or being built.
     pub fn switching_to(&self) -> Option<&ReviewSubject> {
         self.switching.as_ref()
+    }
+
+    pub fn is_switching(&self) -> bool {
+        self.switching.is_some()
+    }
+
+    pub fn is_switching_to(&self, subject: &ReviewSubject) -> bool {
+        self.switching.as_ref() == Some(subject)
     }
 
     /// The reviewer picked a PR to switch to. This is known before the app's open request is answered,

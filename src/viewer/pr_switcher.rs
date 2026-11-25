@@ -226,7 +226,7 @@ impl PrSwitcher {
                 writing: active.writing_fact_of(&row.subject),
             };
             row.has_unseen_reply = active.has_unseen_reply(&row.subject);
-            row.is_active = active.shown() == Some(&row.subject);
+            row.is_active = active.is_shown(&row.subject);
         }
     }
 

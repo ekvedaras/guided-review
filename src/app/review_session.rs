@@ -315,11 +315,11 @@ impl ReviewSession {
     }
 
     pub fn is_moving(&self) -> bool {
-        self.review.jobs().is_running(ReplacingJob::MoveToPr)
+        self.review.job_is_running(ReplacingJob::MoveToPr)
     }
 
     pub fn repin_progress(&self) -> JobProgress {
-        self.review.jobs().progress(ReplacingJob::Repin)
+        self.review.job_progress(ReplacingJob::Repin)
     }
 
     pub fn refresh_progress(&self) -> JobProgress {
@@ -327,7 +327,7 @@ impl ReviewSession {
         if let Some(staged) = &self.staged_refresh {
             return staged.clone();
         }
-        self.review.jobs().progress(ReplacingJob::Refresh)
+        self.review.job_progress(ReplacingJob::Refresh)
     }
 
     pub fn image_pictures(&self, path: &FilePath) -> Option<Rc<ImagePictures>> {
@@ -2072,10 +2072,7 @@ impl ReviewSession {
     /// The review agent says its findings are on disk: how many the review shows now.
     pub fn findings_done(&mut self, cx: &mut Context<Self>) -> usize {
         let folders = self.tour_work.repinner.folders.clone();
-        self.change(cx, |review| {
-            review.findings_done(&folders);
-            review.ai_review().counts().total()
-        })
+        self.change(cx, |review| review.findings_done(&folders))
     }
 
     /// Loads the pictures of the screen once each, off the main thread. A load that ends after `reopen`

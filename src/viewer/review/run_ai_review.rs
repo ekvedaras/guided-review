@@ -133,12 +133,14 @@ impl ReviewCore {
         self.questions_hear(FindingThreads::agent_gone);
     }
 
-    /// The review agent said it is done: its findings are read, and it has no run open.
-    pub fn findings_done(&mut self, folders: &AppFolders) {
+    /// The review agent said it is done: its findings are read, and it has no run open. Says how
+    /// many findings the review shows now.
+    pub fn findings_done(&mut self, folders: &AppFolders) -> usize {
         self.read_findings(folders);
         if matches!(self.ai_review, AiReview::Findings(_)) {
             self.keep_ai_run_open(false);
         }
+        self.ai_review.counts().total()
     }
 
     fn keep_ai_run_open(&mut self, open: bool) {

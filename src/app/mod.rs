@@ -629,8 +629,8 @@ fn mark_replied(
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
     };
-    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
-    let window = window.filter(|_| shown.as_deref() == Some(pr.as_str()));
+    let is_shown = active.read_with(cx, |active, _| active.shows_key(&pr));
+    let window = window.filter(|_| is_shown);
     let Some(window) = window else {
         if let Ok(replied_pr) = pr.parse::<ReviewSubject>() {
             active.update(cx, |active, cx| {
@@ -674,8 +674,8 @@ fn take_fix_reply(
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
     };
-    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
-    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+    let is_shown = active.read_with(cx, |active, _| active.shows_key(&pr));
+    let Some(window) = window.filter(|_| is_shown) else {
         return Answer::NotShown { pr };
     };
     let taken = cx.update(|cx| {
@@ -702,8 +702,8 @@ fn take_why_reply(
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
     };
-    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
-    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+    let is_shown = active.read_with(cx, |active, _| active.shows_key(&pr));
+    let Some(window) = window.filter(|_| is_shown) else {
         return Answer::NotShown { pr };
     };
     let taken = cx.update(|cx| {
@@ -723,8 +723,8 @@ async fn read_findings(screen: &SharedScreen, pr: String, cx: &mut AsyncApp) -> 
         let screen = screen.borrow();
         (screen.active.clone(), screen.window.review())
     };
-    let shown = active.read_with(cx, |active, _| active.shown().map(ToString::to_string));
-    let Some(window) = window.filter(|_| shown.as_deref() == Some(pr.as_str())) else {
+    let is_shown = active.read_with(cx, |active, _| active.shows_key(&pr));
+    let Some(window) = window.filter(|_| is_shown) else {
         return Answer::NotShown { pr };
     };
     let catch_up = cx.update(|cx| window.update(cx, |layout, _, cx| layout.findings_catch_up(cx)));

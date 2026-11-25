@@ -11,7 +11,7 @@ use super::palette::{CARD_RADIUS, CODE_FONT, Colors, SIDEBAR_WIDTH, TEXT_FONT};
 use super::title_bar::TITLE_BAR_HEIGHT;
 use crate::app::tour_writer;
 use crate::review_subject::ReviewSubject;
-use crate::viewer::{ActivePr, AgentStatus, TourWriting, WritingStage};
+use crate::viewer::ActivePr;
 
 /// What the window shows while a tour agent writes the tour of the PR the reviewer picked: its status,
 /// its last screen lines and, when it ended without a tour, why, with Try again and Show agent.
@@ -48,29 +48,16 @@ impl Shown {
         Some(Self {
             pr: pr.clone(),
             title: format!("Writing the tour of {}", pr.short()).into(),
-            status: status_line(writing).into(),
-            failure: match &writing.stage {
-                WritingStage::Failed(reason) => Some(reason.clone().into()),
-                WritingStage::Starting | WritingStage::Writing => None,
-            },
-            lines: writing.screen.iter().cloned().map(Into::into).collect(),
+            status: writing.status_line().into(),
+            failure: writing.failure().map(|reason| reason.to_owned().into()),
+            lines: writing
+                .last_lines()
+                .map(|line| line.to_owned().into())
+                .collect(),
             back_to: active
                 .shown()
                 .map(|shown| format!("Back to {}", shown.short()).into()),
         })
-    }
-}
-
-fn status_line(writing: &TourWriting) -> String {
-    let Some(terminal) = &writing.terminal else {
-        return "Starting a tour agent in herdr...".to_owned();
-    };
-    match writing.status {
-        None | Some(AgentStatus::Unreported) => format!("Tour agent {terminal}: starting"),
-        Some(AgentStatus::WaitingForYou) => format!(
-            "Tour agent {terminal} waits for you in its terminal: show the agent to answer it"
-        ),
-        Some(status) => format!("Tour agent {terminal}: {status}"),
     }
 }
 

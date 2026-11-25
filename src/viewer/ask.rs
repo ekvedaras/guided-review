@@ -3,6 +3,7 @@ use crate::pieces::PieceId;
 use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -209,6 +210,28 @@ impl Asks {
     }
 
     /// Asks about this place, newest first. Empty drafts are left out.
+    pub fn ids_where(&self, wanted: impl Fn(&Ask) -> bool) -> HashSet<AskId> {
+        self.asks
+            .iter()
+            .filter(|ask| wanted(ask))
+            .map(|ask| ask.id)
+            .collect()
+    }
+
+    /// The selected lines with Asks that a screen showing `shown_on` shows.
+    pub(super) fn asked_lines_shown_on(&self, shown_on: &ShownOn) -> Vec<Place> {
+        let mut places: Vec<Place> = Vec::new();
+        for ask in &self.asks {
+            let Place::Lines { shown_on: of, .. } = &ask.place else {
+                continue;
+            };
+            if of == shown_on && !ask.messages.is_empty() && !places.contains(&ask.place) {
+                places.push(ask.place.clone());
+            }
+        }
+        places
+    }
+
     pub fn at(&self, place: &Place) -> Vec<&Ask> {
         self.asks
             .iter()

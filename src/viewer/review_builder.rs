@@ -46,16 +46,16 @@ impl ReviewBuilder {
                     .facts(change_set, &tour.pin().pinned_tips())
             })
             .transpose()?;
-        let working_copy = WorkingCopy::of(source.working_tree_is_at(&tour.pin().head));
+        let pinned = tour.pin().pinned_tips();
+        let working_copy = WorkingCopy::of(source.working_tree_is_at(&pinned.head));
         let state_file = ReviewStateFile::for_subject(&self.folders, &self.subject);
-        let pin = tour.pin();
         if let Err(error) = catch_up_findings(
             &self.folders,
             &self.subject,
             &state_file,
             source,
-            &pin.base,
-            &pin.head,
+            &pinned.base_branch_tip,
+            &pinned.head,
         ) {
             eprintln!("could not follow the findings to the review's commits: {error:#}");
         }

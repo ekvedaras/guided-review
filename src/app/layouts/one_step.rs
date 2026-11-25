@@ -1705,8 +1705,11 @@ impl OneStepLayout {
 
     /// What the window alone knows when the reader asks for something.
     fn moment(&self, cx: &App) -> WindowMoment {
-        let is_reopening = cx.global::<PrSwitching>().active.read(cx).switching_to()
-            == Some(self.session.read(cx).review().subject());
+        let is_reopening = cx
+            .global::<PrSwitching>()
+            .active
+            .read(cx)
+            .is_switching_to(self.session.read(cx).review().subject());
         WindowMoment {
             reopening: if is_reopening {
                 Reopening::Underway

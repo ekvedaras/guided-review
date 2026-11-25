@@ -5,9 +5,11 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use crate::app_folders::AppFolders;
+use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::issue::IssueLink;
 use crate::piece_id::PieceId;
+use crate::pieces::{self, ChangedFile};
 use crate::pull_request::{ChangeTips, RepoName, Sha};
 use crate::review_subject::ReviewSubject;
 
@@ -423,6 +425,33 @@ impl TourPin {
 
     pub fn is_pinned(&self) -> bool {
         !self.base.is_empty() && !self.head.is_empty()
+    }
+
+    /// A pin with no head was never pinned: `check` pins it to the code it reads.
+    pub fn needs_pinning(&self) -> bool {
+        self.head.is_empty()
+    }
+
+    pub fn is_at_head(&self, head: &Sha) -> bool {
+        self.head == *head
+    }
+
+    /// A tour written before pins named their subject names neither a PR nor a local change set.
+    pub fn names_a_subject(&self) -> bool {
+        !self.pr.is_empty() || self.local.is_some()
+    }
+
+    /// Moves the pin to new commits, remembering the head it leaves.
+    pub fn move_to(&mut self, base: &Sha, head: &Sha) {
+        if self.head != *head {
+            self.previous_head = Some(std::mem::replace(&mut self.head, head.clone()));
+        }
+        self.base = base.clone();
+    }
+
+    /// The changed files between the pinned base and head, cut into pieces.
+    pub fn cut(&self, source: &dyn CodeSource) -> anyhow::Result<Vec<ChangedFile>> {
+        pieces::cut(source, &self.base, &self.head)
     }
 
     pub fn pinned_tips(&self) -> ChangeTips {

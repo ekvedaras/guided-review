@@ -1,18 +1,14 @@
-use super::Review;
-use crate::viewer::move_offer::MoveFrom;
+use super::ReviewCore;
 use crate::viewer::problems::Problem;
-use crate::viewer::replacing_jobs::{
-    AfterJob, JobOutcome, ReplacingJob, ReplacingJobs, StartedJob,
-};
-use crate::viewer::screen::Screen;
+use crate::viewer::replacing_jobs::{JobProgress, ReplacingJob, StartedJob};
 
-impl Review {
+impl ReviewCore {
     /// `None` while another job runs: a reload then waits for it and comes from `due_job`, any
     /// other is refused. Also `None` for a move with no offer, and a drop of a PR's review.
     /// A re-pin, a move and a drop write the state file from another thread, so from their start
     /// nothing this review holds may write it until they failed.
     pub fn start_job(&mut self, job: ReplacingJob) -> Option<StartedJob> {
-        if !self.jobs_mut().may_start(job) {
+        if !self.jobs.may_start(job) {
             return None;
         }
         let started = match job {
@@ -31,110 +27,53 @@ impl Review {
         ) {
             self.state.writes_elsewhere();
         }
-        Some(self.jobs_mut().started(started))
+        Some(self.jobs.started(started))
     }
 
     /// A reload asked for while another job ran, once none runs.
-    pub fn due_job(&mut self) -> Option<StartedJob> {
+    pub(super) fn due_job(&mut self) -> Option<StartedJob> {
         if !self.jobs.reload_is_due() {
             return None;
         }
         self.start_job(ReplacingJob::Reload)
     }
 
-    pub fn land_job(&mut self, outcome: JobOutcome) -> AfterJob {
-        let Some(started) = self.jobs_mut().landed(outcome.job()) else {
-            return AfterJob::Nothing;
-        };
-        match outcome {
-            JobOutcome::Repin(Ok(replacement))
-            | JobOutcome::Refresh(Ok(replacement))
-            | JobOutcome::Reload(Ok(replacement)) => AfterJob::Reopen {
-                replacement: Box::new(replacement),
-                screen: self.screen.clone(),
-            },
-            JobOutcome::SwitchToGuided(Ok(replacement)) => AfterJob::Reopen {
-                replacement: Box::new(replacement),
-                screen: Screen::Summary,
-            },
-            JobOutcome::Repin(Err(error)) => {
-                self.state.writes_here_again();
-                self.job_failed(ReplacingJob::Repin, &error, None)
-            }
-            JobOutcome::Refresh(Err(error)) => self.job_failed(
-                ReplacingJob::Refresh,
-                &error,
-                Some(Problem::TourNotRefreshed(format!("{error:#}"))),
-            ),
-            JobOutcome::Reload(Err(error)) => self.job_failed(
-                ReplacingJob::Reload,
-                &error,
-                Some(Problem::TourNotReloaded(format!("{error:#}"))),
-            ),
-            JobOutcome::SwitchToGuided(Err(error)) => {
-                self.job_failed(ReplacingJob::SwitchToGuided, &error, None);
-                AfterJob::Stays {
-                    toast: Some(format!("Could not switch to the guided tour: {error:#}")),
-                }
-            }
-            JobOutcome::MoveToPr(moved) => {
-                let StartedJob::MoveToPr(started) = started else {
-                    return AfterJob::Nothing;
-                };
-                match moved {
-                    Ok(()) => {
-                        self.jobs_mut().review_ended();
-                        match started.from {
-                            MoveFrom::TheLocalReview => AfterJob::ShowPr {
-                                moved_away: self.subject.clone(),
-                                pr: started.offer.pr,
-                            },
-                            MoveFrom::ThePr => AfterJob::DropAndReopen(started.change_set.into()),
-                        }
-                    }
-                    Err(error) => {
-                        self.state.writes_here_again();
-                        self.job_failed(ReplacingJob::MoveToPr, &error, None);
-                        AfterJob::Stays {
-                            toast: Some(started.failure_text(&error)),
-                        }
-                    }
-                }
-            }
-            JobOutcome::DropReview(Ok(())) => {
-                self.jobs_mut().review_ended();
-                AfterJob::Dropped(self.subject.clone())
-            }
-            JobOutcome::DropReview(Err(error)) => {
-                self.state.writes_here_again();
-                self.job_failed(
-                    ReplacingJob::DropReview,
-                    &error,
-                    Some(Problem::ReviewNotDropped(format!("{error:#}"))),
-                )
-            }
-        }
-    }
-
     /// What `job` did last, for its banner; an activity that arrives after it landed is dropped.
-    pub fn job_did(&mut self, job: ReplacingJob, activity: String) {
-        self.jobs_mut().did(job, activity);
+    pub(super) fn job_did(&mut self, job: ReplacingJob, activity: String) {
+        self.jobs.did(job, activity);
     }
 
-    pub fn jobs(&self) -> &ReplacingJobs {
-        &self.jobs
+    /// What `job` is doing or did last, for its banner.
+    pub fn job_progress(&self, job: ReplacingJob) -> JobProgress {
+        self.jobs.progress(job)
     }
 
-    fn job_failed(
+    pub fn job_is_running(&self, job: ReplacingJob) -> bool {
+        self.jobs.is_running(job)
+    }
+
+    pub(super) fn landed_job(&mut self, job: ReplacingJob) -> Option<StartedJob> {
+        self.jobs.landed(job)
+    }
+
+    /// The job that wrote the state file from another thread failed, so this review writes it again.
+    pub(super) fn writes_here_again(&mut self) {
+        self.state.writes_here_again();
+    }
+
+    pub(super) fn job_ended_the_review(&mut self) {
+        self.jobs.review_ended();
+    }
+
+    pub(super) fn job_failed(
         &mut self,
         job: ReplacingJob,
         error: &anyhow::Error,
         problem: Option<Problem>,
-    ) -> AfterJob {
-        self.jobs_mut().failed(job, &format!("{error:#}"));
+    ) {
+        self.jobs.failed(job, &format!("{error:#}"));
         if let Some(problem) = problem {
             self.raise_problem(problem);
         }
-        AfterJob::Stays { toast: None }
     }
 }

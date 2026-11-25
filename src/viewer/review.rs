@@ -15,7 +15,7 @@ mod run_ai_review;
 mod stations;
 mod work;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Instant;
@@ -37,7 +37,7 @@ use crate::config::AskSettings;
 
 use super::ai_review::AiReview;
 use super::ai_review_run::{AiReviewRun, ReviewAgentLife};
-use super::ask::{Ask, Asks, Place, ShownOn};
+use super::ask::{Ask, AskId, Asks, Place, ShownOn};
 use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
@@ -73,6 +73,7 @@ use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::line_location::LineLocation;
 use super::local_thread_store::ThreadHome;
 use super::markdown::Markdown;
+use super::move_offer::MoveFrom;
 use super::name_desk::NameDesk;
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
@@ -89,7 +90,7 @@ use super::problems::{Problem, ProblemKind, Problems};
 use super::reactions::ReactionChange;
 use super::refresh_brief::RefreshBrief;
 use super::related_issues::{IssueDetails, RelatedIssue, RelatedIssues};
-use super::replacing_jobs::{ReplacingJob, ReplacingJobs};
+use super::replacing_jobs::{AfterJob, JobOutcome, ReplacingJob, ReplacingJobs, StartedJob};
 use super::review_state::{RepinRecord, ReviewState, ReviewStateFile};
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use super::reviewing_mark::{ReviewingMark, ReviewingMarkRemoval};
@@ -421,20 +422,133 @@ impl Review {
     /// Adds a suggestion block of the commented lines to the draft, after what is typed already.
     /// `None` when the lines cannot be suggested on, are not on the screen, or there is no draft.
     pub fn suggest_change(&mut self, place: &CommentPlace) -> anyhow::Result<Option<String>> {
-        let Some(rows) = RowSelection::of(place).and_then(|lines| self.page().selected(&lines))
-        else {
+        let page = Arc::clone(self.page());
+        let Some(rows) = RowSelection::of(place).and_then(|lines| page.selected(&lines)) else {
             return Ok(None);
         };
-        CommentDesk::suggest_change(&mut self.state, place, rows.lines())
+        self.suggest_lines(place, rows.lines())
     }
 
+    /// A review reopened after a re-pin goes on with what the one it replaces was doing; see
+    /// `ReviewCore::carry_on_from`.
+    pub fn carry_on_from(&mut self, replaced: Self) {
+        ReviewCore::carry_on_from(self, replaced.into_core());
+    }
+
+    /// A job's outcome carries the review built to replace this one, so the review, not its core,
+    /// lands it.
+    pub fn land_job(&mut self, outcome: JobOutcome) -> AfterJob {
+        let Some(started) = self.landed_job(outcome.job()) else {
+            return AfterJob::Nothing;
+        };
+        let stays = AfterJob::Stays { toast: None };
+        match outcome {
+            JobOutcome::Repin(Ok(replacement))
+            | JobOutcome::Refresh(Ok(replacement))
+            | JobOutcome::Reload(Ok(replacement)) => AfterJob::Reopen {
+                replacement: Box::new(replacement),
+                screen: self.screen().clone(),
+            },
+            JobOutcome::SwitchToGuided(Ok(replacement)) => AfterJob::Reopen {
+                replacement: Box::new(replacement),
+                screen: Screen::Summary,
+            },
+            JobOutcome::Repin(Err(error)) => {
+                self.writes_here_again();
+                self.job_failed(ReplacingJob::Repin, &error, None);
+                stays
+            }
+            JobOutcome::Refresh(Err(error)) => {
+                self.job_failed(
+                    ReplacingJob::Refresh,
+                    &error,
+                    Some(Problem::TourNotRefreshed(format!("{error:#}"))),
+                );
+                stays
+            }
+            JobOutcome::Reload(Err(error)) => {
+                self.job_failed(
+                    ReplacingJob::Reload,
+                    &error,
+                    Some(Problem::TourNotReloaded(format!("{error:#}"))),
+                );
+                stays
+            }
+            JobOutcome::SwitchToGuided(Err(error)) => {
+                self.job_failed(ReplacingJob::SwitchToGuided, &error, None);
+                AfterJob::Stays {
+                    toast: Some(format!("Could not switch to the guided tour: {error:#}")),
+                }
+            }
+            JobOutcome::MoveToPr(moved) => {
+                let StartedJob::MoveToPr(started) = started else {
+                    return AfterJob::Nothing;
+                };
+                match moved {
+                    Ok(()) => {
+                        self.job_ended_the_review();
+                        match started.from {
+                            MoveFrom::TheLocalReview => AfterJob::ShowPr {
+                                moved_away: self.subject().clone(),
+                                pr: started.offer.pr,
+                            },
+                            MoveFrom::ThePr => AfterJob::DropAndReopen(started.change_set.into()),
+                        }
+                    }
+                    Err(error) => {
+                        self.writes_here_again();
+                        self.job_failed(ReplacingJob::MoveToPr, &error, None);
+                        AfterJob::Stays {
+                            toast: Some(started.failure_text(&error)),
+                        }
+                    }
+                }
+            }
+            JobOutcome::DropReview(Ok(())) => {
+                self.job_ended_the_review();
+                AfterJob::Dropped(self.subject().clone())
+            }
+            JobOutcome::DropReview(Err(error)) => {
+                self.writes_here_again();
+                self.job_failed(
+                    ReplacingJob::DropReview,
+                    &error,
+                    Some(Problem::ReviewNotDropped(format!("{error:#}"))),
+                );
+                stays
+            }
+        }
+    }
+
+    /// Opens the Ask panel on a place, with notes on the answers whose code changed since.
+    pub fn open_ask(
+        &mut self,
+        place: Place,
+        label: String,
+        settings: &AskSettings,
+        now: Instant,
+        processes: &mut dyn AskProcesses,
+    ) {
+        let clone = self.asks().clone_folder().cloned();
+        let target = self.ask_target(place, label, clone, settings);
+        let head = self.head().clone();
+        self.check_asks_for_code_changes();
+        self.change_asks(|desk| desk.open(target, &head, now, processes));
+    }
+
+    fn check_asks_for_code_changes(&mut self) {
+        let changed = self.asks_whose_code_changed();
+        self.change_asks(|desk| desk.code_changed_is(changed));
+    }
+}
+
+impl ReviewCore {
     /// A review reopened after a re-pin goes on with what the one it replaces was doing: what its
     /// comment boxes were doing (which takes the keys, which are sending and why a send did not
     /// go), its work, whose outcomes still land here, its branch link and PR controls, which those
     /// outcomes filled, and which screen's end the window saw. What the config and the disk say is
     /// `ReviewBuilder`'s, which built this review.
-    pub fn carry_on_from(&mut self, replaced: Self) {
-        let replaced = replaced.into_core();
+    fn carry_on_from(&mut self, replaced: Self) {
         let switched_to_guided =
             matches!(replaced.tour, Tour::Basic(_)) && matches!(self.tour, Tour::Guided(_));
         self.comment_desk.keep_boxes_of(replaced.comment_desk);
@@ -455,7 +569,8 @@ impl Review {
             self.take_over_from_basic(&replaced.state);
             self.follow_file_asks_into_the_guided_tour();
         }
-        self.check_asks_for_code_changes();
+        let changed = self.asks_whose_code_changed();
+        self.ask_desk.code_changed_is(changed);
         for (id, replied) in replaced.replies_after_repin {
             if let Err(error) = self.hand_off_replied(id, &replied) {
                 eprintln!("could not carry the reply to {id} into the re-pinned review: {error:#}");
@@ -463,23 +578,23 @@ impl Review {
         }
     }
 
-    /// Opens the Ask panel on a place, with notes on the answers whose code changed since.
-    pub fn open_ask(
+    fn suggest_lines(
         &mut self,
-        place: Place,
-        label: String,
-        settings: &AskSettings,
-        now: Instant,
-        processes: &mut dyn AskProcesses,
-    ) {
-        let clone = self.ask_desk.clone_folder().cloned();
-        let target = self.ask_target(place, label, clone, settings);
-        let head = self.head().clone();
-        self.check_asks_for_code_changes();
-        self.change_asks(|desk| desk.open(target, &head, now, processes));
+        place: &CommentPlace,
+        lines: &[DiffLine],
+    ) -> anyhow::Result<Option<String>> {
+        CommentDesk::suggest_change(&mut self.state, place, lines)
     }
 
-    pub(super) fn takes_over_from_basic_with(&mut self, carrier: ReadCarrier) {
+    fn asks_whose_code_changed(&self) -> HashSet<AskId> {
+        self.ask_desk.ids_where(|ask| self.code_changed_since(ask))
+    }
+
+    /// This review replaces the basic review of its subject: its steps start with the read ticks
+    /// carried from that review's files, and `carrier` carries the files it reads until it hands
+    /// its whole state over.
+    pub(in crate::viewer) fn switched_from_basic(&mut self, carrier: ReadCarrier) {
+        self.steps_started_read = Some(self.progress().read);
         self.read_carrier = Some(carrier);
     }
 
@@ -534,17 +649,6 @@ impl Review {
         if let Err(error) = moved {
             eprintln!("could not save the Asks moved into the guided tour: {error:#}");
         }
-    }
-
-    fn check_asks_for_code_changes(&mut self) {
-        let changed = self
-            .ask_desk
-            .all()
-            .iter()
-            .filter(|ask| self.code_changed_since(ask))
-            .map(|ask| ask.id)
-            .collect();
-        self.change_asks(|desk| desk.code_changed_is(changed));
     }
 }
 
@@ -786,6 +890,13 @@ impl ReviewCore {
 
     pub(super) fn has_seen_end_of_screen(&self) -> bool {
         self.seen_end_of.as_ref() == Some(&self.screen)
+    }
+
+    /// The window had the end of the screen on show.
+    fn saw_end_of_screen(&mut self) {
+        if !self.has_seen_end_of_screen() {
+            self.seen_end_of = Some(self.screen.clone());
+        }
     }
 
     pub const fn ai_review(&self) -> &AiReview {
@@ -1910,6 +2021,10 @@ impl ReviewCore {
     /// The viewer's latest sent review, from this app or the GitHub web page.
     pub fn last_review(&self) -> Option<&SubmittedReview> {
         self.last_review.as_ref()
+    }
+
+    pub fn has_last_review(&self) -> bool {
+        self.last_review.is_some()
     }
 
     /// The PR has commits the last review did not see. Not so while the PR's head is unknown.

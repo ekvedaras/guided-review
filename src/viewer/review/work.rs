@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use super::{Review, ReviewCore};
+use super::ReviewCore;
 use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
 use crate::viewer::github_outage::Read;
@@ -13,18 +13,20 @@ use crate::viewer::work_agenda::{
     WorkKind, WorkOutcome,
 };
 
-impl Review {
+impl ReviewCore {
     /// The work to start now, each marked as running until its outcome lands. The app runs each
     /// off the UI thread and asks again after every change and when `next_due` comes.
-    pub fn due_work(&mut self, now: Instant) -> Vec<Work> {
-        let due = self.work_mut().fall_due(now);
+    pub(super) fn due_work(&mut self, now: Instant) -> Vec<Work> {
+        let due = self.work.fall_due(now);
+        #[expect(
+            clippy::needless_collect,
+            reason = "job_of reads the whole review, and start changes its agenda"
+        )]
         let jobs: Vec<Job> = due
             .into_iter()
             .filter_map(|kind| self.job_of(kind))
             .collect();
-        jobs.into_iter()
-            .map(|job| self.work_mut().start(job))
-            .collect()
+        jobs.into_iter().map(|job| self.work.start(job)).collect()
     }
 
     /// When work wanted later falls due; `None` when none is.
@@ -34,14 +36,12 @@ impl Review {
 
     /// The window came to the front, or the review opened: GitHub and the clone are read again,
     /// and what waits to go to GitHub is sent.
-    pub fn pull_from_github(&mut self) {
+    pub(super) fn pull_from_github(&mut self) {
         for kind in WorkKind::READ_AGAIN_ON_FOCUS {
-            self.work_mut().want(kind);
+            self.work.want(kind);
         }
     }
-}
 
-impl ReviewCore {
     /// `None` when there is nothing of the kind to do now. Work with GitHub is never done for a local
     /// review, which has no PR.
     fn job_of(&self, kind: WorkKind) -> Option<Job> {
