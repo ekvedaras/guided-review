@@ -44,13 +44,15 @@ fn the_title_bar_button_says_what_a_click_offers_and_hides_where_the_viewer_cann
 
 fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeHost, Instant) {
     let mut review = pull.open();
-    let host = pull.host().with_status(PrStatus::Open(OpenPrStatus {
-        readiness: Readiness::Ready,
-        checks: Checks::Running,
-        check_runs: Arc::default(),
-        viewer_may_change_readiness: true,
-        merging,
-    }));
+    let host = pull
+        .host()
+        .with_status(PrStatus::Open(OpenPrStatus {
+            readiness: Readiness::Ready,
+            checks: Checks::Running,
+            check_runs: Arc::default(),
+            viewer_may_change_readiness: true,
+        }))
+        .with_merging(merging);
     let now = Instant::now();
     pull.read(&mut review, &host, now);
     (review, host, now)
@@ -71,6 +73,24 @@ fn a_host_without_merging_offers_no_button_key_or_palette_action() {
             .palette_actions(Build::Local)
             .into_iter()
             .any(|action| action.command() == Some(Command::ToggleAutoMerge))
+    );
+}
+
+#[test]
+fn how_the_pr_would_merge_is_read_from_the_hosts_merging_port_with_its_status() {
+    let pull = Pull::new();
+    let on = Merging {
+        auto_merge: AutoMerge::On(MergeMethod::Squash),
+        ..blocked_merging()
+    };
+
+    let (review, ..) = read_merging(&pull, on);
+
+    assert_eq!(review.merging(), Some(on));
+    assert!(
+        pull.sent
+            .host_calls()
+            .contains(&HostCall::MergingOf(PR.parse().unwrap()))
     );
 }
 
@@ -125,11 +145,7 @@ fn the_same_press_again_within_ten_seconds_turns_auto_merge_on() {
         [MergeChange::EnableAutoMerge(MergeMethod::Merge)]
     );
     assert_eq!(
-        review
-            .pr_status()
-            .as_ref()
-            .and_then(PrStatus::open)
-            .map(|status| status.merging.auto_merge),
+        review.merging().map(|merging| merging.auto_merge),
         Some(AutoMerge::On(MergeMethod::Merge))
     );
     assert_eq!(review.problems(), []);
@@ -193,11 +209,7 @@ fn with_auto_merge_on_the_same_key_turns_it_off() {
     assert!(note.contains("turn off auto-merge"), "{note}");
     assert_eq!(merging_calls(&pull), [MergeChange::DisableAutoMerge]);
     assert_eq!(
-        review
-            .pr_status()
-            .as_ref()
-            .and_then(PrStatus::open)
-            .map(|status| status.merging.auto_merge),
+        review.merging().map(|merging| merging.auto_merge),
         Some(AutoMerge::Off)
     );
 }
@@ -321,11 +333,7 @@ fn a_change_github_does_not_take_is_a_problem_and_leaves_the_status_as_it_was() 
     drive_without_agents(&mut review, &host, &pull.source(), now);
 
     assert_eq!(
-        review
-            .pr_status()
-            .as_ref()
-            .and_then(PrStatus::open)
-            .map(|status| status.merging.auto_merge),
+        review.merging().map(|merging| merging.auto_merge),
         Some(AutoMerge::Off)
     );
     assert_eq!(

@@ -337,8 +337,8 @@ impl Scene {
         })
     }
 
-    /// The PR status a title bar scene shows; `None` for every other scene.
-    fn staged_status(self) -> Option<PrStatus> {
+    /// The PR status a title bar scene shows, and how it would merge; `None` for every other scene.
+    fn staged_status(self) -> Option<(PrStatus, Merging)> {
         let blocked = Merging {
             mergeability: Mergeability::Blocked,
             auto_merge: AutoMerge::Off,
@@ -352,14 +352,14 @@ impl Scene {
             viewer_may_enable_auto_merge: false,
             ..blocked
         };
-        let open = |readiness, checks, merging| OpenPrStatus {
+        let open = |readiness, checks| OpenPrStatus {
             readiness,
             checks,
             check_runs: Arc::default(),
             viewer_may_change_readiness: true,
-            merging,
         };
-        let status = |readiness, checks, merging| PrStatus::Open(open(readiness, checks, merging));
+        let status =
+            |readiness, checks, merging| (PrStatus::Open(open(readiness, checks)), merging);
         Some(match self {
             Self::TitleBarDraftChecksRunning => {
                 status(Readiness::Draft, Checks::Running, cannot_act)
@@ -384,23 +384,26 @@ impl Scene {
                     ..blocked
                 },
             ),
-            Self::TitleBarChecksList => PrStatus::Open(OpenPrStatus {
-                check_runs: [
-                    ("lint", CheckState::Passing),
-                    ("test (ubuntu-latest)", CheckState::Failing),
-                    ("deploy preview", CheckState::Skipped),
-                    ("test (macos-latest)", CheckState::Running),
-                ]
-                .map(|(name, state)| CheckRun {
-                    name: name.into(),
-                    state,
-                    page: None,
-                })
-                .into(),
-                ..open(Readiness::Ready, Checks::Failing, cannot_act)
-            }),
-            Self::TitleBarMerged => PrStatus::Merged,
-            Self::TitleBarClosed => PrStatus::Closed,
+            Self::TitleBarChecksList => (
+                PrStatus::Open(OpenPrStatus {
+                    check_runs: [
+                        ("lint", CheckState::Passing),
+                        ("test (ubuntu-latest)", CheckState::Failing),
+                        ("deploy preview", CheckState::Skipped),
+                        ("test (macos-latest)", CheckState::Running),
+                    ]
+                    .map(|(name, state)| CheckRun {
+                        name: name.into(),
+                        state,
+                        page: None,
+                    })
+                    .into(),
+                    ..open(Readiness::Ready, Checks::Failing)
+                }),
+                cannot_act,
+            ),
+            Self::TitleBarMerged => (PrStatus::Merged, blocked),
+            Self::TitleBarClosed => (PrStatus::Closed, blocked),
             _ => return None,
         })
     }
@@ -1231,9 +1234,10 @@ impl OneStepLayout {
             | Scene::TitleBarChecksList
             | Scene::TitleBarMerged
             | Scene::TitleBarClosed => {
-                if let Some(status) = scene.staged_status() {
-                    self.session
-                        .update(cx, |session, cx| session.stage_pr_status(status, cx));
+                if let Some((status, merging)) = scene.staged_status() {
+                    self.session.update(cx, |session, cx| {
+                        session.stage_pr_status(status, merging, cx);
+                    });
                 }
                 if scene == Scene::TitleBarMerging {
                     self.change_review(cx, |review| {

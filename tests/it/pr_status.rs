@@ -2,9 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{
-    FakeHost, HostCall, HostFault, ReadFailure, SentLog, blocked_merging,
-};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, ReadFailure, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
@@ -83,7 +81,6 @@ fn open_status(readiness: Readiness, checks: Checks) -> OpenPrStatus {
         checks,
         check_runs: Arc::default(),
         viewer_may_change_readiness: true,
-        merging: blocked_merging(),
     }
 }
 

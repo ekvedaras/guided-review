@@ -114,6 +114,7 @@ pub enum HostCall {
         name: String,
     },
     StatusOf(PullRequestUrl),
+    MergingOf(PullRequestUrl),
     SetReadiness {
         pr: PullRequestUrl,
         readiness: Readiness,
@@ -219,6 +220,7 @@ pub struct FakeHost {
     replied_now: Mutex<Vec<(ThreadId, ThreadComment)>>,
     description: Mutex<String>,
     status: Mutex<PrStatus>,
+    merging: Mutex<Merging>,
     pulls_of_branches: Mutex<Vec<(String, PullOfBranch)>>,
     head_branches: Mutex<Vec<(String, String)>>,
     issues: Mutex<PullRequestIssues>,
@@ -252,8 +254,8 @@ impl FakeHost {
                 checks: Checks::NoneRun,
                 check_runs: Arc::default(),
                 viewer_may_change_readiness: true,
-                merging: blocked_merging(),
             })),
+            merging: Mutex::new(blocked_merging()),
             pulls_of_branches: Mutex::default(),
             head_branches: Mutex::default(),
             issues: Mutex::default(),
@@ -337,6 +339,12 @@ impl FakeHost {
 
     pub fn with_status(self, status: PrStatus) -> Self {
         self.set_status(status);
+        self
+    }
+
+    /// How the PR would merge, as the host's merging port says.
+    pub fn with_merging(self, merging: Merging) -> Self {
+        *self.merging.lock().unwrap() = merging;
         self
     }
 
@@ -657,24 +665,27 @@ impl PullRequestStatusPort for FakeHost {
 }
 
 impl MergingPort for FakeHost {
+    fn pull_request_merging(&self, pr: &PullRequestUrl) -> Result<Merging, HostError> {
+        self.sent.record(HostCall::MergingOf(pr.clone()));
+        self.fail_if_reads_fail()?;
+        Ok(*self.merging.lock().unwrap())
+    }
+
     fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), HostError> {
         self.sent.record(HostCall::ChangeMerging {
             pr: pr.clone(),
             change,
         });
         self.fail_if_connection_lost()?;
-        let mut status = self.status.lock().unwrap();
         let auto_merge = match change {
             MergeChange::EnableAutoMerge(method) => AutoMerge::On(method),
             MergeChange::DisableAutoMerge => AutoMerge::Off,
             MergeChange::MergeNow(_) => {
-                *status = PrStatus::Merged;
+                *self.status.lock().unwrap() = PrStatus::Merged;
                 return Ok(());
             }
         };
-        if let PrStatus::Open(open) = &mut *status {
-            open.merging.auto_merge = auto_merge;
-        }
+        self.merging.lock().unwrap().auto_merge = auto_merge;
         Ok(())
     }
 }

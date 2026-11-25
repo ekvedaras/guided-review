@@ -100,12 +100,13 @@ pub struct ReviewSession {
     /// The code source of the PR a snapshot scene put aside to show a local review.
     #[cfg(feature = "snapshots")]
     source_before_staging: Option<Arc<dyn CodeSource>>,
-    /// What GitHub said of the PR before a snapshot scene staged another title bar.
+    /// What the host said of the PR, and of how it would merge, before a snapshot scene staged
+    /// another title bar.
     #[cfg(feature = "snapshots")]
-    pr_status_before_staging: Option<crate::viewer::PrStatus>,
-    /// The status a title bar scene shows, held over a GitHub read that lands while it is on screen.
+    pr_status_before_staging: Option<(crate::viewer::PrStatus, Option<crate::viewer::Merging>)>,
+    /// The status a title bar scene shows, held over a host read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
-    staged_pr_status: Option<crate::viewer::PrStatus>,
+    staged_pr_status: Option<(crate::viewer::PrStatus, crate::viewer::Merging)>,
     /// The issues a title bar scene shows, held over a GitHub read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
     staged_related_issues: Vec<(
@@ -1210,12 +1211,21 @@ impl ReviewSession {
 
     /// The title bar as GitHub would have it say `status`; `unstage_pr_status` puts back what was read.
     #[cfg(feature = "snapshots")]
-    pub fn stage_pr_status(&mut self, status: crate::viewer::PrStatus, cx: &mut Context<Self>) {
+    pub fn stage_pr_status(
+        &mut self,
+        status: crate::viewer::PrStatus,
+        merging: crate::viewer::Merging,
+        cx: &mut Context<Self>,
+    ) {
         if self.pr_status_before_staging.is_none() {
-            self.pr_status_before_staging = self.review.pr_status();
+            self.pr_status_before_staging = self
+                .review
+                .pr_status()
+                .map(|before| (before, self.review.merging()));
         }
         self.review.pr_status_is(status.clone());
-        self.staged_pr_status = Some(status);
+        self.review.pr_merging_is(merging);
+        self.staged_pr_status = Some((status, merging));
         cx.notify();
     }
 
@@ -1277,8 +1287,9 @@ impl ReviewSession {
 
     #[cfg(feature = "snapshots")]
     fn keep_staged_pr_status(&mut self) {
-        if let Some(status) = self.staged_pr_status.clone() {
+        if let Some((status, merging)) = self.staged_pr_status.clone() {
             self.review.pr_status_is(status);
+            self.review.pr_merging_is(merging);
         }
     }
 
@@ -1286,8 +1297,11 @@ impl ReviewSession {
     #[cfg(feature = "snapshots")]
     pub fn unstage_pr_status(&mut self, cx: &mut Context<Self>) {
         self.staged_pr_status = None;
-        if let Some(before) = self.pr_status_before_staging.take() {
-            self.review.pr_status_is(before);
+        if let Some((status, merging)) = self.pr_status_before_staging.take() {
+            self.review.pr_status_is(status);
+            if let Some(merging) = merging {
+                self.review.pr_merging_is(merging);
+            }
         }
         cx.notify();
     }

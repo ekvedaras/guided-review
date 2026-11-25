@@ -21,6 +21,9 @@ pub(super) struct PrControls {
     readiness: PressAgain<Readiness>,
     /// `None` on a host that has no merging: nothing offers it.
     merging: Option<PressAgain<MergeChange>>,
+    /// How the PR would merge, as the host's merging port last said; `None` until it answers, and
+    /// always on a host that has no merging.
+    merging_state: Option<Merging>,
 }
 
 impl PrControls {
@@ -29,6 +32,7 @@ impl PrControls {
             status: None,
             readiness: PressAgain::default(),
             merging: host.has(Capability::Merging).then(PressAgain::default),
+            merging_state: None,
         })
     }
 
@@ -39,8 +43,10 @@ impl PrControls {
             .merging
             .take()
             .map(|fresh| replaced.merging.unwrap_or(fresh));
+        let merging_state = merging.as_ref().and(replaced.merging_state);
         *self = Self {
             merging,
+            merging_state,
             ..replaced
         };
     }
@@ -59,9 +65,15 @@ impl PrControls {
         read_again
     }
 
+    pub(super) fn merging_is(&mut self, merging: Merging) {
+        if self.merging.is_some() {
+            self.merging_state = Some(merging);
+        }
+    }
+
     pub(super) fn merging(&self) -> Option<Merging> {
-        self.merging.as_ref()?;
-        Some(self.status.as_ref()?.open()?.merging)
+        self.status.as_ref()?.open()?;
+        self.merging_state
     }
 
     /// A merged or closed PR has nothing to change, so the key does nothing.
@@ -94,17 +106,14 @@ impl PrControls {
         now: Instant,
         preferred: MergeMethod,
     ) -> PressStep {
-        let (Some(status), Some(merging)) = (
-            self.status.as_ref().and_then(PrStatus::open),
-            self.merging.as_mut(),
-        ) else {
+        let state = self.merging();
+        let (Some(state), Some(merging)) = (state, self.merging.as_mut()) else {
             return PressStep::Nothing;
         };
         if merging.to_send().is_some() {
             return PressStep::Nothing;
         }
-        let offered = status
-            .merging
+        let offered = state
             .change(preferred)
             .map_err(|refusal| refusal.to_string());
         merging.press(
@@ -134,9 +143,9 @@ impl PrControls {
                 Readiness::Ready => PaletteAction::ConvertToDraft,
                 Readiness::Draft => PaletteAction::MarkReadyForReview,
             });
-        let merging = status
-            .filter(|_| self.merging.is_some())
-            .and_then(|status| status.merging.offer().ok())
+        let merging = self
+            .merging()
+            .and_then(|merging| merging.offer().ok())
             .map(|offer| match offer {
                 MergeOffer::EnableAutoMerge => PaletteAction::EnableAutoMerge,
                 MergeOffer::DisableAutoMerge => PaletteAction::DisableAutoMerge,
@@ -192,8 +201,8 @@ impl PrControls {
                 return Ok(());
             }
         };
-        if let Some(status) = self.status.as_mut().and_then(PrStatus::open_mut) {
-            status.merging.auto_merge = auto_merge;
+        if let Some(state) = &mut self.merging_state {
+            state.auto_merge = auto_merge;
         }
         Ok(())
     }

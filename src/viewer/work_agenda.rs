@@ -17,7 +17,7 @@ use super::comment_send::{CommentOutcome, CommentRequest};
 use super::fix_requests::{FixDeliveryOutcome, FixDeliveryRequest};
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
 use super::local_thread_store::ThreadHome;
-use super::merging::MergeChange;
+use super::merging::{MergeChange, Merging};
 use super::outdated_lines::{FollowedLines, follow_outdated};
 use super::ports::{CodeHost, HostError, PullOfBranch};
 use super::pr_origin::PullRequestOrigin;
@@ -364,7 +364,16 @@ impl Work {
                 authored: host.viewer_authored(&pr),
             },
             Job::PullReviews(pr) => Done::Reviews(host.reviews(&pr)),
-            Job::PullPrStatus(pr) => Done::PrStatus(host.pull_request_status(&pr)),
+            Job::PullPrStatus(pr) => {
+                let status = host.pull_request_status(&pr);
+                let merging = match (&status, host.merging()) {
+                    (Ok(PrStatus::Open(_)), Some(merging)) => {
+                        Some(merging.pull_request_merging(&pr))
+                    }
+                    _ => None,
+                };
+                Done::PrStatus { status, merging }
+            }
             Job::SendQueuedComment(request) => Done::QueuedComment(request.run(host)),
             Job::ChangeReviewingMark { pr, change } => Done::ReviewingMark {
                 change,
@@ -428,7 +437,11 @@ pub(super) enum Done {
         authored: Result<bool, HostError>,
     },
     Reviews(Result<PullRequestReviews, HostError>),
-    PrStatus(Result<PrStatus, HostError>),
+    /// `merging` is read only for an open PR on a host that merges from the app.
+    PrStatus {
+        status: Result<PrStatus, HostError>,
+        merging: Option<Result<Merging, HostError>>,
+    },
     QueuedComment(CommentOutcome),
     ReviewingMark {
         change: ReactionChange,

@@ -143,8 +143,11 @@ Issue #140, 2026-11-25. `ReviewVerdict::RequestChanges` assumed every host has i
 
 Issue #140, 2026-11-25. `ReviewThreadsPort::set_reaction` made every host react to comments. It is `CommentReactionsPort::set_comment_reaction` now, handed out by `CodeHost::comment_reactions`. On a host without it a hand-off puts no seen mark (👀) and is delivered all the same (`SeenMark::Off`, no trouble named), the thread shows no reactions to add (`Review::can_react_to_comments`, from the `CommentDesk`'s capabilities), and a reaction asked anyway is refused with `CommentRefusal::NotOffered` before the host is asked. `DeliveryRequest`, `AgentReplyRequest`, `SeenMarkOff` and `ThreadActionRequest` run with a `&dyn CodeHost`, so each reaches the port through its `Option`. GitLab has award emoji on notes, so its adapter would offer it (not checked).
 
+## How a PR would merge is the merging port's
+
+Issue #140, 2026-11-25. `OpenPrStatus` held `Merging` (merge state, auto-merge, merge methods, what the viewer may do), so every host's status had to fill it. It is `MergingPort::pull_request_merging` now: the status job reads the status, and only for an open PR on a host with a merging port, how it would merge (`Done::PrStatus { status, merging }`). `PrControls` keeps it apart from the status (`merging_state`), only when the review offers merging, and a rebuild keeps it only then too; a rebuild that newly offers merging shows it after its next read. GitHub reads the two in two queries now, one more request per status read (every 30 s while checks run) on GitHub. Would GitLab fill `Merging`: `detailed_merge_status` for whether it merges now, `merge_when_pipeline_succeeds` for auto-merge, the project's merge method and squash option for the methods, and the user's merge permission (not checked). Approvals are not in it; they would be a capability of their own.
+
 ## Left open
 
 - Tests of a local review other than `local_review.rs` and `local_guided_tour.rs` that go through `Review::open_basic` with `every_capability()` (for example `basic_tour.rs`, `move_to_pr.rs`) build a local review with a PR host's capabilities; they test reading, not capabilities.
 
-- `PrStatus` holds GitHub's `Merging` (merge state, auto-merge, merge methods). With no `MergingPort` the review hides it, but a GitLab status would have to fill it or the type would need a split.

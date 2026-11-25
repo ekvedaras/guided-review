@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::capability::{Capability, HostCapabilities};
 use super::comments::{CommentPlace, SendMode};
 use super::host_outage::OutageCause;
-use super::merging::MergeChange;
+use super::merging::{MergeChange, Merging};
 use super::pr_origin::PullRequestOrigin;
 use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
@@ -107,7 +107,7 @@ pub trait IssueDetailsPort: Send + Sync {
     ) -> Result<Vec<(IssueUrl, IssueDetails)>, HostError>;
 }
 
-/// The PR's status: whether it is a draft, its checks, and what the viewer may change.
+/// The PR's status: whether it is a draft, its checks, and whether the viewer may change the draft.
 pub trait PullRequestStatusPort: Send + Sync {
     fn pull_request_status(&self, pr: &PullRequestUrl) -> Result<PrStatus, HostError>;
 
@@ -122,6 +122,9 @@ pub trait PullRequestStatusPort: Send + Sync {
 /// Merging the PR from the app: auto-merge on or off, or merge now. Optional, as GitHub's
 /// auto-merge is its own: a host may merge only from its web page.
 pub trait MergingPort: Send + Sync {
+    /// What the host says of merging the open PR now, and what the viewer may do about it.
+    fn pull_request_merging(&self, pr: &PullRequestUrl) -> Result<Merging, HostError>;
+
     fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), HostError>;
 }
 

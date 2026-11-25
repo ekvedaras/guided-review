@@ -67,6 +67,7 @@ mod fix_requests;
 mod focused_change;
 mod fold_key;
 mod fonts;
+mod github_merging;
 mod github_releases;
 mod github_threads;
 mod guided_ready;

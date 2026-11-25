@@ -197,8 +197,20 @@ impl ReviewCore {
             }
             Done::Reviews(Ok(reviews)) => self.reviews_are(reviews),
             Done::Reviews(Err(error)) => self.could_not_read(Read::LastReview, &error),
-            Done::PrStatus(Ok(status)) => self.pr_status_is(status),
-            Done::PrStatus(Err(error)) => self.could_not_read(Read::PrStatus, &error),
+            Done::PrStatus {
+                status: Ok(status),
+                merging,
+            } => {
+                self.pr_status_is(status);
+                match merging {
+                    Some(Ok(merging)) => self.pr_merging_is(merging),
+                    Some(Err(error)) => self.could_not_read(Read::PrStatus, &error),
+                    None => {}
+                }
+            }
+            Done::PrStatus {
+                status: Err(error), ..
+            } => self.could_not_read(Read::PrStatus, &error),
             Done::ReviewingMark { change, result } => self.reviewing_mark_landed(change, result),
             Done::PrReadiness { readiness, result } => self.readiness_landed(readiness, result),
             Done::Merging { change, result } => self.merging_landed(change, result),

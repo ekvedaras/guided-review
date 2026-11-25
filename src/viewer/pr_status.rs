@@ -5,8 +5,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::merging::Merging;
-
 /// How often the checks are read again while one is running.
 pub const CHECKS_RECHECK: Duration = Duration::from_secs(30);
 
@@ -104,8 +102,9 @@ pub struct CheckList {
     pub hidden: usize,
 }
 
-/// What GitHub says of the PR right now. Draft or ready, the checks and merging mean something only
-/// while the PR is open; a merged or closed PR is only that.
+/// What the host says of the PR right now. Draft or ready and the checks mean something only while
+/// the PR is open; a merged or closed PR is only that. How it would merge is the merging port's
+/// (`MergingPort::pull_request_merging`), read only on a host that merges from the app.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrStatus {
     Open(OpenPrStatus),
@@ -154,7 +153,6 @@ pub struct OpenPrStatus {
     pub check_runs: Arc<[CheckRun]>,
     /// GitHub lets only the author and those with write access change it.
     pub viewer_may_change_readiness: bool,
-    pub merging: Merging,
 }
 
 impl OpenPrStatus {

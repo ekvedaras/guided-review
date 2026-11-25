@@ -806,8 +806,6 @@ impl PullRequestStatusPort for GitHub {
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
                     repository(owner: $owner, name: $name) {
-                        autoMergeAllowed mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
-                        viewerPermission
                         pullRequest(number: $number) {
                             isDraft
                             viewerCanUpdate
@@ -820,63 +818,27 @@ impl PullRequestStatusPort for GitHub {
                                 } }
                             } } } }
                             state
-                            mergeStateStatus
-                            viewerCanEnableAutoMerge
-                            viewerCanDisableAutoMerge
-                            autoMergeRequest { mergeMethod }
                         }
                     }
                 }",
                 &pull_request_variables(pr, &serde_json::Value::Null),
             )
             .map_err(|error| error.context(format!("could not read the status of {pr}")))?;
-        let repository = at(&data, "/repository");
-        let pull = at(repository, "/pullRequest");
-        let flag_of = |node: &serde_json::Value, pointer: &str| {
-            at(node, pointer)
+        let pull = at(&data, "/repository/pullRequest");
+        let flag = |pointer: &str| {
+            at(pull, pointer)
                 .as_bool()
                 .with_context(|| format!("GitHub did not give the {pointer} of {pr}"))
         };
-        let flag = |pointer: &str| flag_of(pull, pointer);
-        let text = |pointer: &str| {
-            at(pull, pointer)
-                .as_str()
-                .with_context(|| format!("GitHub did not give the {pointer} of {pr}"))
-        };
-        match text("/state")? {
-            "MERGED" => return Ok(PrStatus::Merged),
-            "CLOSED" => return Ok(PrStatus::Closed),
-            _ => {}
+        match at(pull, "/state").as_str() {
+            Some("MERGED") => return Ok(PrStatus::Merged),
+            Some("CLOSED") => return Ok(PrStatus::Closed),
+            Some(_) => {}
+            None => {
+                return Err(anyhow::anyhow!("GitHub did not give the /state of {pr}").into());
+            }
         }
         let rollup = at(pull, "/commits/nodes/0/commit/statusCheckRollup/state").as_str();
-        let allowed: Vec<MergeMethod> = [
-            ("/mergeCommitAllowed", MergeMethod::Merge),
-            ("/squashMergeAllowed", MergeMethod::Squash),
-            ("/rebaseMergeAllowed", MergeMethod::Rebase),
-        ]
-        .into_iter()
-        .filter(|(pointer, _)| at(repository, pointer).as_bool() == Some(true))
-        .map(|(_, method)| method)
-        .collect();
-        let auto_merge = match at(pull, "/autoMergeRequest/mergeMethod").as_str() {
-            None => AutoMerge::Off,
-            Some(name) => AutoMerge::On(
-                MergeMethod::of_github_name(name)
-                    .with_context(|| format!("GitHub gave an unknown merge method {name}"))?,
-            ),
-        };
-        let merging = Merging {
-            mergeability: Mergeability::from_github(text("/mergeStateStatus")?),
-            auto_merge,
-            methods: MergeMethods::only(&allowed),
-            repo_allows_auto_merge: flag_of(repository, "/autoMergeAllowed")?,
-            viewer_may_enable_auto_merge: flag("/viewerCanEnableAutoMerge")?,
-            viewer_may_disable_auto_merge: flag("/viewerCanDisableAutoMerge")?,
-            viewer_may_merge: matches!(
-                at(repository, "/viewerPermission").as_str(),
-                Some("ADMIN" | "MAINTAIN" | "WRITE")
-            ),
-        };
         Ok(PrStatus::Open(OpenPrStatus {
             readiness: if flag("/isDraft")? {
                 Readiness::Draft
@@ -889,7 +851,6 @@ impl PullRequestStatusPort for GitHub {
                 "/commits/nodes/0/commit/statusCheckRollup/contexts/nodes",
             )),
             viewer_may_change_readiness: flag("/viewerCanUpdate")?,
-            merging,
         }))
     }
 
@@ -916,6 +877,65 @@ impl PullRequestStatusPort for GitHub {
 }
 
 impl MergingPort for GitHub {
+    fn pull_request_merging(&self, pr: &PullRequestUrl) -> Result<Merging, HostError> {
+        let data = self
+            .graphql(
+                "query($owner: String!, $name: String!, $number: Int!) {
+                    repository(owner: $owner, name: $name) {
+                        autoMergeAllowed mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
+                        viewerPermission
+                        pullRequest(number: $number) {
+                            mergeStateStatus
+                            viewerCanEnableAutoMerge
+                            viewerCanDisableAutoMerge
+                            autoMergeRequest { mergeMethod }
+                        }
+                    }
+                }",
+                &pull_request_variables(pr, &serde_json::Value::Null),
+            )
+            .map_err(|error| error.context(format!("could not read how {pr} would merge")))?;
+        let repository = at(&data, "/repository");
+        let pull = at(repository, "/pullRequest");
+        let flag_of = |node: &serde_json::Value, pointer: &str| {
+            at(node, pointer)
+                .as_bool()
+                .with_context(|| format!("GitHub did not give the {pointer} of {pr}"))
+        };
+        let flag = |pointer: &str| flag_of(pull, pointer);
+        let allowed: Vec<MergeMethod> = [
+            ("/mergeCommitAllowed", MergeMethod::Merge),
+            ("/squashMergeAllowed", MergeMethod::Squash),
+            ("/rebaseMergeAllowed", MergeMethod::Rebase),
+        ]
+        .into_iter()
+        .filter(|(pointer, _)| at(repository, pointer).as_bool() == Some(true))
+        .map(|(_, method)| method)
+        .collect();
+        let auto_merge = match at(pull, "/autoMergeRequest/mergeMethod").as_str() {
+            None => AutoMerge::Off,
+            Some(name) => AutoMerge::On(
+                MergeMethod::of_github_name(name)
+                    .with_context(|| format!("GitHub gave an unknown merge method {name}"))?,
+            ),
+        };
+        let merge_state = at(pull, "/mergeStateStatus")
+            .as_str()
+            .with_context(|| format!("GitHub did not give the /mergeStateStatus of {pr}"))?;
+        Ok(Merging {
+            mergeability: Mergeability::from_github(merge_state),
+            auto_merge,
+            methods: MergeMethods::only(&allowed),
+            repo_allows_auto_merge: flag_of(repository, "/autoMergeAllowed")?,
+            viewer_may_enable_auto_merge: flag("/viewerCanEnableAutoMerge")?,
+            viewer_may_disable_auto_merge: flag("/viewerCanDisableAutoMerge")?,
+            viewer_may_merge: matches!(
+                at(repository, "/viewerPermission").as_str(),
+                Some("ADMIN" | "MAINTAIN" | "WRITE")
+            ),
+        })
+    }
+
     fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), HostError> {
         let id = self.pull_request_id(pr)?;
         let (mutation, method, doing) = match change {

@@ -30,6 +30,13 @@ impl ReviewCore {
         }
     }
 
+    /// How the open PR would merge, as the host's merging port says.
+    pub fn pr_merging_is(&mut self, merging: Merging) {
+        if let Some(controls) = &mut self.pr_controls {
+            controls.merging_is(merging);
+        }
+    }
+
     /// What the title bar's merge button acts on: `None` for a PR not open or not read yet, and on a
     /// host that has no merging.
     pub fn merging(&self) -> Option<Merging> {

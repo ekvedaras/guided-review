@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use crate::pr_status::Pull;
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{blocked_merging, every_capability};
+use crate::support::fake_ports::every_capability;
 use guided_review::build::Build;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
@@ -20,7 +20,6 @@ fn both_changes_offered() -> PrStatus {
         checks: Checks::Passing,
         check_runs: Arc::default(),
         viewer_may_change_readiness: true,
-        merging: blocked_merging(),
     })
 }
 
@@ -140,6 +139,8 @@ fn a_reopened_pr_review_offers_merging_as_its_own_build_says_whatever_the_replac
 
         let mut reopened = pull.open_on(reopened_on);
         reopened.carry_on_from(replaced);
+        // A replaced review with no merging never read how the PR would merge.
+        pull.read(&mut reopened, &host, Instant::now());
 
         assert_eq!(
             pr_controls_of(&reopened).contains(&Command::ToggleAutoMerge),
