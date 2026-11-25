@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use super::file_path;
 use guided_review::viewer::{
-    AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
+    AutoMerge, HostCapabilities, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
 };
 
 /// A PR that checks or reviews still hold back, in a repo that allows every merge method and
@@ -199,6 +199,11 @@ pub enum Capability {
     PullRequestReactions,
     PictureUploads,
     IssueTracker,
+}
+
+/// What a GitHub PR's host offers, for a review whose test is not about what the host lacks.
+pub fn every_capability() -> HostCapabilities {
+    HostCapabilities::of(&FakeHost::with_pull("", "", &SentLog::default()))
 }
 
 pub struct FakeHost {

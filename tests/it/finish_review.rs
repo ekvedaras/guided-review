@@ -65,6 +65,7 @@ impl Pull {
             tour,
             &source,
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
+            crate::support::fake_ports::every_capability(),
         )
         .unwrap()
     }
@@ -102,6 +103,7 @@ fn nothing_unread_means_no_warning() {
         tour,
         &source,
         ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pr)),
+        crate::support::fake_ports::every_capability(),
     )
     .unwrap();
     review.tick(&"all".into()).unwrap();

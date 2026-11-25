@@ -12,8 +12,8 @@ use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner, adapte
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::Tour;
 use crate::viewer::{
-    AgentLauncher, CodeHost, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher,
-    TourReloader, TourSwitcher,
+    AgentLauncher, CodeHost, HostCapabilities, PrMover, PullsOfBranchPort, Review, TourAgents,
+    TourRefresher, TourReloader, TourSwitcher,
 };
 
 /// Everything the Ask panel needs to start the AI, built once at startup.
@@ -47,10 +47,10 @@ pub fn open_review(
     let opened = OpenedSubject::in_folders(subject, folders, clones_from);
     // A local change set keeps the repo its clone names for every review rebuilt after this open.
     let subject = &opened.subject();
-    let (mut review, source) = opened.open_review()?;
+    let (review, source) = opened.open_review()?;
     let pick_code_source = opened.code_source_picker();
     let host = opened.host();
-    review.host_is(host.as_ref());
+    let capabilities = HostCapabilities::of(host.as_ref());
     let clone = source.local_clone().map(Path::to_path_buf);
     let config = Config::load_from(folders)?;
     let agent_folder = clone
@@ -64,6 +64,7 @@ pub fn open_review(
         folders: folders.clone(),
         subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
+        host: capabilities,
         writer: Arc::new(ClaudeRefreshWriter::new(
             clone
                 .clone()
@@ -75,16 +76,19 @@ pub fn open_review(
         folders: folders.clone(),
         subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
+        host: capabilities,
     };
     let switcher = TourSwitcher {
         folders: folders.clone(),
         subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
+        host: capabilities,
     };
     let repinner = TourRepinner {
         folders: folders.clone(),
         subject: subject.clone(),
         pick_code_source,
+        host: capabilities,
     };
     let tour_agents = TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
         .finding_head_branches_with(Arc::clone(&host) as Arc<dyn PullsOfBranchPort>)

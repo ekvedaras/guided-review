@@ -5,6 +5,7 @@ use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
 
 use super::agent_event::AgentEvent;
+use super::host_capabilities::HostCapabilities;
 use super::new_commits::PickCodeSource;
 use super::ports::RefreshWriter;
 use super::replacing_jobs::RepinnedTour;
@@ -15,6 +16,7 @@ pub struct TourRefresher {
     pub folders: AppFolders,
     pub subject: ReviewSubject,
     pub pick_code_source: PickCodeSource,
+    pub host: HostCapabilities,
     pub writer: Arc<dyn RefreshWriter>,
 }
 
@@ -41,7 +43,7 @@ impl TourRefresher {
         let tour =
             GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
         let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
-        let review = ReviewBuilder::new(&self.folders, &self.subject)
+        let review = ReviewBuilder::new(&self.folders, &self.subject, self.host)
             .build(Tour::Guided(tour), source.as_ref())?;
         if !review.refresh_brief().is_empty() {
             anyhow::bail!("claude ended without refreshing the tour: {said}");

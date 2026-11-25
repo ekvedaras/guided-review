@@ -58,7 +58,13 @@ impl Shop {
             &self.repo.folders(),
             &PR.parse::<ReviewSubject>().unwrap(),
         );
-        Review::open_basic(tour, &source, state_file).unwrap()
+        Review::open_basic(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 
     fn host(&self, files: &[&str]) -> FakeHost {

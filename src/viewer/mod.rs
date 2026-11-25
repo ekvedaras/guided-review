@@ -40,6 +40,7 @@ mod guided_tour;
 mod hand_offs;
 mod hidden_text;
 mod highlight;
+mod host_capabilities;
 mod host_outage;
 mod image_preview;
 mod intent;
@@ -185,6 +186,7 @@ pub use hidden_text::{HiddenPart, HiddenText};
 pub use highlight::{
     Capture, HighlightRequest, Highlights, Span, highlight_file_lines, highlight_snippet,
 };
+pub use host_capabilities::HostCapabilities;
 pub use host_outage::Read;
 pub use host_outage::{Affected, Outage, OutageCause, backoff};
 pub use image_preview::{

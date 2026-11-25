@@ -29,7 +29,13 @@ fn open_review() -> (FixtureRepo, Review) {
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &PR.parse().unwrap());
-    let review = Review::open(tour, &source, state_file).unwrap();
+    let review = Review::open(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
     (repo, review)
 }
 

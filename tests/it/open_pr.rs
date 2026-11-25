@@ -110,7 +110,13 @@ fn pr_review(repo: &FixtureRepo) -> Review {
     .unwrap()
     .unwrap();
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &SHOP_7.parse().unwrap());
-    Review::open(tour, &source, state_file).unwrap()
+    Review::open(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap()
 }
 
 fn offered(review: &Review, action: PaletteAction) -> bool {

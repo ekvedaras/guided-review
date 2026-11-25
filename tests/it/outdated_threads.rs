@@ -65,7 +65,13 @@ impl Shop {
         let state_file =
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr));
         let source = self.source();
-        let mut review = Review::open(tour, &source, state_file).unwrap();
+        let mut review = Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
         review.go_forward();

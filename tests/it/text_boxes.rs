@@ -72,6 +72,7 @@ impl Pull {
             tour,
             &source,
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
+            crate::support::fake_ports::every_capability(),
         )
         .unwrap();
         let files_at_head = review.files_at_head_request().read(&source);

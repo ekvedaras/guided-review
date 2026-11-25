@@ -57,6 +57,10 @@ impl Shop {
     }
 
     fn open(&self) -> Review {
+        self.open_on(crate::support::fake_ports::every_capability())
+    }
+
+    fn open_on(&self, capabilities: guided_review::viewer::HostCapabilities) -> Review {
         let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
@@ -76,7 +80,7 @@ impl Shop {
             .unwrap();
         let state_file =
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()));
-        Review::open(tour, &source, state_file).unwrap()
+        Review::open(tour, &source, state_file, capabilities).unwrap()
     }
 
     fn source(&self) -> LocalGit {
@@ -124,8 +128,7 @@ fn all_unviewed(shop: &Shop) -> FakeHost {
 fn a_host_without_viewed_marks_is_never_synced_and_ticks_stay_ticks() {
     let shop = Shop::with_pull();
     let host = all_unviewed(&shop).without(Capability::ViewedMarks);
-    let mut review = shop.open();
-    review.host_is(&host);
+    let mut review = shop.open_on(guided_review::viewer::HostCapabilities::of(&host));
 
     let start = Instant::now();
 

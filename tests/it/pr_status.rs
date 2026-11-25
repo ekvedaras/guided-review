@@ -53,6 +53,10 @@ impl Pull {
     }
 
     pub(crate) fn open(&self) -> Review {
+        self.open_on(crate::support::fake_ports::every_capability())
+    }
+
+    pub(crate) fn open_on(&self, capabilities: guided_review::viewer::HostCapabilities) -> Review {
         let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
@@ -65,7 +69,7 @@ impl Pull {
         }))
         .unwrap();
         let state_file = ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse().unwrap());
-        Review::open(tour, &self.source(), state_file).unwrap()
+        Review::open(tour, &self.source(), state_file, capabilities).unwrap()
     }
 
     pub(crate) fn read(&self, review: &mut Review, host: &FakeHost, now: Instant) {

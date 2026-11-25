@@ -61,6 +61,7 @@ use super::finish_review::FinishAction;
 use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{AgentReplied, HandOffId};
 use super::highlight::{HighlightRequest, Highlights};
+use super::host_capabilities::HostCapabilities;
 use super::host_outage::Read;
 use super::host_outage::{Affected, OutageCause};
 use super::image_preview::ImagePreviewRequest;
@@ -353,8 +354,9 @@ impl Review {
         tour: GuidedTour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
+        host: HostCapabilities,
     ) -> anyhow::Result<Self> {
-        ReviewCore::open(Tour::Guided(tour), source, state_file).map(Self::keeping_page_of)
+        ReviewCore::open(Tour::Guided(tour), source, state_file, host).map(Self::keeping_page_of)
     }
 
     /// A review with no steps: it opens on the overview and reads one screen per changed file.
@@ -362,8 +364,9 @@ impl Review {
         tour: BasicTour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
+        host: HostCapabilities,
     ) -> anyhow::Result<Self> {
-        ReviewCore::open(Tour::Basic(tour), source, state_file).map(Self::keeping_page_of)
+        ReviewCore::open(Tour::Basic(tour), source, state_file, host).map(Self::keeping_page_of)
     }
 
     /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
@@ -648,6 +651,7 @@ impl ReviewCore {
         tour: Tour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
+        host: HostCapabilities,
     ) -> anyhow::Result<Self> {
         let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
         let parts_not_read = state.parts_not_read();
@@ -726,7 +730,7 @@ impl ReviewCore {
                 .cloned()
                 .collect(),
         ))));
-        Ok(Self {
+        let mut core = Self {
             tour,
             file_tree,
             folded_folders: BTreeSet::new(),
@@ -795,7 +799,9 @@ impl ReviewCore {
             read_carrier: None,
             seen_end_of: None,
             tour_files,
-        })
+        };
+        core.offer_only(host);
+        Ok(core)
     }
 
     /// Colouring reads whole files, so the app runs this off the main thread and hands the result to `set_highlights`.

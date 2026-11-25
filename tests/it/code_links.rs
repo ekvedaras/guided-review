@@ -53,7 +53,13 @@ impl Shop {
                 .parse::<ReviewSubject>()
                 .unwrap(),
         );
-        let mut review = Review::open(tour, &source, state_file).unwrap();
+        let mut review = Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         review.working_copy_is(WorkingCopy::of(
             source.working_tree_is_at(&Sha::new(&self.head)),
         ));

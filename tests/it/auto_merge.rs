@@ -59,8 +59,7 @@ fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeHost, Instant) {
 fn a_host_without_merging_offers_no_button_key_or_palette_action() {
     let pull = Pull::new();
     let host = pull.host().without(Capability::Merging);
-    let mut review = pull.open();
-    review.host_is(&host);
+    let mut review = pull.open_on(guided_review::viewer::HostCapabilities::of(&host));
     let now = Instant::now();
     pull.read(&mut review, &host, now);
 

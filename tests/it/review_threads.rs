@@ -78,7 +78,13 @@ impl Shop {
                 .parse::<ReviewSubject>()
                 .unwrap(),
         );
-        Review::open(tour, &source, state_file).unwrap()
+        Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 }
 

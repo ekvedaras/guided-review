@@ -6,6 +6,7 @@ use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Tour};
 
 use super::carried::ReadCarrier;
+use super::host_capabilities::HostCapabilities;
 use super::new_commits::PickCodeSource;
 use super::replacing_jobs::RepinnedTour;
 use super::review_builder::ReviewBuilder;
@@ -17,6 +18,7 @@ pub struct TourSwitcher {
     pub folders: AppFolders,
     pub subject: ReviewSubject,
     pub pick_code_source: PickCodeSource,
+    pub host: HostCapabilities,
 }
 
 impl TourSwitcher {
@@ -32,7 +34,7 @@ impl TourSwitcher {
         let carrier = ReadCarrier::of(&guided, &files, &heads, source.as_ref())?;
         let carried = carrier.carry(&reads);
         state_file.update(|state| state.carry_file_reads_into_steps(&carried))?;
-        let mut review = ReviewBuilder::new(&self.folders, &self.subject)
+        let mut review = ReviewBuilder::new(&self.folders, &self.subject, self.host)
             .build(Tour::Guided(guided), source.as_ref())?;
         review.switched_from_basic(carrier);
         self.delete_basic_file()?;

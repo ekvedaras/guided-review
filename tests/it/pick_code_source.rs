@@ -55,7 +55,13 @@ impl Shop {
         .unwrap();
         let state_file =
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr()));
-        Review::open(tour, source, state_file).unwrap()
+        Review::open(
+            tour,
+            source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 }
 

@@ -185,7 +185,13 @@ fn a_pr_review_looks_for_no_branch() {
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr));
-    let mut review = Review::open_basic(tour, &source, state_file).unwrap();
+    let mut review = Review::open_basic(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
 
     review.pull_from_host();
     drive_without_agents(&mut review, &host, &source, Instant::now());

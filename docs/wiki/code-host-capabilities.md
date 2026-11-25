@@ -24,9 +24,11 @@ A flag list beside the ports (`supports_viewed_marks: true`) can disagree with t
 
 ## How the review learns it
 
-`Review::host_is(&dyn CodeHost)` reads each accessor once and tells the part that shows it: `ViewedSync::without_host_marks`, `ReviewingMark::without_reactions`, `PrControls::without_merging` (no merge button, `Shift+M` or palette action), `PrNotes::without_picture_uploads` (no note that shows a picture), `RelatedIssues::without_tracker` (no hover details). The review's work is planned on the UI thread and run with the ports lent on another, so the review cannot hold the port; it holds what the port's absence means for each part.
+`HostCapabilities::of(&dyn CodeHost)` reads each accessor once, and `Review::open`, `Review::open_basic` and `ReviewBuilder::new` take it, so no review is built without its host's capabilities. The review tells the part that shows each: `ViewedSync::without_host_marks`, `ReviewingMark::without_reactions`, `PrControls::without_merging` (no merge button, `Shift+M` or palette action), `PrNotes::without_picture_uploads` (no note that shows a picture), `RelatedIssues::without_tracker` (no hover details). The review's work is planned on the UI thread and run with the ports lent on another, so the review cannot hold the port; it holds what the port's absence means for each part.
 
-`open_review` calls it on the opened review, and the session on every review that replaces the shown one (re-pin, refresh, reload, switch to guided, a snapshot's staged review). A review opened with `Review::open` and never told offers every capability, as a GitHub PR does, which keeps tests of a PR short.
+`open_review` reads it from the opened subject's host (`NoHost` for a local review, so none) and hands it to `ReviewBuilder`, `TourRefresher`, `TourReloader`, `TourSwitcher` and `TourRepinner`, which rebuild the review on re-pin, refresh, reload and switch to guided; the session's snapshot staging reads it from its own host. Nothing tells a review afterwards (`Review::host_is` is gone). Tests pass `support::fake_ports::every_capability()`, or `HostCapabilities::of(&host.without(..))` when the test is about a host that lacks one.
+
+Before this, a review opened any other way offered every capability: a local review opened through `OpenedSubject::open_review` counted its ticks as unsent viewed marks (`opened_subject::a_local_review_opened_as_the_app_opens_it_offers_no_host_viewed_marks`).
 
 ## PrControls keeps its fields
 
@@ -98,6 +100,8 @@ From my knowledge of GitLab, not checked against its docs:
 - Snapshot sample data (`app::snapshots`, the staged findings' avatars) stays GitHub's.
 
 ## Left open
+
+- Tests of a local review other than `local_review.rs` and `local_guided_tour.rs` that go through `Review::open_basic` with `every_capability()` (for example `basic_tour.rs`, `move_to_pr.rs`) build a local review with a PR host's capabilities; they test reading, not capabilities.
 
 - Comment reactions (the hand-off's seen mark) are still in `ReviewThreadsPort`; a host with no reactions on comments would need them split out too.
 - `PrStatus` holds GitHub's `Merging` (merge state, auto-merge, merge methods). With no `MergingPort` the review hides it, but a GitLab status would have to fill it or the type would need a split.

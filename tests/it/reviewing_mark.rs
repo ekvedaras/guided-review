@@ -49,6 +49,10 @@ impl Pull {
     }
 
     fn open(&self) -> Review {
+        self.open_on(crate::support::fake_ports::every_capability())
+    }
+
+    fn open_on(&self, capabilities: guided_review::viewer::HostCapabilities) -> Review {
         let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
@@ -65,6 +69,7 @@ impl Pull {
             tour,
             &self.source(),
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
+            capabilities,
         )
         .unwrap()
     }
@@ -115,8 +120,7 @@ fn opening_someone_elses_pr_puts_eyes_on_it() {
 fn a_host_without_reactions_on_a_pr_is_never_asked_for_eyes() {
     let pull = Pull::new();
     let host = pull.host().without(Capability::PullRequestReactions);
-    let mut review = pull.open();
-    review.host_is(&host);
+    let mut review = pull.open_on(guided_review::viewer::HostCapabilities::of(&host));
 
     review.pull_from_host();
     let ran = drive_without_agents(&mut review, &host, &pull.source(), Instant::now());

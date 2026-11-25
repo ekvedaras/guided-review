@@ -69,7 +69,12 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        Review::open(tour, &source, self.state_file())
+        Review::open(
+            tour,
+            &source,
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
     }
 
     fn state_on_disk(&self) -> Value {

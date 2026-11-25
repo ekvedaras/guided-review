@@ -64,7 +64,13 @@ impl Shop {
                 .parse::<ReviewSubject>()
                 .unwrap(),
         );
-        let mut review = Review::open(tour, &source, state_file).unwrap();
+        let mut review = Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         review.set_threads(threads);
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
@@ -90,7 +96,13 @@ impl Shop {
                 .parse::<ReviewSubject>()
                 .unwrap(),
         );
-        let mut review = Review::open_basic(tour, &self.source(), state_file).unwrap();
+        let mut review = Review::open_basic(
+            tour,
+            &self.source(),
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         review.set_threads(threads);
         review
     }

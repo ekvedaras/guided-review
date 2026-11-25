@@ -40,7 +40,13 @@ fn guided() -> (FixtureRepo, Review) {
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &PR.parse().unwrap());
-    let mut review = Review::open(tour, &source, state_file).unwrap();
+    let mut review = Review::open(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
     review.go_to(&"skim".into());
     (repo, review)
 }
@@ -63,7 +69,13 @@ fn basic() -> (FixtureRepo, Review) {
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &PR.parse().unwrap());
-    let mut review = Review::open_basic(tour, &source, state_file).unwrap();
+    let mut review = Review::open_basic(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
     review.go_to_file(&file_path("a.txt"));
     (repo, review)
 }

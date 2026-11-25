@@ -62,7 +62,13 @@ impl Pull {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let mut review = Review::open(tour, &source, self.state_file()).unwrap();
+        let mut review = Review::open(
+            tour,
+            &source,
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
         review.go_forward();

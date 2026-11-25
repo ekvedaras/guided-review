@@ -77,7 +77,13 @@ impl Shop {
         }))
         .unwrap();
         let state_file = ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse().unwrap());
-        Review::open(tour, &self.source(), state_file).unwrap()
+        Review::open(
+            tour,
+            &self.source(),
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 
     fn host(&self, origin: PullRequestOrigin) -> FakeHost {

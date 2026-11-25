@@ -89,7 +89,13 @@ impl Shop {
 
     fn open(&self) -> Review {
         let tour = GuidedTour::load(&self.tour_path()).unwrap();
-        Review::open(tour, &self.source(), self.state_file()).unwrap()
+        Review::open(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 
     fn asks(&self) -> Asks {

@@ -53,16 +53,31 @@ impl Shop {
 
     /// The tour's folder holds `before.png` and `explainer.html`.
     fn open_with_summary(&self, reviewer_summary: &str) -> Review {
+        self.open_with_summary_on(
+            reviewer_summary,
+            crate::support::fake_ports::every_capability(),
+        )
+    }
+
+    fn open_with_summary_on(
+        &self,
+        reviewer_summary: &str,
+        capabilities: guided_review::viewer::HostCapabilities,
+    ) -> Review {
         let files = self.tour_files();
         std::fs::create_dir_all(&files).unwrap();
         image::RgbaImage::new(40, 20)
             .save(files.join("before.png"))
             .unwrap();
         std::fs::write(files.join("explainer.html"), "<html></html>").unwrap();
-        self.open_tour(reviewer_summary)
+        self.open_tour(reviewer_summary, capabilities)
     }
 
-    fn open_tour(&self, reviewer_summary: &str) -> Review {
+    fn open_tour(
+        &self,
+        reviewer_summary: &str,
+        capabilities: guided_review::viewer::HostCapabilities,
+    ) -> Review {
         let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
@@ -84,6 +99,7 @@ impl Shop {
             tour,
             &source,
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
+            capabilities,
         )
         .unwrap()
     }
@@ -271,8 +287,10 @@ fn hidden_mark(text: &str, start: &str) -> String {
 fn a_host_without_picture_uploads_offers_no_note_with_a_picture_but_still_a_diagram() {
     let shop = Shop::new();
     let host = shop.host("").without(Capability::PictureUploads);
-    let mut review = shop.open_with_summary("Look:\n\n![before](before.png)");
-    review.host_is(&host);
+    let review = shop.open_with_summary_on(
+        "Look:\n\n![before](before.png)",
+        guided_review::viewer::HostCapabilities::of(&host),
+    );
 
     assert_eq!(review.notes_button(&before_png(&shop)), None);
     assert_eq!(review.notes_button(&NoteSubject::ReviewerSummary), None);

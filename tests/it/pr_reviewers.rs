@@ -178,6 +178,7 @@ impl Pull {
             tour,
             &self.source(),
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr)),
+            crate::support::fake_ports::every_capability(),
         )
         .unwrap()
     }

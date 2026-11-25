@@ -1540,7 +1540,13 @@ fn review_of(rig: &Rig, answer: Option<ServerAnswer>) -> (Review, LocalGit) {
         &rig.repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
-    let mut review = Review::open(tour, &source, state_file).unwrap();
+    let mut review = Review::open(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
     review.use_language_server_pool(&rig.servers, shop_codebase(), answer);
     (review, source)
 }

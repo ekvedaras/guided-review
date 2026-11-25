@@ -82,7 +82,13 @@ impl Shop {
 
     fn basic_review(&self) -> Review {
         let tour = BasicTour::load(&self.basic_path()).unwrap();
-        Review::open_basic(tour, &self.source(), self.state_file()).unwrap()
+        Review::open_basic(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 
     /// The guided tour the writer wrote at `head`, beside the basic file.
@@ -130,6 +136,7 @@ impl Shop {
     fn switcher(&self) -> TourSwitcher {
         let clone = self.repo.path().to_path_buf();
         TourSwitcher {
+            host: crate::support::fake_ports::every_capability(),
             folders: self.repo.folders(),
             subject: self.pr().into(),
             pick_code_source: Arc::new(move |_| {
@@ -473,7 +480,13 @@ fn reopened_guided(shop: &Shop) -> Review {
         &ReviewSubject::from(shop.pr()),
     ))
     .unwrap();
-    Review::open(tour, &shop.source(), shop.state_file()).unwrap()
+    Review::open(
+        tour,
+        &shop.source(),
+        shop.state_file(),
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap()
 }
 
 fn comment_box_on_first(review: &mut Review) -> CommentPlace {

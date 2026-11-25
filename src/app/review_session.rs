@@ -1301,6 +1301,7 @@ impl ReviewSession {
             self.review.basic_tour_of_same_pin(),
             self.source.as_ref(),
             self.review.state_file(),
+            crate::viewer::HostCapabilities::of(self.host.as_ref()),
         ) else {
             return;
         };
@@ -1317,6 +1318,7 @@ impl ReviewSession {
             self.review.basic_tour_of_same_pin(),
             self.source.as_ref(),
             self.review.state_file(),
+            crate::viewer::HostCapabilities::of(self.host.as_ref()),
         ) else {
             return;
         };
@@ -1554,7 +1556,6 @@ impl ReviewSession {
 
     #[cfg(feature = "snapshots")]
     fn swapped_review(&mut self, cx: &mut Context<Self>) {
-        self.review.host_is(self.host.as_ref());
         self.image_pictures.clear();
         self.loading_images.clear();
         self.rows = PageRows::none();
@@ -1675,7 +1676,6 @@ impl ReviewSession {
         self.save_typing_now();
         let replaced = std::mem::replace(&mut self.review, repinned.review);
         self.review.carry_on_from(replaced);
-        self.review.host_is(self.host.as_ref());
         self.source = repinned.source;
         self.image_pictures.clear();
         self.loading_images.clear();

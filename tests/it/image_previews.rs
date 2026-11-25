@@ -105,7 +105,13 @@ impl Pull {
         }))
         .unwrap();
         let state_file = ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse().unwrap());
-        let mut review = Review::open(tour, source, state_file).unwrap();
+        let mut review = Review::open(
+            tour,
+            source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         review.go_forward();
         review
     }

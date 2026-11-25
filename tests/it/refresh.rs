@@ -112,7 +112,13 @@ impl Shop {
 
     fn text_may_be_old(&self, step: &str) -> bool {
         let tour = GuidedTour::load(&self.tour_path()).unwrap();
-        let mut review = Review::open(tour, &self.source(), self.state_file()).unwrap();
+        let mut review = Review::open(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         review.go_to(&step.into());
         review.current_step().unwrap().text_may_be_old
     }
@@ -185,9 +191,14 @@ fn the_app_offers_the_same_brief_until_done() {
     shop.repin_onto_head_with_a_new_class();
     let tour = GuidedTour::load(&shop.tour_path()).unwrap();
 
-    let brief = Review::open(tour, &shop.source(), shop.state_file())
-        .unwrap()
-        .refresh_brief();
+    let brief = Review::open(
+        tour,
+        &shop.source(),
+        shop.state_file(),
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap()
+    .refresh_brief();
 
     assert_eq!(brief.stale_steps.len(), 1);
     assert_eq!(
@@ -273,6 +284,7 @@ fn refresher(shop: &Shop, writer: Writer) -> TourRefresher {
         ))
     });
     TourRefresher {
+        host: crate::support::fake_ports::every_capability(),
         folders: shop.repo.folders(),
         subject: shop.pr().into(),
         pick_code_source: pick,
@@ -362,7 +374,13 @@ fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_
     let shop = Shop::with_tour_at_first_head();
     shop.repin_onto_head_with_a_new_class();
     let tour = GuidedTour::load(&shop.tour_path()).unwrap();
-    let mut review = Review::open(tour, &shop.source(), shop.state_file()).unwrap();
+    let mut review = Review::open(
+        tour,
+        &shop.source(),
+        shop.state_file(),
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
 
     let error = refresher(&shop, Writer::GivesUp)
         .run(&mut |_| {})

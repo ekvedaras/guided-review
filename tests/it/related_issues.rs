@@ -84,6 +84,14 @@ impl Shop {
     }
 
     fn open_with(&self, extra: serde_json::Value) -> Review {
+        self.open_with_on(extra, crate::support::fake_ports::every_capability())
+    }
+
+    fn open_with_on(
+        &self,
+        extra: serde_json::Value,
+        capabilities: guided_review::viewer::HostCapabilities,
+    ) -> Review {
         let mut tour = json!({
             "pr": PR,
             "base": self.base,
@@ -97,7 +105,7 @@ impl Shop {
             .extend(extra.as_object().unwrap().clone());
         let tour: GuidedTour = serde_json::from_value(tour).unwrap();
         let state_file = ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse().unwrap());
-        Review::open(tour, &self.source(), state_file).unwrap()
+        Review::open(tour, &self.source(), state_file, capabilities).unwrap()
     }
 
     fn host(&self, issues: PullRequestIssues) -> FakeHost {
@@ -448,8 +456,10 @@ fn the_details_of_the_shown_issues_are_read_after_github_names_them_and_kept_wit
 fn a_host_without_an_issue_tracker_reads_no_issue_details_but_still_names_the_issues() {
     let shop = Shop::new();
     let host = host_with_details(&shop).without(Capability::IssueTracker);
-    let mut review = shop.open_with(json!({}));
-    review.host_is(&host);
+    let mut review = shop.open_with_on(
+        json!({}),
+        guided_review::viewer::HostCapabilities::of(&host),
+    );
 
     review.pull_from_host();
     let ran = drive_without_agents(&mut review, &host, &shop.source(), Instant::now());

@@ -300,7 +300,13 @@ fn the_review_reads_every_changed_file_at_head_for_context_at_the_same_time() {
         &folders_in(home.path()),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
-    let review = Review::open(tour, &cache, state_file).unwrap();
+    let review = Review::open(
+        tour,
+        &cache,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
 
     review.files_at_head_request().read(&cache);
 
@@ -354,7 +360,13 @@ fn an_unchanged_line_whose_base_line_does_not_add_up_is_still_shown() {
         &folders_in(home.path()),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
-    let mut review = Review::open(tour, &cache, state_file).unwrap();
+    let mut review = Review::open(
+        tour,
+        &cache,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
     let files_at_head = review.files_at_head_request().read(&cache);
     review.set_files_at_head(files_at_head);
     review.go_forward();

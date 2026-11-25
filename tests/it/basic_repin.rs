@@ -78,7 +78,13 @@ impl Shop {
 
     fn open(&self) -> Review {
         let tour = BasicTour::load(&self.tour_path()).unwrap();
-        Review::open_basic(tour, &self.source(), self.state_file()).unwrap()
+        Review::open_basic(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 
     /// a.txt changes again, gone.txt goes back to base, new.txt joins, b.txt stays as it was.
@@ -269,6 +275,7 @@ fn update_tour_re_pins_the_basic_tour_not_the_guided_one_beside_it_and_the_banne
     let host = FakeHost::with_pull(&shop.base, &second_head, &SentLog::default());
     let clone = shop.repo.path().to_path_buf();
     let repinner = TourRepinner {
+        host: crate::support::fake_ports::every_capability(),
         folders: shop.repo.folders(),
         subject: shop.pr().into(),
         pick_code_source: Arc::new(move |_| {

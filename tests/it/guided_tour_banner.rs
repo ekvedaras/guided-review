@@ -54,7 +54,13 @@ impl Shop {
 
     fn basic(&self) -> Review {
         let tour = BasicTour::new(self.pin(), "Orders cost two".to_owned());
-        Review::open_basic(tour, &self.source(), self.state_file()).unwrap()
+        Review::open_basic(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 
     fn guided(&self) -> Review {
@@ -63,7 +69,13 @@ impl Shop {
             "steps": [{"id": "a", "title": "A", "why": "w", "pieces": [{"file": "a.txt"}]}],
         }))
         .unwrap();
-        Review::open(tour, &self.source(), self.state_file()).unwrap()
+        Review::open(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 }
 

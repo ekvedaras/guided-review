@@ -61,7 +61,13 @@ fn shop_titled(title: &str) -> Shop {
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
     Shop {
-        review: Review::open(tour, &source, state_file).unwrap(),
+        review: Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap(),
         head: Sha::new(&head),
     }
 }

@@ -46,7 +46,13 @@ impl Shop {
             &self.repo.folders(),
             &"https://github.com/acme/shop/pull/7".parse().unwrap(),
         );
-        Review::open(tour, &source, state_file).unwrap()
+        Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 }
 

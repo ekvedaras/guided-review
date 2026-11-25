@@ -199,6 +199,7 @@ fn a_review_refreshed_keeps_what_the_config_and_disk_say() {
     shop.write_guided_tour_at(&shop.second);
     let opened = shop.open();
     let refresher = TourRefresher {
+        host: crate::support::fake_ports::every_capability(),
         folders: shop.repo.folders(),
         subject: Shop::subject(),
         pick_code_source: Arc::clone(&opened.refresher.pick_code_source),

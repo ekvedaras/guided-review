@@ -34,7 +34,13 @@ fn open_basic(repo: &FixtureRepo, files: &[&str]) -> Review {
         &repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
-    Review::open_basic(tour, &source, state_file).unwrap()
+    Review::open_basic(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap()
 }
 
 const TREE_FILES: [&str; 5] = [

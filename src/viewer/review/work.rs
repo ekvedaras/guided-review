@@ -4,8 +4,8 @@ use super::ReviewCore;
 use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
 use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
+use crate::viewer::host_capabilities::HostCapabilities;
 use crate::viewer::host_outage::Read;
-use crate::viewer::ports::CodeHost;
 use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::related_issues::RelatedIssues;
 use crate::viewer::tour_agent::{TourAgentState, TourKind};
@@ -37,23 +37,23 @@ impl ReviewCore {
     }
 
     /// What the review's code host offers decides what the review shows and asks of it: a capability
-    /// the host has no port for is hidden, and no work asks for it. The app tells each review it opens.
-    pub fn host_is(&mut self, host: &dyn CodeHost) {
-        if host.viewed_marks().is_none() {
+    /// the host has no port for is hidden, and no work asks for it.
+    pub(super) fn offer_only(&mut self, host: HostCapabilities) {
+        if !host.has_viewed_marks() {
             self.viewed_sync = ViewedSync::without_host_marks();
         }
-        if host.pull_request_reactions().is_none() {
+        if !host.has_pull_request_reactions() {
             self.reviewing_mark.without_reactions();
         }
-        if host.merging().is_none()
+        if !host.has_merging()
             && let Some(controls) = &mut self.pr_controls
         {
             controls.without_merging();
         }
-        if host.picture_uploads().is_none() {
+        if !host.has_picture_uploads() {
             self.pr_notes.without_picture_uploads();
         }
-        if host.issue_tracker().is_none() {
+        if !host.has_issue_tracker() {
             self.related_issues.without_tracker();
         }
     }

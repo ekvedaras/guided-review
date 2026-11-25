@@ -97,6 +97,9 @@ impl Feature {
 
     fn switcher(&self) -> TourSwitcher {
         TourSwitcher {
+            host: guided_review::viewer::HostCapabilities::of(
+                &guided_review::viewer::NoHost::default(),
+            ),
             folders: self.repo.folders(),
             subject: self.subject.clone(),
             pick_code_source: self.opened_change_set().code_source_picker(),
@@ -105,6 +108,9 @@ impl Feature {
 
     fn reloader(&self) -> TourReloader {
         TourReloader {
+            host: guided_review::viewer::HostCapabilities::of(
+                &guided_review::viewer::NoHost::default(),
+            ),
             folders: self.repo.folders(),
             subject: self.subject.clone(),
             pick_code_source: self.opened_change_set().code_source_picker(),
@@ -113,6 +119,9 @@ impl Feature {
 
     fn repinner(&self) -> TourRepinner {
         TourRepinner {
+            host: guided_review::viewer::HostCapabilities::of(
+                &guided_review::viewer::NoHost::default(),
+            ),
             folders: self.repo.folders(),
             subject: self.subject.clone(),
             pick_code_source: self.opened_change_set().code_source_picker(),

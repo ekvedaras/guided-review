@@ -22,7 +22,13 @@ fn open_review(repo: &FixtureRepo, base: &str, head: &str) -> (Review, LocalGit)
         &repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
-    let mut review = Review::open(tour, &source, state_file).unwrap();
+    let mut review = Review::open(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
     review.go_forward();
     (review, source)
 }

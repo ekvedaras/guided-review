@@ -21,8 +21,8 @@ use crate::repin::Repin;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin};
 use crate::viewer::{
-    ChangeTipsPort, CodeHost, NoHost, PickCodeSource, RepinnedTour, Review, ReviewBuilder,
-    ReviewStateFile,
+    ChangeTipsPort, CodeHost, HostCapabilities, NoHost, PickCodeSource, RepinnedTour, Review,
+    ReviewBuilder, ReviewStateFile,
 };
 use pull_request::OpenedPr;
 
@@ -103,7 +103,9 @@ impl OpenedSubject {
             Adapter::PullRequest(opened) => opened.code_at(tour.pin())?,
             Adapter::Local(opened) => opened.code_of_shown(tour.pin())?,
         };
-        let review = ReviewBuilder::new(folders, &subject).build(tour, code.source.as_ref())?;
+        let host = HostCapabilities::of(self.host().as_ref());
+        let review =
+            ReviewBuilder::new(folders, &subject, host).build(tour, code.source.as_ref())?;
         if let Adapter::PullRequest(opened) = &self.0 {
             opened.after_open()?;
         }
@@ -147,6 +149,7 @@ pub struct TourRepinner {
     pub folders: AppFolders,
     pub subject: ReviewSubject,
     pub pick_code_source: PickCodeSource,
+    pub host: HostCapabilities,
 }
 
 impl TourRepinner {
@@ -154,8 +157,8 @@ impl TourRepinner {
     pub fn run(&self, host: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
         let (tour, source) =
             update_shown_tour(&self.subject, &self.folders, host, &self.pick_code_source)?;
-        let review =
-            ReviewBuilder::new(&self.folders, &self.subject).build(tour, source.as_ref())?;
+        let review = ReviewBuilder::new(&self.folders, &self.subject, self.host)
+            .build(tour, source.as_ref())?;
         Ok(RepinnedTour {
             review,
             source: source.into(),

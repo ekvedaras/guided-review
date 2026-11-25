@@ -113,7 +113,13 @@ impl Shop {
 
     fn open(&self) -> Review {
         let tour = GuidedTour::load(&self.tour_path()).unwrap();
-        Review::open(tour, &self.source(), self.state_file()).unwrap()
+        Review::open(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 
     fn tick(&self, steps: &[&str]) {
@@ -590,6 +596,7 @@ fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
     let host = FakeHost::with_pull(&shop.base, &second_head, &SentLog::default());
     let clone = shop.repo.path().to_path_buf();
     let repinner = TourRepinner {
+        host: crate::support::fake_ports::every_capability(),
         folders: shop.repo.folders(),
         subject: shop.pr().into(),
         pick_code_source: Arc::new(move |_| {

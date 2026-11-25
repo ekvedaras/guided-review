@@ -61,7 +61,13 @@ impl Pull {
             &self.repo.folders(),
             &PR.parse::<ReviewSubject>().unwrap(),
         );
-        let mut review = Review::open_basic(tour, &self.source(), state_file).unwrap();
+        let mut review = Review::open_basic(
+            tour,
+            &self.source(),
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         while review.screen() != &Screen::File(file_path("notes.txt")) {
             assert!(review.go_forward());
         }
