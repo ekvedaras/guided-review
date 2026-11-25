@@ -76,7 +76,8 @@ impl<'de> serde::Deserialize<'de> for RepoName {
 
 /// The code host a PR lives on, as its link names it. What the host shows on the web, and how its
 /// links read, is `host_web`'s.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HostSite {
     GitHub,
 }
@@ -111,6 +112,21 @@ impl PullRequestUrl {
     pub fn short(&self) -> String {
         format!("{}#{}", self.repo, self.number)
     }
+
+    pub fn hosted_repo(&self) -> HostedRepo {
+        HostedRepo {
+            host: self.host,
+            repo: self.repo.clone(),
+        }
+    }
+}
+
+/// A repo on a code host: which host, and the repo's name there. A git remote names both
+/// (`host_web`), so a local change set's origin knows which host to ask for its branch's PR.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HostedRepo {
+    pub host: HostSite,
+    pub repo: RepoName,
 }
 
 /// Empty when not known yet: a tour that was never pinned, a state file from before shas were kept.

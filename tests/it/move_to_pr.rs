@@ -11,7 +11,7 @@ use guided_review::github::GitHub;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::make_basic_tour::make_basic_tour;
 use guided_review::open_review::{OpenedReview, open_review};
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{HostSite, HostedRepo, PullRequestUrl, RepoName, Sha};
 use guided_review::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{AfterJob, JobOutcome, ReplacingJob, StartedJob, StartedMove};
@@ -215,7 +215,10 @@ fn the_github_adapter_lists_the_open_pr_of_a_branch_of_the_repo_itself() {
         ),
     ]);
     let host = GitHub::without_token_at(&url);
-    let repo = RepoName::new("acme", "shop");
+    let repo = HostedRepo {
+        host: HostSite::GitHub,
+        repo: RepoName::new("acme", "shop"),
+    };
 
     let found = host
         .open_pull_of_branch(&repo, &BranchName::new("feature/cart").unwrap())

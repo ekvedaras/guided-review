@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 use crate::file_path::FilePath;
 use crate::local_facts::LocalFacts;
-use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject, WorkTreeRoot};
 
 /// Why `open` stops before it makes a review.
@@ -423,7 +423,7 @@ impl LocalWorkTree {
             .map(str::to_owned)
             .collect();
         Ok(LocalFacts {
-            repo: change_set.repo().cloned(),
+            origin: change_set.origin().cloned(),
             folder: self.root.clone(),
             branch: change_set.branch().clone(),
             default_branch: self.default_branch()?.name,
@@ -500,9 +500,9 @@ impl LocalWorkTree {
     }
 
     /// The repo the `origin` remote points at, on any code host the app reads.
-    fn origin(&self) -> Option<RepoName> {
+    fn origin(&self) -> Option<HostedRepo> {
         let url = self.git(&["config", "--get", "remote.origin.url"]).ok()?;
-        crate::host_web::repo_of_remote(url.trim())
+        HostedRepo::of_remote(url.trim())
     }
 
     fn git(&self, args: &[&str]) -> Result<String, OpenRefusal> {

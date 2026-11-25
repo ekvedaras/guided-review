@@ -1,19 +1,42 @@
-use super::ports::HostError;
 use super::pr_origin::PrAuthor;
 use crate::pull_request::PullRequestUrl;
-
-/// The open PRs the reviewer has something to do with, for the PR switcher.
-pub trait RelevantPullRequestsPort: Send + Sync {
-    /// Every open PR that involves the viewer or asks one of their teams for a review, newest
-    /// update first, one entry per PR url.
-    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, HostError>;
-}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RelevantPullRequests {
     pub pull_requests: Vec<RelevantPullRequest>,
     /// Teams whose review requests were not searched, because only so many searches are made.
     pub teams_left_out: Vec<String>,
+}
+
+impl RelevantPullRequests {
+    /// The lists of every code host as one, newest update first. A host that fails is left out, since
+    /// a reviewer need not have an account on every host; the list fails only when every host does.
+    pub fn merged<E>(answers: impl IntoIterator<Item = Result<Self, E>>) -> Result<Self, E> {
+        let mut merged: Option<Self> = None;
+        let mut first_error = None;
+        for answer in answers {
+            match answer {
+                Ok(list) => {
+                    let into = merged.get_or_insert_with(Self::default);
+                    into.pull_requests.extend(list.pull_requests);
+                    into.teams_left_out.extend(list.teams_left_out);
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        match (merged, first_error) {
+            (Some(mut merged), _) => {
+                merged
+                    .pull_requests
+                    .sort_by(|newer, older| older.updated_at.cmp(&newer.updated_at));
+                Ok(merged)
+            }
+            (None, Some(error)) => Err(error),
+            (None, None) => Ok(Self::default()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

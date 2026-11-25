@@ -84,6 +84,7 @@ impl Shop {
                 pr: "https://github.com/acme/shop/pull/7".to_owned(),
                 local: None,
                 repo: None,
+                host: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,

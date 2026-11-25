@@ -2,18 +2,19 @@
 //! where the code comes from, how a tour is first made and how it moves on. The CLI's commands, the
 //! app's open and its Update ask an `OpenedSubject`; only the adapters inside know GitHub or git.
 
+mod hosts;
 mod local;
 mod pull_request;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub(crate) use hosts::code_reader_of;
+pub use hosts::{EveryHost, adapter_of, host_of};
 pub use local::OpenedChangeSet;
-pub(crate) use pull_request::adapter_of;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::github::GitHub;
 use crate::local_git::LocalGit;
 use crate::pieces::{self, ChangedFile};
 use crate::pull_request::{ChangeTips, Sha};
@@ -21,7 +22,7 @@ use crate::repin::Repin;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin};
 use crate::viewer::{
-    ChangeTipsPort, CodeHost, HostCapabilities, NoHost, PickCodeSource, RepinnedTour, Review,
+    ChangeTipsPort, CodeHost, HostCapabilities, PickCodeSource, RepinnedTour, Review,
     ReviewBuilder, ReviewStateFile,
 };
 use pull_request::OpenedPr;
@@ -122,13 +123,11 @@ impl OpenedSubject {
     }
 
     /// The code host the review talks to. A local review has none to ask: its port refuses every call but
-    /// the look-up of a PR of its branch.
+    /// the look-up of a PR of its branch, on the host its origin is on.
     pub fn host(&self) -> Arc<dyn CodeHost> {
         match &self.0 {
             Adapter::PullRequest(opened) => Arc::new(opened.github().clone()),
-            Adapter::Local(_) => Arc::new(NoHost::looking_up_branches_with(Arc::new(
-                GitHub::from_env(),
-            ))),
+            Adapter::Local(opened) => host_of(&opened.subject()),
         }
     }
 
@@ -207,10 +206,10 @@ pub fn writer_folder(subject: &ReviewSubject, folders: &AppFolders) -> PathBuf {
 /// git. A subject that knows its repo keeps it.
 fn with_repo_of_its_clone(subject: &ReviewSubject) -> ReviewSubject {
     match subject {
-        ReviewSubject::Local(change_set) if change_set.repo().is_none() => ReviewSubject::from(
+        ReviewSubject::Local(change_set) if change_set.origin().is_none() => ReviewSubject::from(
             change_set
                 .clone()
-                .in_repo(LocalGit::origin_of(change_set.folder().as_path())),
+                .with_origin(LocalGit::origin_of(change_set.folder().as_path())),
         ),
         _ => subject.clone(),
     }

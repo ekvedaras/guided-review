@@ -12,7 +12,6 @@ use gpui::{
 
 use crate::app::tour_writer;
 use crate::config::Config;
-use crate::github::GitHub;
 use crate::local_change_sets::find_local_rows;
 use crate::opened_subject::OpenedChangeSet;
 use crate::review_subject::ReviewSubject;
@@ -77,11 +76,12 @@ impl PrSwitching {
     pub fn refresh(&self, cx: &mut App) {
         self.list.update(cx, |list, _| list.refreshing());
         let relevant = Arc::clone(&self.relevant);
-        let (list, active, folders, agents) = (
+        let (list, active, folders, agents, pulls) = (
             self.list.clone(),
             self.active.clone(),
             self.folders.clone(),
             Arc::clone(&self.agents),
+            Arc::clone(&self.head_branches),
         );
         cx.spawn(async move |cx| {
             let answer = cx
@@ -100,7 +100,7 @@ impl PrSwitching {
                 .spawn(async move {
                     // A config that cannot be read is Settings' to report; here it only names no clones.
                     let config = Config::load_from(&looked_in).unwrap_or_default();
-                    find_local_rows(&looked_in, &config, agents.as_ref(), &GitHub::from_env())
+                    find_local_rows(&looked_in, &config, agents.as_ref(), pulls.as_ref())
                 })
                 .await;
             list.update(cx, |list, cx| {

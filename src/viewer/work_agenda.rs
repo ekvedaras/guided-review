@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use crate::code_source::CodeSource;
 use crate::issue::IssueUrl;
 use crate::local_work_tree::OnDisk;
-use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
 use super::capability::Capability;
@@ -251,7 +251,7 @@ pub(super) enum Job {
     },
     CheckWorkingCopy(Sha),
     LookUpPullOfBranch {
-        repo: RepoName,
+        repo: HostedRepo,
         branch: BranchName,
     },
     LookUpHeadBranch(PullRequestUrl),

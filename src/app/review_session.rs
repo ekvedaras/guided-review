@@ -30,7 +30,6 @@ use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::github::GitHub;
 use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
     AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CodeHost,
@@ -846,9 +845,8 @@ impl ReviewSession {
             }
             StartedJob::MoveToPr(started) => {
                 let mover = crate::open_review::mover_of(&folders, &started.change_set);
-                Box::new(move || {
-                    JobOutcome::MoveToPr(mover.run(&started.offer, &GitHub::from_env()))
-                })
+                let host = crate::opened_subject::adapter_of(started.offer.pr.host);
+                Box::new(move || JobOutcome::MoveToPr(mover.run(&started.offer, host.as_ref())))
             }
             StartedJob::DropReview(change_set) => Box::new(move || {
                 JobOutcome::DropReview(OpenedChangeSet::new(&change_set, &folders).drop_review())

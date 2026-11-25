@@ -1,5 +1,5 @@
 use guided_review::codebase::Codebase;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::{HostSite, HostedRepo, PullRequestUrl, RepoName};
 use guided_review::review_subject::{BranchName, LocalChangeSet, ReviewSubject, WorkTreeRoot};
 use tempfile::TempDir;
 
@@ -7,7 +7,10 @@ fn local_in(folder: &std::path::Path, origin: Option<RepoName>) -> ReviewSubject
     ReviewSubject::from(LocalChangeSet::new(
         WorkTreeRoot::new(folder.to_path_buf()).unwrap(),
         BranchName::new("feature").unwrap(),
-        origin,
+        origin.map(|repo| HostedRepo {
+            host: HostSite::GitHub,
+            repo,
+        }),
     ))
 }
 

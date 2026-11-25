@@ -415,7 +415,7 @@ impl Settings {
     pub fn pick_clone_folder(&mut self, row: usize, folder: PathBuf) {
         let origin = LocalGit::origin_of(&self.in_home(&folder));
         if let (Some(clone), Some(origin)) = (self.edited.clones.get_mut(row), origin) {
-            clone.repo = origin.to_string();
+            clone.repo = origin.repo.to_string();
         }
         self.set_clone_folder(row, folder);
     }

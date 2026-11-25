@@ -237,7 +237,7 @@ fn head_branch_retry_after(failures: u32) -> Duration {
 pub fn local_reviews_of_repo(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<LocalChangeSet> {
     local_reviews_on_disk(folders)
         .into_iter()
-        .filter(|review| review.repo() == Some(&pr.repo))
+        .filter(|review| review.origin() == Some(&pr.hosted_repo()))
         .filter(|review| {
             let subject = ReviewSubject::from(review.clone());
             !ReviewStateFile::for_subject(folders, &subject).has_declined_move_to(pr)

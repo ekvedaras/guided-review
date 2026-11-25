@@ -149,6 +149,7 @@ fn basic_shop(findings: &[Value]) -> Review {
             pr: PR.to_owned(),
             local: None,
             repo: None,
+            host: None,
             base: Sha::new(&base),
             head: Sha::new(&head),
             previous_head: None,

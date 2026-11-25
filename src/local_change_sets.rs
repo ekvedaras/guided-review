@@ -77,9 +77,9 @@ fn open_pr_of(
     change_set: &LocalChangeSet,
     pulls: &dyn PullsOfBranchPort,
 ) -> Option<PullRequestUrl> {
-    let repo = change_set.repo()?;
+    let origin = change_set.origin()?;
     pulls
-        .open_pull_of_branch(repo, change_set.branch())
+        .open_pull_of_branch(origin, change_set.branch())
         .ok()
         .flatten()
         .map(|pull| pull.pr)

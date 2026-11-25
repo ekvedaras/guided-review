@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 
-use crate::pull_request::{HostSite, PullRequestUrl, RepoName};
+use crate::pull_request::{HostSite, HostedRepo, PullRequestUrl, RepoName};
 
 /// What a review reads: a PR, or a local change set.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -14,13 +14,13 @@ pub enum ReviewSubject {
     Local(LocalChangeSet),
 }
 
-/// One branch of one working tree. Its identity is the folder and the branch; `repo` is only for
-/// display and for finding a PR opened from the branch.
+/// One branch of one working tree. Its identity is the folder and the branch; `origin` is only for
+/// display and for finding a PR opened from the branch, on the host the origin is on.
 #[derive(Debug, Clone)]
 pub struct LocalChangeSet {
     folder: WorkTreeRoot,
     branch: BranchName,
-    repo: Option<RepoName>,
+    origin: Option<HostedRepo>,
 }
 
 /// The root of a working tree, absolute and canonical, so `/tmp/x` and `/private/tmp/x` are one review. A
@@ -82,7 +82,7 @@ impl ReviewSubject {
         matches!(self, Self::Local(_))
     }
 
-    /// The repo whose GitHub holds the review; a local change set holds none.
+    /// The repo whose code host holds the review; a local change set holds none.
     pub const fn host_repo(&self) -> Option<&RepoName> {
         match self {
             Self::PullRequest(pr) => Some(&pr.repo),
@@ -284,18 +284,18 @@ fn unescape(text: &str) -> anyhow::Result<String> {
 }
 
 impl LocalChangeSet {
-    pub const fn new(folder: WorkTreeRoot, branch: BranchName, repo: Option<RepoName>) -> Self {
+    pub const fn new(folder: WorkTreeRoot, branch: BranchName, origin: Option<HostedRepo>) -> Self {
         Self {
             folder,
             branch,
-            repo,
+            origin,
         }
     }
 
     /// The same change set with the repo its folder's clone belongs to; a key names no repo.
     #[must_use]
-    pub fn in_repo(self, repo: Option<RepoName>) -> Self {
-        Self { repo, ..self }
+    pub fn with_origin(self, origin: Option<HostedRepo>) -> Self {
+        Self { origin, ..self }
     }
 
     /// `<folder>@<branch>`: the folder's `@` is escaped, so the first `@` ends it.
@@ -306,7 +306,7 @@ impl LocalChangeSet {
         Ok(Self {
             folder: WorkTreeRoot::new(PathBuf::from(unescape(folder)?))?,
             branch: BranchName::new(branch)?,
-            repo: None,
+            origin: None,
         })
     }
 
@@ -322,8 +322,13 @@ impl LocalChangeSet {
         &self.branch
     }
 
-    pub const fn repo(&self) -> Option<&RepoName> {
-        self.repo.as_ref()
+    /// The repo its folder's `origin` points at, and the host it is on.
+    pub const fn origin(&self) -> Option<&HostedRepo> {
+        self.origin.as_ref()
+    }
+
+    pub fn repo(&self) -> Option<&RepoName> {
+        self.origin.as_ref().map(|origin| &origin.repo)
     }
 }
 

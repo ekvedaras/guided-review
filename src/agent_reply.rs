@@ -79,7 +79,7 @@ pub fn why_reply(
 
 /// Says where the reply went. Nothing is posted for a hand-off the review does not have.
 pub fn agent_reply(
-    host: &(impl ReviewThreadsPort + ReviewWritesPort),
+    host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
     folders: &AppFolders,
     subject: &ReviewSubject,
     id: HandOffId,

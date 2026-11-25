@@ -12,7 +12,7 @@ use crate::image_facts;
 use crate::issue::{IssueLink, IssueUrl};
 use crate::json::at;
 use crate::line_number::LineNumber;
-use crate::pull_request::{ChangeTips, HostSite, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::url_path;
@@ -469,9 +469,10 @@ struct PullListedJson {
 impl PullsOfBranchPort for GitHub {
     fn open_pull_of_branch(
         &self,
-        repo: &RepoName,
+        hosted: &HostedRepo,
         branch: &BranchName,
     ) -> Result<Option<PullOfBranch>, HostError> {
+        let repo = &hosted.repo;
         let head = url_path::encode(&format!("{}:{}", repo.owner(), branch.as_str()));
         let pulls: Vec<PullListedJson> = self
             .get(
@@ -482,7 +483,7 @@ impl PullsOfBranchPort for GitHub {
             .with_context(|| format!("could not look for a PR of {} in {repo}", branch.as_str()))?;
         Ok(pulls.into_iter().next().map(|pull| PullOfBranch {
             pr: PullRequestUrl {
-                host: HostSite::GitHub,
+                host: hosted.host,
                 repo: repo.clone(),
                 number: pull.number,
             },

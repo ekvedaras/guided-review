@@ -16,9 +16,8 @@ use guided_review::findings_check;
 use guided_review::findings_done::findings_done;
 use guided_review::fix_reply::fix_reply;
 use guided_review::git_checkout::GitCheckouts;
-use guided_review::github::GitHub;
 use guided_review::instructions::SummaryInstructions;
-use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject};
+use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject, host_of};
 use guided_review::outline::Outline;
 use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
@@ -210,9 +209,13 @@ fn main() -> anyhow::Result<()> {
             let folders = AppFolders::running()?;
             let said = match ReplyTo::of(&folders, &subject, &id)? {
                 ReplyTo::Finding(finding) => why_reply(&folders, &subject, &finding, &reply)?,
-                ReplyTo::HandOff(hand_off) => {
-                    agent_reply(&GitHub::from_env(), &folders, &subject, hand_off, &reply)?
-                }
+                ReplyTo::HandOff(hand_off) => agent_reply(
+                    host_of(&subject).as_ref(),
+                    &folders,
+                    &subject,
+                    hand_off,
+                    &reply,
+                )?,
             };
             println!("{said}");
             Ok(())

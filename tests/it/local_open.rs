@@ -543,7 +543,7 @@ fn a_review_opened_from_a_parsed_key_still_knows_its_repo_from_the_folder() {
     let title = opened.review.window_title();
     assert!(title.contains("acme/shop"), "title: {title}");
     let overview = opened.review.overview_page().local.unwrap();
-    assert_eq!(overview.repo.unwrap().to_string(), "acme/shop");
+    assert_eq!(overview.origin.unwrap().repo.to_string(), "acme/shop");
 }
 
 #[test]

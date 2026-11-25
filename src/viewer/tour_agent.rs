@@ -11,7 +11,7 @@ use super::review_place::ReviewPlace;
 use super::toasts::ToastTone;
 use crate::local_work_tree::LocalWorkTree;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
-use crate::pull_request::{PullRequestUrl, RepoName};
+use crate::pull_request::{HostedRepo, PullRequestUrl};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
 /// A herdr terminal, as `hc` names it (`t7`).
@@ -900,7 +900,7 @@ impl TourAgents {
         let mut candidates = match subject {
             ReviewSubject::Local(change_set) => claude_terminals_in(&live, change_set),
             ReviewSubject::PullRequest(pr) => match self.head_branch_of(pr) {
-                Some(branch) => claude_terminals_on(&live, &pr.repo, &branch),
+                Some(branch) => claude_terminals_on(&live, &pr.hosted_repo(), &branch),
                 None => Vec::new(),
             },
         };
@@ -1010,7 +1010,7 @@ pub(super) fn follow_state(
 
 fn claude_terminals_on(
     live: &[LiveTerminal],
-    repo: &RepoName,
+    repo: &HostedRepo,
     branch: &BranchName,
 ) -> Vec<TerminalId> {
     live.iter()
@@ -1084,10 +1084,10 @@ pub(super) fn terminal_name(role: AgentRole, subject: &ReviewSubject) -> String 
 const NAME_HASH_BYTES: usize = 3;
 
 /// Whether the folder is in a clone of the repo with the branch checked out.
-fn has_checked_out(cwd: &Path, repo: &RepoName, branch: &BranchName) -> bool {
+fn has_checked_out(cwd: &Path, repo: &HostedRepo, branch: &BranchName) -> bool {
     LocalWorkTree::containing(cwd)
         .and_then(|tree| tree.change_set())
-        .is_ok_and(|change_set| change_set.branch() == branch && change_set.repo() == Some(repo))
+        .is_ok_and(|change_set| change_set.branch() == branch && change_set.origin() == Some(repo))
 }
 
 /// `write_tour` replaces the subject's agent, which for a local change set is the reviewer's own agent

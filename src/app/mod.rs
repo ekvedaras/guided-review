@@ -42,10 +42,10 @@ use crate::app_folders::AppFolders;
 use crate::app_icon::AppIcon;
 use crate::app_link::{Answer, AppListener, BUILD_WAIT, OpenRequest, Request};
 use crate::findings::FindingId;
-use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::local_reviews_on_disk::clean_snapshot_refs;
 use crate::open_review::{OpenedReview, open_review};
+use crate::opened_subject::EveryHost;
 use crate::platform::{self, Os};
 use crate::review_subject::ReviewSubject;
 use crate::review_worktree::GitReviewWorktrees;
@@ -199,12 +199,13 @@ fn pr_switching(
     let reopen_requests = requests.clone();
     let drop_requests = requests.clone();
     let all_folders = folders.clone();
+    let hosts = Arc::new(EveryHost::from_env());
     PrSwitching {
-        relevant: relevant_pull_requests(),
+        relevant: relevant_pull_requests(&hosts),
         folders: folders.clone(),
         active,
         agents: switcher_agents(folders),
-        head_branches: head_branches(),
+        head_branches: head_branches(&hosts),
         list: cx.new(|_| {
             PrSwitcher::remembering_in(RememberedPullRequestsFile::in_folders(folders), folders)
         }),
@@ -243,20 +244,20 @@ fn switcher_agents(folders: &AppFolders) -> Arc<dyn TourAgentPort> {
     herdr
 }
 
-fn head_branches() -> Arc<dyn PullsOfBranchPort> {
+fn head_branches(hosts: &Arc<EveryHost>) -> Arc<dyn PullsOfBranchPort> {
     #[cfg(feature = "snapshots")]
     if snapshots::is_on() {
         return Arc::new(crate::viewer::NoHost::default());
     }
-    Arc::new(GitHub::from_env())
+    Arc::clone(hosts) as Arc<dyn PullsOfBranchPort>
 }
 
-fn relevant_pull_requests() -> Arc<dyn RelevantPullRequestsPort> {
+fn relevant_pull_requests(hosts: &Arc<EveryHost>) -> Arc<dyn RelevantPullRequestsPort> {
     #[cfg(feature = "snapshots")]
     if snapshots::is_on() {
         return Arc::new(snapshots::SamplePullRequests);
     }
-    Arc::new(GitHub::from_env())
+    Arc::clone(hosts) as Arc<dyn RelevantPullRequestsPort>
 }
 
 /// The open of a review the app makes of itself, from the folder a PR's clone is searched from: the

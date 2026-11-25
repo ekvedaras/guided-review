@@ -1218,8 +1218,8 @@ impl ReviewCore {
         let change_set = subject.local()?;
         let branch = change_set.branch().as_str();
         Some(
-            match facts.and_then(|facts| facts.repo.as_ref()) {
-                Some(repo) => format!("Local changes · {repo} · {branch}"),
+            match facts.and_then(|facts| facts.origin.as_ref()) {
+                Some(origin) => format!("Local changes · {} · {branch}", origin.repo),
                 None => format!("Local changes · {branch}"),
             }
             .into(),

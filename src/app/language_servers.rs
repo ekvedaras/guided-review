@@ -73,6 +73,7 @@ pub fn use_language_servers(review: &mut Review, folders: &AppFolders, cx: &mut 
                 downloads: folders.language_servers(),
                 indexes: folders.server_indexes(),
             },
+            // The servers' releases are on GitHub whatever host the review's PR is on.
             Arc::new(GitHub::from_env()),
             ServerPins::pinned(),
             Target::running(),

@@ -25,7 +25,7 @@ pub fn blocked_merging() -> Merging {
 use guided_review::file_path::FilePath;
 use guided_review::issue::IssueUrl;
 use guided_review::navigation::{ServerMessage, ServerMessages};
-use guided_review::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
     Checks, ClonePort, CodeHost, CommentId, CommentPlace, HostError, IssueDetails,
@@ -459,22 +459,21 @@ impl FakeHost {
 impl PullsOfBranchPort for FakeHost {
     fn open_pull_of_branch(
         &self,
-        repo: &RepoName,
+        repo: &HostedRepo,
         branch: &guided_review::review_subject::BranchName,
     ) -> Result<Option<PullOfBranch>, HostError> {
-        self.sent
-            .0
-            .lock()
-            .unwrap()
-            .branch_lookups
-            .push(format!("{repo}:{}", branch.as_str()));
+        self.sent.0.lock().unwrap().branch_lookups.push(format!(
+            "{}:{}",
+            repo.repo,
+            branch.as_str()
+        ));
         self.fail_if_reads_fail()?;
         Ok(self
             .pulls_of_branches
             .lock()
             .unwrap()
             .iter()
-            .find(|(head, pull)| head == branch.as_str() && &pull.pr.repo == repo)
+            .find(|(head, pull)| head == branch.as_str() && pull.pr.hosted_repo() == *repo)
             .map(|(_, pull)| pull.clone()))
     }
 

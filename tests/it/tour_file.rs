@@ -223,7 +223,7 @@ fn a_basic_tour_lives_beside_the_guided_tours_file() {
 }
 
 mod pin_subject {
-    use guided_review::pull_request::Sha;
+    use guided_review::pull_request::{HostSite, HostedRepo, RepoName, Sha};
     use guided_review::review_subject::ReviewSubject;
     use guided_review::tour::{GuidedTour, TourPin};
 
@@ -263,6 +263,43 @@ mod pin_subject {
         assert!(!json.contains("github.com"));
         assert_eq!(read.local.as_deref(), Some(LOCAL_KEY));
         assert_eq!(read.subject().unwrap(), local);
+    }
+
+    fn shop_on_github() -> HostedRepo {
+        HostedRepo {
+            host: HostSite::GitHub,
+            repo: RepoName::new("acme", "shop"),
+        }
+    }
+
+    #[test]
+    fn a_local_pin_keeps_the_code_host_of_its_origin() {
+        let mut pinned = pin("{}");
+        let key: ReviewSubject = LOCAL_KEY.parse().unwrap();
+        let local = ReviewSubject::from(
+            key.local()
+                .unwrap()
+                .clone()
+                .with_origin(Some(shop_on_github())),
+        );
+        pinned.pin_to(&local, &Sha::new("aaa"), &Sha::new("bbb"));
+
+        let json = serde_json::to_string(&pinned).unwrap();
+
+        assert!(json.contains(r#""host":"github""#), "{json}");
+        let read = pin(&json).subject().unwrap();
+        assert_eq!(read.local().unwrap().origin(), Some(&shop_on_github()));
+    }
+
+    #[test]
+    fn a_local_pin_written_before_pins_kept_the_host_is_of_github() {
+        let pinned = pin(&format!(
+            r#"{{"local": "{LOCAL_KEY}", "repo": "acme/shop"}}"#
+        ));
+
+        let read = pinned.subject().unwrap();
+
+        assert_eq!(read.local().unwrap().origin(), Some(&shop_on_github()));
     }
 
     #[test]

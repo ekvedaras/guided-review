@@ -10,7 +10,7 @@ use anyhow::bail;
 use crate::file_path::FilePath;
 use crate::github_web;
 use crate::line_number::LineNumber;
-use crate::pull_request::{HostSite, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{HostSite, HostedRepo, PullRequestUrl, RepoName, Sha};
 
 impl HostSite {
     fn of_link(url: &str) -> Option<Self> {
@@ -82,9 +82,14 @@ impl fmt::Display for PullRequestUrl {
     }
 }
 
-/// The repo a git remote points at, on any code host the app reads.
-pub fn repo_of_remote(url: &str) -> Option<RepoName> {
-    HostSite::ALL.into_iter().find_map(|site| match site {
-        HostSite::GitHub => github_web::repo_of_remote(url),
-    })
+impl HostedRepo {
+    /// The repo a git remote points at, and the host it is on; `None` for a host the app does not read.
+    pub fn of_remote(url: &str) -> Option<Self> {
+        HostSite::ALL.into_iter().find_map(|host| {
+            let repo = match host {
+                HostSite::GitHub => github_web::repo_of_remote(url),
+            }?;
+            Some(Self { host, repo })
+        })
+    }
 }

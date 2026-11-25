@@ -11,7 +11,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
 use guided_review::opened_subject::OpenedChangeSet;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::{HostSite, HostedRepo, RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::review_subject::{BranchName, WorkTreeRoot};
 use guided_review::tour::{BasicTour, Tour, TourPin};
@@ -126,6 +126,7 @@ impl PullRequest {
                 pr: PR.to_owned(),
                 local: None,
                 repo: None,
+                host: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,
@@ -185,7 +186,13 @@ fn the_overview_names_the_repo_folder_branch_default_branch_commits_and_uncommit
     assert_eq!(page.description, None);
     assert_eq!(page.title, "feature");
     let local = page.local.unwrap();
-    assert_eq!(local.repo, Some(RepoName::new("acme", "shop")));
+    assert_eq!(
+        local.origin,
+        Some(HostedRepo {
+            host: HostSite::GitHub,
+            repo: RepoName::new("acme", "shop")
+        })
+    );
     assert_eq!(
         local.folder,
         WorkTreeRoot::new(feature.repo.path().canonicalize().unwrap()).unwrap()

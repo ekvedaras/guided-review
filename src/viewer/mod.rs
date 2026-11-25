@@ -235,8 +235,9 @@ pub use ports::{
     AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, ClonePort, CodeHost, HostError,
     IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
     PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
-    PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort,
-    ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, RelevantPullRequestsPort, Resolution,
+    ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
@@ -258,9 +259,7 @@ pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::TourRefresher;
 pub use refresh_brief::{RefreshBrief, StaleStep};
 pub use related_issues::{IssueDetails, IssueState, PullRequestIssues, RelatedIssue};
-pub use relevant_prs::{
-    RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
-};
+pub use relevant_prs::{RelevantPullRequest, RelevantPullRequests, WhyListed};
 pub use remembered_prs::RememberedPullRequestsFile;
 pub use rendered_view::{BlockChange, FileView, RenderedBlock, Rendering, ViewSwitch};
 pub use reopen_after_save::{

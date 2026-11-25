@@ -860,13 +860,13 @@ fn an_update_keeps_the_more_lines_setting_the_repo_and_the_problem_of_an_unreada
         &feature.repo.folders(),
     )
     .unwrap();
-    let repo = opened.review.local_facts().unwrap().repo.clone();
+    let repo = opened.review.local_facts().unwrap().origin.clone();
     assert!(repo.is_some());
     feature.repo.write("README.md", "hello\nworld\nagain\n");
 
     update(&mut opened);
 
-    assert_eq!(opened.review.local_facts().unwrap().repo, repo);
+    assert_eq!(opened.review.local_facts().unwrap().origin, repo);
     assert_eq!(opened.review.display_options().more_lines().get(), 5);
     assert!(
         opened

@@ -102,6 +102,7 @@ impl Shop {
                 pr: PR.to_owned(),
                 local: None,
                 repo: None,
+                host: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(head),
                 previous_head: None,

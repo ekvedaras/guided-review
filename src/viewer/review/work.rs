@@ -58,7 +58,7 @@ impl ReviewCore {
                 Job::CheckWorkingCopy(self.head.clone())
             }
             WorkKind::LookUpPullOfBranch => Job::LookUpPullOfBranch {
-                repo: self.local_facts.as_ref()?.repo.clone()?,
+                repo: self.local_facts.as_ref()?.origin.clone()?,
                 branch: self.subject.local()?.branch().clone(),
             },
             WorkKind::LookUpHeadBranch => {

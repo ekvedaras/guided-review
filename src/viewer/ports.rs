@@ -12,10 +12,11 @@ use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::{IssueDetails, PullRequestIssues};
+use super::relevant_prs::RelevantPullRequests;
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use crate::file_path::FilePath;
 use crate::issue::IssueUrl;
-use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
+use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName};
 use crate::review_subject::{BranchName, ReviewSubject};
 
 /// Makes a clone of a repo of the host, in a folder that does not exist yet, with the reviewer's own
@@ -39,7 +40,7 @@ pub trait PullsOfBranchPort: Send + Sync {
     /// The open PR whose head is `branch` of `repo` itself, when there is one.
     fn open_pull_of_branch(
         &self,
-        repo: &RepoName,
+        repo: &HostedRepo,
         branch: &BranchName,
     ) -> Result<Option<PullOfBranch>, HostError>;
 
@@ -48,6 +49,13 @@ pub trait PullsOfBranchPort: Send + Sync {
         &self,
         pr: &PullRequestUrl,
     ) -> Result<Option<BranchName>, HostError>;
+}
+
+/// The open PRs the reviewer has something to do with, for the PR switcher.
+pub trait RelevantPullRequestsPort: Send + Sync {
+    /// Every open PR that involves the viewer or asks one of their teams for a review, newest
+    /// update first, one entry per PR url.
+    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, HostError>;
 }
 
 pub trait ViewedFilesPort: Send + Sync {
@@ -207,6 +215,7 @@ pub trait CodeHost:
     + PullRequestDescriptionPort
     + PullRequestOriginPort
     + PullRequestStatusPort
+    + RelevantPullRequestsPort
     + ReviewThreadsPort
     + ReviewWritesPort
 {

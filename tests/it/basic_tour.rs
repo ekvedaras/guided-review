@@ -21,6 +21,7 @@ fn open_basic(repo: &FixtureRepo, files: &[&str]) -> Review {
             pr: "https://github.com/acme/shop/pull/7".to_owned(),
             local: None,
             repo: None,
+            host: None,
             base: Sha::new(&base),
             head: Sha::new(&head),
             previous_head: None,

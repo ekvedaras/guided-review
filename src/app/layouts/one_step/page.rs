@@ -1220,9 +1220,9 @@ fn local_overview_card(colors: &Colors, local: &LocalFacts) -> impl IntoElement 
                 .text_sm()
                 .children(
                     local
-                        .repo
+                        .origin
                         .as_ref()
-                        .map(|repo| local_fact(colors, "Repo", repo.to_string())),
+                        .map(|origin| local_fact(colors, "Repo", origin.repo.to_string())),
                 )
                 .child(local_fact(
                     colors,

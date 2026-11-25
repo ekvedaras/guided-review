@@ -3,16 +3,17 @@ use super::ports::ReviewVerdict;
 use super::ports::{
     ChangeTipsPort, ClonePort, CodeHost, HostError, IssueDetailsPort, MergingPort, NoAccess,
     PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
-    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Resolution,
-    ReviewThreadsPort, ReviewWritesPort, ViewedFilesPort,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, RelevantPullRequestsPort,
+    Resolution, ReviewThreadsPort, ReviewWritesPort, ViewedFilesPort,
 };
 use super::pr_origin::PullRequestOrigin;
 use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
 use super::related_issues::PullRequestIssues;
+use super::relevant_prs::RelevantPullRequests;
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
-use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
+use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, RepoName};
 use crate::review_subject::BranchName;
 use std::path::Path;
 use std::sync::Arc;
@@ -36,7 +37,7 @@ impl NoHost {
 impl PullsOfBranchPort for NoHost {
     fn open_pull_of_branch(
         &self,
-        repo: &RepoName,
+        repo: &HostedRepo,
         branch: &BranchName,
     ) -> Result<Option<PullOfBranch>, HostError> {
         match &self.branch_lookups {
@@ -58,7 +59,7 @@ impl PullsOfBranchPort for NoHost {
 
 fn refused<T>() -> Result<T, HostError> {
     Err(HostError::NoAccess(NoAccess::new(
-        "a local review has no GitHub",
+        "a local review has no code host",
     )))
 }
 
@@ -87,6 +88,12 @@ impl CodeHost for NoHost {
 impl ClonePort for NoHost {
     fn clone_repo(&self, repo: &RepoName, _folder: &Path) -> anyhow::Result<()> {
         anyhow::bail!("a local review clones no repo, not {repo} either: it reads its own folder")
+    }
+}
+
+impl RelevantPullRequestsPort for NoHost {
+    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, HostError> {
+        refused()
     }
 }
 

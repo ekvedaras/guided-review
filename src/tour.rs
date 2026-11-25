@@ -10,7 +10,7 @@ use crate::file_path::FilePath;
 use crate::issue::IssueLink;
 use crate::piece_id::PieceId;
 use crate::pieces::{self, ChangedFile};
-use crate::pull_request::{ChangeTips, RepoName, Sha};
+use crate::pull_request::{ChangeTips, HostSite, HostedRepo, RepoName, Sha};
 use crate::review_subject::ReviewSubject;
 
 const VERSION: u32 = 1;
@@ -61,9 +61,12 @@ pub struct TourPin {
     /// The subject key of a local tour, which has no `pr`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local: Option<String>,
-    /// The GitHub repo of a local tour's clone, so a PR of that repo finds the local review without git.
+    /// The repo of a local tour's clone, so a PR of that repo finds the local review without git.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo: Option<RepoName>,
+    /// The code host `repo` is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<HostSite>,
     #[serde(default)]
     pub base: Sha,
     #[serde(default)]
@@ -378,15 +381,25 @@ impl TourPin {
                 self.pr = pr.to_string();
                 self.local = None;
                 self.repo = None;
+                self.host = None;
             }
             ReviewSubject::Local(change_set) => {
                 self.pr = String::new();
                 self.local = Some(subject.to_string());
-                if let Some(repo) = change_set.repo() {
-                    self.repo = Some(repo.clone());
+                if let Some(origin) = change_set.origin() {
+                    self.repo = Some(origin.repo.clone());
+                    self.host = Some(origin.host);
                 }
             }
         }
+    }
+
+    fn origin(&self) -> Option<HostedRepo> {
+        Some(HostedRepo {
+            // A pin written before pins kept the host is of GitHub, the only host the app read then.
+            host: self.host.unwrap_or(HostSite::GitHub),
+            repo: self.repo.clone()?,
+        })
     }
 
     /// The subject the tour is pinned to: a tour names a PR or a local change set, never both.
@@ -395,7 +408,7 @@ impl TourPin {
             (false, None) => self.pr.parse(),
             (true, Some(key)) => Ok(match key.parse()? {
                 ReviewSubject::Local(change_set) => {
-                    ReviewSubject::from(change_set.in_repo(self.repo.clone()))
+                    ReviewSubject::from(change_set.with_origin(self.origin()))
                 }
                 pr @ ReviewSubject::PullRequest(_) => pr,
             }),
