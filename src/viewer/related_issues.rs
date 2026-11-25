@@ -11,6 +11,7 @@ use crate::pull_request::RepoName;
 use crate::review_subject::{BranchName, ReviewSubject};
 use crate::tour::Tour;
 
+use super::capability::{Capability, HostCapabilities};
 use super::markdown::Markdown;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,12 +103,17 @@ pub(super) struct RelatedIssues {
     shown: Arc<[RelatedIssue]>,
     /// What GitHub last said of each shown issue; an issue no longer shown keeps its entry.
     details: HashMap<IssueUrl, Arc<IssueDetails>>,
-    /// The host has no issue tracker to read details from: the issues show with no hover card.
-    without_tracker: bool,
+    /// A host with no issue tracker has no details to read: the issues show with no hover card.
+    has_tracker: bool,
 }
 
 impl RelatedIssues {
-    pub(super) fn of(subject: &ReviewSubject, tour: &Tour, description: &str) -> Self {
+    pub(super) fn of(
+        subject: &ReviewSubject,
+        tour: &Tour,
+        description: &str,
+        host: HostCapabilities,
+    ) -> Self {
         let of_local_branch = subject.local().and_then(|change_set| {
             IssueUrl::of_branch(change_set.repo()?, change_set.branch())
                 .map(RelatedIssue::of_github)
@@ -124,7 +130,7 @@ impl RelatedIssues {
             of_local_branch,
             shown: Arc::default(),
             details: HashMap::new(),
-            without_tracker: false,
+            has_tracker: host.has(Capability::IssueTracker),
         };
         issues.description_is(description);
         issues
@@ -162,13 +168,9 @@ impl RelatedIssues {
         }
     }
 
-    pub(super) fn without_tracker(&mut self) {
-        self.without_tracker = true;
-    }
-
     /// The shown issues whose details the host's tracker has; none when it has no tracker.
     pub(super) fn details_to_read(&self) -> Vec<IssueUrl> {
-        if self.without_tracker {
+        if !self.has_tracker {
             return Vec::new();
         }
         self.shown

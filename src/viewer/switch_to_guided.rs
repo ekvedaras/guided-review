@@ -5,8 +5,8 @@ use crate::pull_request::Sha;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Tour};
 
+use super::capability::HostCapabilities;
 use super::carried::ReadCarrier;
-use super::host_capabilities::HostCapabilities;
 use super::new_commits::PickCodeSource;
 use super::replacing_jobs::RepinnedTour;
 use super::review_builder::ReviewBuilder;

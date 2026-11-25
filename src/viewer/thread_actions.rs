@@ -207,9 +207,10 @@ fn classify(error: &HostError) -> ThreadActionResult {
         HostError::NoAccess(no_access) => {
             ThreadActionResult::Refused(CommentRefusal::NoAccess(no_access.reason().to_owned()))
         }
-        HostError::ThreadNotCreated(_) | HostError::NotAnswering(_) | HostError::Other(_) => {
-            ThreadActionResult::Failed(format!("{error:#}"))
-        }
+        HostError::ThreadNotCreated(_)
+        | HostError::NotAnswering(_)
+        | HostError::NotOffered(_)
+        | HostError::Other(_) => ThreadActionResult::Failed(format!("{error:#}")),
     }
 }
 

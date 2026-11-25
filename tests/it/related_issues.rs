@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{Capability, FakeHost, HostFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::build::Build;
 use guided_review::issue::{IssueLink, IssueUrl};
@@ -12,6 +12,7 @@ use guided_review::open_review::open_review;
 use guided_review::pull_request::RepoName;
 use guided_review::review_subject::{BranchName, ReviewSubject};
 use guided_review::tour::GuidedTour;
+use guided_review::viewer::Capability;
 use guided_review::viewer::{
     Command, Effect, Intent, IssueDetails, IssueState, PaletteAction, PullRequestIssues,
     RelatedIssue, Review, ReviewStateFile, WindowMoment, WorkKind,

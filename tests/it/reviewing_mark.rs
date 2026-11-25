@@ -2,12 +2,13 @@ use std::time::Instant;
 
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{Capability, FakeHost, HostCall, HostFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
+use guided_review::viewer::Capability;
 use guided_review::viewer::{
     Effect, FinishAction, Intent, Problem, Reaction, ReactionChange, Review, ReviewOutcome,
     ReviewStateFile, ReviewVerdict, SubmittedReview, WindowMoment, WorkKind,

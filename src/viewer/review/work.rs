@@ -4,12 +4,10 @@ use super::ReviewCore;
 use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
 use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
-use crate::viewer::host_capabilities::HostCapabilities;
 use crate::viewer::host_outage::Read;
 use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::related_issues::RelatedIssues;
 use crate::viewer::tour_agent::{TourAgentState, TourKind};
-use crate::viewer::viewed_sync::ViewedSync;
 use crate::viewer::work_agenda::{
     AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, Done, Job, WORKING_TREE_RECHECK, Work,
     WorkKind, WorkOutcome,
@@ -34,28 +32,6 @@ impl ReviewCore {
     /// When work wanted later falls due; `None` when none is.
     pub fn next_due(&self) -> Option<Instant> {
         self.work.next_due()
-    }
-
-    /// What the review's code host offers decides what the review shows and asks of it: a capability
-    /// the host has no port for is hidden, and no work asks for it.
-    pub(super) fn offer_only(&mut self, host: HostCapabilities) {
-        if !host.has_viewed_marks() {
-            self.viewed_sync = ViewedSync::without_host_marks();
-        }
-        if !host.has_pull_request_reactions() {
-            self.reviewing_mark.without_reactions();
-        }
-        if !host.has_merging()
-            && let Some(controls) = &mut self.pr_controls
-        {
-            controls.without_merging();
-        }
-        if !host.has_picture_uploads() {
-            self.pr_notes.without_picture_uploads();
-        }
-        if !host.has_issue_tracker() {
-            self.related_issues.without_tracker();
-        }
     }
 
     /// The window came to the front, or the review opened: GitHub and the clone are read again,

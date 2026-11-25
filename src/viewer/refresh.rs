@@ -5,7 +5,7 @@ use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
 
 use super::agent_event::AgentEvent;
-use super::host_capabilities::HostCapabilities;
+use super::capability::HostCapabilities;
 use super::new_commits::PickCodeSource;
 use super::ports::RefreshWriter;
 use super::replacing_jobs::RepinnedTour;

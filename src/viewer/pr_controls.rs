@@ -3,6 +3,7 @@
 
 use std::time::{Duration, Instant};
 
+use super::capability::{Capability, HostCapabilities};
 use super::jump::PaletteAction;
 use super::merging::{AutoMerge, MergeChange, MergeOffer, Merging};
 use super::ports::HostError;
@@ -13,7 +14,7 @@ use crate::keys::Command;
 use crate::merge_method::MergeMethod;
 use crate::review_subject::ReviewSubject;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct PrControls {
     /// `None` until GitHub answers; kept as it was while a read fails.
     status: Option<PrStatus>,
@@ -23,15 +24,25 @@ pub(super) struct PrControls {
 }
 
 impl PrControls {
-    pub(super) fn of(subject: &ReviewSubject) -> Option<Self> {
+    pub(super) fn of(subject: &ReviewSubject, host: HostCapabilities) -> Option<Self> {
         subject.pull_request().map(|_| Self {
-            merging: Some(PressAgain::default()),
-            ..Self::default()
+            status: None,
+            readiness: PressAgain::default(),
+            merging: host.has(Capability::Merging).then(PressAgain::default),
         })
     }
 
-    pub(super) fn without_merging(&mut self) {
-        self.merging = None;
+    /// A rebuilt review goes on with what the host said and what the reviewer pressed. Whether it
+    /// offers merging is its own build's, which read the host's capabilities last.
+    pub(super) fn carry_on_from(&mut self, replaced: Self) {
+        let merging = self
+            .merging
+            .take()
+            .map(|fresh| replaced.merging.unwrap_or(fresh));
+        *self = Self {
+            merging,
+            ..replaced
+        };
     }
 
     pub(super) fn status(&self) -> Option<PrStatus> {

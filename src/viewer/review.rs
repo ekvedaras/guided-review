@@ -44,6 +44,7 @@ use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
 use super::branch_link::BranchLink;
+use super::capability::HostCapabilities;
 use super::carried::ReadCarrier;
 use super::code_link::{CodeLinks, CodeOnWeb, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentDesk, CommentGesture};
@@ -61,7 +62,6 @@ use super::finish_review::FinishAction;
 use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{AgentReplied, HandOffId};
 use super::highlight::{HighlightRequest, Highlights};
-use super::host_capabilities::HostCapabilities;
 use super::host_outage::Read;
 use super::host_outage::{Affected, OutageCause};
 use super::image_preview::ImagePreviewRequest;
@@ -551,8 +551,8 @@ impl ReviewCore {
         self.branch_link = replaced.branch_link;
         self.related_issues.carry_on_from(replaced.related_issues);
         self.pr_origin = replaced.pr_origin;
-        if self.pr_controls.is_some() && replaced.pr_controls.is_some() {
-            self.pr_controls = replaced.pr_controls;
+        if let (Some(controls), Some(replaced)) = (&mut self.pr_controls, replaced.pr_controls) {
+            controls.carry_on_from(replaced);
         }
         if !switched_to_guided {
             self.guided_tour = replaced.guided_tour;
@@ -666,7 +666,7 @@ impl ReviewCore {
                     repo: pr.repo.clone(),
                 });
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
-        let mut reviewing_mark = ReviewingMark::new(head.clone());
+        let mut reviewing_mark = ReviewingMark::new(head.clone(), host);
         if state.is_done_at(&head) {
             reviewing_mark.done();
         }
@@ -719,8 +719,8 @@ impl ReviewCore {
         display_options.cut_markdown(&files);
         let local_heading = Self::heading_of(&subject, None);
         let branch_link = BranchLink::of(&subject);
-        let related_issues = RelatedIssues::of(&subject, &tour, state.pr_description());
-        let pr_controls = PrControls::of(&subject);
+        let related_issues = RelatedIssues::of(&subject, &tour, state.pr_description(), host);
+        let pr_controls = PrControls::of(&subject, host);
         let names = NameDesk::new(Arc::new(Lookups::new(FileSearch::for_source(
             source,
             files
@@ -730,7 +730,7 @@ impl ReviewCore {
                 .cloned()
                 .collect(),
         ))));
-        let mut core = Self {
+        Ok(Self {
             tour,
             file_tree,
             folded_folders: BTreeSet::new(),
@@ -764,7 +764,7 @@ impl ReviewCore {
             state: SavedState::new(state, state_file),
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
-            viewed_sync: ViewedSync::default(),
+            viewed_sync: ViewedSync::for_host(host),
             problems: {
                 let mut problems = Problems::default();
                 if let Some(reason) = source.fallback_reason() {
@@ -783,7 +783,7 @@ impl ReviewCore {
             working_copy: WorkingCopy::Elsewhere,
             comment_desk: CommentDesk::default(),
             display_options,
-            pr_notes: PrNotes::default(),
+            pr_notes: PrNotes::for_host(host),
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
             jobs: ReplacingJobs::default(),
@@ -799,9 +799,7 @@ impl ReviewCore {
             read_carrier: None,
             seen_end_of: None,
             tour_files,
-        };
-        core.offer_only(host);
-        Ok(core)
+        })
     }
 
     /// Colouring reads whole files, so the app runs this off the main thread and hands the result to `set_highlights`.

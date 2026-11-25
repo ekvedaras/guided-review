@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use super::capability::{Capability, HostCapabilities};
 use super::comments::{CommentPlace, SendMode};
 use super::host_outage::OutageCause;
 use super::merging::MergeChange;
@@ -221,6 +222,23 @@ pub trait CodeHost:
     fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort>;
 }
 
+impl HostCapabilities {
+    /// Read from the host's ports, so it cannot say otherwise than they do.
+    pub fn of(host: &dyn CodeHost) -> Self {
+        Self::offering(
+            Capability::ALL
+                .into_iter()
+                .filter(|capability| match capability {
+                    Capability::ViewedMarks => host.viewed_marks().is_some(),
+                    Capability::Merging => host.merging().is_some(),
+                    Capability::PullRequestReactions => host.pull_request_reactions().is_some(),
+                    Capability::PictureUploads => host.picture_uploads().is_some(),
+                    Capability::IssueTracker => host.issue_tracker().is_some(),
+                }),
+        )
+    }
+}
+
 /// A code host failure a caller tells apart from the rest.
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
@@ -233,6 +251,10 @@ pub enum HostError {
     /// GitHub answered a new thread with `thread: null` and no error. It leaves an empty pending review behind.
     #[error("{0}")]
     ThreadNotCreated(String),
+    /// Work that needs a capability the host has none of. The review asks no such work, so this is
+    /// a refusal, not a failure to show.
+    #[error("the code host has no {0}")]
+    NotOffered(Capability),
     /// A server error, a timeout or no connection: GitHub as a whole is not answering.
     #[error("GitHub is not answering ({0})")]
     NotAnswering(OutageCause),
@@ -242,12 +264,6 @@ pub enum HostError {
 }
 
 impl HostError {
-    /// Work that needs a capability the host has none of. The review does not ask for such work, so
-    /// this is a refusal, not a failure to show.
-    pub fn not_offered(capability: &str) -> Self {
-        Self::NoAccess(NoAccess::new(format!("the code host has no {capability}")))
-    }
-
     /// What went wrong without what was being done: the sidebar says that itself.
     pub fn short_reason(&self) -> String {
         match self {

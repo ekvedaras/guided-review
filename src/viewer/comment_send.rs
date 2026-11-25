@@ -227,6 +227,6 @@ fn classify(error: &HostError) -> Outcome {
             Outcome::Refused(CommentRefusal::NoAccess(no_access.reason().to_owned()))
         }
         HostError::Other(error) => Outcome::Failed(format!("{error:#}")),
-        HostError::NotAnswering(_) => Outcome::Failed(error.to_string()),
+        HostError::NotAnswering(_) | HostError::NotOffered(_) => Outcome::Failed(error.to_string()),
     }
 }

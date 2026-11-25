@@ -7,8 +7,8 @@ use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 
 use super::branch_link::LocalReviewsOfRepo;
+use super::capability::HostCapabilities;
 use super::code_link::WorkingCopy;
-use super::host_capabilities::HostCapabilities;
 use super::new_commits::PickCodeSource;
 use super::new_commits::catch_up_findings;
 use super::problems::Problem;

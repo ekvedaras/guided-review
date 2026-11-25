@@ -14,6 +14,7 @@ mod ask_desk;
 mod ask_target;
 mod avatars;
 mod branch_link;
+mod capability;
 mod carried;
 mod clone_offer;
 mod code_link;
@@ -40,7 +41,6 @@ mod guided_tour;
 mod hand_offs;
 mod hidden_text;
 mod highlight;
-mod host_capabilities;
 mod host_outage;
 mod image_preview;
 mod intent;
@@ -140,6 +140,7 @@ pub use ask_desk::{
 pub use ask_target::{AskTarget, Unavailable};
 pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub use branch_link::{BranchOffer, local_reviews_of_repo};
+pub use capability::{Capability, HostCapabilities};
 pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState};
 pub use code_link::{
     CodeLink, CodeOnWeb, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy,
@@ -186,7 +187,6 @@ pub use hidden_text::{HiddenPart, HiddenText};
 pub use highlight::{
     Capture, HighlightRequest, Highlights, Span, highlight_file_lines, highlight_snippet,
 };
-pub use host_capabilities::HostCapabilities;
 pub use host_outage::Read;
 pub use host_outage::{Affected, Outage, OutageCause, backoff};
 pub use image_preview::{

@@ -9,6 +9,7 @@ use crate::hex;
 use crate::pull_request::PullRequestUrl;
 use crate::tour::StepId;
 
+use super::capability::{Capability, HostCapabilities};
 use super::markdown::local_files;
 use super::ports::{CodeHost, HostError};
 
@@ -40,20 +41,23 @@ enum Attempt {
 }
 
 /// The adds to the PR description that are running or failed, by subject. Not saved.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct PrNotes {
     attempts: BTreeMap<NoteSubject, Attempt>,
-    /// The host stores no pictures, so a note that shows one cannot be added.
-    without_picture_uploads: bool,
+    /// A host that stores no pictures takes no note that shows one.
+    has_picture_uploads: bool,
 }
 
 impl PrNotes {
-    pub(super) fn without_picture_uploads(&mut self) {
-        self.without_picture_uploads = true;
+    pub(super) fn for_host(host: HostCapabilities) -> Self {
+        Self {
+            attempts: BTreeMap::new(),
+            has_picture_uploads: host.has(Capability::PictureUploads),
+        }
     }
 
     pub(super) fn can_add(&self, note: &Note) -> bool {
-        !self.without_picture_uploads || note.pictures().next().is_none()
+        self.has_picture_uploads || note.pictures().next().is_none()
     }
 
     pub(super) fn button(
@@ -289,7 +293,7 @@ impl ToNotes {
         for picture in self.note.pictures() {
             let uploads = host
                 .picture_uploads()
-                .ok_or_else(|| HostError::not_offered("picture uploads"))?;
+                .ok_or_else(|| HostError::NotOffered(Capability::PictureUploads))?;
             let url = uploads.upload_picture(&self.pr, picture).with_context(|| {
                 format!(
                     "could not upload {}",

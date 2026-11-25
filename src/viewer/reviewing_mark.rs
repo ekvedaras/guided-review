@@ -1,3 +1,4 @@
+use super::capability::{Capability, HostCapabilities};
 use super::ports::{CodeHost, HostError};
 use super::pr_reviewers::SubmittedReview;
 use super::reactions::{Reaction, ReactionChange};
@@ -56,12 +57,13 @@ enum EarlierReview {
 }
 
 impl ReviewingMark {
-    pub(super) fn new(tour_head: Sha) -> Self {
+    /// A host with no reactions on a PR has nowhere to show the mark, so nothing puts it on.
+    pub(super) fn new(tour_head: Sha, host: HostCapabilities) -> Self {
         Self {
             tour_head,
             authorship: Authorship::Unknown,
             earlier_review: EarlierReview::NotReadYet,
-            is_finished: false,
+            is_finished: !host.has(Capability::PullRequestReactions),
             is_asked_for: false,
             to_send: None,
         }
@@ -111,13 +113,6 @@ impl ReviewingMark {
             self.is_finished = true;
             self.to_send = self.is_asked_for.then_some(ReactionChange::Remove);
         }
-    }
-
-    /// A host with no reactions on a PR has nowhere to show the mark, so nothing puts it on.
-    pub(super) fn without_reactions(&mut self) {
-        self.is_finished = true;
-        self.is_asked_for = false;
-        self.to_send = None;
     }
 
     /// The review closes: true when the mark may be on GitHub, so it has to come off now. Nothing

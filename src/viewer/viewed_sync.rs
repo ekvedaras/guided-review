@@ -6,33 +6,33 @@ use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::GuidedTour;
 
+use super::capability::{Capability, HostCapabilities};
 use super::ports::{CodeHost, HostError, Viewed, ViewedFilesPort};
 use super::review_state::ReviewState;
 use super::screen::ReadSubject;
 
 /// Keeps the host's "viewed" marks and the read ticks in step. Ticks keep working when it is off.
-#[derive(Default)]
 pub(super) struct ViewedSync {
     /// Why sync is switched off for this session; the app shows it as a banner.
     off_because: Option<String>,
-    /// The host has no viewed marks (a local review's has none): ticks stay ticks.
-    without_host_marks: bool,
+    /// A host with no viewed marks (a local review's has none) leaves ticks as ticks.
+    has_host_marks: bool,
 }
 
 impl ViewedSync {
-    pub(super) fn without_host_marks() -> Self {
+    pub(super) fn for_host(host: HostCapabilities) -> Self {
         Self {
             off_because: None,
-            without_host_marks: true,
+            has_host_marks: host.has(Capability::ViewedMarks),
         }
     }
 
     pub(super) fn has_host_marks(&self) -> bool {
-        !self.without_host_marks
+        self.has_host_marks
     }
 
     fn wishes_nothing(&self) -> bool {
-        self.without_host_marks || self.off_because.is_some()
+        !self.has_host_marks || self.off_because.is_some()
     }
 
     pub(super) fn banner(&self) -> Option<&str> {
@@ -85,7 +85,7 @@ impl ViewedSync {
         pr: &PullRequestUrl,
         tour_head: &Sha,
     ) -> Option<SyncRequest> {
-        if self.without_host_marks {
+        if !self.has_host_marks {
             return None;
         }
         let baseline_wishes = state
@@ -111,11 +111,16 @@ impl ViewedSync {
         outcome.land(state, coverage, tour_head)
     }
 
-    /// GitHub saying viewed sync is unavailable switches it off for the session instead of failing.
+    /// The host saying viewed sync is unavailable, or having no viewed marks, switches it off for
+    /// the session instead of failing.
     pub(super) fn settle(&mut self, error: HostError) -> anyhow::Result<()> {
         match error {
             HostError::NoAccess(no_access) => {
                 self.off_because = Some(no_access.into_reason());
+                Ok(())
+            }
+            not_offered @ HostError::NotOffered(_) => {
+                self.off_because = Some(not_offered.to_string());
                 Ok(())
             }
             HostError::Other(error) => Err(error),
@@ -379,7 +384,10 @@ impl SyncRequest {
             return SyncOutcome::nothing(&self.tour_head);
         }
         let Some(marks) = host.viewed_marks() else {
-            return SyncOutcome::failed(&self.tour_head, HostError::not_offered("viewed marks"));
+            return SyncOutcome::failed(
+                &self.tour_head,
+                HostError::NotOffered(Capability::ViewedMarks),
+            );
         };
         match host.pull_request_tips(pr) {
             Ok(tips) if tips.head == self.tour_head => {}

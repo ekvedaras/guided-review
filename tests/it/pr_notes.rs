@@ -1,9 +1,10 @@
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{Capability, FakeHost, HostCall, HostFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
+use guided_review::viewer::Capability;
 use guided_review::viewer::{
     NoteSubject, NotesButton, Review, ReviewStateFile, StepId, with_diagram_in_notes,
 };

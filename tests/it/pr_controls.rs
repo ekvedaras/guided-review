@@ -3,14 +3,14 @@ use std::time::{Duration, Instant};
 
 use crate::pr_status::Pull;
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::blocked_merging;
+use crate::support::fake_ports::{blocked_merging, every_capability};
 use guided_review::build::Build;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
-    Checks, Command, MergeMethod, OpenPrStatus, PaletteAction, PrStatus, PressStep, Readiness,
-    Review,
+    Capability, Checks, Command, HostCapabilities, MergeMethod, OpenPrStatus, PaletteAction,
+    PrStatus, PressStep, Readiness, Review,
 };
 
 /// A ready PR the viewer may turn into a draft and turn auto-merge on for, so both keys ask.
@@ -123,6 +123,30 @@ fn a_reopened_pr_review_keeps_what_github_said_and_a_first_press() {
             "{key}"
         );
         assert_eq!(press(&mut reopened, now), PressStep::Sent, "{key}");
+    }
+}
+
+#[test]
+fn a_reopened_pr_review_offers_merging_as_its_own_build_says_whatever_the_replaced_one_offered() {
+    let pull = Pull::new();
+    let without_merging = HostCapabilities::of(&pull.host().without(Capability::Merging));
+    let host = pull.host().with_status(both_changes_offered());
+    for (replaced_on, reopened_on, offered) in [
+        (without_merging, every_capability(), true),
+        (every_capability(), without_merging, false),
+    ] {
+        let mut replaced = pull.open_on(replaced_on);
+        pull.read(&mut replaced, &host, Instant::now());
+
+        let mut reopened = pull.open_on(reopened_on);
+        reopened.carry_on_from(replaced);
+
+        assert_eq!(
+            pr_controls_of(&reopened).contains(&Command::ToggleAutoMerge),
+            offered,
+            "reopened with merging: {offered}"
+        );
+        assert_eq!(reopened.merging().is_some(), offered, "{offered}");
     }
 }
 

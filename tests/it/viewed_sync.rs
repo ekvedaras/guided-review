@@ -1,12 +1,13 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{Capability, FakeHost, HostCall, HostFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
+use guided_review::viewer::Capability;
 use guided_review::viewer::{
     PUSH_DEBOUNCE, Problem, Review, ReviewStateFile, TourAgents, ViewedState, Work, WorkKind,
     WorkPorts,
@@ -122,6 +123,24 @@ fn all_unviewed(shop: &Shop) -> FakeHost {
         .fold(shop.host(), |host, path| {
             host.viewing(path, ViewedState::Unviewed)
         })
+}
+
+#[test]
+fn a_review_whose_host_turns_out_to_have_no_viewed_marks_stops_syncing_and_says_why() {
+    let shop = Shop::with_pull();
+    let host = all_unviewed(&shop).without(Capability::ViewedMarks);
+    let mut review = shop.open();
+    let start = Instant::now();
+
+    review.tick(&"c-only".into()).unwrap();
+    shop.drive_at(&mut review, &host, start);
+    shop.drive_at(&mut review, &host, start + PUSH_DEBOUNCE);
+
+    assert_eq!(
+        review.sync_banner(),
+        Some("the code host has no viewed marks")
+    );
+    assert!(review.problems().is_empty(), "{:?}", review.problems());
 }
 
 #[test]

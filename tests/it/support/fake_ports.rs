@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use super::file_path;
 use guided_review::viewer::{
-    AutoMerge, HostCapabilities, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
+    AutoMerge, Capability, HostCapabilities, MergeChange, MergeMethod, MergeMethods, Mergeability,
+    Merging,
 };
 
 /// A PR that checks or reviews still hold back, in a repo that allows every merge method and
@@ -189,16 +190,6 @@ impl ReadFailure {
             .context("could not read https://github.com/acme/shop/pull/7 from GitHub")
             .into()
     }
-}
-
-/// What a host may lack, for a test of a host that does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Capability {
-    ViewedMarks,
-    Merging,
-    PullRequestReactions,
-    PictureUploads,
-    IssueTracker,
 }
 
 /// What a GitHub PR's host offers, for a review whose test is not about what the host lacks.

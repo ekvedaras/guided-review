@@ -12,6 +12,7 @@ use crate::local_work_tree::OnDisk;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
+use super::capability::Capability;
 use super::comment_send::{CommentOutcome, CommentRequest};
 use super::fix_requests::{FixDeliveryOutcome, FixDeliveryRequest};
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
@@ -345,7 +346,7 @@ impl Work {
             Job::PullPrOrigin(pr) => Done::PrOrigin(host.pull_request_origin(&pr)),
             Job::PullIssueDetails(issues) => Done::IssueDetails(match host.issue_tracker() {
                 Some(tracker) => tracker.issue_details(&issues),
-                None => Err(HostError::not_offered("issue tracker")),
+                None => Err(HostError::NotOffered(Capability::IssueTracker)),
             }),
             Job::SyncViewed(request) => Done::SyncViewed(request.run(host)),
             // Outdated threads are followed to their lines in the same trip, so they never jump once shown.
@@ -371,7 +372,7 @@ impl Work {
                     Some(reactions) => {
                         reactions.set_pull_request_reaction(&pr, REVIEWING_MARK, change)
                     }
-                    None => Err(HostError::not_offered("reactions on a PR")),
+                    None => Err(HostError::NotOffered(Capability::PullRequestReactions)),
                 },
             },
             Job::ChangePrReadiness { pr, readiness } => Done::PrReadiness {
@@ -382,7 +383,7 @@ impl Work {
                 change,
                 result: match host.merging() {
                     Some(merging) => merging.change_merging(&pr, change),
-                    None => Err(HostError::not_offered("merging")),
+                    None => Err(HostError::NotOffered(Capability::Merging)),
                 },
             },
             Job::TakeSeenMarksOff(requests) => Done::SeenMarksOff(
