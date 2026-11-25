@@ -36,6 +36,10 @@ pub struct ScreenGroup {
 pub struct CommentsSection {
     pub title: String,
     pub is_resolved: bool,
+    /// The Resolved section folds: its heading stays, its rows go. The open section is always shown.
+    pub is_shown: bool,
+    /// The cursor is on the section's heading, which only the Resolved section lets it stop on.
+    pub is_header_under_cursor: bool,
     pub groups: Vec<ScreenGroup>,
 }
 
@@ -66,6 +70,7 @@ const PLACE_CHARS: usize = 34;
 pub struct CommentsList {
     threads: Vec<ListedThread>,
     cursor: usize,
+    resolved_are_shown: bool,
 }
 
 impl CommentsList {
@@ -77,6 +82,81 @@ impl CommentsList {
         Self {
             threads: open.into_iter().chain(resolved).collect(),
             cursor: 0,
+            resolved_are_shown: false,
+        }
+        .unfolded_without_open_threads()
+    }
+
+    /// With no open thread the resolved ones are all there is, so they show.
+    fn unfolded_without_open_threads(mut self) -> Self {
+        self.resolved_are_shown = self.open_count() == 0;
+        self
+    }
+
+    fn open_count(&self) -> usize {
+        self.threads
+            .iter()
+            .filter(|listed| !listed.thread.is_resolved)
+            .count()
+    }
+
+    fn resolved_count(&self) -> usize {
+        self.threads.len() - self.open_count()
+    }
+
+    /// The cursor's stops: the open rows, then the Resolved heading, then the resolved rows while shown.
+    fn stop_count(&self) -> usize {
+        match self.resolved_count() {
+            0 => self.open_count(),
+            resolved if self.resolved_are_shown => self.open_count() + 1 + resolved,
+            _ => self.open_count() + 1,
+        }
+    }
+
+    /// The stop of the thread at `position` of `threads`, which has none while it is folded away.
+    fn stop_of(&self, position: usize) -> Option<usize> {
+        match position.checked_sub(self.open_count()) {
+            None => Some(position),
+            Some(_) if self.resolved_are_shown => Some(position + 1),
+            Some(_) => None,
+        }
+    }
+
+    fn position_under_cursor(&self) -> Option<usize> {
+        match self.cursor.cmp(&self.open_count()) {
+            std::cmp::Ordering::Less => Some(self.cursor),
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Greater => Some(self.cursor - 1),
+        }
+    }
+
+    pub const fn resolved_are_shown(&self) -> bool {
+        self.resolved_are_shown
+    }
+
+    /// Enter or a click on the Resolved heading.
+    pub fn toggle_resolved_shown(&mut self) {
+        self.resolved_are_shown = !self.resolved_are_shown;
+        self.cursor = self.cursor.min(self.stop_count().saturating_sub(1));
+    }
+
+    pub fn is_on_resolved_header(&self) -> bool {
+        self.resolved_count() > 0 && self.cursor == self.open_count()
+    }
+
+    /// Right: the Resolved heading unfolds its section.
+    pub fn unfold_under_cursor(&mut self) {
+        if self.is_on_resolved_header() {
+            self.resolved_are_shown = true;
+        }
+    }
+
+    /// Left: folds the Resolved section; from a resolved row it goes up to the heading.
+    pub fn fold_under_cursor(&mut self) {
+        if self.is_on_resolved_header() {
+            self.resolved_are_shown = false;
+        } else if self.cursor > self.open_count() {
+            self.cursor = self.open_count();
         }
     }
 
@@ -94,10 +174,7 @@ impl CommentsList {
                 continue;
             }
             let screen = listed.shown_on.as_ref().map(|(screen, _)| screen);
-            let row = CommentsListRow {
-                is_under_cursor: position == self.cursor,
-                ..row_of(listed)
-            };
+            let row = self.row_at(position, listed);
             match groups.last_mut() {
                 Some((last, group)) if *last == screen => group.rows.push(row),
                 _ => {
@@ -120,34 +197,54 @@ impl CommentsList {
         (count > 0).then(|| CommentsSection {
             title: format!("{name} · {count}"),
             is_resolved,
+            is_shown: !is_resolved || self.resolved_are_shown,
+            is_header_under_cursor: is_resolved && self.is_on_resolved_header(),
             groups: groups.into_iter().map(|(_, group)| group).collect(),
         })
     }
 
-    /// Every row in the order the cursor walks them.
+    /// Every row the cursor can walk, in its order: the resolved ones only while they are shown.
     pub fn rows(&self) -> Vec<CommentsListRow> {
         self.threads
             .iter()
             .enumerate()
-            .map(|(position, listed)| CommentsListRow {
-                is_under_cursor: position == self.cursor,
-                ..row_of(listed)
-            })
+            .filter(|(position, _)| self.stop_of(*position).is_some())
+            .map(|(position, listed)| self.row_at(position, listed))
             .collect()
     }
 
+    /// Every thread, folded away or not, for the title's count.
+    pub const fn thread_count(&self) -> usize {
+        self.threads.len()
+    }
+
+    fn row_at(&self, position: usize, listed: &ListedThread) -> CommentsListRow {
+        CommentsListRow {
+            is_under_cursor: self.stop_of(position) == Some(self.cursor),
+            ..row_of(listed)
+        }
+    }
+
+    /// The thread the cursor is on; none on the Resolved heading.
     pub fn thread_under_cursor(&self) -> Option<&ThreadId> {
         self.threads
-            .get(self.cursor)
+            .get(self.position_under_cursor()?)
             .map(|listed| &listed.thread.id)
     }
 
+    /// Past the last stop the cursor comes round to the first.
     pub fn cursor_down(&mut self) {
-        self.cursor = (self.cursor + 1).min(self.threads.len().saturating_sub(1));
+        self.cursor = (self.cursor + 1)
+            .checked_rem(self.stop_count())
+            .unwrap_or(0);
     }
 
-    pub const fn cursor_up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
+    /// Before the first stop the cursor comes round to the last.
+    pub fn cursor_up(&mut self) {
+        self.cursor = self
+            .cursor
+            .checked_sub(1)
+            .unwrap_or_else(|| self.stop_count().saturating_sub(1));
     }
 }
 

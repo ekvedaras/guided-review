@@ -263,7 +263,7 @@ fn open_threads_come_before_resolved_ones_each_in_reading_order() {
 
     let list = review.comments_list();
 
-    assert_eq!(ids(&list), ["order-open", "config-open", "order-done"]);
+    assert_eq!(ids(&list), ["order-open", "config-open"]);
     let sections = list.sections();
     let titles: Vec<(&str, bool)> = sections
         .iter()
@@ -419,7 +419,7 @@ fn a_thread_no_screen_shows_comes_last_under_not_in_this_tour() {
 }
 
 #[test]
-fn the_cursor_moves_over_the_rows_and_stops_at_the_ends() {
+fn the_cursor_cycles_over_the_rows_from_the_last_to_the_first_and_back() {
     let shop = Shop::with_pull();
     let review = shop.open_with(
         two_steps(),
@@ -441,9 +441,6 @@ fn the_cursor_moves_over_the_rows_and_stops_at_the_ends() {
     let mut list = review.comments_list();
     assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("on-order")));
 
-    list.cursor_up();
-    assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("on-order")));
-    list.cursor_down();
     list.cursor_down();
     assert_eq!(
         list.thread_under_cursor(),
@@ -451,6 +448,177 @@ fn the_cursor_moves_over_the_rows_and_stops_at_the_ends() {
     );
     let under: Vec<bool> = list.rows().iter().map(|row| row.is_under_cursor).collect();
     assert_eq!(under, [false, true]);
+
+    list.cursor_down();
+    assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("on-order")));
+    list.cursor_up();
+    assert_eq!(
+        list.thread_under_cursor(),
+        Some(&ThreadId::new("on-config"))
+    );
+}
+
+/// One open thread and two resolved ones, as the Resolved section's tests need.
+fn open_and_two_resolved(shop: &Shop) -> Review {
+    shop.open_with(
+        two_steps(),
+        &[
+            thread(
+                "open",
+                "app/Order.php",
+                7,
+                vec![comment("alice", "Why two?")],
+            ),
+            resolved(thread(
+                "done-a",
+                "app/Order.php",
+                7,
+                vec![comment("bob", "Fine")],
+            )),
+            resolved(thread(
+                "done-b",
+                "config.yml",
+                3,
+                vec![comment("carol", "Ok")],
+            )),
+        ],
+    )
+}
+
+fn cursor_on(list: &mut CommentsList, id: &str) {
+    for _ in 0..8 {
+        if list.thread_under_cursor() == Some(&ThreadId::new(id)) {
+            return;
+        }
+        list.cursor_down();
+    }
+    panic!("the cursor never reached {id}");
+}
+
+#[test]
+fn resolved_threads_are_folded_by_default_and_the_cursor_walk_stops_on_their_heading() {
+    let shop = Shop::with_pull();
+    let mut list = open_and_two_resolved(&shop).comments_list();
+
+    assert!(!list.resolved_are_shown());
+    assert_eq!(ids(&list), ["open"]);
+    let sections = list.sections();
+    assert_eq!(sections[1].title, "Resolved · 2");
+    assert!(sections[0].is_shown);
+    assert!(!sections[1].is_shown);
+    assert!(!list.is_on_resolved_header());
+
+    list.cursor_down();
+
+    assert!(list.is_on_resolved_header());
+    assert_eq!(list.thread_under_cursor(), None);
+    assert!(list.sections()[1].is_header_under_cursor);
+    assert!(!list.sections()[0].is_header_under_cursor);
+    list.cursor_down();
+    assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("open")));
+}
+
+#[test]
+fn the_resolved_heading_unfolds_and_folds_by_toggle_right_and_left() {
+    let shop = Shop::with_pull();
+    let mut list = open_and_two_resolved(&shop).comments_list();
+    list.cursor_down();
+
+    list.toggle_resolved_shown();
+    assert!(list.resolved_are_shown());
+    assert_eq!(ids(&list), ["open", "done-a", "done-b"]);
+    assert!(list.is_on_resolved_header());
+
+    list.fold_under_cursor();
+    assert!(!list.resolved_are_shown());
+    assert_eq!(ids(&list), ["open"]);
+
+    list.unfold_under_cursor();
+    assert!(list.resolved_are_shown());
+    list.unfold_under_cursor();
+    assert!(list.resolved_are_shown());
+
+    list.toggle_resolved_shown();
+    assert!(!list.resolved_are_shown());
+}
+
+#[test]
+fn left_on_a_resolved_row_goes_up_to_the_heading_and_the_walk_includes_the_rows_while_shown() {
+    let shop = Shop::with_pull();
+    let mut list = open_and_two_resolved(&shop).comments_list();
+    list.cursor_down();
+    list.unfold_under_cursor();
+
+    list.cursor_down();
+    assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("done-a")));
+    cursor_on(&mut list, "done-b");
+    list.cursor_down();
+    assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("open")));
+
+    cursor_on(&mut list, "done-b");
+    list.fold_under_cursor();
+
+    assert!(list.is_on_resolved_header());
+    assert!(list.resolved_are_shown());
+    let under: Vec<bool> = list.rows().iter().map(|row| row.is_under_cursor).collect();
+    assert_eq!(under, [false, false, false]);
+}
+
+#[test]
+fn folding_with_the_cursor_on_a_resolved_row_leaves_the_cursor_on_the_heading() {
+    let shop = Shop::with_pull();
+    let mut list = open_and_two_resolved(&shop).comments_list();
+    list.cursor_down();
+    list.unfold_under_cursor();
+    cursor_on(&mut list, "done-b");
+
+    list.toggle_resolved_shown();
+
+    assert!(list.is_on_resolved_header());
+    assert!(!list.resolved_are_shown());
+}
+
+#[test]
+fn resolved_threads_are_shown_when_no_thread_is_open() {
+    let shop = Shop::with_pull();
+    let review = shop.open_with(
+        two_steps(),
+        &[resolved(thread(
+            "only",
+            "config.yml",
+            3,
+            vec![comment("bob", "Ok")],
+        ))],
+    );
+    let mut list = review.comments_list();
+
+    assert!(list.resolved_are_shown());
+    assert_eq!(ids(&list), ["only"]);
+    assert!(list.is_on_resolved_header());
+    list.cursor_down();
+    assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("only")));
+    list.cursor_down();
+    assert!(list.is_on_resolved_header());
+}
+
+#[test]
+fn a_list_with_no_resolved_thread_has_no_heading_to_stop_on() {
+    let shop = Shop::with_pull();
+    let review = shop.open_with(
+        two_steps(),
+        &[thread(
+            "open",
+            "app/Order.php",
+            7,
+            vec![comment("alice", "Why two?")],
+        )],
+    );
+    let mut list = review.comments_list();
+
+    assert!(!list.is_on_resolved_header());
+    list.cursor_down();
+    assert_eq!(list.thread_under_cursor(), Some(&ThreadId::new("open")));
+    assert!(!list.is_on_resolved_header());
 }
 
 #[test]

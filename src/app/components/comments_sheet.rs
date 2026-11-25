@@ -100,8 +100,12 @@ impl CommentsSheet {
                 self.list.cursor_up();
                 self.cursor_moved = true;
             }
+            "right" => self.list.unfold_under_cursor(),
+            "left" => self.list.fold_under_cursor(),
             "enter" => {
-                if let Some(id) = self.list.thread_under_cursor().cloned() {
+                if self.list.is_on_resolved_header() {
+                    self.list.toggle_resolved_shown();
+                } else if let Some(id) = self.list.thread_under_cursor().cloned() {
                     self.open_thread(id, window, cx);
                 }
             }
@@ -121,24 +125,29 @@ impl CommentsSheet {
         cx: &mut Context<Self>,
     ) {
         let (children, cursor_child) = into;
-        let heading_color = if section.is_resolved {
-            colors.muted_text
+        if section.is_resolved {
+            if section.is_header_under_cursor {
+                *cursor_child = Some(children.len());
+            }
+            children.push(Self::resolved_header(colors, section, cx).into_any_element());
         } else {
-            colors.text
-        };
-        children.push(
-            div()
-                .flex_none()
-                .mx_2()
-                .px_2()
-                .pt_3()
-                .pb_1()
-                .text_sm()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(heading_color)
-                .child(section.title.clone())
-                .into_any_element(),
-        );
+            children.push(
+                div()
+                    .flex_none()
+                    .mx_2()
+                    .px_2()
+                    .pt_3()
+                    .pb_1()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(colors.text)
+                    .child(section.title.clone())
+                    .into_any_element(),
+            );
+        }
+        if !section.is_shown {
+            return;
+        }
         for group in &section.groups {
             let first = *next_position;
             *next_position += group.rows.len();
@@ -168,6 +177,45 @@ impl CommentsSheet {
                 children.push(Self::row(colors, row, place, cx).into_any_element());
             }
         }
+    }
+
+    /// The fold of the resolved threads: a stop of the cursor, with a chevron that shows whether they show.
+    fn resolved_header(
+        colors: &Colors,
+        section: &CommentsSection,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let place = if section.is_header_under_cursor {
+            RowPlace::Current
+        } else {
+            RowPlace::Apart
+        };
+        picker_row_at(colors, "comments-resolved-header", place, None)
+            .flex_none()
+            .mt_2()
+            .py_2()
+            .gap_2()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.list.toggle_resolved_shown();
+                cx.notify();
+            }))
+            .child(sized_icon(
+                if section.is_shown {
+                    Icon::ChevronDown
+                } else {
+                    Icon::ChevronRight
+                },
+                colors.muted_text,
+                px(14.),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(colors.muted_text)
+                    .child(section.title.clone()),
+            )
     }
 
     /// Every row has the same slots, so the columns line up: who, what they said, where, replies, Outdated.
@@ -291,7 +339,7 @@ impl Render for CommentsSheet {
                     .flat_map(|chord| chord.caps().map(KeyLabel::of)),
             )
             .collect();
-        let title = format!("Comments ({})", rows.len());
+        let title = format!("Comments ({})", self.list.thread_count());
         let header = div()
             .px_5()
             .pt_4()
