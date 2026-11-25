@@ -6,7 +6,7 @@ use crate::support::FixtureRepo;
 use crate::support::folders_in;
 use guided_review::config::Config;
 use guided_review::pull_request::RepoName;
-use guided_review::viewer::{CloneOffer, CloneOfferState, RepoCloner};
+use guided_review::viewer::{CloneOffer, CloneOfferState, ClonePort};
 use tempfile::TempDir;
 
 fn shop() -> RepoName {
@@ -47,7 +47,7 @@ struct FakeCloner {
     refusal: Option<String>,
 }
 
-impl RepoCloner for FakeCloner {
+impl ClonePort for FakeCloner {
     fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()> {
         if let Some(reason) = &self.refusal {
             anyhow::bail!("{reason}");

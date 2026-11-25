@@ -1105,7 +1105,7 @@ impl OneStepLayout {
             Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
             Effect::OpenPr => self.session.update(cx, ReviewSession::open_pr),
             Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
-            Effect::OpenChecksOnGitHub(pr) => open_link(&format!("{pr}/checks"), cx),
+            Effect::OpenChecksOnGitHub(pr) => open_link(&pr.checks_page(), cx),
             Effect::OpenCheck(url) => open_link(&url, cx),
             Effect::OpenIssue(link) => {
                 self.issue_list_open = false;

@@ -17,6 +17,12 @@ use crate::issue::IssueUrl;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
 use crate::review_subject::{BranchName, ReviewSubject};
 
+/// Makes a clone of a repo of the host, in a folder that does not exist yet, with the reviewer's own
+/// login, so a private repo clones too.
+pub trait ClonePort: Send + Sync {
+    fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()>;
+}
+
 pub trait ChangeTipsPort: Send + Sync {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, HostError>;
 }
@@ -195,6 +201,7 @@ pub trait ReviewWritesPort: Send + Sync {
 /// said by the ports it has, never by a flag beside them that could say otherwise.
 pub trait CodeHost:
     ChangeTipsPort
+    + ClonePort
     + PullsOfBranchPort
     + PullRequestDescriptionPort
     + PullRequestOriginPort

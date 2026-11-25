@@ -8,6 +8,7 @@ use anyhow::{Context, bail};
 use crate::code_source::{BlobInfo, CodeSource, FileDiff, parse_unified_diff};
 use crate::config::Config;
 use crate::file_path::FilePath;
+use crate::host_web;
 use crate::local_work_tree::{LocalWorkTree, OnDisk};
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::{LocalChangeSet, WorkTreeRoot};
@@ -87,11 +88,11 @@ impl LocalGit {
         Ok(clone)
     }
 
-    /// The GitHub repo the folder's `origin` remote points at.
+    /// The repo the folder's `origin` remote points at, on any code host the app reads.
     pub fn origin_of(folder: &Path) -> Option<RepoName> {
         let clone = Self::pr_clone(folder);
         let url = clone.git(&["config", "--get", "remote.origin.url"]).ok()?;
-        RepoName::from_github_remote(url.trim())
+        host_web::repo_of_remote(url.trim())
     }
 
     pub fn root(&self) -> &Path {
@@ -105,7 +106,7 @@ impl LocalGit {
         tips: &ChangeTips,
     ) -> anyhow::Result<()> {
         if !self.has_commit(&tips.head) {
-            let pull_ref = format!("+refs/pull/{0}/head:refs/guided-review/{0}", pr.number);
+            let pull_ref = format!("+{}:refs/guided-review/{}", pr.head_ref(), pr.number);
             self.fetch(&pr.repo, &pull_ref)?;
         }
         if !self.has_commit(&tips.base_branch_tip) {
@@ -157,7 +158,7 @@ impl LocalGit {
         remotes
             .lines()
             .filter_map(|line| line.split_once(' '))
-            .filter(|(_, url)| RepoName::from_github_remote(url.trim()).is_some_and(|r| r == *repo))
+            .filter(|(_, url)| host_web::repo_of_remote(url.trim()).is_some_and(|r| r == *repo))
             .filter_map(|(key, _)| key.strip_prefix("remote")?.strip_suffix(".url"))
             .map(|name| name.trim_start_matches('.').to_owned())
             .collect()

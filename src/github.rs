@@ -12,23 +12,24 @@ use crate::image_facts;
 use crate::issue::{IssueLink, IssueUrl};
 use crate::json::at;
 use crate::line_number::LineNumber;
-use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, HostSite, PullRequestUrl, RepoName, Sha};
 use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
+use crate::url_path;
 use crate::viewer::{
     AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus,
     PrStatus, Readiness,
 };
 use crate::viewer::{
-    AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CodeHost, CommentId, CommentPlace,
-    HeadBranch, HostError, IssueDetails, IssueDetailsPort, IssueState, MergeRoute, MergingPort,
-    NoAccess, OutageCause, PictureUploadPort, PrAuthor, PullOfBranch, PullRequestDescriptionPort,
-    PullRequestIssues, PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort,
-    PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
-    ReactionCount, RelatedIssue, RepoCloner, Resolution, ReviewOutcome, ReviewRecord, ReviewThread,
-    ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, Reviewer, ReviewersOnGitHub, SendMode,
-    Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
-    ViewedState, percent_encode_path,
+    AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, ClonePort, CodeHost, CommentId,
+    CommentPlace, HeadBranch, HostError, IssueDetails, IssueDetailsPort, IssueState, MergeRoute,
+    MergingPort, NoAccess, OutageCause, PictureUploadPort, PrAuthor, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin, PullRequestOriginPort,
+    PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
+    Reaction, ReactionChange, ReactionCount, RelatedIssue, Resolution, ReviewOutcome, ReviewRecord,
+    ReviewThread, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, Reviewer, ReviewersOnGitHub,
+    SendMode, Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState,
 };
 
 #[derive(Clone)]
@@ -471,7 +472,7 @@ impl PullsOfBranchPort for GitHub {
         repo: &RepoName,
         branch: &BranchName,
     ) -> Result<Option<PullOfBranch>, HostError> {
-        let head = percent_encode_path(&format!("{}:{}", repo.owner(), branch.as_str()));
+        let head = url_path::encode(&format!("{}:{}", repo.owner(), branch.as_str()));
         let pulls: Vec<PullListedJson> = self
             .get(
                 &format!("repos/{repo}/pulls?head={head}&state=open"),
@@ -481,6 +482,7 @@ impl PullsOfBranchPort for GitHub {
             .with_context(|| format!("could not look for a PR of {} in {repo}", branch.as_str()))?;
         Ok(pulls.into_iter().next().map(|pull| PullOfBranch {
             pr: PullRequestUrl {
+                host: HostSite::GitHub,
                 repo: repo.clone(),
                 number: pull.number,
             },
@@ -500,8 +502,9 @@ impl PullsOfBranchPort for GitHub {
             .and_then(|mut response| Ok(response.body_mut().read_json()?))
             .with_context(|| format!("could not read the branch of {pr} from GitHub"))?;
         let from_the_repo_itself = pull.head.repo.is_some_and(|repo| {
-            RepoName::from_github_remote(&format!("https://github.com/{}", repo.full_name))
-                .is_some_and(|head_repo| head_repo == pr.repo)
+            repo.full_name
+                .parse::<RepoName>()
+                .is_ok_and(|head_repo| head_repo == pr.repo)
         });
         Ok(if from_the_repo_itself {
             Some(BranchName::new(&pull.head.branch)?)
@@ -1439,7 +1442,7 @@ impl CodeSource for GitHubCodeSource {
         let url = format!(
             "repos/{}/contents/{}?ref={sha}",
             self.repo,
-            percent_encode_path(path.as_str())
+            url_path::encode(path.as_str())
         );
         let mut response = self
             .github
@@ -1457,7 +1460,7 @@ impl CodeSource for GitHubCodeSource {
         let url = format!(
             "repos/{}/contents/{}?ref={sha}",
             self.repo,
-            percent_encode_path(path.as_str())
+            url_path::encode(path.as_str())
         );
         let contents: ContentsJson = self
             .github
@@ -1576,9 +1579,7 @@ fn non_empty_id(id: &serde_json::Value) -> Option<String> {
 }
 
 /// `gh` holds the reviewer's GitHub login, so private repos clone too.
-pub struct GhCloner;
-
-impl RepoCloner for GhCloner {
+impl ClonePort for GitHub {
     fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()> {
         let output = Command::new("gh")
             .args(["repo", "clone", &repo.to_string()])

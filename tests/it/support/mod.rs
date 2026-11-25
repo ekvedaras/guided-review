@@ -388,7 +388,7 @@ pub fn save_typing(review: &mut Review) {
 /// Where `link` opens on GitHub, for a review with no IDE.
 pub fn on_github(review: &Review, link: &CodeLink) -> String {
     match review.code_opener(Err(NoIde::NoTemplate)).destination(link) {
-        Destination::GitHub { url, .. } => url,
+        Destination::OnHost { url, .. } => url,
         other => panic!("code opens on GitHub without an IDE, not {other:?}"),
     }
 }

@@ -499,10 +499,10 @@ impl LocalWorkTree {
         self.git_with(&env, &["write-tree"])
     }
 
-    /// The GitHub repo the `origin` remote points at.
+    /// The repo the `origin` remote points at, on any code host the app reads.
     fn origin(&self) -> Option<RepoName> {
         let url = self.git(&["config", "--get", "remote.origin.url"]).ok()?;
-        RepoName::from_github_remote(url.trim())
+        crate::host_web::repo_of_remote(url.trim())
     }
 
     fn git(&self, args: &[&str]) -> Result<String, OpenRefusal> {

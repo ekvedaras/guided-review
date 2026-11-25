@@ -139,8 +139,7 @@ pub use ask_desk::{
 pub use ask_target::{AskTarget, Unavailable};
 pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub use branch_link::{BranchOffer, local_reviews_of_repo};
-pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState, RepoCloner};
-pub(crate) use code_link::percent_encode_path;
+pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState};
 pub use code_link::{
     CodeLink, CodeOnWeb, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy,
 };
@@ -231,11 +230,11 @@ pub use piece_diff::PieceDiff;
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::ReviewVerdict;
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, CodeHost, HostError, IssueDetailsPort,
-    MergingPort, NoAccess, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
-    PullRequestOriginPort, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
-    RefreshWriter, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed,
-    ViewedFile, ViewedFilesPort, ViewedState,
+    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, ClonePort, CodeHost, HostError,
+    IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
+    PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, Resolution, ReviewThreadsPort,
+    ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};

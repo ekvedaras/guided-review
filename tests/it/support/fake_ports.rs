@@ -24,14 +24,14 @@ pub fn blocked_merging() -> Merging {
 use guided_review::file_path::FilePath;
 use guided_review::issue::IssueUrl;
 use guided_review::navigation::{ServerMessage, ServerMessages};
-use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
+use guided_review::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
-    Checks, CodeHost, CommentId, CommentPlace, HostError, IssueDetails, IssueDetailsPort,
-    MergingPort, NoAccess, NotDelivered, OpenPrStatus, PictureUploadPort, PrStatus, PullOfBranch,
-    PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin, PullRequestOriginPort,
-    PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
-    Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
+    Checks, ClonePort, CodeHost, CommentId, CommentPlace, HostError, IssueDetails,
+    IssueDetailsPort, MergingPort, NoAccess, NotDelivered, OpenPrStatus, PictureUploadPort,
+    PrStatus, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin,
+    PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort,
+    PullsOfBranchPort, Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
     RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
     ReviewVerdict, ReviewWritesPort, SendMode, Standing, SubmittedReview, ThreadComment, ThreadId,
     TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
@@ -463,7 +463,7 @@ impl FakeHost {
 impl PullsOfBranchPort for FakeHost {
     fn open_pull_of_branch(
         &self,
-        repo: &guided_review::pull_request::RepoName,
+        repo: &RepoName,
         branch: &guided_review::review_subject::BranchName,
     ) -> Result<Option<PullOfBranch>, HostError> {
         self.sent
@@ -533,6 +533,13 @@ impl CodeHost for FakeHost {
 
     fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort> {
         self.offers(Capability::IssueTracker).then_some(self)
+    }
+}
+
+/// Clones are the clone offer's to test, with a cloner of its own.
+impl ClonePort for FakeHost {
+    fn clone_repo(&self, repo: &RepoName, _folder: &Path) -> anyhow::Result<()> {
+        anyhow::bail!("FakeHost makes no clone of {repo}")
     }
 }
 

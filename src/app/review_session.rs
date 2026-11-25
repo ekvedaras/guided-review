@@ -30,7 +30,7 @@ use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::github::{GhCloner, GitHub};
+use crate::github::GitHub;
 use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
     AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CodeHost,
@@ -787,9 +787,10 @@ impl ReviewSession {
             return;
         };
         cx.notify();
+        let host = Arc::clone(&self.host);
         self.run_off_thread(
             cx,
-            move || job.run(&GhCloner),
+            move || job.run(host.as_ref()),
             |this, cloned, cx| match cloned {
                 Ok(()) => {
                     this.clone_offer = None;

@@ -1,7 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use anyhow::{Context, bail};
+use anyhow::bail;
 
 #[derive(Debug, Clone)]
 pub struct RepoName {
@@ -23,18 +23,6 @@ impl RepoName {
             owner: owner.to_owned(),
             name: name.trim_end_matches(".git").to_owned(),
         }
-    }
-
-    pub fn from_github_remote(url: &str) -> Option<Self> {
-        let after_host = url
-            .strip_prefix("git@github.com:")
-            .or_else(|| url.split_once("github.com/").map(|(_, rest)| rest))?;
-        let mut segments = after_host.trim_end_matches('/').split('/');
-        let (owner, name) = (segments.next()?, segments.next()?);
-        if segments.next().is_some() || owner.is_empty() || name.is_empty() {
-            return None;
-        }
-        Some(Self::new(owner, name))
     }
 }
 
@@ -86,43 +74,42 @@ impl<'de> serde::Deserialize<'de> for RepoName {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PullRequestUrl {
-    pub repo: RepoName,
-    pub number: u64,
+/// The code host a PR lives on, as its link names it. What the host shows on the web, and how its
+/// links read, is `host_web`'s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HostSite {
+    GitHub,
 }
 
-impl FromStr for PullRequestUrl {
-    type Err = anyhow::Error;
+impl HostSite {
+    pub const ALL: [Self; 1] = [Self::GitHub];
 
-    fn from_str(url: &str) -> anyhow::Result<Self> {
-        let path = url
-            .strip_prefix("https://github.com/")
-            .with_context(|| format!("not a GitHub PR link: {url}"))?;
-        let segments: Vec<&str> = path.split('/').collect();
-        let [owner, name, "pull", number, ..] = segments.as_slice() else {
-            bail!("not a GitHub PR link: {url}");
-        };
-        let number = number
-            .parse()
-            .with_context(|| format!("not a GitHub PR link: {url}"))?;
-        Ok(Self {
-            repo: RepoName::new(owner, name),
-            number,
-        })
+    /// The hosts the app reads, by name, for a message that refuses another.
+    pub fn all_named() -> String {
+        Self::ALL.map(Self::name).join(", ")
     }
+
+    /// The host's own name, which the UI shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::GitHub => "GitHub",
+        }
+    }
+}
+
+/// A PR: its host, its repo there and its number. Its text form, the subject key, is its page on
+/// the host (`host_web`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PullRequestUrl {
+    pub host: HostSite,
+    pub repo: RepoName,
+    pub number: u64,
 }
 
 impl PullRequestUrl {
     /// `owner/repo#number`
     pub fn short(&self) -> String {
         format!("{}#{}", self.repo, self.number)
-    }
-}
-
-impl fmt::Display for PullRequestUrl {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "https://github.com/{}/pull/{}", self.repo, self.number)
     }
 }
 

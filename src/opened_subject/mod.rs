@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub use local::OpenedChangeSet;
+pub(crate) use pull_request::adapter_of;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;

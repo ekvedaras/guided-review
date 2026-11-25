@@ -6,6 +6,7 @@ use crate::home::expand_home;
 use crate::local_git::LocalGit;
 use crate::pull_request::RepoName;
 
+use super::ports::ClonePort;
 use super::settings::{SaveOutcome, SettingProblem, Settings};
 
 /// Folders in home where people keep their code, the usual first.
@@ -28,11 +29,6 @@ const CODE_FOLDERS: &[&str] = &[
     "RustroverProjects",
 ];
 
-/// Makes a clone of a GitHub repo in a folder that does not exist yet.
-pub trait RepoCloner: Send + Sync {
-    fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()>;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CloneOfferState {
     Offered,
@@ -40,7 +36,7 @@ pub enum CloneOfferState {
     Failed(String),
 }
 
-/// The sidebar's offer to clone a repo whose code is read from GitHub, so the next reads come from disk.
+/// The sidebar's offer to clone a repo whose code is read from its code host, so the next reads come from disk.
 pub struct CloneOffer {
     repo: RepoName,
     folders: AppFolders,
@@ -137,7 +133,7 @@ pub struct CloneJob {
 }
 
 impl CloneJob {
-    pub fn run(&self, cloner: &dyn RepoCloner) -> anyhow::Result<()> {
+    pub fn run(&self, cloner: &dyn ClonePort) -> anyhow::Result<()> {
         if LocalGit::configured_clone(&self.repo, &self.folder).is_err() {
             cloner.clone_repo(&self.repo, &self.folder)?;
         }

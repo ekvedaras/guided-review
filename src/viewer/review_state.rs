@@ -9,7 +9,7 @@ use crate::app_folders::{AppFolders, remove_if_there};
 use crate::file_path::FilePath;
 use crate::findings::{Finding, FindingId};
 use crate::pieces::PieceId;
-use crate::pull_request::{PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{HostSite, PullRequestUrl, RepoName, Sha};
 use crate::repin::{Repin, RepinStatus};
 use crate::review_subject::{LOCAL_FILES_FOLDER, ReviewSubject};
 use crate::timestamp::UtcTimestamp;
@@ -1075,7 +1075,7 @@ impl ReviewStateFile {
     /// The folders any PR of the repo was last opened from, for the PRs the app knows. Unreadable files
     /// and folders count for nothing: this only looks for a clone to work in.
     pub fn folders_opened_from_in(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<PathBuf> {
-        Self::folders_opened_from_repo(folders, &pr.repo)
+        Self::folders_opened_from_repo(folders, pr.host, &pr.repo)
     }
 
     /// The folders any PR of any repo was last opened from, as far as the state files tell. Unreadable
@@ -1101,11 +1101,16 @@ impl ReviewStateFile {
                     .into_iter()
                     .map(move |name| RepoName::new(&owner, &name))
             })
-            .flat_map(|repo| Self::folders_opened_from_repo(folders, &repo))
+            // The state folder names no host: every PR it holds is on GitHub, the one host so far.
+            .flat_map(|repo| Self::folders_opened_from_repo(folders, HostSite::GitHub, &repo))
             .collect()
     }
 
-    fn folders_opened_from_repo(folders: &AppFolders, repo: &RepoName) -> Vec<PathBuf> {
+    fn folders_opened_from_repo(
+        folders: &AppFolders,
+        host: HostSite,
+        repo: &RepoName,
+    ) -> Vec<PathBuf> {
         let Ok(files) = std::fs::read_dir(folders.state_files().join(repo.to_string())) else {
             return Vec::new();
         };
@@ -1117,6 +1122,7 @@ impl ReviewStateFile {
             .into_iter()
             .filter_map(|number| {
                 let other = PullRequestUrl {
+                    host,
                     repo: repo.clone(),
                     number,
                 };

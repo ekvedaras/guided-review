@@ -46,7 +46,7 @@ pub fn open_code_label(link: &CodeLink, cx: &App) -> &'static str {
 pub fn open_code_icon(link: &CodeLink, cx: &App) -> Icon {
     match cx.global::<ActiveCodeOpener>().0.destination(link) {
         Destination::Ide { .. } | Destination::NotOpenable { .. } => Icon::Code,
-        Destination::GitHub { .. } | Destination::Browser(_) => Icon::ExternalLink,
+        Destination::OnHost { .. } | Destination::Browser(_) => Icon::ExternalLink,
     }
 }
 

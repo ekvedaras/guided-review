@@ -1,7 +1,7 @@
 use super::comments::{CommentPlace, SendMode};
 use super::ports::ReviewVerdict;
 use super::ports::{
-    ChangeTipsPort, CodeHost, HostError, IssueDetailsPort, MergingPort, NoAccess,
+    ChangeTipsPort, ClonePort, CodeHost, HostError, IssueDetailsPort, MergingPort, NoAccess,
     PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
     PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Resolution,
     ReviewThreadsPort, ReviewWritesPort, ViewedFilesPort,
@@ -14,6 +14,7 @@ use super::related_issues::PullRequestIssues;
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
 use crate::review_subject::BranchName;
+use std::path::Path;
 use std::sync::Arc;
 
 /// The code host a local review holds: it only looks for the PR opened from its branch, when it was
@@ -80,6 +81,12 @@ impl CodeHost for NoHost {
 
     fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort> {
         None
+    }
+}
+
+impl ClonePort for NoHost {
+    fn clone_repo(&self, repo: &RepoName, _folder: &Path) -> anyhow::Result<()> {
+        anyhow::bail!("a local review clones no repo, not {repo} either: it reads its own folder")
     }
 }
 

@@ -7,7 +7,7 @@ use crate::github::GitHub;
 use crate::local_git::LocalGit;
 use crate::make_basic_tour::make_basic_tour;
 use crate::pick_code_source::pick_code_source;
-use crate::pull_request::{ChangeTips, PullRequestUrl};
+use crate::pull_request::{ChangeTips, HostSite, PullRequestUrl};
 use crate::repin::Repin;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin, ToursOnDisk};
@@ -36,7 +36,7 @@ impl OpenedPr {
             pr: pr.clone(),
             folders: folders.clone(),
             current_dir: current_dir.to_path_buf(),
-            github: GitHub::from_env(),
+            github: adapter_of(pr.host),
         }
     }
 
@@ -136,6 +136,13 @@ impl OpenedPr {
     pub(super) fn after_open(&self) -> anyhow::Result<()> {
         ReviewStateFile::for_subject(&self.folders, &self.subject())
             .remember_folder(&self.current_dir)
+    }
+}
+
+/// The adapter of a PR's code host, which the PR's link names.
+pub(crate) fn adapter_of(host: HostSite) -> GitHub {
+    match host {
+        HostSite::GitHub => GitHub::from_env(),
     }
 }
 

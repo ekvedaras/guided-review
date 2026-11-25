@@ -1,6 +1,7 @@
 //! What each host offers. A capability a host lacks is `None`, so the review hides it.
 
-use guided_review::viewer::{CodeHost, HostError, NoHost, ReviewThreadsPort};
+use guided_review::pull_request::RepoName;
+use guided_review::viewer::{ClonePort, CodeHost, HostError, NoHost, ReviewThreadsPort};
 
 use super::{PullOnHost, hosts, pr};
 
@@ -25,6 +26,16 @@ fn github_offers_every_capability() {
 #[test]
 fn no_host_offers_no_capability() {
     assert_eq!(offered(&NoHost::default()), [false; 5]);
+}
+
+#[test]
+fn no_host_refuses_to_clone_as_a_local_review_has_its_folder_already() {
+    let folder = tempfile::tempdir().unwrap();
+
+    let refused =
+        NoHost::default().clone_repo(&RepoName::new("acme", "shop"), &folder.path().join("shop"));
+
+    assert!(refused.is_err());
 }
 
 #[test]

@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 
-use crate::pull_request::{PullRequestUrl, RepoName};
+use crate::pull_request::{HostSite, PullRequestUrl, RepoName};
 
 /// What a review reads: a PR, or a local change set.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -221,9 +221,15 @@ impl FromStr for ReviewSubject {
             Some(local) => LocalChangeSet::from_key(local)
                 .map(Self::Local)
                 .with_context(|| format!("not a local change set key: {key}")),
-            None => key.parse().map(Self::PullRequest).with_context(|| {
-                format!("{key} is neither a GitHub PR link nor a local change set key")
-            }),
+            None => key
+                .parse()
+                .map(Self::PullRequest)
+                .with_context(|| {
+                    format!(
+                        "{key} is neither a PR link of a code host guided-review reads ({}) nor a local change set key",
+                        HostSite::all_named()
+                    )
+                }),
         }
     }
 }

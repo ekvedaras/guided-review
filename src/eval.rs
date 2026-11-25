@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::app_folders::AppFolders;
 use crate::hex;
-use crate::pull_request::PullRequestUrl;
+use crate::pull_request::{HostSite, PullRequestUrl, RepoName};
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 
@@ -204,7 +204,11 @@ impl EvalStore {
                     let name = repo.file_name().unwrap_or_default().to_string_lossy();
                     let number = note.file_stem().unwrap_or_default().to_string_lossy();
                     test_set.push(TestPr {
-                        pr: format!("https://github.com/{owner}/{name}/pull/{number}").parse()?,
+                        pr: PullRequestUrl {
+                            host: HostSite::GitHub,
+                            repo: RepoName::new(&owner, &name),
+                            number: number.parse()?,
+                        },
                         note: std::fs::read_to_string(&note)?,
                     });
                 }

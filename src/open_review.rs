@@ -5,11 +5,10 @@ use crate::app_folders::AppFolders;
 use crate::claude_cli::{ClaudeCli, ClaudeRefreshWriter};
 use crate::code_source::CodeSource;
 use crate::config::{AskSettings, Config};
-use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::instructions::TourWriter;
-use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner};
+use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner, adapter_of};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::Tour;
 use crate::viewer::{
@@ -112,7 +111,7 @@ pub fn mover_of(folders: &AppFolders, change_set: &LocalChangeSet) -> PrMover {
         folders: folders.clone(),
         change_set: change_set.clone(),
         pick_code_source: Arc::new(move |pr, tips| {
-            crate::pick_code_source::pick_code_source(&GitHub::from_env(), pr, tips, &folder)
+            crate::pick_code_source::pick_code_source(&adapter_of(pr.host), pr, tips, &folder)
         }),
         drop_local_review: Arc::new(|change_set, folders| {
             OpenedChangeSet::new(change_set, folders).drop_review()

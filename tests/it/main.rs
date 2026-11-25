@@ -78,6 +78,7 @@ mod hidden_text;
 mod highlighting;
 mod host_contract;
 mod host_outage;
+mod host_web;
 mod hover_cards;
 mod icons;
 mod ide;

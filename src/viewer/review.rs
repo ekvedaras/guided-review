@@ -654,9 +654,13 @@ impl ReviewCore {
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let subject = tour.pin().subject()?;
-        let code_on_web = subject.host_repo().map_or(CodeOnWeb::LocalClone, |repo| {
-            CodeOnWeb::GitHub(repo.clone())
-        });
+        let code_on_web =
+            subject
+                .pull_request()
+                .map_or(CodeOnWeb::LocalClone, |pr| CodeOnWeb::Host {
+                    site: pr.host,
+                    repo: pr.repo.clone(),
+                });
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
         let mut reviewing_mark = ReviewingMark::new(head.clone());
         if state.is_done_at(&head) {
