@@ -26,7 +26,7 @@ impl RelatedIssue {
         Self { link, title: None }
     }
 
-    fn of_github(url: IssueUrl) -> Self {
+    fn of_issue(url: IssueUrl) -> Self {
         Self::untitled(IssueLink::GitHub(url))
     }
 }
@@ -44,16 +44,6 @@ pub enum IssueState {
 }
 
 impl IssueState {
-    pub fn of_github(state: &str, reason: Option<&str>) -> Self {
-        match (state, reason) {
-            ("OPEN", _) => Self::Open,
-            ("MERGED", _) => Self::Merged,
-            (_, Some("COMPLETED")) => Self::ClosedAsCompleted,
-            (_, Some("NOT_PLANNED")) => Self::ClosedAsNotPlanned,
-            _ => Self::Closed,
-        }
-    }
-
     pub const fn label(self) -> &'static str {
         match self {
             Self::Open => "Open",
@@ -94,7 +84,7 @@ pub struct PullRequestIssues {
 #[derive(Debug, Default)]
 pub(super) struct RelatedIssues {
     /// `None` until GitHub answers, and always for a local review.
-    on_github: Option<PullRequestIssues>,
+    on_host: Option<PullRequestIssues>,
     /// The PR's repo, where its head branch's issue is; `None` for a local review.
     pr_repo: Option<RepoName>,
     named_in_description: Vec<RelatedIssue>,
@@ -115,15 +105,14 @@ impl RelatedIssues {
         host: HostCapabilities,
     ) -> Self {
         let of_local_branch = subject.local().and_then(|change_set| {
-            IssueUrl::of_branch(change_set.repo()?, change_set.branch())
-                .map(RelatedIssue::of_github)
+            IssueUrl::of_branch(change_set.repo()?, change_set.branch()).map(RelatedIssue::of_issue)
         });
         let named_by_tour = tour
             .guided()
             .and_then(|guided| guided.issue.clone())
             .map(RelatedIssue::untitled);
         let mut issues = Self {
-            on_github: None,
+            on_host: None,
             pr_repo: subject.pull_request().map(|pr| pr.repo.clone()),
             named_in_description: Vec::new(),
             named_by_tour,
@@ -148,7 +137,7 @@ impl RelatedIssues {
     }
 
     pub(super) fn carry_on_from(&mut self, replaced: Self) {
-        self.on_github = replaced.on_github;
+        self.on_host = replaced.on_host;
         self.details = replaced.details;
         self.choose_shown();
     }
@@ -193,7 +182,7 @@ impl RelatedIssues {
             })
             .collect();
         self.details_say(read);
-        self.github_says(PullRequestIssues {
+        self.host_says(PullRequestIssues {
             linked: issues.into_iter().map(|(issue, _)| issue).collect(),
             head_branch: None,
         });
@@ -201,12 +190,12 @@ impl RelatedIssues {
 
     #[cfg(feature = "snapshots")]
     pub(super) fn unstaged(&mut self) {
-        self.on_github = None;
+        self.on_host = None;
         self.choose_shown();
     }
 
-    pub(super) fn github_says(&mut self, issues: PullRequestIssues) {
-        self.on_github = Some(issues);
+    pub(super) fn host_says(&mut self, issues: PullRequestIssues) {
+        self.on_host = Some(issues);
         self.choose_shown();
     }
 
@@ -216,14 +205,14 @@ impl RelatedIssues {
 
     fn choose_shown(&mut self) {
         let linked = self
-            .on_github
+            .on_host
             .as_ref()
-            .map(|on_github| on_github.linked.clone())
+            .map(|on_host| on_host.linked.clone())
             .filter(|linked| !linked.is_empty());
         let of_pr_branch = || {
             let repo = self.pr_repo.as_ref()?;
-            let branch = self.on_github.as_ref()?.head_branch.as_ref()?;
-            IssueUrl::of_branch(repo, branch).map(RelatedIssue::of_github)
+            let branch = self.on_host.as_ref()?.head_branch.as_ref()?;
+            IssueUrl::of_branch(repo, branch).map(RelatedIssue::of_issue)
         };
         let in_description =
             Some(self.named_in_description.clone()).filter(|issues| !issues.is_empty());

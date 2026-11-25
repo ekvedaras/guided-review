@@ -139,9 +139,9 @@ pub struct ReviewRecord {
     pub commit: Sha,
 }
 
-/// What GitHub says of a PR's reviewers, before it is sorted into standings.
+/// What the host says of a PR's reviewers, before it is sorted into standings.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ReviewersOnGitHub {
+pub struct ReviewersOnHost {
     pub viewer_login: String,
     /// The PR's author answers threads in reviews of their own; they are not a reviewer.
     pub author_login: Option<String>,
@@ -153,7 +153,7 @@ pub struct ReviewersOnGitHub {
     pub requested: Vec<Reviewer>,
 }
 
-impl ReviewersOnGitHub {
+impl ReviewersOnHost {
     pub fn standings(self) -> Vec<Standing> {
         let whose = |reviewer: &Reviewer| {
             if reviewer.name() == self.viewer_login {
@@ -333,19 +333,6 @@ impl SubmittedReview {
     pub fn body_is_long(&self) -> bool {
         self.body.lines().count() > CLAMPED_BODY_LINES
             || self.body.chars().count() > LONG_BODY_CHARS
-    }
-}
-
-impl ReviewOutcome {
-    /// From GitHub's `PullRequestReviewState`. A pending review is not sent, so it has no outcome.
-    pub fn from_github_state(state: &str) -> Option<Self> {
-        match state {
-            "APPROVED" => Some(Self::Approved),
-            "CHANGES_REQUESTED" => Some(Self::ChangesRequested),
-            "COMMENTED" => Some(Self::Commented),
-            "DISMISSED" => Some(Self::Dismissed),
-            _ => None,
-        }
     }
 }
 

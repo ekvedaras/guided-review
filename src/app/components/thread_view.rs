@@ -409,7 +409,7 @@ impl ThreadElement {
              }| {
                 reaction_pill(
                     colors,
-                    SharedString::from(format!("react-{}-{}", comment.id, reaction.github_name())),
+                    SharedString::from(format!("react-{}-{reaction:?}", comment.id)),
                     format!("{} {count}", reaction.emoji()),
                     count,
                     viewer_has_reacted,
@@ -470,9 +470,8 @@ impl ThreadElement {
                         reaction_pill(
                             colors,
                             SharedString::from(format!(
-                                "react-pick-{}-{}",
-                                comment.id,
-                                count.reaction.github_name()
+                                "react-pick-{}-{:?}",
+                                comment.id, count.reaction
                             )),
                             count.reaction.emoji().to_owned(),
                             0,

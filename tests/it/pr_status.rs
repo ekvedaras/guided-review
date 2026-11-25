@@ -1,3 +1,4 @@
+use guided_review::github::names;
 use guided_review::pull_request::HostSite;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -116,12 +117,12 @@ fn the_status_is_unknown_until_github_is_read_and_then_what_github_says() {
 
 #[test]
 fn a_rollup_state_is_one_of_four_words() {
-    assert_eq!(Checks::from_github_state(None), Checks::NoneRun);
-    assert_eq!(Checks::from_github_state(Some("SUCCESS")), Checks::Passing);
-    assert_eq!(Checks::from_github_state(Some("FAILURE")), Checks::Failing);
-    assert_eq!(Checks::from_github_state(Some("ERROR")), Checks::Failing);
-    assert_eq!(Checks::from_github_state(Some("PENDING")), Checks::Running);
-    assert_eq!(Checks::from_github_state(Some("EXPECTED")), Checks::Running);
+    assert_eq!(names::checks_of_rollup(None), Checks::NoneRun);
+    assert_eq!(names::checks_of_rollup(Some("SUCCESS")), Checks::Passing);
+    assert_eq!(names::checks_of_rollup(Some("FAILURE")), Checks::Failing);
+    assert_eq!(names::checks_of_rollup(Some("ERROR")), Checks::Failing);
+    assert_eq!(names::checks_of_rollup(Some("PENDING")), Checks::Running);
+    assert_eq!(names::checks_of_rollup(Some("EXPECTED")), Checks::Running);
 }
 
 fn failing(pull: &Pull, failure: ReadFailure) -> FakeHost {
@@ -505,7 +506,7 @@ fn the_check_list_is_capped_and_counts_what_it_left_out_after_the_worst_were_kep
 
 #[test]
 fn a_check_run_is_running_until_it_completed_and_then_passes_or_fails_by_its_conclusion() {
-    let of = CheckState::of_check_run;
+    let of = names::state_of_check_run;
 
     assert_eq!(of("IN_PROGRESS", None), CheckState::Running);
     assert_eq!(of("QUEUED", None), CheckState::Running);
@@ -516,12 +517,12 @@ fn a_check_run_is_running_until_it_completed_and_then_passes_or_fails_by_its_con
     assert_eq!(of("COMPLETED", Some("TIMED_OUT")), CheckState::Failing);
     assert_eq!(of("COMPLETED", Some("CANCELLED")), CheckState::Failing);
     assert_eq!(
-        CheckState::of_status_context("SUCCESS"),
+        names::state_of_status_context("SUCCESS"),
         CheckState::Passing
     );
-    assert_eq!(CheckState::of_status_context("ERROR"), CheckState::Failing);
+    assert_eq!(names::state_of_status_context("ERROR"), CheckState::Failing);
     assert_eq!(
-        CheckState::of_status_context("PENDING"),
+        names::state_of_status_context("PENDING"),
         CheckState::Running
     );
 }

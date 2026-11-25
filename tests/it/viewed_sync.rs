@@ -438,3 +438,28 @@ fn a_sync_due_while_one_runs_runs_once_more_after_it_and_no_more() {
     }
     assert_eq!(syncs(&review.due_work(now)), 0);
 }
+
+#[test]
+fn the_hosts_viewed_marks_keep_the_section_names_written_before_hosts_were_named() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let folders = repo.folders();
+    let pr: PullRequestUrl = PR.parse().unwrap();
+    let file = ReviewStateFile::for_subject(&folders, &ReviewSubject::from(pr));
+    let path = folders.state_files().join("acme/shop/7.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        r#"{"viewed_on_github": {"a.txt": true}, "github_baseline_due": true}"#,
+    )
+    .unwrap();
+
+    let state = file.load().unwrap();
+    file.update(guided_review::viewer::ReviewState::finish_refresh)
+        .unwrap();
+
+    assert!(state.host_baseline_due());
+    assert_eq!(state.parts_not_read(), Vec::<String>::new());
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains("\"viewed_on_github\""), "{written}");
+    assert!(written.contains("\"github_baseline_due\""), "{written}");
+}

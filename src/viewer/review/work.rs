@@ -171,7 +171,7 @@ impl ReviewCore {
             Done::PrDescription(Err(error)) => self.could_not_read(Read::PrDescription, &error),
             // The issue button is a shortcut, not something to warn of: a failed read keeps the last answer.
             Done::RelatedIssues(Ok(issues)) => {
-                self.change_related_issues(|related| related.github_says(issues));
+                self.change_related_issues(|related| related.host_says(issues));
             }
             // Like the issue button, the origin is no cause for a warning: a failed read keeps the last answer.
             Done::PrOrigin(Ok(origin)) => self.pr_origin = Some(origin),

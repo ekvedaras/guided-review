@@ -19,7 +19,7 @@ pub struct ThreadId(Arc<str>);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CommentId(Arc<str>);
 
-macro_rules! github_node_id {
+macro_rules! host_id {
     ($id:ident) => {
         impl $id {
             pub fn new(id: &str) -> Self {
@@ -51,8 +51,8 @@ macro_rules! github_node_id {
     };
 }
 
-github_node_id!(ThreadId);
-github_node_id!(CommentId);
+host_id!(ThreadId);
+host_id!(CommentId);
 
 /// A review thread as GitHub holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]

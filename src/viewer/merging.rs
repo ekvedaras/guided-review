@@ -59,16 +59,6 @@ pub enum Mergeability {
     Blocked,
 }
 
-impl Mergeability {
-    /// `UNSTABLE` (checks that are not required fail) and `HAS_HOOKS` merge like `CLEAN`.
-    pub fn from_github(merge_state_status: &str) -> Self {
-        match merge_state_status {
-            "CLEAN" | "UNSTABLE" | "HAS_HOOKS" => Self::Now,
-            _ => Self::Blocked,
-        }
-    }
-}
-
 /// What GitHub says of merging the open PR, and what the viewer may do about it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Merging {

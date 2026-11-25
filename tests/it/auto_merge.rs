@@ -1,3 +1,4 @@
+use guided_review::github::names;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -501,14 +502,14 @@ fn the_preferred_method_is_used_where_the_repo_allows_it_else_its_first_allowed_
 fn github_merge_states_are_merge_now_or_blocked() {
     for status in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] {
         assert_eq!(
-            Mergeability::from_github(status),
+            names::mergeability_of(status),
             Mergeability::Now,
             "{status}"
         );
     }
     for status in ["BLOCKED", "BEHIND", "DIRTY", "DRAFT", "UNKNOWN"] {
         assert_eq!(
-            Mergeability::from_github(status),
+            names::mergeability_of(status),
             Mergeability::Blocked,
             "{status}"
         );
@@ -519,7 +520,7 @@ fn github_merge_states_are_merge_now_or_blocked() {
 fn merge_methods_read_and_write_as_github_and_the_config_spell_them() {
     for method in MergeMethod::ALL {
         assert_eq!(
-            MergeMethod::of_github_name(method.github_name()),
+            names::merge_method_named(names::merge_method_name(method)),
             Some(method)
         );
         assert_eq!(

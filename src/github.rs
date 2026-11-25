@@ -17,19 +17,17 @@ use crate::review_subject::BranchName;
 use crate::update::{PublishedRelease, ReleaseAsset, ReleasesPort};
 use crate::url_path;
 use crate::viewer::{
-    AutoMerge, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging, OpenPrStatus,
-    PrStatus, Readiness,
+    AutoMerge, MergeChange, MergeMethod, MergeMethods, Merging, OpenPrStatus, PrStatus, Readiness,
 };
 use crate::viewer::{
-    AvatarPort, ChangeRequestsPort, ChangeTipsPort, CheckRun, CheckState, Checks, ClonePort,
-    CodeHost, CommentId, CommentPlace, CommentReactionsPort, HeadBranch, HostError, HostedCodePort,
-    IssueDetails, IssueDetailsPort, IssueState, MergeRoute, MergingPort, NoAccess, OutageCause,
-    PictureUploadPort, PrAuthor, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues,
-    PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews,
-    PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount,
-    RelatedIssue, Resolution, ReviewOutcome, ReviewRecord, ReviewThread, ReviewThreadsPort,
-    ReviewWritesPort, Reviewer, ReviewersOnGitHub, SendMode, Side, SubmittedReview, ThreadComment,
-    ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
+    ChangeRequestsPort, ChangeTipsPort, CheckRun, ClonePort, CodeHost, CommentId, CommentPlace,
+    CommentReactionsPort, HeadBranch, HostError, HostedCodePort, IssueDetails, IssueDetailsPort,
+    MergeRoute, MergingPort, NoAccess, OutageCause, PictureUploadPort, PrAuthor, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin, PullRequestOriginPort,
+    PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
+    Reaction, ReactionChange, ReactionCount, RelatedIssue, Resolution, ReviewRecord, ReviewThread,
+    ReviewThreadsPort, ReviewWritesPort, Reviewer, ReviewersOnHost, SendMode, Side,
+    SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 
 #[derive(Clone)]
@@ -44,6 +42,7 @@ pub struct GitHub {
     viewer_teams: Arc<Mutex<Option<Vec<String>>>>,
 }
 
+pub mod names;
 mod relevant_prs;
 
 impl From<anyhow::Error> for HostError {
@@ -185,7 +184,7 @@ impl GitHub {
                 "mutation($input: {}Input!) {{ {mutation}(input: $input) {{ clientMutationId }} }}",
                 capitalized(mutation)
             ),
-            &serde_json::json!({"input": {"subjectId": subject_id, "content": reaction.github_name()}}),
+            &serde_json::json!({"input": {"subjectId": subject_id, "content": names::reaction_name(reaction)}}),
         )?;
         Ok(())
     }
@@ -745,7 +744,7 @@ impl IssueDetailsPort for GitHub {
                 let issue = at(&data, &format!("/issue{place}/issue"));
                 let details = IssueDetails {
                     title: at(issue, "/title").as_str()?.into(),
-                    state: IssueState::of_github(
+                    state: names::issue_state_of(
                         at(issue, "/state").as_str()?,
                         at(issue, "/stateReason").as_str(),
                     ),
@@ -784,7 +783,7 @@ fn check_runs_of(nodes: &serde_json::Value) -> Arc<[CheckRun]> {
         .filter_map(|node| match at(node, "/__typename").as_str()? {
             "CheckRun" => Some(CheckRun {
                 name: text(node, "/name")?,
-                state: CheckState::of_check_run(
+                state: names::state_of_check_run(
                     at(node, "/status").as_str()?,
                     at(node, "/conclusion").as_str(),
                 ),
@@ -792,7 +791,7 @@ fn check_runs_of(nodes: &serde_json::Value) -> Arc<[CheckRun]> {
             }),
             "StatusContext" => Some(CheckRun {
                 name: text(node, "/context")?,
-                state: CheckState::of_status_context(at(node, "/state").as_str()?),
+                state: names::state_of_status_context(at(node, "/state").as_str()?),
                 page: text(node, "/targetUrl"),
             }),
             _ => None,
@@ -845,7 +844,7 @@ impl PullRequestStatusPort for GitHub {
             } else {
                 Readiness::Ready
             },
-            checks: Checks::from_github_state(rollup),
+            checks: names::checks_of_rollup(rollup),
             check_runs: check_runs_of(at(
                 pull,
                 "/commits/nodes/0/commit/statusCheckRollup/contexts/nodes",
@@ -915,7 +914,7 @@ impl MergingPort for GitHub {
         let auto_merge = match at(pull, "/autoMergeRequest/mergeMethod").as_str() {
             None => AutoMerge::Off,
             Some(name) => AutoMerge::On(
-                MergeMethod::of_github_name(name)
+                names::merge_method_named(name)
                     .with_context(|| format!("GitHub gave an unknown merge method {name}"))?,
             ),
         };
@@ -923,7 +922,7 @@ impl MergingPort for GitHub {
             .as_str()
             .with_context(|| format!("GitHub did not give the /mergeStateStatus of {pr}"))?;
         Ok(Merging {
-            mergeability: Mergeability::from_github(merge_state),
+            mergeability: names::mergeability_of(merge_state),
             auto_merge,
             methods: MergeMethods::only(&allowed),
             repo_allows_auto_merge: flag_of(repository, "/autoMergeAllowed")?,
@@ -953,7 +952,7 @@ impl MergingPort for GitHub {
         };
         let input = match method {
             Some(method) => {
-                serde_json::json!({"pullRequestId": id, "mergeMethod": method.github_name()})
+                serde_json::json!({"pullRequestId": id, "mergeMethod": names::merge_method_name(method)})
             }
             None => serde_json::json!({"pullRequestId": id}),
         };
@@ -1245,7 +1244,7 @@ fn viewer_latest_review(
     let text = |pointer: &str| at(review, pointer).as_str().map(str::to_owned);
     let state = text("/state")
         .with_context(|| format!("GitHub did not say how your last review of {pr} ended"))?;
-    let Some(outcome) = ReviewOutcome::from_github_state(&state) else {
+    let Some(outcome) = names::review_outcome_of(&state) else {
         return Ok(None);
     };
     let missing =
@@ -1261,7 +1260,7 @@ fn viewer_latest_review(
 /// A review GitHub lists among a PR's latest. A pending one, or one whose author's account is gone,
 /// says nothing about where anyone stands.
 fn review_record(review: &serde_json::Value) -> Option<ReviewRecord> {
-    let outcome = ReviewOutcome::from_github_state(at(review, "/state").as_str()?)?;
+    let outcome = names::review_outcome_of(at(review, "/state").as_str()?)?;
     Some(ReviewRecord {
         reviewer: Reviewer::person(
             at(review, "/author/login").as_str()?,
@@ -1345,7 +1344,7 @@ impl ReviewWritesPort for GitHub {
             .iter()
             .filter_map(|request| requested_reviewer(at(request, "/requestedReviewer")))
             .collect();
-        let standings = ReviewersOnGitHub {
+        let standings = ReviewersOnHost {
             viewer_login: at(&data, "/viewer/login")
                 .as_str()
                 .unwrap_or_default()
@@ -1819,7 +1818,7 @@ pub(crate) fn parse_review_threads(
                             .filter(|group| group.reactors.total_count > 0)
                             .filter_map(|group| {
                                 Some(ReactionCount {
-                                    reaction: Reaction::from_github_name(&group.content)?,
+                                    reaction: names::reaction_named(&group.content)?,
                                     count: group.reactors.total_count,
                                     viewer_has_reacted: group.viewer_has_reacted,
                                 })
@@ -1830,25 +1829,4 @@ pub(crate) fn parse_review_threads(
             })
             .collect(),
     })
-}
-
-/// Avatars are public on GitHub's picture host, so no token goes along.
-pub struct GitHubAvatars;
-
-/// Far above a 64 px picture; a bigger answer is not an avatar.
-const AVATAR_LIMIT: u64 = 1024 * 1024;
-
-impl AvatarPort for GitHubAvatars {
-    fn avatar(&self, url: &str) -> anyhow::Result<Vec<u8>> {
-        let mut response = ureq::get(url)
-            .header("User-Agent", "guided-review")
-            .call()
-            .with_context(|| format!("could not download {url}"))?;
-        response
-            .body_mut()
-            .with_config()
-            .limit(AVATAR_LIMIT)
-            .read_to_vec()
-            .with_context(|| format!("could not download {url}"))
-    }
 }

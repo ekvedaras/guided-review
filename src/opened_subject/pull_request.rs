@@ -146,11 +146,11 @@ pub(super) fn repin_to_live_tips(
     folders: &AppFolders,
     pr: &PullRequestUrl,
     tour_path: &Path,
-    github: &dyn ChangeTipsPort,
+    host: &dyn ChangeTipsPort,
     pick_code_source: &PickCodeSource,
 ) -> anyhow::Result<(Tour, Repin, Box<dyn CodeSource>)> {
     let subject = ReviewSubject::from(pr.clone());
-    let tips = github.pull_request_tips(pr)?;
+    let tips = host.pull_request_tips(pr)?;
     let source = pick_code_source(&tips)?;
     let base = source.merge_base(&tips.base_branch_tip, &tips.head)?;
     let (tour, repinned) = repin_tour(

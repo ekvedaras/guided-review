@@ -1274,7 +1274,7 @@ impl AgentReplyRequest {
 
     pub fn run(&self, host: &dyn CodeHost) -> Result<AgentReplyDone, HostError> {
         let (placement, working_on_it) = match &self.home {
-            ThreadHome::Host(pr) => self.post_on_github(host, pr)?,
+            ThreadHome::Host(pr) => self.post_on_host(host, pr)?,
             ThreadHome::StateFile(store) => self.keep_locally(store).map_err(|error| {
                 HostError::Other(error.context("could not write the local thread"))
             })?,
@@ -1292,7 +1292,7 @@ impl AgentReplyRequest {
         })
     }
 
-    fn post_on_github(
+    fn post_on_host(
         &self,
         host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
         pr: &PullRequestUrl,

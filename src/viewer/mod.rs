@@ -243,7 +243,7 @@ pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagr
 pub use pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 pub use pr_reviewers::{
     CLAMPED_BODY_LINES, PullRequestReviews, ReviewOutcome, ReviewRecord, Reviewer, ReviewerKind,
-    ReviewerLine, ReviewerStatus, ReviewersOnGitHub, Stance, StanceAge, Standing, SubmittedReview,
+    ReviewerLine, ReviewerStatus, ReviewersOnHost, Stance, StanceAge, Standing, SubmittedReview,
     Whose, YourReview,
 };
 pub use pr_status::{

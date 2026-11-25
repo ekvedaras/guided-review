@@ -124,9 +124,9 @@ pub struct ReviewState {
 struct ViewerSections {
     #[serde(default)]
     read_ticks: KeptSection<BTreeMap<StepId, ReadTick>>,
-    /// Per file, whether GitHub said viewed at the last sync. A pull reacts to changes against it.
-    #[serde(default)]
-    viewed_on_github: KeptSection<BTreeMap<FilePath, Viewed>>,
+    /// Per file, whether the host said viewed at the last sync. A pull reacts to changes against it.
+    #[serde(default, rename = "viewed_on_github")]
+    viewed_on_host: KeptSection<BTreeMap<FilePath, Viewed>>,
     /// Viewed changes GitHub has not taken yet, newest wish per file.
     #[serde(default)]
     unsent_viewed: KeptSection<BTreeMap<FilePath, Viewed>>,
@@ -144,8 +144,8 @@ struct ViewerSections {
     file_read_before: KeptSection<BTreeMap<FilePath, ReadTick>>,
     /// After a re-pin GitHub's viewed state is taken as it is, so its "not viewed" for files
     /// the new commits touched is not read as the reviewer unticking.
-    #[serde(default)]
-    github_baseline_due: KeptSection<bool>,
+    #[serde(default, rename = "github_baseline_due")]
+    host_baseline_due: KeptSection<bool>,
     /// A review agent was started and has not said findings-done since, so an idle one found
     /// again later has stopped without its findings, whatever an earlier run left in the file.
     #[serde(default)]
@@ -347,15 +347,12 @@ impl ReviewState {
         let typed = &self.typed;
         let sections = [
             ("read_ticks", viewer.read_ticks.is_unread()),
-            ("viewed_on_github", viewer.viewed_on_github.is_unread()),
+            ("viewed_on_github", viewer.viewed_on_host.is_unread()),
             ("unsent_viewed", viewer.unsent_viewed.is_unread()),
             ("read_before", viewer.read_before.is_unread()),
             ("file_read_ticks", viewer.file_read_ticks.is_unread()),
             ("file_read_before", viewer.file_read_before.is_unread()),
-            (
-                "github_baseline_due",
-                viewer.github_baseline_due.is_unread(),
-            ),
+            ("github_baseline_due", viewer.host_baseline_due.is_unread()),
             ("ai_run_open", viewer.ai_run_open.is_unread()),
             ("finding_decisions", viewer.finding_decisions.is_unread()),
             ("fix_requests", viewer.fix_requests.is_unread()),
@@ -426,7 +423,7 @@ impl ReviewState {
             Some(earlier) if earlier.to_head == record.from_head => record.following(&earlier),
             _ => record,
         });
-        *self.viewer.github_baseline_due = true;
+        *self.viewer.host_baseline_due = true;
     }
 
     /// The head each file of a basic tour was last read at: its tick, or the tick a re-pin took away.
@@ -465,7 +462,7 @@ impl ReviewState {
         self.viewer.file_read_ticks.clear();
         self.viewer.file_read_before.clear();
         *self.last_repin = None;
-        *self.viewer.github_baseline_due = true;
+        *self.viewer.host_baseline_due = true;
     }
 
     /// A Refresh answered what the re-pin left open, so its marks go.
@@ -482,22 +479,22 @@ impl ReviewState {
     }
 
     pub fn host_baseline_due(&self) -> bool {
-        *self.viewer.github_baseline_due
+        *self.viewer.host_baseline_due
     }
 
     /// GitHub's state replaces what was seen before; only wishes it does not match yet stay queued.
     pub(super) fn take_host_baseline(
         &mut self,
-        on_github: &BTreeMap<FilePath, Viewed>,
+        on_host: &BTreeMap<FilePath, Viewed>,
         wishes: &BTreeMap<FilePath, Viewed>,
     ) {
-        *self.viewer.viewed_on_github = on_github.clone();
+        *self.viewer.viewed_on_host = on_host.clone();
         *self.viewer.unsent_viewed = wishes
             .iter()
             .filter(|(path, viewed)| self.was_viewed_on_host(path) != **viewed)
             .map(|(path, viewed)| (path.clone(), *viewed))
             .collect();
-        *self.viewer.github_baseline_due = false;
+        *self.viewer.host_baseline_due = false;
     }
 
     pub fn tick(&mut self, step: &StepId, head: &Sha) {
@@ -564,14 +561,14 @@ impl ReviewState {
 
     pub(super) fn was_viewed_on_host(&self, path: &FilePath) -> Viewed {
         self.viewer
-            .viewed_on_github
+            .viewed_on_host
             .get(path)
             .copied()
             .unwrap_or(Viewed::No)
     }
 
     pub(super) fn saw_on_host(&mut self, path: &FilePath, viewed: Viewed) {
-        self.viewer.viewed_on_github.insert(path.clone(), viewed);
+        self.viewer.viewed_on_host.insert(path.clone(), viewed);
     }
 
     /// A wish that equals what GitHub already says needs no push, so it cancels the queued one.

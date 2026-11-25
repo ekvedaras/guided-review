@@ -34,18 +34,6 @@ pub enum Checks {
     Failing,
 }
 
-impl Checks {
-    /// From the `state` of a commit's `statusCheckRollup`; `None` when the commit has none.
-    pub fn from_github_state(state: Option<&str>) -> Self {
-        match state {
-            None => Self::NoneRun,
-            Some("SUCCESS") => Self::Passing,
-            Some("FAILURE" | "ERROR") => Self::Failing,
-            Some(_) => Self::Running,
-        }
-    }
-}
-
 /// How many checks the title bar's list shows before it says how many more there are.
 pub const CHECKS_SHOWN: usize = 20;
 
@@ -58,31 +46,6 @@ pub enum CheckState {
     Passing,
     Neutral,
     Skipped,
-}
-
-impl CheckState {
-    /// From a check run's `status` and, once it completed, its `conclusion`. A cancelled or timed
-    /// out run did not pass, so it fails.
-    pub fn of_check_run(status: &str, conclusion: Option<&str>) -> Self {
-        if status != "COMPLETED" {
-            return Self::Running;
-        }
-        match conclusion {
-            Some("SUCCESS") => Self::Passing,
-            Some("NEUTRAL") => Self::Neutral,
-            Some("SKIPPED") => Self::Skipped,
-            _ => Self::Failing,
-        }
-    }
-
-    /// From the `state` of a commit status, which an external service posts.
-    pub fn of_status_context(state: &str) -> Self {
-        match state {
-            "SUCCESS" => Self::Passing,
-            "FAILURE" | "ERROR" => Self::Failing,
-            _ => Self::Running,
-        }
-    }
 }
 
 /// One check of the PR's head commit: a check run or a commit status.

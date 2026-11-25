@@ -1,7 +1,7 @@
 //! A piece's diff as a screen shows it, and the pieces a step shows.
 
 use super::code_link::CodeLink;
-use super::diff_display::{DiffDisplay, DiffHunk, PieceView, is_in_github_diff};
+use super::diff_display::{DiffDisplay, DiffHunk, PieceView, is_in_pr_diff};
 use super::diff_line::{DiffLine, RowView};
 use super::line_location::Side;
 use crate::code_source::Line;
@@ -125,9 +125,8 @@ impl PieceDiff {
         // Removed lines are numbered at the read head, so the PR base's colours do not fit them.
         for row in diff.hunks.iter_mut().flat_map(|hunk| hunk.rows.iter_mut()) {
             row.view = RowView::ChangeSinceRead {
-                head_line_is_in_pr_diff: pr_file.is_some_and(|file| {
-                    is_in_github_diff(&file.hunks, usize::from(row.location.line))
-                }),
+                head_line_is_in_pr_diff: pr_file
+                    .is_some_and(|file| is_in_pr_diff(&file.hunks, usize::from(row.location.line))),
             };
             if row.location.side == Side::Base {
                 row.spans.clear();

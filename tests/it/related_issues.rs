@@ -1,3 +1,4 @@
+use guided_review::github::names;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -37,7 +38,7 @@ fn linked(number: u64, title: &str) -> RelatedIssue {
 fn details(title: &str, body: &str) -> IssueDetails {
     IssueDetails {
         title: title.into(),
-        state: IssueState::of_github("CLOSED", Some("NOT_PLANNED")),
+        state: names::issue_state_of("CLOSED", Some("NOT_PLANNED")),
         author: Some("ada".into()),
         labels: Arc::from([Arc::from("bug")]),
         assignees: Arc::from([Arc::from("grace")]),
@@ -259,9 +260,9 @@ fn with_no_linked_issue_the_issues_the_description_is_part_of_come_before_the_to
 
 #[test]
 fn a_pull_request_named_as_an_issue_reads_as_merged_once_merged() {
-    assert_eq!(IssueState::of_github("MERGED", None), IssueState::Merged);
+    assert_eq!(names::issue_state_of("MERGED", None), IssueState::Merged);
     assert_eq!(IssueState::Merged.label(), "Merged");
-    assert_eq!(IssueState::of_github("OPEN", None), IssueState::Open);
+    assert_eq!(names::issue_state_of("OPEN", None), IssueState::Open);
 }
 
 #[test]

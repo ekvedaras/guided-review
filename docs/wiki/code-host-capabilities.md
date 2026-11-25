@@ -96,7 +96,7 @@ From my knowledge of GitLab, not checked against its docs:
 
 ### Left open after step 4
 
-- Snapshot sample data (`app::snapshots`, the staged findings' avatars) stays GitHub's.
+- Snapshot sample data (`app::snapshots`, the staged findings' avatars, the gallery's texts, the `44-github-outage` scene) stays GitHub's.
 
 ## A local review knows its host
 
@@ -155,7 +155,15 @@ Issue #140, 2026-11-25. What the UI said of GitHub it now says of the PR's host,
 - The switcher waits on and fails for every host the app reads, so it names them all (`HostSite::all_named`, made once, not per frame).
 - Neutral where no PR is at hand: Settings ("code opens on its code host", "Write the repo as its path on its code host, as owner/repo"), the shortcuts sheet, the CLI's subject error, the merge refusals ("You may not turn off this PR's auto-merge"), the comment refusals, no access ("No access to the PR's host"), a comment posted now ("Comment posted").
 
+## GitHub's names live in the adapter
+
+Issue #140, 2026-11-25. The viewer's types parsed and wrote GitHub's GraphQL names: `Checks::from_github_state`, `CheckState::of_check_run` and `of_status_context`, `Mergeability::from_github`, `ReviewOutcome::from_github_state`, `IssueState::of_github`, `Reaction::github_name` and `from_github_name`, `MergeMethod::github_name` and `of_github_name`. They are `github::names` now, functions of the adapter over the viewer's types, which know none of GitHub's words. Identifiers in generic code that meant the host say host: `ReviewersOnHost`, `host_id!` (thread and comment ids are opaque to the viewer), `RelatedIssues::host_says`, `DIFF_CONTEXT_LINES` and `is_in_pr_diff` (GitHub's rule of 3 context lines; GitLab's diff takes comments on the context lines it shows too, not checked), `post_on_host`. The state file keeps its section names `viewed_on_github` and `github_baseline_due` (`#[serde(rename)]`, `viewed_sync::the_hosts_viewed_marks_keep_the_section_names_written_before_hosts_were_named`). The avatar download was the adapter's `GitHubAvatars` and fetched any public address with no token: it is the app's `PublicAvatars` (`app::avatar_pictures`), as a comment's avatar address comes from whatever host the comment is on.
+
+What keeps GitHub's name in generic code on purpose: `HostSite::GitHub` and the matches on it, `opened_subject::hosts` (the one mapping to adapters), `IssueLink::GitHub` and `IssueUrl` (a GitHub issue is GitHub's), the release downloaders, the default host of a pin or a key written before hosts were named.
+
 ## Left open
 
+- Doc comments in generic code still say GitHub where they mean the PR's host (about 300 lines outside the adapter); words for maintainers, no behaviour.
+- The agents' prompts (review brief, review agent, Ask, hand-off) say "never post on GitHub" and "GitHub markdown". Right for every PR the app reads today; a second host needs them to name the PR's host.
 - Tests of a local review other than `local_review.rs` and `local_guided_tour.rs` that go through `Review::open_basic` with `every_capability()` (for example `basic_tour.rs`, `move_to_pr.rs`) build a local review with a PR host's capabilities; they test reading, not capabilities.
 

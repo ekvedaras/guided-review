@@ -9,7 +9,7 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Review, ReviewOutcome, ReviewRecord, ReviewStateFile, Reviewer, ReviewerLine, ReviewerStatus,
-    ReviewersOnGitHub, Stance, StanceAge, Standing, SubmittedReview, Whose, YourReview,
+    ReviewersOnHost, Stance, StanceAge, Standing, SubmittedReview, Whose, YourReview,
 };
 use serde_json::json;
 
@@ -27,8 +27,8 @@ fn record(login: &str, outcome: ReviewOutcome) -> ReviewRecord {
     }
 }
 
-fn on_github() -> ReviewersOnGitHub {
-    ReviewersOnGitHub {
+fn on_github() -> ReviewersOnHost {
+    ReviewersOnHost {
         viewer_login: "me".to_owned(),
         author_login: Some("author".to_owned()),
         latest: Vec::new(),
@@ -53,7 +53,7 @@ fn reviewed(outcome: ReviewOutcome) -> Stance {
 
 #[test]
 fn the_viewer_comes_first_then_change_requests_approvals_comments_and_who_is_waited_on() {
-    let standings = ReviewersOnGitHub {
+    let standings = ReviewersOnHost {
         latest: vec![
             record("carol", ReviewOutcome::Commented),
             record("bob", ReviewOutcome::Approved),
@@ -84,7 +84,7 @@ fn the_viewer_comes_first_then_change_requests_approvals_comments_and_who_is_wai
 
 #[test]
 fn an_approval_outweighs_a_later_comment_of_the_same_reviewer() {
-    let standings = ReviewersOnGitHub {
+    let standings = ReviewersOnHost {
         latest: vec![record("bob", ReviewOutcome::Commented)],
         verdicts: vec![record("bob", ReviewOutcome::Approved)],
         ..on_github()
@@ -99,7 +99,7 @@ fn an_approval_outweighs_a_later_comment_of_the_same_reviewer() {
 
 #[test]
 fn the_pr_author_answering_threads_is_not_a_reviewer() {
-    let standings = ReviewersOnGitHub {
+    let standings = ReviewersOnHost {
         latest: vec![
             record("author", ReviewOutcome::Commented),
             record("bob", ReviewOutcome::Approved),
@@ -116,7 +116,7 @@ fn the_pr_author_answering_threads_is_not_a_reviewer() {
 
 #[test]
 fn a_reviewer_asked_again_keeps_the_review_that_counts_on_github() {
-    let standings = ReviewersOnGitHub {
+    let standings = ReviewersOnHost {
         verdicts: vec![record("bob", ReviewOutcome::Approved)],
         latest: vec![record("bob", ReviewOutcome::Approved)],
         requested: vec![person("bob"), person("dave")],
