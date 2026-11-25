@@ -146,8 +146,8 @@ impl CommentsSheet {
                 div()
                     .mx_2()
                     .px_2()
-                    .pt_2()
-                    .pb_1()
+                    .pt_3()
+                    .pb_1p5()
                     .truncate()
                     .text_xs()
                     .text_color(colors.muted_text)
@@ -197,18 +197,25 @@ impl CommentsSheet {
             place,
             None,
         )
-        .h(px(34.))
-        .when(row.is_resolved, |row| row.opacity(0.7))
+        .py_2()
         .on_click(cx.listener(move |this, _, window, cx| {
             this.open_thread(id.clone(), window, cx);
         }))
-        .child(author_avatar(
-            colors,
-            &row.author,
-            row.avatar_url.as_deref(),
-            row.is_by_agent,
-            cx,
-        ))
+        .child(
+            div()
+                .flex_none()
+                .size(px(AVATAR_SLOT))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(author_avatar(
+                    colors,
+                    &row.author,
+                    row.avatar_url.as_deref(),
+                    row.is_by_agent,
+                    cx,
+                )),
+        )
         .child(
             div()
                 .flex_none()
@@ -255,6 +262,8 @@ impl CommentsSheet {
     }
 }
 
+/// The avatar's own box, so a picture still loading or the agent mark never moves the row's text.
+const AVATAR_SLOT: f32 = 24.;
 const AUTHOR_WIDTH: f32 = 110.;
 /// Wide enough for the 34 characters the viewer cuts a place to, in the code font at its small size.
 const PLACE_WIDTH: f32 = 250.;
