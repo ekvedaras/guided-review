@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, FixtureRepo as Repo};
 use guided_review::local_git::LocalGit;
@@ -80,13 +80,13 @@ impl Shop {
         Review::open(tour, &self.source(), state_file).unwrap()
     }
 
-    fn github(&self, origin: PullRequestOrigin) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent).with_origin(origin)
+    fn host(&self, origin: PullRequestOrigin) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent).with_origin(origin)
     }
 
-    fn read(&self, review: &mut Review, github: &FakeGitHub) {
-        review.pull_from_github();
-        drive_without_agents(review, github, &self.source(), Instant::now());
+    fn read(&self, review: &mut Review, host: &FakeHost) {
+        review.pull_from_host();
+        drive_without_agents(review, host, &self.source(), Instant::now());
     }
 }
 
@@ -94,12 +94,12 @@ impl Shop {
 fn a_pr_names_its_author_and_branches_once_github_answers() {
     let shop = Shop::new();
     let mut review = shop.open();
-    let github = shop.github(origin("main", HeadBranch::of_repo(branch("feat/cart"))));
+    let host = shop.host(origin("main", HeadBranch::of_repo(branch("feat/cart"))));
 
     assert_eq!(review.merge_route(), None);
     assert_eq!(review.pr_author(), None);
 
-    shop.read(&mut review, &github);
+    shop.read(&mut review, &host);
 
     let route = review.merge_route().unwrap();
     assert_eq!(route.base, branch("main"));
@@ -115,9 +115,9 @@ fn a_pr_names_its_author_and_branches_once_github_answers() {
 fn a_pr_from_a_fork_writes_its_head_branch_as_owner_and_branch() {
     let shop = Shop::new();
     let mut review = shop.open();
-    let github = shop.github(origin("main", HeadBranch::of_fork("grace", branch("fix"))));
+    let host = shop.host(origin("main", HeadBranch::of_fork("grace", branch("fix"))));
 
-    shop.read(&mut review, &github);
+    shop.read(&mut review, &host);
 
     assert_eq!(review.merge_route().unwrap().head.to_string(), "grace:fix");
     assert_eq!(
@@ -132,9 +132,9 @@ fn a_pr_of_a_deleted_user_has_a_route_and_no_author() {
     let mut review = shop.open();
     let mut ghost = origin("main", HeadBranch::of_repo(branch("feat/cart")));
     ghost.author = None;
-    let github = shop.github(ghost);
+    let host = shop.host(ghost);
 
-    shop.read(&mut review, &github);
+    shop.read(&mut review, &host);
 
     assert_eq!(review.pr_author(), None);
     assert_eq!(
@@ -147,14 +147,14 @@ fn a_pr_of_a_deleted_user_has_a_route_and_no_author() {
 fn a_pr_retargeted_on_github_shows_its_new_base_when_the_window_comes_to_the_front() {
     let shop = Shop::new();
     let mut review = shop.open();
-    let github = shop.github(origin("main", HeadBranch::of_repo(branch("feat/cart"))));
-    shop.read(&mut review, &github);
+    let host = shop.host(origin("main", HeadBranch::of_repo(branch("feat/cart"))));
+    shop.read(&mut review, &host);
 
-    github.set_origin(origin(
+    host.set_origin(origin(
         "release/2",
         HeadBranch::of_repo(branch("feat/cart")),
     ));
-    shop.read(&mut review, &github);
+    shop.read(&mut review, &host);
 
     assert_eq!(review.merge_route().unwrap().base, branch("release/2"));
 }
@@ -163,11 +163,11 @@ fn a_pr_retargeted_on_github_shows_its_new_base_when_the_window_comes_to_the_fro
 fn a_failed_read_keeps_the_last_answer() {
     let shop = Shop::new();
     let mut review = shop.open();
-    let github = shop.github(origin("main", HeadBranch::of_repo(branch("feat/cart"))));
-    shop.read(&mut review, &github);
+    let host = shop.host(origin("main", HeadBranch::of_repo(branch("feat/cart"))));
+    shop.read(&mut review, &host);
 
-    github.inject(GitHubFault::ReadsFail);
-    shop.read(&mut review, &github);
+    host.inject(HostFault::ReadsFail);
+    shop.read(&mut review, &host);
 
     assert_eq!(review.merge_route().unwrap().base, branch("main"));
     assert_eq!(review.pr_author(), Some(&ada()));
@@ -177,8 +177,8 @@ fn a_failed_read_keeps_the_last_answer() {
 fn a_review_that_replaces_another_goes_on_with_what_it_knew() {
     let shop = Shop::new();
     let mut replaced = shop.open();
-    let github = shop.github(origin("main", HeadBranch::of_repo(branch("feat/cart"))));
-    shop.read(&mut replaced, &github);
+    let host = shop.host(origin("main", HeadBranch::of_repo(branch("feat/cart"))));
+    shop.read(&mut replaced, &host);
 
     let mut review = shop.open();
     review.carry_on_from(replaced);

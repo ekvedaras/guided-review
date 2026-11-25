@@ -16,14 +16,14 @@ use std::collections::BTreeMap;
 /// Where a review's threads are kept: on GitHub for a PR, in its state file for a local review.
 #[derive(Debug, Clone)]
 pub enum ThreadHome {
-    GitHub(PullRequestUrl),
+    Host(PullRequestUrl),
     StateFile(LocalThreadStore),
 }
 
 impl ThreadHome {
     pub fn of(subject: &ReviewSubject, state_file: &ReviewStateFile) -> Self {
         match subject {
-            ReviewSubject::PullRequest(pr) => Self::GitHub(pr.clone()),
+            ReviewSubject::PullRequest(pr) => Self::Host(pr.clone()),
             ReviewSubject::Local(_) => {
                 Self::StateFile(LocalThreadStore::in_file(state_file.clone()))
             }

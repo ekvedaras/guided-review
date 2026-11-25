@@ -53,10 +53,10 @@ fn the_card_opens_on_the_station_that_failed_before_one_that_waits() {
     let stations = of(&[
         (StationKind::Tour, StationHealth::Done),
         (StationKind::Fixes, StationHealth::Waiting),
-        (StationKind::GitHub, StationHealth::Failed),
+        (StationKind::Host, StationHealth::Failed),
     ]);
 
-    assert_eq!(stations.open(None), StationKind::GitHub);
+    assert_eq!(stations.open(None), StationKind::Host);
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn with_nothing_to_look_at_the_card_opens_on_the_ai_review() {
     let stations = of(&[
         (StationKind::Tour, StationHealth::Done),
         (StationKind::AiReview, StationHealth::NotStarted),
-        (StationKind::GitHub, StationHealth::Done),
+        (StationKind::Host, StationHealth::Done),
     ]);
 
     assert_eq!(stations.open(None), StationKind::AiReview);
@@ -84,11 +84,11 @@ fn with_nothing_to_look_at_the_card_opens_on_the_ai_review() {
 fn a_picked_station_opens_whatever_else_needs_the_reviewer() {
     let stations = of(&[
         (StationKind::Tour, StationHealth::Done),
-        (StationKind::GitHub, StationHealth::Failed),
+        (StationKind::Host, StationHealth::Failed),
     ]);
 
     assert_eq!(stations.open(Some(StationKind::Tour)), StationKind::Tour);
-    assert_eq!(stations.open(Some(StationKind::Fixes)), StationKind::GitHub);
+    assert_eq!(stations.open(Some(StationKind::Fixes)), StationKind::Host);
 }
 
 #[test]
@@ -97,11 +97,11 @@ fn every_other_station_that_needs_the_reviewer_is_named_under_the_card() {
         (StationKind::Tour, StationHealth::Working),
         (StationKind::Fixes, StationHealth::Waiting),
         (StationKind::YourReview, StationHealth::Done),
-        (StationKind::GitHub, StationHealth::Failed),
+        (StationKind::Host, StationHealth::Failed),
     ]);
 
     let named: Vec<StationKind> = stations
-        .also_needing_you(StationKind::GitHub)
+        .also_needing_you(StationKind::Host)
         .map(|station| station.kind)
         .collect();
 
@@ -112,12 +112,12 @@ fn every_other_station_that_needs_the_reviewer_is_named_under_the_card() {
 fn problems_sit_with_the_station_they_are_about() {
     let stations = of(&[
         (StationKind::Tour, StationHealth::Done),
-        (StationKind::GitHub, StationHealth::Done),
+        (StationKind::Host, StationHealth::Done),
     ]);
 
     assert_eq!(
         stations.home_of(&Problem::ThreadsNotRead("503".to_owned())),
-        Some(StationKind::GitHub)
+        Some(StationKind::Host)
     );
     assert_eq!(
         stations.home_of(&Problem::ShowAgentFailed("gone".to_owned())),
@@ -133,7 +133,7 @@ fn problems_sit_with_the_station_they_are_about() {
 fn a_station_with_one_problem_names_it_and_with_more_counts_them() {
     let stations = of(&[
         (StationKind::Tour, StationHealth::Done),
-        (StationKind::GitHub, StationHealth::Done),
+        (StationKind::Host, StationHealth::Done),
     ]);
 
     let one = stations
@@ -148,10 +148,10 @@ fn a_station_with_one_problem_names_it_and_with_more_counts_them() {
     ]);
 
     assert_eq!(
-        station(&one, StationKind::GitHub),
+        station(&one, StationKind::Host),
         (StationHealth::Failed, "threads not read".to_owned())
     );
-    assert_eq!(station(&two, StationKind::GitHub).1, "2 problems");
+    assert_eq!(station(&two, StationKind::Host).1, "2 problems");
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn a_fresh_review_of_a_pr_has_every_station_and_nothing_started() {
             StationKind::AiReview,
             StationKind::Fixes,
             StationKind::YourReview,
-            StationKind::GitHub,
+            StationKind::Host,
         ]
     );
     assert_eq!(
@@ -194,7 +194,7 @@ fn a_fresh_review_of_a_pr_has_every_station_and_nothing_started() {
         (StationHealth::NotStarted, "none asked".to_owned())
     );
     assert_eq!(
-        station(&stations, StationKind::GitHub),
+        station(&stations, StationKind::Host),
         (StationHealth::Done, "viewed marks in sync".to_owned())
     );
 }
@@ -295,7 +295,7 @@ fn viewed_marks_waiting_for_github_say_how_many_and_for_how_long() {
     );
 
     assert_eq!(
-        station(&stations, StationKind::GitHub),
+        station(&stations, StationKind::Host),
         (
             StationHealth::Waiting,
             "1 viewed mark waiting · 4 min".to_owned()
@@ -327,7 +327,7 @@ fn how_long_marks_waited_outlives_a_restart() {
     assert_eq!(
         station(
             &reopened.stations(&TourAgentState::None, later),
-            StationKind::GitHub
+            StationKind::Host
         )
         .1,
         "1 viewed mark waiting · 2 h"

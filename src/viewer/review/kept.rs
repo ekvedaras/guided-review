@@ -59,8 +59,8 @@ impl Review {
         self.review.due_work(now)
     }
 
-    pub fn pull_from_github(&mut self) {
-        self.review.pull_from_github();
+    pub fn pull_from_host(&mut self) {
+        self.review.pull_from_host();
     }
 
     /// Nor are the replacing jobs. A due job is a reload asked for while another job ran, which

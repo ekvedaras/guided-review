@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
@@ -152,9 +152,9 @@ fn a_review_updated_to_new_commits_keeps_what_the_config_and_disk_say() {
     let shop = Shop::new();
     shop.write_guided_tour_at(&shop.first);
     let opened = shop.open();
-    let github = FakeGitHub::with_pull(&shop.base, &shop.second, &SentLog::default());
+    let host = FakeHost::with_pull(&shop.base, &shop.second, &SentLog::default());
 
-    let updated = opened.repinner.run(&github).unwrap();
+    let updated = opened.repinner.run(&host).unwrap();
 
     assert_eq!(updated.review.head(), &Sha::new(&shop.second));
     assert_eq!(

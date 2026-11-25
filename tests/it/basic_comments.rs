@@ -1,5 +1,5 @@
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, line, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
@@ -22,8 +22,8 @@ struct Shop {
 }
 
 impl Shop {
-    fn github(&self) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent)
+    fn host(&self) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent)
     }
 
     fn new() -> Self {
@@ -223,18 +223,18 @@ fn typed(review: &mut Review, place: &CommentPlace, body: &str) {
 #[test]
 fn a_line_comment_is_sent_from_a_file_screen_into_the_pending_review() {
     let shop = Shop::new();
-    let github = shop.github();
+    let host = shop.host();
     let mut review = shop.open();
     on_file_screen(&mut review, "a.txt");
     let place = comment_on_line(&mut review, "TWO");
     typed(&mut review, &place, "why caps?");
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert_eq!(
-        shop.sent.github_calls().iter().rev().nth(1).unwrap(),
-        &GitHubCall::AddThread {
+        shop.sent.host_calls().iter().rev().nth(1).unwrap(),
+        &HostCall::AddThread {
             pr: PR.parse().unwrap(),
             place,
             body: "why caps?".into()
@@ -246,7 +246,7 @@ fn a_line_comment_is_sent_from_a_file_screen_into_the_pending_review() {
 #[test]
 fn a_file_comment_is_sent_from_a_file_screen_and_its_draft_survives_a_restart() {
     let shop = Shop::new();
-    let github = shop.github();
+    let host = shop.host();
     let mut review = shop.open();
     on_file_screen(&mut review, "b.txt");
     let path = file_path("b.txt");
@@ -260,11 +260,11 @@ fn a_file_comment_is_sent_from_a_file_screen_and_its_draft_survives_a_restart() 
     assert_eq!(drafts(&reopened).len(), 1);
     assert_eq!(drafts(&reopened)[0].body, "whole file");
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert!(matches!(
-        shop.sent.github_calls().iter().rev().nth(1).unwrap(),
-        GitHubCall::AddThread { place: sent, .. } if sent == &CommentPlace::on_file(&path)
+        shop.sent.host_calls().iter().rev().nth(1).unwrap(),
+        HostCall::AddThread { place: sent, .. } if sent == &CommentPlace::on_file(&path)
     ));
 }
 
@@ -314,14 +314,14 @@ fn the_overview_offers_no_comment_on_a_file() {
 #[test]
 fn a_queued_comment_of_a_basic_review_survives_a_restart() {
     let shop = Shop::new();
-    let github = shop.github();
+    let host = shop.host();
     let mut review = shop.open();
     on_file_screen(&mut review, "a.txt");
     let place = comment_on_line(&mut review, "TWO");
     typed(&mut review, &place, "later");
-    github.inject(GitHubFault::ConnectionLost);
+    host.inject(HostFault::ConnectionLost);
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert!(matches!(result.unwrap(), Some(CommentResult::Queued(_))));
     assert_eq!(shop.open().queued_comments().len(), 1);

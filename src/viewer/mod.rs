@@ -36,11 +36,11 @@ mod findings_list;
 mod finish_review;
 mod fix_requests;
 mod focused_change;
-mod github_outage;
 mod guided_tour;
 mod hand_offs;
 mod hidden_text;
 mod highlight;
+mod host_outage;
 mod image_preview;
 mod intent;
 mod jump;
@@ -58,7 +58,7 @@ mod name_desk;
 mod name_highlights;
 mod name_hover;
 mod new_commits;
-mod no_github;
+mod no_host;
 mod outdated_lines;
 mod overview;
 mod page;
@@ -142,7 +142,7 @@ pub use branch_link::{BranchOffer, local_reviews_of_repo};
 pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState, RepoCloner};
 pub(crate) use code_link::percent_encode_path;
 pub use code_link::{
-    CodeHost, CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy,
+    CodeLink, CodeOnWeb, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy,
 };
 pub use comment_desk::{BoxState, CommentBox, CommentGesture, TextBox, land_elsewhere};
 pub use comment_send::{CommentOutcome, CommentRequest};
@@ -176,8 +176,6 @@ pub use fix_requests::{
     FixNote, FixReply, FixRequest, FixRequests, FixState, FixTiming, NoFixRequest,
 };
 pub use focused_change::{ChangeInView, PageChange, ReadStep};
-pub use github_outage::Read;
-pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, HandOff, HandOffButton,
@@ -188,6 +186,8 @@ pub use hidden_text::{HiddenPart, HiddenText};
 pub use highlight::{
     Capture, HighlightRequest, Highlights, Span, highlight_file_lines, highlight_snippet,
 };
+pub use host_outage::Read;
+pub use host_outage::{Affected, Outage, OutageCause, backoff};
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,
 };
@@ -217,7 +217,7 @@ pub use name_highlights::NameHighlights;
 pub use name_highlights::USAGES_SHOWN;
 pub use name_hover::{HoverTicket, NameHover};
 pub use new_commits::{PickCodeSource, catch_up_findings, repin_tour};
-pub use no_github::NoGitHub;
+pub use no_host::NoHost;
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use overview::{OverviewFile, OverviewPage, OverviewStats};
 pub use page::{
@@ -231,11 +231,11 @@ pub use piece_diff::PieceDiff;
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::ReviewVerdict;
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, GitHubError, GitHubPort,
-    IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
-    PullRequestOriginPort, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
-    RefreshWriter, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed,
-    ViewedFile, ViewedFilesPort, ViewedState,
+    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, CodeHost, HostError, IssueDetailsPort,
+    NoAccess, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, Resolution,
+    ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed, ViewedFile, ViewedFilesPort,
+    ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};

@@ -1,5 +1,5 @@
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
 use crate::support::{FixtureRepo, on_github};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::RepoName;
@@ -291,15 +291,15 @@ fn a_note_shows_when_the_pr_has_moved_past_the_tours_head() {
     let sent = SentLog::default();
 
     review
-        .check_pr_head(&FakeGitHub::with_pull(&shop.base, "f00d", &sent))
+        .check_pr_head(&FakeHost::with_pull(&shop.base, "f00d", &sent))
         .unwrap();
 
     let note = review.old_head().unwrap();
     assert_eq!(note.tour_head.as_str(), shop.head);
     assert_eq!(note.pr_head.as_str(), "f00d");
     assert_eq!(
-        sent.github_calls(),
-        [GitHubCall::TipsOf(
+        sent.host_calls(),
+        [HostCall::TipsOf(
             "https://github.com/acme/shop/pull/7".parse().unwrap()
         )]
     );
@@ -312,7 +312,7 @@ fn no_note_while_the_tour_is_on_the_pr_head_or_before_github_answered() {
     assert!(review.old_head().is_none());
 
     review
-        .check_pr_head(&FakeGitHub::with_pull(
+        .check_pr_head(&FakeHost::with_pull(
             &shop.base,
             &shop.head,
             &SentLog::default(),

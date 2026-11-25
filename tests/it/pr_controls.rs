@@ -26,9 +26,9 @@ fn both_changes_offered() -> PrStatus {
 
 fn read(pull: &Pull) -> (Review, Instant) {
     let mut review = pull.open();
-    let github = pull.github().with_status(both_changes_offered());
+    let host = pull.host().with_status(both_changes_offered());
     let now = Instant::now();
-    pull.read(&mut review, &github, now);
+    pull.read(&mut review, &host, now);
     (review, now)
 }
 

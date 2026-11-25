@@ -246,7 +246,7 @@ fn switcher_agents(folders: &AppFolders) -> Arc<dyn TourAgentPort> {
 fn head_branches() -> Arc<dyn PullsOfBranchPort> {
     #[cfg(feature = "snapshots")]
     if snapshots::is_on() {
-        return Arc::new(crate::viewer::NoGitHub::default());
+        return Arc::new(crate::viewer::NoHost::default());
     }
     Arc::new(GitHub::from_env())
 }
@@ -1246,7 +1246,7 @@ fn new_layout(
 ) -> OneStepLayout {
     window.set_window_title(&marked_with_build(window_title(&opened)));
     let collaborators = Collaborators {
-        github: opened.github,
+        host: opened.host,
         ide: opened.ide,
         tour_work: TourWork {
             repinner: Arc::new(opened.repinner),

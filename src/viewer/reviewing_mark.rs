@@ -1,4 +1,4 @@
-use super::ports::{GitHubError, PullRequestReactionsPort};
+use super::ports::{HostError, PullRequestReactionsPort};
 use super::pr_reviewers::SubmittedReview;
 use super::reactions::{Reaction, ReactionChange};
 use crate::pull_request::{PullRequestUrl, Sha};
@@ -17,11 +17,8 @@ impl ReviewingMarkRemoval {
         Self { pr }
     }
 
-    pub fn run(
-        &self,
-        github: &(impl PullRequestReactionsPort + ?Sized),
-    ) -> Result<(), GitHubError> {
-        github.set_pull_request_reaction(&self.pr, REVIEWING_MARK, ReactionChange::Remove)
+    pub fn run(&self, host: &(impl PullRequestReactionsPort + ?Sized)) -> Result<(), HostError> {
+        host.set_pull_request_reaction(&self.pr, REVIEWING_MARK, ReactionChange::Remove)
     }
 }
 

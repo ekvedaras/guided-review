@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use super::jump::PaletteAction;
 use super::merging::{AutoMerge, MergeChange, MergeOffer};
-use super::ports::GitHubError;
+use super::ports::HostError;
 use super::pr_status::{PrStatus, Readiness};
 use super::press_again::{PressAgain, PressStep};
 use super::problems::Problem;
@@ -145,7 +145,7 @@ impl PrControls {
     pub(super) fn readiness_landed(
         &mut self,
         readiness: Readiness,
-        result: Result<(), GitHubError>,
+        result: Result<(), HostError>,
     ) -> Result<(), Problem> {
         self.readiness.landed(readiness);
         result.map_err(|error| Problem::ReadinessNotChanged(readiness, error.short_reason()))?;
@@ -159,7 +159,7 @@ impl PrControls {
     pub(super) fn merging_landed(
         &mut self,
         change: MergeChange,
-        result: Result<(), GitHubError>,
+        result: Result<(), HostError>,
     ) -> Result<(), Problem> {
         self.merging.landed(change);
         result.map_err(|error| Problem::MergingNotChanged(change, error.short_reason()))?;

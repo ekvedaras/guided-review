@@ -140,7 +140,7 @@ impl Destination {
 
 /// Where code that the IDE cannot open goes: a PR's repo on GitHub, or nowhere for a local review.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CodeHost {
+pub enum CodeOnWeb {
     GitHub(RepoName),
     LocalClone,
 }
@@ -169,7 +169,7 @@ impl WorkingCopy {
 pub struct CodeOpener {
     ide: Result<Ide, NoIde>,
     working_copy: WorkingCopy,
-    host: CodeHost,
+    on_web: CodeOnWeb,
     head: Sha,
 }
 
@@ -177,13 +177,13 @@ impl CodeOpener {
     pub(super) fn new(
         ide: Result<Ide, NoIde>,
         working_copy: WorkingCopy,
-        host: &CodeHost,
+        on_web: &CodeOnWeb,
         head: &Sha,
     ) -> Self {
         Self {
             ide,
             working_copy,
-            host: host.clone(),
+            on_web: on_web.clone(),
             head: head.clone(),
         }
     }
@@ -216,13 +216,13 @@ impl CodeOpener {
         }
         match repo_relative(url) {
             Some(at) => {
-                let on_github = match &self.host {
-                    CodeHost::GitHub(repo) => Some(format!(
+                let on_github = match &self.on_web {
+                    CodeOnWeb::GitHub(repo) => Some(format!(
                         "{}#L{}",
                         blob_url(repo, &self.head, at.path.as_str()),
                         at.line
                     )),
-                    CodeHost::LocalClone => None,
+                    CodeOnWeb::LocalClone => None,
                 };
                 self.code_destination(Ok(at), on_github.as_deref())
             }
@@ -255,10 +255,10 @@ impl CodeOpener {
         let ide = self
             .ide
             .as_ref()
-            .map_err(|missing| match (missing, &self.host) {
+            .map_err(|missing| match (missing, &self.on_web) {
                 (NoIde::NoTemplate, _) => NotInIde::NoIdeTemplate,
-                (NoIde::NoClone, CodeHost::GitHub(repo)) => NotInIde::NoClone(repo.clone()),
-                (NoIde::NoClone, CodeHost::LocalClone) => NotInIde::NoLocalFolder,
+                (NoIde::NoClone, CodeOnWeb::GitHub(repo)) => NotInIde::NoClone(repo.clone()),
+                (NoIde::NoClone, CodeOnWeb::LocalClone) => NotInIde::NoLocalFolder,
             })?;
         if !ide.holds(&at.path) {
             return Err(NotInIde::NotInWorkingCopy);
@@ -269,7 +269,7 @@ impl CodeOpener {
     /// `https://github.com/{owner}/{repo}/blob/{ref}/{path}#L{n}`; a ref with a slash in it is
     /// read as its first segment, as GitHub cannot tell those apart either.
     fn github_blob(&self, url: &str) -> Option<WorkingCopyLine> {
-        let CodeHost::GitHub(repo) = &self.host else {
+        let CodeOnWeb::GitHub(repo) = &self.on_web else {
             return None;
         };
         let rest = url.strip_prefix("https://github.com/")?;
@@ -322,7 +322,7 @@ fn line_of_fragment(fragment: &str) -> LineNumber {
 /// Links point at the commits the tour is pinned to, so a line stays the same line
 /// even after the PR has moved on.
 pub(super) struct CodeLinks<'a> {
-    pub host: &'a CodeHost,
+    pub on_web: &'a CodeOnWeb,
     pub base: &'a Sha,
     pub head: &'a Sha,
 }
@@ -387,16 +387,16 @@ impl CodeLinks<'_> {
     }
 
     fn removed_line(&self) -> NotInIde {
-        match self.host {
-            CodeHost::GitHub(_) => NotInIde::RemovedLine,
-            CodeHost::LocalClone => NotInIde::RemovedFromBranch,
+        match self.on_web {
+            CodeOnWeb::GitHub(_) => NotInIde::RemovedLine,
+            CodeOnWeb::LocalClone => NotInIde::RemovedFromBranch,
         }
     }
 
     fn blob(&self, sha: &Sha, path: &str) -> Option<String> {
-        match self.host {
-            CodeHost::GitHub(repo) => Some(blob_url(repo, sha, path)),
-            CodeHost::LocalClone => None,
+        match self.on_web {
+            CodeOnWeb::GitHub(repo) => Some(blob_url(repo, sha, path)),
+            CodeOnWeb::LocalClone => None,
         }
     }
 }

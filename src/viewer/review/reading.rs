@@ -7,9 +7,9 @@ use super::{
 };
 use crate::file_path::FilePath;
 use crate::tour::{Step, Tour};
-use crate::viewer::github_outage::Affected;
+use crate::viewer::host_outage::Affected;
 use crate::viewer::jump::JumpTarget;
-use crate::viewer::ports::GitHubError;
+use crate::viewer::ports::HostError;
 use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::screen::{NextScreen, ReadSubject, Screen};
 use crate::viewer::viewed_sync::{Coverage, SyncOutcome, SyncRequest};
@@ -438,12 +438,12 @@ impl ReviewCore {
         });
         self.clear_problem(ProblemKind::ViewedNotSynced);
         match error {
-            Some(GitHubError::NotAnswering(cause)) => {
-                self.github_not_answering(cause, Affected::ViewedMarks);
-                Err(GitHubError::NotAnswering(cause).into())
+            Some(HostError::NotAnswering(cause)) => {
+                self.host_not_answering(cause, Affected::ViewedMarks);
+                Err(HostError::NotAnswering(cause).into())
             }
             Some(error) => {
-                self.github_answered(Affected::ViewedMarks);
+                self.host_answered(Affected::ViewedMarks);
                 let settled = self.viewed_sync.settle(error);
                 if let Err(error) = &settled {
                     self.raise_problem(Problem::ViewedNotSynced(error.root_cause().to_string()));
@@ -451,7 +451,7 @@ impl ReviewCore {
                 settled
             }
             None => {
-                self.github_answered(Affected::ViewedMarks);
+                self.host_answered(Affected::ViewedMarks);
                 saved
             }
         }

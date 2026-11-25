@@ -49,7 +49,7 @@ pub enum ThreadVisit {
     /// To the screen that shows it, which the window scrolls to its row.
     OnScreen,
     /// No screen shows it: to its first comment on GitHub.
-    OnGitHub(String),
+    OnHost(String),
     /// Neither: the thread is gone, or a local thread no screen shows.
     Nowhere,
 }

@@ -6,7 +6,7 @@ use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
 use super::move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
-use super::ports::{GitHubError, PullOfBranch};
+use super::ports::{HostError, PullOfBranch};
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::saved_state::SavedState;
 use super::work_agenda::PULL_OF_BRANCH_RETRY;
@@ -72,7 +72,7 @@ impl BranchLink {
     /// When to look again after a failed look; a look for a PR is a convenience, so it is silent.
     pub(super) fn pull_looked_up(
         &mut self,
-        found: Result<Option<PullOfBranch>, GitHubError>,
+        found: Result<Option<PullOfBranch>, HostError>,
     ) -> Option<Duration> {
         match found {
             Ok(found) => {
@@ -98,7 +98,7 @@ impl BranchLink {
     /// When to look again after a failed look, silent as for a local review's look for its PR.
     pub(super) fn head_branch_looked_up(
         &mut self,
-        branch: Result<Option<BranchName>, GitHubError>,
+        branch: Result<Option<BranchName>, HostError>,
     ) -> Option<Duration> {
         let Self::OfPr {
             local_reviews,

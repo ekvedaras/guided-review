@@ -20,8 +20,8 @@ use crate::viewer::{
     PrStatus, Readiness,
 };
 use crate::viewer::{
-    AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, GitHubError,
-    HeadBranch, IssueDetails, IssueDetailsPort, IssueState, MergeRoute, NoAccess, OutageCause,
+    AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, HeadBranch,
+    HostError, IssueDetails, IssueDetailsPort, IssueState, MergeRoute, NoAccess, OutageCause,
     PictureUploadPort, PrAuthor, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues,
     PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews,
     PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount,
@@ -45,7 +45,7 @@ pub struct GitHub {
 
 mod relevant_prs;
 
-impl From<anyhow::Error> for GitHubError {
+impl From<anyhow::Error> for HostError {
     /// Every failure of a call to GitHub passes through here, so an outage is told from the rest
     /// in one place, by what the HTTP client reported and not by its text.
     fn from(error: anyhow::Error) -> Self {
@@ -174,7 +174,7 @@ impl GitHub {
         subject_id: &str,
         reaction: Reaction,
         change: ReactionChange,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         let mutation = match change {
             ReactionChange::Add => "addReaction",
             ReactionChange::Remove => "removeReaction",
@@ -189,7 +189,7 @@ impl GitHub {
         Ok(())
     }
 
-    fn pull_request_id(&self, pr: &PullRequestUrl) -> Result<String, GitHubError> {
+    fn pull_request_id(&self, pr: &PullRequestUrl) -> Result<String, HostError> {
         if let Some(id) = self.known_ids().get(&pr.to_string()) {
             return Ok(id.clone());
         }
@@ -216,9 +216,9 @@ impl GitHub {
         &self,
         query: &str,
         variables: &serde_json::Value,
-    ) -> Result<serde_json::Value, GitHubError> {
+    ) -> Result<serde_json::Value, HostError> {
         let token = self.token.as_ref().ok_or_else(|| {
-            GitHubError::NoAccess(NoAccess::new(
+            HostError::NoAccess(NoAccess::new(
                 "no GitHub token: run `gh auth login` or set GITHUB_TOKEN",
             ))
         })?;
@@ -232,7 +232,7 @@ impl GitHub {
                 .read_json()
                 .map_err(anyhow::Error::from)?,
             Err(ureq::Error::StatusCode(status @ (401 | 403))) => {
-                return Err(GitHubError::NoAccess(NoAccess::new(format!(
+                return Err(HostError::NoAccess(NoAccess::new(format!(
                     "GitHub refused the token (HTTP {status})"
                 ))));
             }
@@ -246,13 +246,13 @@ impl GitHub {
                     .find(|error| error["type"].as_str() == Some(wanted))
             };
             if error_of_type("INSUFFICIENT_SCOPES").is_some() {
-                return Err(GitHubError::NoAccess(NoAccess::new(
+                return Err(HostError::NoAccess(NoAccess::new(
                     "GitHub refused the token: it needs the `repo` scope",
                 )));
             }
             if let Some(forbidden) = error_of_type("FORBIDDEN") {
                 let message = forbidden["message"].as_str().unwrap_or("no reason given");
-                return Err(GitHubError::NoAccess(NoAccess::new(format!(
+                return Err(HostError::NoAccess(NoAccess::new(format!(
                     "GitHub refused: {message}"
                 ))));
             }
@@ -269,7 +269,7 @@ impl GitHub {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> Result<Option<String>, GitHubError> {
+    ) -> Result<Option<String>, HostError> {
         let pull_request_id = self.pull_request_id(pr)?;
         let input = match place {
             CommentPlace::File(path) => ReviewThreadInput {
@@ -304,7 +304,7 @@ impl GitHub {
                 CommentPlace::File(_) => String::new(),
                 CommentPlace::Lines { end, .. } => format!(" line {}", end.line),
             };
-            return Err(GitHubError::ThreadNotCreated(format!(
+            return Err(HostError::ThreadNotCreated(format!(
                 "GitHub took no comment on {}{line}",
                 place.path()
             )));
@@ -322,7 +322,7 @@ impl GitHub {
         &self,
         pr: &PullRequestUrl,
         reported: Option<String>,
-    ) -> Result<String, GitHubError> {
+    ) -> Result<String, HostError> {
         if let Some(review_id) = reported {
             return Ok(review_id);
         }
@@ -331,7 +331,7 @@ impl GitHub {
         )?)
     }
 
-    fn pending_review_id(&self, pr: &PullRequestUrl) -> Result<Option<String>, GitHubError> {
+    fn pending_review_id(&self, pr: &PullRequestUrl) -> Result<Option<String>, HostError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -357,7 +357,7 @@ impl GitHub {
         review_id: &str,
         verdict: ReviewVerdict,
         body: &str,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         self.graphql(
             "mutation($input: SubmitPullRequestReviewInput!) {
                 submitPullRequestReview(input: $input) { clientMutationId }
@@ -444,7 +444,7 @@ impl ReleasesPort for GitHub {
 }
 
 impl ChangeTipsPort for GitHub {
-    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError> {
+    fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, HostError> {
         let pull: PullJson = self
             .get(
                 &format!("repos/{}/pulls/{}", pr.repo, pr.number),
@@ -470,7 +470,7 @@ impl PullsOfBranchPort for GitHub {
         &self,
         repo: &RepoName,
         branch: &BranchName,
-    ) -> Result<Option<PullOfBranch>, GitHubError> {
+    ) -> Result<Option<PullOfBranch>, HostError> {
         let head = percent_encode_path(&format!("{}:{}", repo.owner(), branch.as_str()));
         let pulls: Vec<PullListedJson> = self
             .get(
@@ -491,7 +491,7 @@ impl PullsOfBranchPort for GitHub {
     fn pull_request_head_branch(
         &self,
         pr: &PullRequestUrl,
-    ) -> Result<Option<BranchName>, GitHubError> {
+    ) -> Result<Option<BranchName>, HostError> {
         let pull: PullHeadJson = self
             .get(
                 &format!("repos/{}/pulls/{}", pr.repo, pr.number),
@@ -543,7 +543,7 @@ impl GitHub {
 }
 
 impl PullRequestDescriptionPort for GitHub {
-    fn pull_request_description(&self, pr: &PullRequestUrl) -> Result<String, GitHubError> {
+    fn pull_request_description(&self, pr: &PullRequestUrl) -> Result<String, HostError> {
         let pull: PullBodyJson = self
             .get(
                 &format!("repos/{}/pulls/{}", pr.repo, pr.number),
@@ -566,7 +566,7 @@ impl PullRequestDescriptionPort for GitHub {
         Ok(())
     }
 
-    fn pull_request_issues(&self, pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
+    fn pull_request_issues(&self, pr: &PullRequestUrl) -> Result<PullRequestIssues, HostError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -609,7 +609,7 @@ impl PullRequestDescriptionPort for GitHub {
 }
 
 impl PullRequestOriginPort for GitHub {
-    fn pull_request_origin(&self, pr: &PullRequestUrl) -> Result<PullRequestOrigin, GitHubError> {
+    fn pull_request_origin(&self, pr: &PullRequestUrl) -> Result<PullRequestOrigin, HostError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -661,7 +661,7 @@ impl IssueDetailsPort for GitHub {
     fn issue_details(
         &self,
         issues: &[IssueUrl],
-    ) -> Result<Vec<(IssueUrl, IssueDetails)>, GitHubError> {
+    ) -> Result<Vec<(IssueUrl, IssueDetails)>, HostError> {
         if issues.is_empty() {
             return Ok(Vec::new());
         }
@@ -782,7 +782,7 @@ fn check_runs_of(nodes: &serde_json::Value) -> Arc<[CheckRun]> {
 }
 
 impl PullRequestStatusPort for GitHub {
-    fn pull_request_status(&self, pr: &PullRequestUrl) -> Result<PrStatus, GitHubError> {
+    fn pull_request_status(&self, pr: &PullRequestUrl) -> Result<PrStatus, HostError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -878,7 +878,7 @@ impl PullRequestStatusPort for GitHub {
         &self,
         pr: &PullRequestUrl,
         readiness: Readiness,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         let id = self.pull_request_id(pr)?;
         let (mutation, doing) = match readiness {
             Readiness::Draft => ("convertPullRequestToDraft", "convert"),
@@ -895,7 +895,7 @@ impl PullRequestStatusPort for GitHub {
         Ok(())
     }
 
-    fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), GitHubError> {
+    fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), HostError> {
         let id = self.pull_request_id(pr)?;
         let (mutation, method, doing) = match change {
             MergeChange::EnableAutoMerge(method) => (
@@ -934,7 +934,7 @@ impl PullRequestReactionsPort for GitHub {
         pr: &PullRequestUrl,
         reaction: Reaction,
         change: ReactionChange,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         let id = self.pull_request_id(pr)?;
         self.change_reaction(&id, reaction, change)
             .map_err(|error| error.context(format!("could not change the reaction on {pr}")))
@@ -983,7 +983,7 @@ impl PictureUploadPort for GitHub {
 }
 
 impl ViewedFilesPort for GitHub {
-    fn viewed_files(&self, pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, GitHubError> {
+    fn viewed_files(&self, pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, HostError> {
         let mut files = Vec::new();
         let mut after = serde_json::Value::Null;
         loop {
@@ -1025,7 +1025,7 @@ impl ViewedFilesPort for GitHub {
         pr: &PullRequestUrl,
         path: &FilePath,
         viewed: Viewed,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         let mutation = match viewed {
             Viewed::Yes => "markFileAsViewed",
             Viewed::No => "unmarkFileAsViewed",
@@ -1049,7 +1049,7 @@ impl ViewedFilesPort for GitHub {
 
 impl ReviewThreadsPort for GitHub {
     /// Every review thread of the PR, over GraphQL (REST shows no resolved or outdated state).
-    fn review_threads(&self, pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, GitHubError> {
+    fn review_threads(&self, pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, HostError> {
         let mut threads = Vec::new();
         let mut after = serde_json::Value::Null;
         loop {
@@ -1077,7 +1077,7 @@ impl ReviewThreadsPort for GitHub {
         thread_id: &ThreadId,
         body: &str,
         mode: SendMode,
-    ) -> Result<CommentId, GitHubError> {
+    ) -> Result<CommentId, HostError> {
         let input = ReplyInput {
             pull_request_review_thread_id: thread_id.as_str(),
             body,
@@ -1112,7 +1112,7 @@ impl ReviewThreadsPort for GitHub {
         &self,
         thread_id: &ThreadId,
         resolution: Resolution,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         let mutation = match resolution {
             Resolution::Resolved => "resolveReviewThread",
             Resolution::Unresolved => "unresolveReviewThread",
@@ -1133,12 +1133,12 @@ impl ReviewThreadsPort for GitHub {
         comment_id: &CommentId,
         reaction: Reaction,
         change: ReactionChange,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         self.change_reaction(comment_id.as_str(), reaction, change)
             .map_err(|error| error.context("could not change the reaction"))
     }
 
-    fn edit_comment(&self, comment_id: &CommentId, body: &str) -> Result<(), GitHubError> {
+    fn edit_comment(&self, comment_id: &CommentId, body: &str) -> Result<(), HostError> {
         self.graphql(
             "mutation($input: UpdatePullRequestReviewCommentInput!) {
                 updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id } }
@@ -1149,7 +1149,7 @@ impl ReviewThreadsPort for GitHub {
         Ok(())
     }
 
-    fn delete_comment(&self, comment_id: &CommentId) -> Result<(), GitHubError> {
+    fn delete_comment(&self, comment_id: &CommentId) -> Result<(), HostError> {
         self.graphql(
             "mutation($input: DeletePullRequestReviewCommentInput!) {
                 deletePullRequestReviewComment(input: $input) { clientMutationId }
@@ -1165,7 +1165,7 @@ impl ReviewThreadsPort for GitHub {
 fn viewer_latest_review(
     pr: &PullRequestUrl,
     review: &serde_json::Value,
-) -> Result<Option<SubmittedReview>, GitHubError> {
+) -> Result<Option<SubmittedReview>, HostError> {
     if review.is_null() {
         return Ok(None);
     }
@@ -1211,7 +1211,7 @@ fn requested_reviewer(requested: &serde_json::Value) -> Option<Reviewer> {
 }
 
 impl ReviewWritesPort for GitHub {
-    fn has_pending_review(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
+    fn has_pending_review(&self, pr: &PullRequestUrl) -> Result<bool, HostError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -1232,7 +1232,7 @@ impl ReviewWritesPort for GitHub {
             .any(|review| at(review, "/viewerDidAuthor").as_bool() == Some(true)))
     }
 
-    fn reviews(&self, pr: &PullRequestUrl) -> Result<PullRequestReviews, GitHubError> {
+    fn reviews(&self, pr: &PullRequestUrl) -> Result<PullRequestReviews, HostError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -1289,7 +1289,7 @@ impl ReviewWritesPort for GitHub {
         })
     }
 
-    fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, GitHubError> {
+    fn viewer_authored(&self, pr: &PullRequestUrl) -> Result<bool, HostError> {
         let data = self
             .graphql(
                 "query($owner: String!, $name: String!, $number: Int!) {
@@ -1308,7 +1308,7 @@ impl ReviewWritesPort for GitHub {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         self.add_thread_to_pending_review(pr, place, body)
             .map(|_| ())
     }
@@ -1320,7 +1320,7 @@ impl ReviewWritesPort for GitHub {
         pr: &PullRequestUrl,
         place: &CommentPlace,
         body: &str,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         let reported = self.add_thread_to_pending_review(pr, place, body)?;
         let review_id = self
             .review_holding_new_comment(pr, reported)
@@ -1355,7 +1355,7 @@ impl ReviewWritesPort for GitHub {
         pr: &PullRequestUrl,
         verdict: ReviewVerdict,
         body: &str,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         if let Some(review_id) = self.pending_review_id(pr)? {
             return self
                 .submit_pending_review(&review_id, verdict, body)
@@ -1531,10 +1531,10 @@ const ONE_PENDING_REVIEW: &str = "one pending review";
 
 /// Only a new thread or a reply can meet the viewer's other pending review; elsewhere the
 /// same words stay a plain failure.
-fn one_pending_review(error: GitHubError) -> GitHubError {
+fn one_pending_review(error: HostError) -> HostError {
     match error {
-        GitHubError::Other(error) if format!("{error:#}").contains(ONE_PENDING_REVIEW) => {
-            GitHubError::PendingReviewExists
+        HostError::Other(error) if format!("{error:#}").contains(ONE_PENDING_REVIEW) => {
+            HostError::PendingReviewExists
         }
         error => error,
     }

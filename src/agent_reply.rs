@@ -79,7 +79,7 @@ pub fn why_reply(
 
 /// Says where the reply went. Nothing is posted for a hand-off the review does not have.
 pub fn agent_reply(
-    github: &(impl ReviewThreadsPort + ReviewWritesPort),
+    host: &(impl ReviewThreadsPort + ReviewWritesPort),
     folders: &AppFolders,
     subject: &ReviewSubject,
     id: HandOffId,
@@ -93,7 +93,7 @@ pub fn agent_reply(
         AgentReply::WorkingOnIt => state.hand_offs().agent_working_on_it(&home, id)?,
     };
     let done = request
-        .run(github)
+        .run(host)
         .with_context(|| format!("could not post the reply to {id} on {subject}"))?;
     mark_replied(folders, &state_file, subject, id, done.replied())?;
     let what = match reply {

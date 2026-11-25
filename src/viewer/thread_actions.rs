@@ -5,7 +5,7 @@ use super::local_threads::LocalAuthor;
 
 use super::comments::Audience;
 use super::comments::{CommentRefusal, SendMode};
-use super::ports::{GitHubError, Resolution, ReviewThreadsPort, ReviewWritesPort};
+use super::ports::{HostError, Resolution, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 
@@ -78,10 +78,10 @@ pub struct ThreadActionOutcome {
 impl ThreadActionRequest {
     pub fn run(
         self,
-        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
     ) -> ThreadActionOutcome {
         let result = match &self.home {
-            ThreadHome::GitHub(pr) => match self.perform(github, pr) {
+            ThreadHome::Host(pr) => match self.perform(host, pr) {
                 Ok(result) => result,
                 Err(error) => classify(&error),
             },
@@ -90,7 +90,7 @@ impl ThreadActionRequest {
                 .unwrap_or_else(|error| ThreadActionResult::Failed(format!("{error:#}"))),
         };
         let threads = (result == ThreadActionResult::Done).then(|| match &self.home {
-            ThreadHome::GitHub(pr) => github
+            ThreadHome::Host(pr) => host
                 .review_threads(pr)
                 .map_err(|error| format!("{error:#}")),
             ThreadHome::StateFile(store) => store
@@ -160,9 +160,9 @@ impl ThreadActionRequest {
 
     fn perform(
         &self,
-        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
         pr: &PullRequestUrl,
-    ) -> Result<ThreadActionResult, GitHubError> {
+    ) -> Result<ThreadActionResult, HostError> {
         if let Some(refusal) = self.refusal_before_sending() {
             return Ok(ThreadActionResult::Refused(refusal));
         }
@@ -174,40 +174,40 @@ impl ThreadActionRequest {
             ThreadAction::Reply {
                 thread_id, mode, ..
             } => {
-                if *mode == SendMode::CommentNow && github.has_pending_review(pr)? {
+                if *mode == SendMode::CommentNow && host.has_pending_review(pr)? {
                     return Ok(ThreadActionResult::Refused(
                         CommentRefusal::PendingReviewExists,
                     ));
                 }
-                github.reply_to_thread(pr, thread_id, text, *mode)?;
+                host.reply_to_thread(pr, thread_id, text, *mode)?;
             }
-            ThreadAction::EditComment { comment_id } => github.edit_comment(comment_id, text)?,
-            ThreadAction::DeleteComment { comment_id } => github.delete_comment(comment_id)?,
+            ThreadAction::EditComment { comment_id } => host.edit_comment(comment_id, text)?,
+            ThreadAction::DeleteComment { comment_id } => host.delete_comment(comment_id)?,
             ThreadAction::Resolve { thread_id } => {
-                github.set_thread_resolved(thread_id, Resolution::Resolved)?;
+                host.set_thread_resolved(thread_id, Resolution::Resolved)?;
             }
             ThreadAction::Unresolve { thread_id } => {
-                github.set_thread_resolved(thread_id, Resolution::Unresolved)?;
+                host.set_thread_resolved(thread_id, Resolution::Unresolved)?;
             }
             ThreadAction::SetReaction {
                 comment_id,
                 reaction,
                 change,
-            } => github.set_reaction(comment_id, *reaction, *change)?,
+            } => host.set_reaction(comment_id, *reaction, *change)?,
         }
         Ok(ThreadActionResult::Done)
     }
 }
 
-fn classify(error: &GitHubError) -> ThreadActionResult {
+fn classify(error: &HostError) -> ThreadActionResult {
     match error {
-        GitHubError::PendingReviewExists => {
+        HostError::PendingReviewExists => {
             ThreadActionResult::Refused(CommentRefusal::PendingReviewExists)
         }
-        GitHubError::NoAccess(no_access) => {
+        HostError::NoAccess(no_access) => {
             ThreadActionResult::Refused(CommentRefusal::NoAccess(no_access.reason().to_owned()))
         }
-        GitHubError::ThreadNotCreated(_) | GitHubError::NotAnswering(_) | GitHubError::Other(_) => {
+        HostError::ThreadNotCreated(_) | HostError::NotAnswering(_) | HostError::Other(_) => {
             ThreadActionResult::Failed(format!("{error:#}"))
         }
     }

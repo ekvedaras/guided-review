@@ -1,6 +1,6 @@
-//! A GitHub outage: GitHub does not answer reads that are fine, so what the screen shows may be
-//! old. The reviewer is told once, whatever number of reads failed, and the reads are tried again
-//! by themselves, further apart the longer the outage lasts.
+//! A host outage: the code host (GitHub) does not answer reads that are fine, so what the screen
+//! shows may be old. The reviewer is told once, whatever number of reads failed, and the reads are
+//! tried again by themselves, further apart the longer the outage lasts.
 
 use std::collections::BTreeMap;
 use std::fmt;

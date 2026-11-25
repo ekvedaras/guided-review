@@ -68,7 +68,7 @@ enum Scene {
     ReleaseInstallInTheWay,
     RenderedMarkdown,
     AgentLinkOff,
-    GitHubOutage,
+    HostOutage,
     RefreshRunning,
     PinnedFileHeader,
     SettingsKeys,
@@ -146,7 +146,7 @@ impl Scene {
         Self::ReleaseInstallInTheWay,
         Self::RenderedMarkdown,
         Self::AgentLinkOff,
-        Self::GitHubOutage,
+        Self::HostOutage,
         Self::RefreshRunning,
         Self::PinnedFileHeader,
         Self::SettingsKeys,
@@ -224,7 +224,7 @@ impl Scene {
             Self::ReleaseInstallInTheWay => "43-release-install-in-the-way",
             Self::RenderedMarkdown => "41-rendered-markdown",
             Self::AgentLinkOff => "42-agent-link-off",
-            Self::GitHubOutage => "44-github-outage",
+            Self::HostOutage => "44-github-outage",
             Self::RefreshRunning => "45-refresh-running",
             Self::PinnedFileHeader => "46-pinned-file-header",
             Self::SettingsKeys => "47-settings-keys",
@@ -1199,7 +1199,7 @@ impl OneStepLayout {
                 review.steps_carried_read_ticks_are(3);
             }),
             Scene::AgentLinkOff => self.session.update(cx, ReviewSession::stage_agent_link_off),
-            Scene::GitHubOutage => self.session.update(cx, ReviewSession::stage_outage),
+            Scene::HostOutage => self.session.update(cx, ReviewSession::stage_outage),
             Scene::StationsBusy => {
                 self.change_review(cx, |review| {
                     review.go_forward();
@@ -1348,7 +1348,7 @@ impl OneStepLayout {
                     review.go_to_summary();
                 });
             }
-            Scene::GitHubOutage => {
+            Scene::HostOutage => {
                 self.session.update(cx, ReviewSession::unstage_outage);
                 if let Some(toaster) = cx.try_global::<Toaster>().cloned() {
                     toaster.0.update(cx, ToastShelf::clear);

@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
@@ -38,8 +38,8 @@ impl Pull {
         }
     }
 
-    fn github(&self) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent)
+    fn host(&self) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent)
     }
 
     fn source(&self) -> LocalGit {
@@ -70,17 +70,17 @@ impl Pull {
     }
 
     /// The window came to the front: everything is read again and what waits is sent.
-    fn come_to_front(&self, review: &mut Review, github: &FakeGitHub) {
-        review.pull_from_github();
-        drive_without_agents(review, github, &self.source(), Instant::now());
+    fn come_to_front(&self, review: &mut Review, host: &FakeHost) {
+        review.pull_from_host();
+        drive_without_agents(review, host, &self.source(), Instant::now());
     }
 
     fn eyes_changes(&self) -> Vec<ReactionChange> {
         self.sent
-            .github_calls()
+            .host_calls()
             .into_iter()
             .filter_map(|call| match call {
-                GitHubCall::SetPullRequestReaction {
+                HostCall::SetPullRequestReaction {
                     reaction: Reaction::Eyes,
                     change,
                     ..
@@ -103,10 +103,10 @@ fn earlier_review(head: &str) -> SubmittedReview {
 #[test]
 fn opening_someone_elses_pr_puts_eyes_on_it() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
 
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
     assert_eq!(pull.eyes_changes(), vec![ReactionChange::Add]);
 }
@@ -114,11 +114,11 @@ fn opening_someone_elses_pr_puts_eyes_on_it() {
 #[test]
 fn the_eyes_go_on_once_however_often_the_window_comes_to_the_front() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
 
-    pull.come_to_front(&mut review, &github);
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
+    pull.come_to_front(&mut review, &host);
 
     assert_eq!(pull.eyes_changes(), vec![ReactionChange::Add]);
 }
@@ -126,10 +126,10 @@ fn the_eyes_go_on_once_however_often_the_window_comes_to_the_front() {
 #[test]
 fn the_viewers_own_pr_gets_no_eyes() {
     let pull = Pull::new();
-    let github = pull.github().with_viewer_as_pull_author();
+    let host = pull.host().with_viewer_as_pull_author();
     let mut review = pull.open();
 
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
     assert_eq!(pull.eyes_changes(), vec![]);
 }
@@ -137,12 +137,12 @@ fn the_viewers_own_pr_gets_no_eyes() {
 #[test]
 fn a_review_sent_from_the_app_takes_the_eyes_off() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
-    review.finish_review(ReviewVerdict::Approve, "ship it", &github);
-    drive_without_agents(&mut review, &github, &pull.source(), Instant::now());
+    review.finish_review(ReviewVerdict::Approve, "ship it", &host);
+    drive_without_agents(&mut review, &host, &pull.source(), Instant::now());
 
     assert_eq!(
         pull.eyes_changes(),
@@ -153,12 +153,12 @@ fn a_review_sent_from_the_app_takes_the_eyes_off() {
 #[test]
 fn a_review_sent_on_the_web_takes_the_eyes_off_once_it_is_read() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
-    let github = pull.github().with_last_review(earlier_review(&pull.head));
-    pull.come_to_front(&mut review, &github);
+    let host = pull.host().with_last_review(earlier_review(&pull.head));
+    pull.come_to_front(&mut review, &host);
 
     assert_eq!(
         pull.eyes_changes(),
@@ -169,11 +169,11 @@ fn a_review_sent_on_the_web_takes_the_eyes_off_once_it_is_read() {
 #[test]
 fn a_review_sent_on_an_older_commit_before_the_pr_was_opened_leaves_the_eyes_on() {
     let pull = Pull::new();
-    let github = pull.github().with_last_review(earlier_review(&pull.base));
+    let host = pull.host().with_last_review(earlier_review(&pull.base));
     let mut review = pull.open();
 
-    pull.come_to_front(&mut review, &github);
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
+    pull.come_to_front(&mut review, &host);
 
     assert_eq!(pull.eyes_changes(), vec![ReactionChange::Add]);
 }
@@ -181,11 +181,11 @@ fn a_review_sent_on_an_older_commit_before_the_pr_was_opened_leaves_the_eyes_on(
 #[test]
 fn eyes_github_refused_are_a_problem_until_they_go_on_at_the_next_try() {
     let pull = Pull::new();
-    let github = pull.github();
-    github.inject(GitHubFault::ConnectionLost);
+    let host = pull.host();
+    host.inject(HostFault::ConnectionLost);
     let mut review = pull.open();
 
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
     assert!(
         review
             .problems()
@@ -195,8 +195,8 @@ fn eyes_github_refused_are_a_problem_until_they_go_on_at_the_next_try() {
         review.problems()
     );
 
-    github.heal(&GitHubFault::ConnectionLost);
-    pull.come_to_front(&mut review, &github);
+    host.heal(&HostFault::ConnectionLost);
+    pull.come_to_front(&mut review, &host);
 
     assert_eq!(
         pull.eyes_changes(),
@@ -213,11 +213,11 @@ fn eyes_github_refused_are_a_problem_until_they_go_on_at_the_next_try() {
 #[test]
 fn closing_the_review_takes_the_eyes_off() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
-    review.close().unwrap().run(&github).unwrap();
+    review.close().unwrap().run(&host).unwrap();
 
     assert_eq!(
         pull.eyes_changes(),
@@ -228,11 +228,11 @@ fn closing_the_review_takes_the_eyes_off() {
 #[test]
 fn closing_a_review_whose_eyes_are_already_off_sends_nothing() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    pull.come_to_front(&mut review, &github);
-    review.finish_review(ReviewVerdict::Approve, "ship it", &github);
-    drive_without_agents(&mut review, &github, &pull.source(), Instant::now());
+    pull.come_to_front(&mut review, &host);
+    review.finish_review(ReviewVerdict::Approve, "ship it", &host);
+    drive_without_agents(&mut review, &host, &pull.source(), Instant::now());
 
     assert!(review.close().is_none());
 }
@@ -240,9 +240,9 @@ fn closing_a_review_whose_eyes_are_already_off_sends_nothing() {
 #[test]
 fn closing_a_review_that_put_no_eyes_on_sends_nothing() {
     let pull = Pull::new();
-    let github = pull.github().with_viewer_as_pull_author();
+    let host = pull.host().with_viewer_as_pull_author();
     let mut review = pull.open();
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
     assert!(review.close().is_none());
 }
@@ -250,12 +250,12 @@ fn closing_a_review_that_put_no_eyes_on_sends_nothing() {
 #[test]
 fn a_closed_review_does_not_put_the_eyes_back() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    pull.come_to_front(&mut review, &github);
-    review.close().unwrap().run(&github).unwrap();
+    pull.come_to_front(&mut review, &host);
+    review.close().unwrap().run(&host).unwrap();
 
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
     assert_eq!(
         pull.eyes_changes(),
@@ -266,13 +266,13 @@ fn a_closed_review_does_not_put_the_eyes_back() {
 #[test]
 fn marking_a_re_review_done_takes_the_eyes_off() {
     let pull = Pull::new();
-    let github = pull.github().with_last_review(earlier_review(&pull.base));
+    let host = pull.host().with_last_review(earlier_review(&pull.base));
     let mut review = pull.open();
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
     assert!(review.can_mark_done());
 
     review.mark_done().unwrap();
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
     assert_eq!(
         pull.eyes_changes(),
@@ -285,15 +285,15 @@ fn marking_a_re_review_done_takes_the_eyes_off() {
 #[test]
 fn a_pr_marked_done_gets_no_eyes_when_opened_again() {
     let pull = Pull::new();
-    let github = pull.github().with_last_review(earlier_review(&pull.base));
+    let host = pull.host().with_last_review(earlier_review(&pull.base));
     let mut review = pull.open();
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
     review.mark_done().unwrap();
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
     drop(review);
 
     let mut again = pull.open();
-    pull.come_to_front(&mut again, &github);
+    pull.come_to_front(&mut again, &host);
 
     assert!(again.is_marked_done());
     assert_eq!(
@@ -305,12 +305,12 @@ fn a_pr_marked_done_gets_no_eyes_when_opened_again() {
 #[test]
 fn mark_done_is_offered_only_when_the_last_review_saw_an_older_commit() {
     let pull = Pull::new();
-    let never_reviewed = pull.github();
+    let never_reviewed = pull.host();
     let mut review = pull.open();
     pull.come_to_front(&mut review, &never_reviewed);
     assert!(!review.can_mark_done());
 
-    let reviewed_at_head = pull.github().with_last_review(earlier_review(&pull.head));
+    let reviewed_at_head = pull.host().with_last_review(earlier_review(&pull.head));
     let mut review = pull.open();
     pull.come_to_front(&mut review, &reviewed_at_head);
     assert!(!review.can_mark_done());
@@ -319,13 +319,13 @@ fn mark_done_is_offered_only_when_the_last_review_saw_an_older_commit() {
 #[test]
 fn mark_done_is_not_offered_while_a_pending_review_waits_to_be_sent() {
     let pull = Pull::new();
-    let github = pull
-        .github()
+    let host = pull
+        .host()
         .with_last_review(earlier_review(&pull.base))
         .with_web_pending_review();
     let mut review = pull.open();
 
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
     assert!(!review.can_mark_done());
 }
@@ -333,9 +333,9 @@ fn mark_done_is_not_offered_while_a_pending_review_waits_to_be_sent() {
 #[test]
 fn a_re_review_finishes_by_marking_it_done_and_then_has_nothing_left_to_finish() {
     let pull = Pull::new();
-    let github = pull.github().with_last_review(earlier_review(&pull.base));
+    let host = pull.host().with_last_review(earlier_review(&pull.base));
     let mut review = pull.open();
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
     assert_eq!(review.finish_action(), Some(FinishAction::MarkDone));
 
     let Effect::Change(change) = review.decide(Intent::MarkDone, WindowMoment::default()) else {
@@ -350,10 +350,10 @@ fn a_re_review_finishes_by_marking_it_done_and_then_has_nothing_left_to_finish()
 #[test]
 fn a_pr_reviewed_at_the_tours_head_gets_no_eyes_when_opened_again() {
     let pull = Pull::new();
-    let github = pull.github().with_last_review(earlier_review(&pull.head));
+    let host = pull.host().with_last_review(earlier_review(&pull.head));
     let mut review = pull.open();
 
-    pull.come_to_front(&mut review, &github);
+    pull.come_to_front(&mut review, &host);
 
     assert_eq!(pull.eyes_changes(), vec![]);
 }

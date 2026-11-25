@@ -1,5 +1,5 @@
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::{FixtureRepo, save_typing};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
@@ -40,8 +40,8 @@ impl Pull {
         }
     }
 
-    fn github(&self) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent)
+    fn host(&self) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent)
     }
 
     fn open(&self) -> Review {
@@ -115,11 +115,11 @@ fn approve_and_request_changes_show_only_on_a_pr_someone_else_wrote() {
     let mut review = pull.open();
     assert!(!review.can_approve_or_request_changes(), "not known yet");
 
-    review.pull_viewer_authorship(&pull.github()).unwrap();
+    review.pull_viewer_authorship(&pull.host()).unwrap();
     assert!(review.can_approve_or_request_changes());
 
     review
-        .pull_viewer_authorship(&pull.github().with_viewer_as_pull_author())
+        .pull_viewer_authorship(&pull.host().with_viewer_as_pull_author())
         .unwrap();
     assert!(!review.can_approve_or_request_changes());
 }
@@ -131,7 +131,7 @@ fn finish_review_is_offered_on_ones_own_pr_only_with_comments_to_send() {
     assert!(!review.can_finish_review(), "not known yet");
 
     review
-        .pull_viewer_authorship(&pull.github().with_viewer_as_pull_author())
+        .pull_viewer_authorship(&pull.host().with_viewer_as_pull_author())
         .unwrap();
     review.pending_review_is(false);
     assert!(
@@ -148,7 +148,7 @@ fn finish_review_is_offered_on_someone_elses_pr_with_nothing_pending() {
     let pull = Pull::new();
     let mut review = pull.open();
 
-    review.pull_viewer_authorship(&pull.github()).unwrap();
+    review.pull_viewer_authorship(&pull.host()).unwrap();
     review.pending_review_is(false);
 
     assert!(review.can_finish_review());
@@ -157,14 +157,14 @@ fn finish_review_is_offered_on_someone_elses_pr_with_nothing_pending() {
 #[test]
 fn finishing_sends_the_verdict_and_body() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    review.pull_viewer_authorship(&github).unwrap();
+    review.pull_viewer_authorship(&host).unwrap();
 
-    let result = review.finish_review(ReviewVerdict::Approve, "ship it", &github);
+    let result = review.finish_review(ReviewVerdict::Approve, "ship it", &host);
 
     assert_eq!(result, FinishResult::Sent);
-    assert!(pull.sent.github_calls().contains(&GitHubCall::Submit {
+    assert!(pull.sent.host_calls().contains(&HostCall::Submit {
         verdict: ReviewVerdict::Approve,
         body: "ship it".into()
     }));
@@ -173,22 +173,22 @@ fn finishing_sends_the_verdict_and_body() {
 #[test]
 fn approving_or_requesting_changes_on_your_own_pr_is_refused_before_anything_is_sent() {
     let pull = Pull::new();
-    let github = pull.github().with_viewer_as_pull_author();
+    let host = pull.host().with_viewer_as_pull_author();
     let mut review = pull.open();
-    review.pull_viewer_authorship(&github).unwrap();
+    review.pull_viewer_authorship(&host).unwrap();
 
     for verdict in [ReviewVerdict::Approve, ReviewVerdict::RequestChanges] {
         assert_eq!(
-            review.finish_review(verdict, "text", &github),
+            review.finish_review(verdict, "text", &host),
             FinishResult::Refused(FinishRefusal::OwnPullRequest)
         );
     }
     assert!(
         !pull
             .sent
-            .github_calls()
+            .host_calls()
             .iter()
-            .any(|call| matches!(call, GitHubCall::Submit { .. }))
+            .any(|call| matches!(call, HostCall::Submit { .. }))
     );
 }
 
@@ -197,16 +197,16 @@ fn a_comment_review_with_no_text_needs_a_pending_review_to_send() {
     let pull = Pull::new();
     let mut review = pull.open();
 
-    let nothing = review.finish_review(ReviewVerdict::Comment, "  ", &pull.github());
+    let nothing = review.finish_review(ReviewVerdict::Comment, "  ", &pull.host());
     assert_eq!(
         nothing,
         FinishResult::Refused(FinishRefusal::BodyNeeded(ReviewVerdict::Comment))
     );
 
-    let github = pull.github().with_web_pending_review();
-    review.pull_pending_review(&github).unwrap();
+    let host = pull.host().with_web_pending_review();
+    review.pull_pending_review(&host).unwrap();
     assert_eq!(
-        review.finish_review(ReviewVerdict::Comment, "", &github),
+        review.finish_review(ReviewVerdict::Comment, "", &host),
         FinishResult::Sent
     );
 }
@@ -214,12 +214,12 @@ fn a_comment_review_with_no_text_needs_a_pending_review_to_send() {
 #[test]
 fn requesting_changes_needs_text() {
     let pull = Pull::new();
-    let github = pull.github().with_web_pending_review();
+    let host = pull.host().with_web_pending_review();
     let mut review = pull.open();
-    review.pull_viewer_authorship(&github).unwrap();
+    review.pull_viewer_authorship(&host).unwrap();
 
     assert_eq!(
-        review.finish_review(ReviewVerdict::RequestChanges, "", &github),
+        review.finish_review(ReviewVerdict::RequestChanges, "", &host),
         FinishResult::Refused(FinishRefusal::BodyNeeded(ReviewVerdict::RequestChanges))
     );
 }
@@ -227,13 +227,13 @@ fn requesting_changes_needs_text() {
 #[test]
 fn a_failed_finish_says_why() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    review.pull_viewer_authorship(&github).unwrap();
-    github.inject(GitHubFault::ConnectionLost);
+    review.pull_viewer_authorship(&host).unwrap();
+    host.inject(HostFault::ConnectionLost);
 
     assert_eq!(
-        review.finish_review(ReviewVerdict::Approve, "", &github),
+        review.finish_review(ReviewVerdict::Approve, "", &host),
         FinishResult::Failed("network is down".into())
     );
 }
@@ -241,12 +241,12 @@ fn a_failed_finish_says_why() {
 #[test]
 fn finishing_ends_the_pending_review() {
     let pull = Pull::new();
-    let github = pull.github().with_web_pending_review();
+    let host = pull.host().with_web_pending_review();
     let mut review = pull.open();
-    review.pull_pending_review(&github).unwrap();
+    review.pull_pending_review(&host).unwrap();
     assert!(!review.can_comment_now());
 
-    review.finish_review(ReviewVerdict::Comment, "done", &github);
+    review.finish_review(ReviewVerdict::Comment, "done", &host);
 
     assert!(review.can_comment_now());
 }
@@ -254,15 +254,15 @@ fn finishing_ends_the_pending_review() {
 #[test]
 fn the_review_body_goes_when_the_review_is_sent() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    review.pull_viewer_authorship(&github).unwrap();
+    review.pull_viewer_authorship(&host).unwrap();
     review
         .type_in(&TextBox::FinishBody, "looks good so far")
         .unwrap();
     save_typing(&mut review);
 
-    let result = review.finish_review(ReviewVerdict::Comment, "looks good so far", &github);
+    let result = review.finish_review(ReviewVerdict::Comment, "looks good so far", &host);
 
     assert_eq!(result, FinishResult::Sent);
     assert_eq!(pull.open().text_of(&TextBox::FinishBody), None);
@@ -271,13 +271,13 @@ fn the_review_body_goes_when_the_review_is_sent() {
 #[test]
 fn a_refused_finish_keeps_the_body() {
     let pull = Pull::new();
-    let github = pull.github().with_viewer_as_pull_author();
+    let host = pull.host().with_viewer_as_pull_author();
     let mut review = pull.open();
-    review.pull_viewer_authorship(&github).unwrap();
+    review.pull_viewer_authorship(&host).unwrap();
     review.type_in(&TextBox::FinishBody, "not yet").unwrap();
     save_typing(&mut review);
 
-    let result = review.finish_review(ReviewVerdict::Approve, "not yet", &github);
+    let result = review.finish_review(ReviewVerdict::Approve, "not yet", &host);
 
     assert!(matches!(result, FinishResult::Refused(_)));
     assert_eq!(pull.open().text_of(&TextBox::FinishBody), Some("not yet"));
@@ -310,7 +310,7 @@ fn a_review_never_sent_has_no_last_review() {
     let pull = Pull::new();
     let mut review = pull.open();
 
-    review.pull_last_review(&pull.github()).unwrap();
+    review.pull_last_review(&pull.host()).unwrap();
 
     assert_eq!(review.last_review(), None);
 }
@@ -319,10 +319,10 @@ fn a_review_never_sent_has_no_last_review() {
 fn a_review_sent_from_the_web_is_the_last_review() {
     let pull = Pull::new();
     let sent = web_review(ReviewOutcome::ChangesRequested, &pull.head);
-    let github = pull.github().with_last_review(sent.clone());
+    let host = pull.host().with_last_review(sent.clone());
     let mut review = pull.open();
 
-    review.pull_last_review(&github).unwrap();
+    review.pull_last_review(&host).unwrap();
 
     assert_eq!(review.last_review(), Some(&sent));
 }
@@ -330,14 +330,14 @@ fn a_review_sent_from_the_web_is_the_last_review() {
 #[test]
 fn the_last_review_is_old_once_the_pr_has_moved_past_its_commit() {
     let pull = Pull::new();
-    let github = pull
-        .github()
+    let host = pull
+        .host()
         .with_last_review(web_review(ReviewOutcome::Approved, "older-commit"));
     let mut review = pull.open();
-    review.pull_last_review(&github).unwrap();
+    review.pull_last_review(&host).unwrap();
     assert!(!review.last_review_is_old(), "the PR head is not known yet");
 
-    review.check_pr_head(&github).unwrap();
+    review.check_pr_head(&host).unwrap();
 
     assert!(review.last_review_is_old());
 }
@@ -345,13 +345,13 @@ fn the_last_review_is_old_once_the_pr_has_moved_past_its_commit() {
 #[test]
 fn the_last_review_is_not_old_while_the_pr_is_at_its_commit() {
     let pull = Pull::new();
-    let github = pull
-        .github()
+    let host = pull
+        .host()
         .with_last_review(web_review(ReviewOutcome::Approved, &pull.head));
     let mut review = pull.open();
-    review.pull_last_review(&github).unwrap();
+    review.pull_last_review(&host).unwrap();
 
-    review.check_pr_head(&github).unwrap();
+    review.check_pr_head(&host).unwrap();
 
     assert!(!review.last_review_is_old());
 }
@@ -359,12 +359,12 @@ fn the_last_review_is_not_old_while_the_pr_is_at_its_commit() {
 #[test]
 fn finishing_makes_the_review_the_last_one_when_read_again() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    review.pull_viewer_authorship(&github).unwrap();
+    review.pull_viewer_authorship(&host).unwrap();
 
-    review.finish_review(ReviewVerdict::Approve, "ship it", &github);
-    review.pull_last_review(&github).unwrap();
+    review.finish_review(ReviewVerdict::Approve, "ship it", &host);
+    review.pull_last_review(&host).unwrap();
 
     let last = review.last_review().unwrap();
     assert_eq!(last.outcome, ReviewOutcome::Approved);
@@ -375,11 +375,11 @@ fn finishing_makes_the_review_the_last_one_when_read_again() {
 #[test]
 fn a_last_review_that_could_not_be_read_is_a_problem_until_it_is_read() {
     let pull = Pull::new();
-    let github = pull.github();
-    github.inject(GitHubFault::ReadsFail);
+    let host = pull.host();
+    host.inject(HostFault::ReadsFail);
     let mut review = pull.open();
 
-    review.pull_last_review(&github).unwrap_err();
+    review.pull_last_review(&host).unwrap_err();
     assert!(
         review
             .problems()
@@ -387,7 +387,7 @@ fn a_last_review_that_could_not_be_read_is_a_problem_until_it_is_read() {
             .any(|problem| problem.to_string().contains("last review"))
     );
 
-    github.heal(&GitHubFault::ReadsFail);
-    review.pull_last_review(&github).unwrap();
+    host.heal(&HostFault::ReadsFail);
+    review.pull_last_review(&host).unwrap();
     assert_eq!(review.problems().len(), 0);
 }

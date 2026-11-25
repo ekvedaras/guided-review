@@ -20,7 +20,7 @@ use crate::repin::Repin;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin};
 use crate::viewer::{
-    ChangeTipsPort, GitHubPort, NoGitHub, PickCodeSource, RepinnedTour, Review, ReviewBuilder,
+    ChangeTipsPort, CodeHost, NoHost, PickCodeSource, RepinnedTour, Review, ReviewBuilder,
     ReviewStateFile,
 };
 use pull_request::OpenedPr;
@@ -118,12 +118,12 @@ impl OpenedSubject {
         }
     }
 
-    /// The GitHub the review talks to. A local review has none to ask: its port refuses every call but
+    /// The code host the review talks to. A local review has none to ask: its port refuses every call but
     /// the look-up of a PR of its branch.
-    pub fn github(&self) -> Arc<dyn GitHubPort> {
+    pub fn host(&self) -> Arc<dyn CodeHost> {
         match &self.0 {
             Adapter::PullRequest(opened) => Arc::new(opened.github().clone()),
-            Adapter::Local(_) => Arc::new(NoGitHub::looking_up_branches_with(Arc::new(
+            Adapter::Local(_) => Arc::new(NoHost::looking_up_branches_with(Arc::new(
                 GitHub::from_env(),
             ))),
         }
@@ -150,9 +150,9 @@ pub struct TourRepinner {
 
 impl TourRepinner {
     /// Blocks on the network and on git; the app runs it off the main thread.
-    pub fn run(&self, github: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
+    pub fn run(&self, host: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
         let (tour, source) =
-            update_shown_tour(&self.subject, &self.folders, github, &self.pick_code_source)?;
+            update_shown_tour(&self.subject, &self.folders, host, &self.pick_code_source)?;
         let review =
             ReviewBuilder::new(&self.folders, &self.subject).build(tour, source.as_ref())?;
         Ok(RepinnedTour {
@@ -168,7 +168,7 @@ impl TourRepinner {
 pub fn update_shown_tour(
     subject: &ReviewSubject,
     folders: &AppFolders,
-    github: &dyn ChangeTipsPort,
+    host: &dyn ChangeTipsPort,
     pick_code_source: &PickCodeSource,
 ) -> anyhow::Result<(Tour, Box<dyn CodeSource>)> {
     match subject {
@@ -177,7 +177,7 @@ pub fn update_shown_tour(
                 folders,
                 pr,
                 &Tour::shown_path_for(folders, subject),
-                github,
+                host,
                 pick_code_source,
             )?;
             Ok((tour, source))

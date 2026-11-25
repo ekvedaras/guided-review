@@ -1,6 +1,6 @@
 use crate::support::graphql::serve_graphql;
 use guided_review::github::GitHub;
-use guided_review::viewer::{GitHubError, RelevantPullRequestsPort, WhyListed};
+use guided_review::viewer::{HostError, RelevantPullRequestsPort, WhyListed};
 
 const TEAMS: &str = include_str!("../fixtures/github/viewer_teams.json");
 const RELEVANT: &str = include_str!("../fixtures/github/relevant_pull_requests.json");
@@ -130,5 +130,5 @@ fn without_a_token_the_list_is_refused_with_the_reason() {
         .relevant_pull_requests()
         .unwrap_err();
 
-    assert!(matches!(error, GitHubError::NoAccess(_)), "{error:?}");
+    assert!(matches!(error, HostError::NoAccess(_)), "{error:?}");
 }

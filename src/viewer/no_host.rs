@@ -4,7 +4,7 @@ use super::comments::{CommentPlace, SendMode};
 use super::merging::MergeChange;
 use super::ports::ReviewVerdict;
 use super::ports::{
-    ChangeTipsPort, GitHubError, IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch,
+    ChangeTipsPort, HostError, IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch,
     PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
     PullRequestStatusPort, PullsOfBranchPort, Resolution, ReviewThreadsPort, ReviewWritesPort,
     Viewed, ViewedFile, ViewedFilesPort,
@@ -21,14 +21,14 @@ use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
 use crate::review_subject::BranchName;
 use std::sync::Arc;
 
-/// The GitHub a local review holds: it only looks for the PR opened from its branch, when it was given
-/// a way to. Anything else a review did would be refused instead of reaching the network.
+/// The code host a local review holds: it only looks for the PR opened from its branch, when it was
+/// given a way to. Anything else a review did would be refused instead of reaching the network.
 #[derive(Clone, Default)]
-pub struct NoGitHub {
+pub struct NoHost {
     branch_lookups: Option<Arc<dyn PullsOfBranchPort>>,
 }
 
-impl NoGitHub {
+impl NoHost {
     pub fn looking_up_branches_with(lookups: Arc<dyn PullsOfBranchPort>) -> Self {
         Self {
             branch_lookups: Some(lookups),
@@ -36,12 +36,12 @@ impl NoGitHub {
     }
 }
 
-impl PullsOfBranchPort for NoGitHub {
+impl PullsOfBranchPort for NoHost {
     fn open_pull_of_branch(
         &self,
         repo: &RepoName,
         branch: &BranchName,
-    ) -> Result<Option<PullOfBranch>, GitHubError> {
+    ) -> Result<Option<PullOfBranch>, HostError> {
         match &self.branch_lookups {
             Some(lookups) => lookups.open_pull_of_branch(repo, branch),
             None => refused(),
@@ -51,7 +51,7 @@ impl PullsOfBranchPort for NoGitHub {
     fn pull_request_head_branch(
         &self,
         pr: &PullRequestUrl,
-    ) -> Result<Option<BranchName>, GitHubError> {
+    ) -> Result<Option<BranchName>, HostError> {
         match &self.branch_lookups {
             Some(lookups) => lookups.pull_request_head_branch(pr),
             None => refused(),
@@ -59,20 +59,20 @@ impl PullsOfBranchPort for NoGitHub {
     }
 }
 
-fn refused<T>() -> Result<T, GitHubError> {
-    Err(GitHubError::NoAccess(NoAccess::new(
+fn refused<T>() -> Result<T, HostError> {
+    Err(HostError::NoAccess(NoAccess::new(
         "a local review has no GitHub",
     )))
 }
 
-impl ChangeTipsPort for NoGitHub {
-    fn pull_request_tips(&self, _pr: &PullRequestUrl) -> Result<ChangeTips, GitHubError> {
+impl ChangeTipsPort for NoHost {
+    fn pull_request_tips(&self, _pr: &PullRequestUrl) -> Result<ChangeTips, HostError> {
         refused()
     }
 }
 
-impl ViewedFilesPort for NoGitHub {
-    fn viewed_files(&self, _pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, GitHubError> {
+impl ViewedFilesPort for NoHost {
+    fn viewed_files(&self, _pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, HostError> {
         refused()
     }
 
@@ -81,13 +81,13 @@ impl ViewedFilesPort for NoGitHub {
         _pr: &PullRequestUrl,
         _path: &FilePath,
         _viewed: Viewed,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         refused()
     }
 }
 
-impl PullRequestDescriptionPort for NoGitHub {
-    fn pull_request_description(&self, _pr: &PullRequestUrl) -> Result<String, GitHubError> {
+impl PullRequestDescriptionPort for NoHost {
+    fn pull_request_description(&self, _pr: &PullRequestUrl) -> Result<String, HostError> {
         refused()
     }
 
@@ -99,28 +99,28 @@ impl PullRequestDescriptionPort for NoGitHub {
         Ok(refused()?)
     }
 
-    fn pull_request_issues(&self, _pr: &PullRequestUrl) -> Result<PullRequestIssues, GitHubError> {
+    fn pull_request_issues(&self, _pr: &PullRequestUrl) -> Result<PullRequestIssues, HostError> {
         refused()
     }
 }
 
-impl PullRequestOriginPort for NoGitHub {
-    fn pull_request_origin(&self, _pr: &PullRequestUrl) -> Result<PullRequestOrigin, GitHubError> {
+impl PullRequestOriginPort for NoHost {
+    fn pull_request_origin(&self, _pr: &PullRequestUrl) -> Result<PullRequestOrigin, HostError> {
         refused()
     }
 }
 
-impl IssueDetailsPort for NoGitHub {
+impl IssueDetailsPort for NoHost {
     fn issue_details(
         &self,
         _issues: &[IssueUrl],
-    ) -> Result<Vec<(IssueUrl, IssueDetails)>, GitHubError> {
+    ) -> Result<Vec<(IssueUrl, IssueDetails)>, HostError> {
         refused()
     }
 }
 
-impl PullRequestStatusPort for NoGitHub {
-    fn pull_request_status(&self, _pr: &PullRequestUrl) -> Result<PrStatus, GitHubError> {
+impl PullRequestStatusPort for NoHost {
+    fn pull_request_status(&self, _pr: &PullRequestUrl) -> Result<PrStatus, HostError> {
         refused()
     }
 
@@ -128,38 +128,34 @@ impl PullRequestStatusPort for NoGitHub {
         &self,
         _pr: &PullRequestUrl,
         _readiness: Readiness,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         refused()
     }
 
-    fn change_merging(
-        &self,
-        _pr: &PullRequestUrl,
-        _change: MergeChange,
-    ) -> Result<(), GitHubError> {
+    fn change_merging(&self, _pr: &PullRequestUrl, _change: MergeChange) -> Result<(), HostError> {
         refused()
     }
 }
 
-impl PullRequestReactionsPort for NoGitHub {
+impl PullRequestReactionsPort for NoHost {
     fn set_pull_request_reaction(
         &self,
         _pr: &PullRequestUrl,
         _reaction: Reaction,
         _change: ReactionChange,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         refused()
     }
 }
 
-impl PictureUploadPort for NoGitHub {
+impl PictureUploadPort for NoHost {
     fn upload_picture(&self, _pr: &PullRequestUrl, _picture: &Path) -> anyhow::Result<String> {
         Ok(refused()?)
     }
 }
 
-impl ReviewThreadsPort for NoGitHub {
-    fn review_threads(&self, _pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, GitHubError> {
+impl ReviewThreadsPort for NoHost {
+    fn review_threads(&self, _pr: &PullRequestUrl) -> Result<Vec<ReviewThread>, HostError> {
         refused()
     }
 
@@ -169,7 +165,7 @@ impl ReviewThreadsPort for NoGitHub {
         _thread_id: &ThreadId,
         _body: &str,
         _mode: SendMode,
-    ) -> Result<CommentId, GitHubError> {
+    ) -> Result<CommentId, HostError> {
         refused()
     }
 
@@ -177,7 +173,7 @@ impl ReviewThreadsPort for NoGitHub {
         &self,
         _thread_id: &ThreadId,
         _resolution: Resolution,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         refused()
     }
 
@@ -186,29 +182,29 @@ impl ReviewThreadsPort for NoGitHub {
         _comment_id: &CommentId,
         _reaction: Reaction,
         _change: ReactionChange,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         refused()
     }
 
-    fn edit_comment(&self, _comment_id: &CommentId, _body: &str) -> Result<(), GitHubError> {
+    fn edit_comment(&self, _comment_id: &CommentId, _body: &str) -> Result<(), HostError> {
         refused()
     }
 
-    fn delete_comment(&self, _comment_id: &CommentId) -> Result<(), GitHubError> {
+    fn delete_comment(&self, _comment_id: &CommentId) -> Result<(), HostError> {
         refused()
     }
 }
 
-impl ReviewWritesPort for NoGitHub {
-    fn has_pending_review(&self, _pr: &PullRequestUrl) -> Result<bool, GitHubError> {
+impl ReviewWritesPort for NoHost {
+    fn has_pending_review(&self, _pr: &PullRequestUrl) -> Result<bool, HostError> {
         refused()
     }
 
-    fn reviews(&self, _pr: &PullRequestUrl) -> Result<PullRequestReviews, GitHubError> {
+    fn reviews(&self, _pr: &PullRequestUrl) -> Result<PullRequestReviews, HostError> {
         refused()
     }
 
-    fn viewer_authored(&self, _pr: &PullRequestUrl) -> Result<bool, GitHubError> {
+    fn viewer_authored(&self, _pr: &PullRequestUrl) -> Result<bool, HostError> {
         refused()
     }
 
@@ -217,7 +213,7 @@ impl ReviewWritesPort for NoGitHub {
         _pr: &PullRequestUrl,
         _place: &CommentPlace,
         _body: &str,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         refused()
     }
 
@@ -226,7 +222,7 @@ impl ReviewWritesPort for NoGitHub {
         _pr: &PullRequestUrl,
         _place: &CommentPlace,
         _body: &str,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         refused()
     }
 
@@ -235,7 +231,7 @@ impl ReviewWritesPort for NoGitHub {
         _pr: &PullRequestUrl,
         _verdict: ReviewVerdict,
         _body: &str,
-    ) -> Result<(), GitHubError> {
+    ) -> Result<(), HostError> {
         refused()
     }
 }

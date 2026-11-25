@@ -13,7 +13,7 @@ use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::Tour;
 use crate::viewer::{
-    AgentLauncher, GitHubPort, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher,
+    AgentLauncher, CodeHost, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher,
     TourReloader, TourSwitcher,
 };
 
@@ -30,7 +30,7 @@ pub struct OpenedReview {
     pub source: Arc<dyn CodeSource>,
     pub ask: AskSetup,
     pub ide: Result<Ide, NoIde>,
-    pub github: Arc<dyn GitHubPort>,
+    pub host: Arc<dyn CodeHost>,
     pub repinner: TourRepinner,
     pub refresher: TourRefresher,
     pub reloader: TourReloader,
@@ -50,7 +50,7 @@ pub fn open_review(
     let subject = &opened.subject();
     let (review, source) = opened.open_review()?;
     let pick_code_source = opened.code_source_picker();
-    let github = opened.github();
+    let host = opened.host();
     let clone = source.local_clone().map(Path::to_path_buf);
     let config = Config::load_from(folders)?;
     let agent_folder = clone
@@ -87,7 +87,7 @@ pub fn open_review(
         pick_code_source,
     };
     let tour_agents = TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
-        .finding_head_branches_with(Arc::clone(&github) as Arc<dyn PullsOfBranchPort>)
+        .finding_head_branches_with(Arc::clone(&host) as Arc<dyn PullsOfBranchPort>)
         .starting_in(agent_folder)
         .with_summary_skill(Config::skill_for_launch::<TourWriter>(folders));
     Ok(OpenedReview {
@@ -95,7 +95,7 @@ pub fn open_review(
         source: source.into(),
         ask,
         ide: Ide::for_clone(clone, config.ide_template()),
-        github,
+        host,
         repinner,
         refresher,
         reloader,

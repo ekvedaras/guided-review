@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use crate::support::FixtureRepo;
 use crate::support::fake_checkouts::FakeCheckouts;
-use crate::support::fake_ports::{FakeAskProcesses, FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeAskProcesses, FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use guided_review::config::AskSettings;
@@ -112,11 +112,11 @@ impl Shop {
     }
 
     fn deliver_fixes(&self, review: &mut Review, head: &str, agent: &Arc<FakeTourAgent>) {
-        let github = FakeGitHub::with_pull("main-tip", head, &SentLog::default());
+        let host = FakeHost::with_pull("main-tip", head, &SentLog::default());
         let agents = TourAgents::new(Arc::clone(agent) as Arc<dyn TourAgentPort>);
         review.tour_agent_is(&agents.lookup(&pr()));
         let ports = WorkPorts {
-            github: &github,
+            host: &host,
             source: &self.source(),
             agents: &agents,
         };

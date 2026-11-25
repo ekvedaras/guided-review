@@ -667,7 +667,7 @@ fn a_thread_no_screen_shows_opens_on_github_and_the_screen_stays() {
 
     assert_eq!(
         visit,
-        ThreadVisit::OnGitHub("https://github.com/acme/shop/pull/7#discussion_bob".to_owned())
+        ThreadVisit::OnHost("https://github.com/acme/shop/pull/7#discussion_bob".to_owned())
     );
     assert_eq!(review.screen(), &before);
 }

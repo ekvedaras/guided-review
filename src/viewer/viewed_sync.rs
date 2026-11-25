@@ -6,7 +6,7 @@ use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::GuidedTour;
 
-use super::ports::{ChangeTipsPort, GitHubError, Viewed, ViewedFilesPort};
+use super::ports::{ChangeTipsPort, HostError, Viewed, ViewedFilesPort};
 use super::review_state::ReviewState;
 use super::screen::ReadSubject;
 
@@ -99,18 +99,18 @@ impl ViewedSync {
         coverage: &Coverage,
         tour_head: &Sha,
         outcome: SyncOutcome,
-    ) -> (Vec<ReadSubject>, Option<GitHubError>) {
+    ) -> (Vec<ReadSubject>, Option<HostError>) {
         outcome.land(state, coverage, tour_head)
     }
 
     /// GitHub saying viewed sync is unavailable switches it off for the session instead of failing.
-    pub(super) fn settle(&mut self, error: GitHubError) -> anyhow::Result<()> {
+    pub(super) fn settle(&mut self, error: HostError) -> anyhow::Result<()> {
         match error {
-            GitHubError::NoAccess(no_access) => {
+            HostError::NoAccess(no_access) => {
                 self.off_because = Some(no_access.into_reason());
                 Ok(())
             }
-            GitHubError::Other(error) => Err(error),
+            HostError::Other(error) => Err(error),
             typed => Err(typed.into()),
         }
     }
@@ -271,7 +271,7 @@ pub struct SyncOutcome {
     sent: Vec<(FilePath, Viewed)>,
     on_github: Option<BTreeMap<FilePath, Viewed>>,
     baseline_wishes: Option<BTreeMap<FilePath, Viewed>>,
-    error: Option<GitHubError>,
+    error: Option<HostError>,
 }
 
 impl SyncOutcome {
@@ -289,7 +289,7 @@ impl SyncOutcome {
         }
     }
 
-    fn failed(tour_head: &Sha, error: GitHubError) -> Self {
+    fn failed(tour_head: &Sha, error: HostError) -> Self {
         Self {
             error: Some(error),
             ..Self::nothing(tour_head)
@@ -300,7 +300,7 @@ impl SyncOutcome {
     fn pushed(
         tour_head: &Sha,
         (sent, push_error): Pushed,
-        read: Result<BTreeMap<FilePath, Viewed>, GitHubError>,
+        read: Result<BTreeMap<FilePath, Viewed>, HostError>,
     ) -> Self {
         let (on_github, read_error) = match read {
             Ok(on_github) => (Some(on_github), None),
@@ -337,7 +337,7 @@ impl SyncOutcome {
         state: &mut ReviewState,
         coverage: &Coverage,
         tour_head: &Sha,
-    ) -> (Vec<ReadSubject>, Option<GitHubError>) {
+    ) -> (Vec<ReadSubject>, Option<HostError>) {
         let mut unticked = Vec::new();
         match (&self.baseline_wishes, &self.on_github) {
             (Some(wishes), Some(on_github)) => {
@@ -361,36 +361,36 @@ impl SyncOutcome {
 }
 
 /// What a push sent, and the failure it stopped at.
-type Pushed = (Vec<(FilePath, Viewed)>, Option<GitHubError>);
+type Pushed = (Vec<(FilePath, Viewed)>, Option<HostError>);
 
 impl SyncRequest {
     /// No sync while sync is off, or while the tour is behind the PR head.
-    pub fn run(self, github: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized)) -> SyncOutcome {
+    pub fn run(self, host: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized)) -> SyncOutcome {
         let pr = &self.pr;
         if self.is_off {
             return SyncOutcome::nothing(&self.tour_head);
         }
-        match github.pull_request_tips(pr) {
+        match host.pull_request_tips(pr) {
             Ok(tips) if tips.head == self.tour_head => {}
             Ok(_) => return SyncOutcome::nothing(&self.tour_head),
             Err(error) => return SyncOutcome::failed(&self.tour_head, error),
         }
         if let Some(wishes) = self.baseline_wishes {
-            Self::take_baseline(github, pr, &self.tour_head, wishes)
+            Self::take_baseline(host, pr, &self.tour_head, wishes)
         } else {
-            let pushed = push(github, pr, &self.unsent);
-            SyncOutcome::pushed(&self.tour_head, pushed, read_viewed(github, pr))
+            let pushed = push(host, pr, &self.unsent);
+            SyncOutcome::pushed(&self.tour_head, pushed, read_viewed(host, pr))
         }
     }
 
     /// GitHub is read first, so only wishes it does not already match are pushed.
     fn take_baseline(
-        github: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized),
+        host: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized),
         pr: &PullRequestUrl,
         tour_head: &Sha,
         wishes: BTreeMap<FilePath, Viewed>,
     ) -> SyncOutcome {
-        let on_github = match read_viewed(github, pr) {
+        let on_github = match read_viewed(host, pr) {
             Ok(on_github) => on_github,
             Err(error) => return SyncOutcome::failed(tour_head, error),
         };
@@ -401,20 +401,20 @@ impl SyncRequest {
             })
             .map(|(path, viewed)| (path.clone(), *viewed))
             .collect();
-        let pushed = push(github, pr, &differing);
+        let pushed = push(host, pr, &differing);
         SyncOutcome::baseline_taken(tour_head, wishes, on_github, pushed)
     }
 }
 
 /// Stops at the first failure; what was not sent stays queued.
 fn push(
-    github: &(impl ViewedFilesPort + ?Sized),
+    host: &(impl ViewedFilesPort + ?Sized),
     pr: &PullRequestUrl,
     wishes: &BTreeMap<FilePath, Viewed>,
 ) -> Pushed {
     let mut sent = Vec::new();
     for (path, viewed) in wishes {
-        if let Err(error) = github.set_file_viewed(pr, path, *viewed) {
+        if let Err(error) = host.set_file_viewed(pr, path, *viewed) {
             return (sent, Some(error));
         }
         sent.push((path.clone(), *viewed));
@@ -423,10 +423,10 @@ fn push(
 }
 
 fn read_viewed(
-    github: &(impl ViewedFilesPort + ?Sized),
+    host: &(impl ViewedFilesPort + ?Sized),
     pr: &PullRequestUrl,
-) -> Result<BTreeMap<FilePath, Viewed>, GitHubError> {
-    Ok(github
+) -> Result<BTreeMap<FilePath, Viewed>, HostError> {
+    Ok(host
         .viewed_files(pr)?
         .into_iter()
         .map(|file| (file.path, file.state.viewed()))

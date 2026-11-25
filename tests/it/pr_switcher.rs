@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use guided_review::tour::{BasicTour, Tour, ToursOnDisk};
 use guided_review::viewer::{
     ActivePr, NotPickable, OpenDecision, OpenOrigin, Pick, PrAuthor, PrSwitcher,
@@ -35,10 +35,10 @@ fn relevant(url: &str, title: &str, author: &str, why: WhyListed) -> RelevantPul
     }
 }
 
-fn three_pull_requests() -> FakeGitHub {
+fn three_pull_requests() -> FakeHost {
     let mut draft = relevant(BLOG_7, "Fix feed", "ekvedaras", WhyListed::Mine);
     draft.is_draft = true;
-    FakeGitHub::with_pull("a", "b", &SentLog::default()).with_relevant_pull_requests(
+    FakeHost::with_pull("a", "b", &SentLog::default()).with_relevant_pull_requests(
         RelevantPullRequests {
             pull_requests: vec![
                 draft,
@@ -62,9 +62,9 @@ fn home_with_tour_of(url: &str) -> TempDir {
     home
 }
 
-fn loaded(github: &FakeGitHub, home: &Path) -> PrSwitcher {
+fn loaded(host: &FakeHost, home: &Path) -> PrSwitcher {
     let mut switcher = PrSwitcher::default();
-    switcher.loaded(github.relevant_pull_requests(), &folders_in(home));
+    switcher.loaded(host.relevant_pull_requests(), &folders_in(home));
     switcher
 }
 
@@ -229,10 +229,10 @@ fn picking_counts_rows_as_filtered() {
 
 #[test]
 fn github_that_cannot_be_reached_is_said_in_the_switcher_and_the_list_stays_empty() {
-    let github = three_pull_requests();
-    github.inject(GitHubFault::RelevantListFails);
+    let host = three_pull_requests();
+    host.inject(HostFault::RelevantListFails);
 
-    let switcher = loaded(&github, TempDir::new().unwrap().path());
+    let switcher = loaded(&host, TempDir::new().unwrap().path());
 
     assert_eq!(switcher.visible().count(), 0);
     let notice = switcher.notice().unwrap();
@@ -241,13 +241,13 @@ fn github_that_cannot_be_reached_is_said_in_the_switcher_and_the_list_stays_empt
 
 #[test]
 fn a_failed_refresh_keeps_the_rows_already_listed_and_gives_the_reason() {
-    let github = three_pull_requests();
+    let host = three_pull_requests();
     let home = TempDir::new().unwrap();
-    let mut switcher = loaded(&github, home.path());
+    let mut switcher = loaded(&host, home.path());
 
-    github.inject(GitHubFault::RelevantListFails);
+    host.inject(HostFault::RelevantListFails);
     switcher.refreshing();
-    switcher.loaded(github.relevant_pull_requests(), &folders_in(home.path()));
+    switcher.loaded(host.relevant_pull_requests(), &folders_in(home.path()));
 
     assert_eq!(visible_urls(&switcher), [BLOG_7, API_31, SHOP_7]);
     let notice = switcher.notice().unwrap();
@@ -303,14 +303,14 @@ fn teams_that_were_not_searched_are_named() {
 
 #[test]
 fn a_reload_after_a_failure_clears_the_notice_and_keeps_the_filter() {
-    let github = three_pull_requests();
-    github.inject(GitHubFault::RelevantListFails);
+    let host = three_pull_requests();
+    host.inject(HostFault::RelevantListFails);
     let home = TempDir::new().unwrap();
-    let mut switcher = loaded(&github, home.path());
+    let mut switcher = loaded(&host, home.path());
     switcher.filter("alice");
 
-    github.heal(&GitHubFault::RelevantListFails);
-    switcher.loaded(github.relevant_pull_requests(), &folders_in(home.path()));
+    host.heal(&HostFault::RelevantListFails);
+    switcher.loaded(host.relevant_pull_requests(), &folders_in(home.path()));
 
     assert_eq!(switcher.notice(), None);
     assert_eq!(visible_urls(&switcher), [SHOP_7]);

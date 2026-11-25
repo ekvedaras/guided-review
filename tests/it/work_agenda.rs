@@ -1,5 +1,5 @@
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
@@ -55,17 +55,17 @@ impl Pull {
         Review::open(tour, &self.source(), state_file).unwrap()
     }
 
-    fn github(&self) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent)
+    fn host(&self) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent)
     }
 
-    fn land(&self, review: &mut Review, work: Work, github: &FakeGitHub) {
+    fn land(&self, review: &mut Review, work: Work, host: &FakeHost) {
         let (source, agents) = (
             self.source(),
             TourAgents::new(Arc::new(FakeTourAgent::new())),
         );
         let ports = WorkPorts {
-            github,
+            host,
             source: &source,
             agents: &agents,
         };
@@ -82,7 +82,7 @@ fn a_window_coming_to_the_front_reads_github_and_the_clone_and_sends_what_waits_
     let pull = Pull::new();
     let mut review = pull.open();
 
-    review.pull_from_github();
+    review.pull_from_host();
 
     assert_eq!(
         kinds_of(&review.due_work(Instant::now())),
@@ -116,22 +116,22 @@ fn a_read_asked_again_while_one_runs_starts_and_the_older_answer_is_dropped() {
     let pull = Pull::new();
     let mut review = pull.open();
     let now = Instant::now();
-    review.pull_from_github();
+    review.pull_from_host();
     let older = review
         .due_work(now)
         .into_iter()
         .find(|work| work.kind() == WorkKind::CheckPrHead)
         .unwrap();
-    let offline = pull.github();
-    offline.inject(GitHubFault::ReadsFail);
+    let offline = pull.host();
+    offline.inject(HostFault::ReadsFail);
 
-    review.pull_from_github();
+    review.pull_from_host();
     let newer = review
         .due_work(now)
         .into_iter()
         .find(|work| work.kind() == WorkKind::CheckPrHead)
         .unwrap();
-    pull.land(&mut review, newer, &pull.github());
+    pull.land(&mut review, newer, &pull.host());
     pull.land(&mut review, older, &offline);
 
     assert_eq!(
@@ -154,14 +154,14 @@ fn a_finished_review_reads_the_last_review_again() {
     let pull = Pull::new();
     let mut review = pull.open();
     review.viewer_authorship_is(false);
-    let github = pull.github();
-    drive_without_agents(&mut review, &github, &pull.source(), Instant::now());
+    let host = pull.host();
+    drive_without_agents(&mut review, &host, &pull.source(), Instant::now());
     let request = review
         .finish_review_request(guided_review::viewer::ReviewVerdict::Approve, "")
         .unwrap();
-    review.apply_finish(request.run(&github));
+    review.apply_finish(request.run(&host));
 
-    let ran = drive_without_agents(&mut review, &github, &pull.source(), Instant::now());
+    let ran = drive_without_agents(&mut review, &host, &pull.source(), Instant::now());
 
     assert_eq!(ran, [WorkKind::PullReviews]);
 }
@@ -172,7 +172,7 @@ fn a_review_reopened_in_place_of_another_lands_the_work_the_other_started() {
     let mut review = pull.open();
     let now = Instant::now();
     review.tick(&"a".into()).unwrap();
-    review.pull_from_github();
+    review.pull_from_host();
     let sync = review
         .due_work(now)
         .into_iter()
@@ -181,12 +181,12 @@ fn a_review_reopened_in_place_of_another_lands_the_work_the_other_started() {
 
     let mut reopened = pull.open();
     reopened.carry_on_from(review);
-    reopened.pull_from_github();
+    reopened.pull_from_host();
 
     assert!(
         !kinds_of(&reopened.due_work(now)).contains(&WorkKind::SyncViewed),
         "the sync the other started still runs"
     );
-    pull.land(&mut reopened, sync, &pull.github());
+    pull.land(&mut reopened, sync, &pull.host());
     assert!(kinds_of(&reopened.due_work(now)).contains(&WorkKind::SyncViewed));
 }

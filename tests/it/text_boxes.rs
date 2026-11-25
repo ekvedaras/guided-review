@@ -2,7 +2,7 @@
 //! a reply to a thread, an edit of one of the reviewer's comments, and the finished review's body.
 
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use crate::support::{FixtureRepo, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
@@ -48,10 +48,10 @@ impl Pull {
         }
     }
 
-    fn github(&self) -> FakeGitHub {
-        let mut github = FakeGitHub::with_pull("main-tip", &self.head, &self.sent);
-        github.threads = vec![my_thread_on_line_ten()];
-        github
+    fn host(&self) -> FakeHost {
+        let mut host = FakeHost::with_pull("main-tip", &self.head, &self.sent);
+        host.threads = vec![my_thread_on_line_ten()];
+        host
     }
 
     fn open(&self) -> Review {
@@ -77,7 +77,7 @@ impl Pull {
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
         review.go_forward();
-        review.set_threads(&self.github().threads);
+        review.set_threads(&self.host().threads);
         review
     }
 }
@@ -271,7 +271,7 @@ fn a_comment_box_opened_by_a_click_takes_the_keys_until_it_is_left() {
 #[test]
 fn a_comment_shows_as_sending_while_it_is_on_its_way_to_github() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     let place = written_comment_box(&mut review);
 
@@ -280,13 +280,13 @@ fn a_comment_shows_as_sending_while_it_is_on_its_way_to_github() {
         .unwrap();
 
     assert_eq!(state_of(&review, &place), Some((BoxState::Sending, None)));
-    review.apply_comment(request.run(&github)).unwrap();
+    review.apply_comment(request.run(&host)).unwrap();
 }
 
 #[test]
 fn a_comment_on_its_way_to_github_gives_the_keys_back_even_to_a_click_on_its_box() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     let place = written_comment_box(&mut review);
 
@@ -297,25 +297,22 @@ fn a_comment_on_its_way_to_github_gives_the_keys_back_even_to_a_click_on_its_box
     assert_eq!(review.composing(), None);
     review.open_box(&TextBox::Draft(place)).unwrap();
     assert_eq!(review.composing(), None);
-    review.apply_comment(request.run(&github)).unwrap();
+    review.apply_comment(request.run(&host)).unwrap();
 }
 
 #[test]
 fn a_sent_or_queued_comment_closes_its_box() {
-    for (fault, result) in [
-        (None, "sent"),
-        (Some(GitHubFault::ConnectionLost), "queued"),
-    ] {
+    for (fault, result) in [(None, "sent"), (Some(HostFault::ConnectionLost), "queued")] {
         let pull = Pull::new();
-        let github = pull.github();
+        let host = pull.host();
         let mut review = pull.open();
         let place = written_comment_box(&mut review);
         if let Some(fault) = fault {
-            github.inject(fault);
+            host.inject(fault);
         }
 
         review
-            .send_comment(&place, SendMode::AddToReview, &github)
+            .send_comment(&place, SendMode::AddToReview, &host)
             .unwrap();
 
         assert_eq!(state_of(&review, &place), None, "{result}");
@@ -326,13 +323,13 @@ fn a_sent_or_queued_comment_closes_its_box() {
 #[test]
 fn a_comment_github_rejects_keeps_its_box_with_the_reason_and_gives_it_the_keys_again() {
     let pull = Pull::new();
-    let github = pull.github();
-    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let host = pull.host();
+    host.inject(HostFault::NewThreadsAnswerNull);
     let mut review = pull.open();
     let place = written_comment_box(&mut review);
 
     review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
 
     let Some((BoxState::Composing, Some(CommentProblem::Rejected(_)))) = state_of(&review, &place)
@@ -347,8 +344,8 @@ fn a_comment_github_rejects_keeps_its_box_with_the_reason_and_gives_it_the_keys_
 fn a_comment_that_did_not_go_leaves_the_keys_with_a_box_the_reviewer_turned_to_meanwhile() {
     for kind in EVERY_KIND {
         let pull = Pull::new();
-        let github = pull.github();
-        github.inject(GitHubFault::NewThreadsAnswerNull);
+        let host = pull.host();
+        host.inject(HostFault::NewThreadsAnswerNull);
         let mut review = pull.open();
         let place = written_comment_box(&mut review);
         let request = review
@@ -365,7 +362,7 @@ fn a_comment_that_did_not_go_leaves_the_keys_with_a_box_the_reviewer_turned_to_m
         };
         review.type_in(&other, "meanwhile").unwrap();
         let other_draft = review.composing().cloned();
-        review.apply_comment(request.run(&github)).unwrap();
+        review.apply_comment(request.run(&host)).unwrap();
 
         assert_eq!(review.composing().cloned(), other_draft, "{kind:?}");
         let Some((BoxState::Idle, Some(CommentProblem::Rejected(_)))) = state_of(&review, &place)
@@ -380,7 +377,7 @@ fn a_refused_comment_keeps_its_box_with_the_refusal_until_it_is_sent_again() {
     let pull = Pull::new();
     let mut review = pull.open();
     let place = written_comment_box(&mut review);
-    let moved_on = FakeGitHub::with_pull("main-tip", "newer-head", &pull.sent);
+    let moved_on = FakeHost::with_pull("main-tip", "newer-head", &pull.sent);
 
     review
         .send_comment(&place, SendMode::AddToReview, &moved_on)
@@ -418,12 +415,12 @@ fn a_comment_box_says_the_tour_is_old_while_the_pr_has_moved_past_it() {
 #[test]
 fn a_discarded_comment_box_takes_its_problem_with_it() {
     let pull = Pull::new();
-    let github = pull.github();
-    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let host = pull.host();
+    host.inject(HostFault::NewThreadsAnswerNull);
     let mut review = pull.open();
     let place = written_comment_box(&mut review);
     review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
 
     review.discard(&TextBox::Draft(place.clone())).unwrap();
@@ -507,12 +504,12 @@ fn a_drag_that_ended_on_no_rows_opens_nothing_and_says_nothing() {
 #[test]
 fn a_review_reopened_in_place_of_another_goes_on_showing_what_its_comment_boxes_were_doing() {
     let pull = Pull::new();
-    let github = pull.github();
-    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let host = pull.host();
+    host.inject(HostFault::NewThreadsAnswerNull);
     let mut review = pull.open();
     let place = written_comment_box(&mut review);
     review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
     let shown = state_of(&review, &place);
 

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::support::fake_ports::{FakeGitHub as FakePorts, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_without_agents;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
@@ -82,11 +82,11 @@ impl Feature {
     }
 
     /// The window comes to the front, and the review looks for the PR opened from its branch.
-    fn focus(&self, opened: &mut OpenedReview, github: &FakePorts) {
-        opened.review.pull_from_github();
+    fn focus(&self, opened: &mut OpenedReview, host: &FakeHost) {
+        opened.review.pull_from_host();
         drive_without_agents(
             &mut opened.review,
-            github,
+            host,
             opened.source.as_ref(),
             Instant::now(),
         );
@@ -157,14 +157,14 @@ fn a_pr_review_offers_open_on_github_and_not_open_pr() {
 #[test]
 fn once_the_pr_of_the_branch_is_open_the_local_review_offers_the_move_instead_of_open_pr() {
     let feature = Feature::with_work_in_progress();
-    let github = FakePorts::with_pull("main-tip", "snapshot", &feature.sent).with_open_pull_from(
+    let host = FakeHost::with_pull("main-tip", "snapshot", &feature.sent).with_open_pull_from(
         "feature",
         SHOP_7,
         "Add the cart",
     );
     let mut opened = feature.open();
 
-    feature.focus(&mut opened, &github);
+    feature.focus(&mut opened, &host);
 
     assert!(matches!(
         opened.review.branch_offer(),
@@ -183,13 +183,13 @@ fn once_the_pr_of_the_branch_is_open_the_local_review_offers_the_move_instead_of
 #[test]
 fn a_local_review_that_kept_away_from_its_pr_offers_neither_the_move_nor_open_pr() {
     let feature = Feature::with_work_in_progress();
-    let github = FakePorts::with_pull("main-tip", "snapshot", &feature.sent).with_open_pull_from(
+    let host = FakeHost::with_pull("main-tip", "snapshot", &feature.sent).with_open_pull_from(
         "feature",
         SHOP_7,
         "Add the cart",
     );
     let mut opened = feature.open();
-    feature.focus(&mut opened, &github);
+    feature.focus(&mut opened, &host);
 
     opened.review.decline_the_move();
 

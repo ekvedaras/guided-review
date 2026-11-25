@@ -1,11 +1,11 @@
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, GitHubFault, ReadFailure, SentLog};
+use crate::support::fake_ports::{FakeHost, HostFault, ReadFailure, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{RepoName, Sha};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    GitHubError, OutageCause, Problem, Read, Review, ReviewStateFile, ToastTone, announcements,
+    HostError, OutageCause, Problem, Read, Review, ReviewStateFile, ToastTone, announcements,
 };
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -47,51 +47,51 @@ impl Pull {
         Review::open(tour, &self.source(), state_file).unwrap()
     }
 
-    fn failing(&self, failure: ReadFailure) -> FakeGitHub {
-        let github = FakeGitHub::with_pull("main-tip", &self.head, &SentLog::default());
-        github.inject(GitHubFault::ReadsFailWith(failure));
-        github
+    fn failing(&self, failure: ReadFailure) -> FakeHost {
+        let host = FakeHost::with_pull("main-tip", &self.head, &SentLog::default());
+        host.inject(HostFault::ReadsFailWith(failure));
+        host
     }
 
-    fn read_everything_at(&self, review: &mut Review, github: &FakeGitHub, now: Instant) {
-        review.pull_from_github();
-        self.run_due_at(review, github, now);
+    fn read_everything_at(&self, review: &mut Review, host: &FakeHost, now: Instant) {
+        review.pull_from_host();
+        self.run_due_at(review, host, now);
     }
 
-    fn run_due_at(&self, review: &mut Review, github: &FakeGitHub, now: Instant) {
-        drive_without_agents(review, github, &self.source(), now);
+    fn run_due_at(&self, review: &mut Review, host: &FakeHost, now: Instant) {
+        drive_without_agents(review, host, &self.source(), now);
     }
 }
 
-fn classified(error: ureq::Error) -> GitHubError {
-    GitHubError::from(anyhow::Error::from(error))
+fn classified(error: ureq::Error) -> HostError {
+    HostError::from(anyhow::Error::from(error))
 }
 
 #[test]
 fn a_server_error_a_timeout_and_no_connection_are_an_outage_and_a_missing_page_is_not() {
     assert!(matches!(
         classified(ureq::Error::StatusCode(503)),
-        GitHubError::NotAnswering(OutageCause::ServerError(503))
+        HostError::NotAnswering(OutageCause::ServerError(503))
     ));
     assert!(matches!(
         classified(ureq::Error::Timeout(ureq::Timeout::Global)),
-        GitHubError::NotAnswering(OutageCause::TimedOut)
+        HostError::NotAnswering(OutageCause::TimedOut)
     ));
     assert!(matches!(
         classified(ureq::Error::HostNotFound),
-        GitHubError::NotAnswering(OutageCause::NoConnection)
+        HostError::NotAnswering(OutageCause::NoConnection)
     ));
     assert!(matches!(
         classified(ureq::Error::Io(
             std::io::ErrorKind::ConnectionRefused.into()
         )),
-        GitHubError::NotAnswering(OutageCause::NoConnection)
+        HostError::NotAnswering(OutageCause::NoConnection)
     ));
     for status in [400, 401, 403, 404, 422] {
         assert!(
             matches!(
                 classified(ureq::Error::StatusCode(status)),
-                GitHubError::Other(_)
+                HostError::Other(_)
             ),
             "{status}"
         );
@@ -104,8 +104,8 @@ fn an_outage_is_known_through_the_context_a_read_adds() {
         .context("could not read the files of https://github.com/acme/shop/pull/7 from GitHub");
 
     assert!(matches!(
-        GitHubError::from(error),
-        GitHubError::NotAnswering(OutageCause::ServerError(502))
+        HostError::from(error),
+        HostError::NotAnswering(OutageCause::ServerError(502))
     ));
 }
 
@@ -113,9 +113,9 @@ fn an_outage_is_known_through_the_context_a_read_adds() {
 fn many_reads_that_fail_because_github_does_not_answer_are_one_short_problem() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull.failing(ReadFailure::Status(503));
+    let host = pull.failing(ReadFailure::Status(503));
 
-    pull.read_everything_at(&mut review, &github, Instant::now());
+    pull.read_everything_at(&mut review, &host, Instant::now());
 
     let problems = review.problems();
     assert_eq!(problems.len(), 1, "{problems:?}");
@@ -140,13 +140,13 @@ fn many_reads_that_fail_because_github_does_not_answer_are_one_short_problem() {
 fn an_outage_is_one_note_that_leaves_by_itself_however_many_reads_fail_and_again() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull.failing(ReadFailure::Status(503));
+    let host = pull.failing(ReadFailure::Status(503));
     let now = Instant::now();
 
-    pull.read_everything_at(&mut review, &github, now);
+    pull.read_everything_at(&mut review, &host, now);
     let first = review.problems();
     let told = announcements(&[], &first);
-    pull.run_due_at(&mut review, &github, now + Duration::from_secs(30));
+    pull.run_due_at(&mut review, &host, now + Duration::from_secs(30));
     let second = review.problems();
 
     assert_eq!(told.len(), 1);
@@ -159,9 +159,9 @@ fn an_outage_is_one_note_that_leaves_by_itself_however_many_reads_fail_and_again
 fn a_timeout_is_an_outage_too() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull.failing(ReadFailure::TimedOut);
+    let host = pull.failing(ReadFailure::TimedOut);
 
-    pull.read_everything_at(&mut review, &github, Instant::now());
+    pull.read_everything_at(&mut review, &host, Instant::now());
 
     assert_eq!(
         review.problems()[0].to_string(),
@@ -173,16 +173,16 @@ fn a_timeout_is_an_outage_too() {
 fn reads_are_tried_again_further_apart_up_to_five_minutes() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull.failing(ReadFailure::Status(503));
+    let host = pull.failing(ReadFailure::Status(503));
     let mut now = Instant::now();
-    pull.read_everything_at(&mut review, &github, now);
+    pull.read_everything_at(&mut review, &host, now);
 
     let mut waits = Vec::new();
     for _ in 0..6 {
         let due = review.next_due().unwrap();
         waits.push(due - now);
         now = due;
-        pull.run_due_at(&mut review, &github, now);
+        pull.run_due_at(&mut review, &host, now);
     }
 
     assert_eq!(
@@ -195,11 +195,11 @@ fn reads_are_tried_again_further_apart_up_to_five_minutes() {
 fn the_wait_shown_is_the_one_before_the_next_try() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull.failing(ReadFailure::Status(503));
+    let host = pull.failing(ReadFailure::Status(503));
     let now = Instant::now();
-    pull.read_everything_at(&mut review, &github, now);
+    pull.read_everything_at(&mut review, &host, now);
 
-    pull.run_due_at(&mut review, &github, now + Duration::from_secs(30));
+    pull.run_due_at(&mut review, &host, now + Duration::from_secs(30));
 
     assert!(
         review.problems()[0]
@@ -214,13 +214,13 @@ fn the_wait_shown_is_the_one_before_the_next_try() {
 fn a_read_that_goes_through_ends_the_outage_and_says_github_is_back() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull.failing(ReadFailure::Status(503));
+    let host = pull.failing(ReadFailure::Status(503));
     let now = Instant::now();
-    pull.read_everything_at(&mut review, &github, now);
+    pull.read_everything_at(&mut review, &host, now);
     let during = review.problems();
 
-    github.heal(&GitHubFault::ReadsFailWith(ReadFailure::Status(503)));
-    pull.run_due_at(&mut review, &github, now + Duration::from_secs(30));
+    host.heal(&HostFault::ReadsFailWith(ReadFailure::Status(503)));
+    pull.run_due_at(&mut review, &host, now + Duration::from_secs(30));
 
     assert_eq!(review.problems(), []);
     let told = announcements(&during, &review.problems());
@@ -233,8 +233,8 @@ fn a_read_that_goes_through_ends_the_outage_and_says_github_is_back() {
 fn the_outage_stays_while_one_of_its_reads_still_fails() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull.failing(ReadFailure::Status(503));
-    pull.read_everything_at(&mut review, &github, Instant::now());
+    let host = pull.failing(ReadFailure::Status(503));
+    pull.read_everything_at(&mut review, &host, Instant::now());
 
     review.pr_head_is(Sha::new(&pull.head));
 
@@ -248,9 +248,9 @@ fn a_missing_page_or_a_refusal_keeps_its_own_short_message_and_is_not_tried_agai
     for status in [404, 403] {
         let pull = Pull::new();
         let mut review = pull.open();
-        let github = pull.failing(ReadFailure::Status(status));
+        let host = pull.failing(ReadFailure::Status(status));
 
-        pull.read_everything_at(&mut review, &github, Instant::now());
+        pull.read_everything_at(&mut review, &host, Instant::now());
 
         let reason = format!("http status: {status}");
         let problems = review.problems();

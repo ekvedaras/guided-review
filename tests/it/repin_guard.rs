@@ -1,4 +1,4 @@
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
@@ -91,8 +91,8 @@ impl Pull {
 
     /// A comment on line ten sent with Ask agent, so one hand-off is queued.
     fn hand_off(&self, review: &mut Review) -> HandOffId {
-        let mut github = FakeGitHub::with_pull("main-tip", &self.head, &self.sent);
-        github.threads = vec![thread_on_line_ten()];
+        let mut host = FakeHost::with_pull("main-tip", &self.head, &self.sent);
+        host.threads = vec![thread_on_line_ten()];
         let place = self.draft_on_line_ten(review);
         review
             .type_in(&TextBox::Draft(place.clone()), "why ten?")
@@ -100,7 +100,7 @@ impl Pull {
         let request = review
             .start_sending(&place, SendMode::CommentNow, Audience::Agent)
             .unwrap();
-        review.apply_comment(request.run(&github)).unwrap();
+        review.apply_comment(request.run(&host)).unwrap();
         review.hand_offs().all().first().unwrap().id()
     }
 

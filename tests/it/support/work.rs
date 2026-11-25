@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use guided_review::code_source::CodeSource;
-use guided_review::viewer::{AfterLanding, GitHubPort, Review, TourAgents, WorkKind, WorkPorts};
+use guided_review::viewer::{AfterLanding, CodeHost, Review, TourAgents, WorkKind, WorkPorts};
 
 use super::fake_tour_agent::FakeTourAgent;
 
@@ -33,13 +33,13 @@ pub fn drive_until_idle(
 /// For work that hands nothing to a tour agent.
 pub fn drive_without_agents(
     review: &mut Review,
-    github: &dyn GitHubPort,
+    host: &dyn CodeHost,
     source: &dyn CodeSource,
     now: Instant,
 ) -> Vec<WorkKind> {
     let agents = TourAgents::new(Arc::new(FakeTourAgent::new()));
     let ports = WorkPorts {
-        github,
+        host,
         source,
         agents: &agents,
     };

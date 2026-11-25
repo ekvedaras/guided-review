@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, serve_files};
 use guided_review::github::GitHub;
@@ -50,8 +50,8 @@ impl Feature {
         }
     }
 
-    fn github(&self) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", "snapshot", &self.sent)
+    fn host(&self) -> FakeHost {
+        FakeHost::with_pull("main-tip", "snapshot", &self.sent)
     }
 
     fn open(&self) -> OpenedReview {
@@ -59,9 +59,9 @@ impl Feature {
     }
 
     /// The window comes to the front, and what the review wants of GitHub is done.
-    fn focus(&self, opened: &mut OpenedReview, github: &FakeGitHub, now: Instant) {
-        opened.review.pull_from_github();
-        drive_without_agents(&mut opened.review, github, opened.source.as_ref(), now);
+    fn focus(&self, opened: &mut OpenedReview, host: &FakeHost, now: Instant) {
+        opened.review.pull_from_host();
+        drive_without_agents(&mut opened.review, host, opened.source.as_ref(), now);
     }
 }
 
@@ -102,13 +102,13 @@ fn keep_the_local_review(review: &mut Review) {
 #[test]
 fn a_local_review_offers_to_move_to_the_open_pr_whose_head_is_its_branch() {
     let feature = Feature::with_work_in_progress();
-    let github = feature
-        .github()
+    let host = feature
+        .host()
         .with_open_pull_from("feature", SHOP_7, "Add the cart");
     let mut opened = feature.open();
     assert_eq!(move_offer(&opened.review), None);
 
-    feature.focus(&mut opened, &github, Instant::now());
+    feature.focus(&mut opened, &host, Instant::now());
 
     let offer = move_offer(&opened.review).unwrap();
     assert_eq!(offer, offer_of(SHOP_7, "Add the cart"));
@@ -119,37 +119,37 @@ fn a_local_review_offers_to_move_to_the_open_pr_whose_head_is_its_branch() {
 #[test]
 fn there_is_no_offer_without_a_pr_from_the_branch_or_with_one_from_another_branch() {
     let feature = Feature::with_work_in_progress();
-    let github = feature
-        .github()
+    let host = feature
+        .host()
         .with_open_pull_from("another", SHOP_7, "Another change");
     let mut opened = feature.open();
 
-    feature.focus(&mut opened, &github, Instant::now());
+    feature.focus(&mut opened, &host, Instant::now());
 
     assert_eq!(move_offer(&opened.review), None);
     assert_eq!(feature.sent.branch_lookups(), ["acme/shop:feature"]);
-    assert_eq!(feature.sent.github_calls(), []);
+    assert_eq!(feature.sent.host_calls(), []);
 }
 
 #[test]
 fn a_look_that_fails_is_silent_and_tried_again_later() {
     let feature = Feature::with_work_in_progress();
-    let github = feature
-        .github()
+    let host = feature
+        .host()
         .with_open_pull_from("feature", SHOP_7, "Add the cart");
-    github.inject(GitHubFault::ReadsFail);
+    host.inject(HostFault::ReadsFail);
     let mut opened = feature.open();
     let now = Instant::now();
 
-    feature.focus(&mut opened, &github, now);
+    feature.focus(&mut opened, &host, now);
 
     assert_eq!(move_offer(&opened.review), None);
     assert_eq!(opened.review.problems(), []);
-    github.heal(&GitHubFault::ReadsFail);
+    host.heal(&HostFault::ReadsFail);
 
     drive_without_agents(
         &mut opened.review,
-        &github,
+        &host,
         opened.source.as_ref(),
         now + PULL_OF_BRANCH_RETRY + Duration::from_secs(1),
     );
@@ -164,7 +164,7 @@ fn a_look_that_fails_is_silent_and_tried_again_later() {
 fn a_pr_review_looks_for_no_branch() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", "head", &sent).with_open_pull_from(
+    let host = FakeHost::with_pull("main-tip", "head", &sent).with_open_pull_from(
         "feature",
         SHOP_7,
         "Add the cart",
@@ -187,8 +187,8 @@ fn a_pr_review_looks_for_no_branch() {
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &ReviewSubject::from(pr));
     let mut review = Review::open_basic(tour, &source, state_file).unwrap();
 
-    review.pull_from_github();
-    drive_without_agents(&mut review, &github, &source, Instant::now());
+    review.pull_from_host();
+    drive_without_agents(&mut review, &host, &source, Instant::now());
 
     assert_eq!(review.branch_offer(), None);
     assert_eq!(sent.branch_lookups(), Vec::<String>::new());
@@ -208,13 +208,13 @@ fn the_github_adapter_lists_the_open_pr_of_a_branch_of_the_repo_itself() {
             b"[]".to_vec(),
         ),
     ]);
-    let github = GitHub::without_token_at(&url);
+    let host = GitHub::without_token_at(&url);
     let repo = RepoName::new("acme", "shop");
 
-    let found = github
+    let found = host
         .open_pull_of_branch(&repo, &BranchName::new("feature/cart").unwrap())
         .unwrap();
-    let none = github
+    let none = host
         .open_pull_of_branch(&repo, &BranchName::new("quiet").unwrap())
         .unwrap();
 
@@ -236,12 +236,12 @@ fn the_github_adapter_names_the_branch_a_pr_is_opened_from_unless_it_is_from_a_f
         ("/repos/acme/shop/pulls/7", own.as_bytes().to_vec()),
         ("/repos/acme/shop/pulls/8", fork.as_bytes().to_vec()),
     ]);
-    let github = GitHub::without_token_at(&url);
+    let host = GitHub::without_token_at(&url);
 
-    let own = github
+    let own = host
         .pull_request_head_branch(&SHOP_7.parse().unwrap())
         .unwrap();
-    let fork = github
+    let fork = host
         .pull_request_head_branch(&"https://github.com/acme/shop/pull/8".parse().unwrap())
         .unwrap();
 
@@ -276,14 +276,17 @@ impl Feature {
 
     /// The reviewer commits the work and goes on with the cart, and a PR is opened from the branch.
     /// Returns GitHub as it is then, and the PR's head.
-    fn open_a_pr_after_one_more_commit(&self) -> (FakeGitHub, Sha) {
+    fn open_a_pr_after_one_more_commit(&self) -> (FakeHost, Sha) {
         self.repo
             .write("src/cart.rs", "pub fn total() {}\npub fn tax() {}\n");
         let head = Sha::new(&self.repo.commit("Finish the cart"));
         let main = self.repo.git(&["rev-parse", "main"]);
-        let github = FakeGitHub::with_pull(main.trim(), head.as_str(), &self.sent)
-            .with_open_pull_from("feature", SHOP_7, "Add the cart");
-        (github, head)
+        let host = FakeHost::with_pull(main.trim(), head.as_str(), &self.sent).with_open_pull_from(
+            "feature",
+            SHOP_7,
+            "Add the cart",
+        );
+        (host, head)
     }
 }
 
@@ -295,13 +298,13 @@ fn moving_carries_the_tick_of_a_file_whose_code_is_the_same_and_shows_what_chang
     opened.review.tick_file(&path("README.md")).unwrap();
     opened.review.tick_file(&path("src/cart.rs")).unwrap();
     let read_at = feature.snapshot_head();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut opened, &github, Instant::now());
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut opened, &host, Instant::now());
     let offer = move_offer(&opened.review).unwrap();
 
     feature
         .mover_of(feature.subject.local().unwrap())
-        .run(&offer, &github)
+        .run(&offer, &host)
         .unwrap();
 
     let state = pr_state(&feature);
@@ -324,9 +327,9 @@ impl Feature {
         opened.review.tick_file(&path("README.md")).unwrap();
         opened.review.tick_file(&path("src/cart.rs")).unwrap();
         let read_at = self.snapshot_head();
-        let (github, _) = self.open_a_pr_after_one_more_commit();
+        let (host, _) = self.open_a_pr_after_one_more_commit();
         self.mover_of(self.subject.local().unwrap())
-            .run(&offer_of(SHOP_7, "Add the cart"), &github)
+            .run(&offer_of(SHOP_7, "Add the cart"), &host)
             .unwrap();
         read_at
     }
@@ -431,11 +434,11 @@ fn moving_a_guided_local_review_carries_its_step_ticks_as_file_ticks_by_the_same
             state.tick(&"cart".into(), &read_at);
         })
         .unwrap();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
 
     feature
         .mover_of(feature.subject.local().unwrap())
-        .run(&offer_of(SHOP_7, "Add the cart"), &github)
+        .run(&offer_of(SHOP_7, "Add the cart"), &host)
         .unwrap();
 
     let state = pr_state(&feature);
@@ -488,7 +491,7 @@ fn add_to_tasks(feature: &Feature, opened: &mut OpenedReview, on: &str, text: &s
         .unwrap();
     opened
         .review
-        .apply_comment(request.run(&feature.github()))
+        .apply_comment(request.run(&feature.host()))
         .unwrap();
 }
 
@@ -542,13 +545,13 @@ fn moving_makes_drafts_of_open_threads_and_queued_tasks_none_of_resolved_ones_an
     store.set_resolved(&settled, Resolution::Resolved).unwrap();
     opened.review.go_to_file(&path("src/cart.rs"));
     add_to_tasks(&feature, &mut opened, "pub fn total() {}", "Shout it");
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut opened, &github, Instant::now());
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut opened, &host, Instant::now());
     let offer = move_offer(&opened.review).unwrap();
 
     feature
         .mover_of(feature.subject.local().unwrap())
-        .run(&offer, &github)
+        .run(&offer, &host)
         .unwrap();
 
     assert_eq!(
@@ -567,8 +570,8 @@ fn moving_makes_drafts_of_open_threads_and_queued_tasks_none_of_resolved_ones_an
         ]
     );
     assert_eq!(
-        feature.sent.github_calls(),
-        [GitHubCall::TipsOf(SHOP_7.parse().unwrap())]
+        feature.sent.host_calls(),
+        [HostCall::TipsOf(SHOP_7.parse().unwrap())]
     );
 }
 
@@ -596,13 +599,13 @@ fn the_local_review_and_its_ref_go_only_once_the_prs_state_is_saved() {
     let feature = Feature::with_work_in_progress();
     let mut opened = feature.open();
     opened.review.tick_file(&path("README.md")).unwrap();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut opened, &github, Instant::now());
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut opened, &host, Instant::now());
     let offer = move_offer(&opened.review).unwrap();
     let mover = feature.mover_of(feature.subject.local().unwrap());
     assert!(local_review_is_on_disk(&feature));
 
-    mover.carry(&offer, &github).unwrap();
+    mover.carry(&offer, &host).unwrap();
 
     assert!(
         local_review_is_on_disk(&feature),
@@ -632,15 +635,15 @@ fn a_pr_state_that_cannot_be_saved_keeps_the_local_review_whole() {
     let feature = Feature::with_work_in_progress();
     let mut opened = feature.open();
     opened.review.tick_file(&path("README.md")).unwrap();
-    let (github, _) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut opened, &github, Instant::now());
+    let (host, _) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut opened, &host, Instant::now());
     let offer = move_offer(&opened.review).unwrap();
     std::fs::create_dir_all(pr_state_path(&feature).parent().unwrap()).unwrap();
     std::fs::write(pr_state_path(&feature), "{ not json").unwrap();
 
     let moved = feature
         .mover_of(feature.subject.local().unwrap())
-        .run(&offer, &github);
+        .run(&offer, &host);
 
     assert!(moved.is_err());
     assert!(local_review_is_on_disk(&feature));
@@ -668,11 +671,11 @@ fn a_move_that_crashed_after_saving_carries_again_without_doubling_drafts_or_und
             &feature.snapshot_head(),
         )
         .unwrap();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut opened, &github, Instant::now());
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut opened, &host, Instant::now());
     let offer = move_offer(&opened.review).unwrap();
     let mover = feature.mover_of(feature.subject.local().unwrap());
-    mover.carry(&offer, &github).unwrap();
+    mover.carry(&offer, &host).unwrap();
     assert!(
         pr_state(&feature)
             .file_read_before(&path("src/cart.rs"))
@@ -686,7 +689,7 @@ fn a_move_that_crashed_after_saving_carries_again_without_doubling_drafts_or_und
     .update(|state| state.tick_file(&path("src/cart.rs"), &pr_head))
     .unwrap();
 
-    mover.run(&offer, &github).unwrap();
+    mover.run(&offer, &host).unwrap();
 
     let state = pr_state(&feature);
     assert_eq!(
@@ -732,14 +735,17 @@ fn a_thread_follows_its_lines_to_the_prs_head_and_one_whose_file_is_gone_becomes
     std::fs::remove_file(feature.repo.path().join("src/cart.rs")).unwrap();
     let head = Sha::new(&feature.repo.commit("Rewrite the readme and drop the cart"));
     let main = feature.repo.git(&["rev-parse", "main"]);
-    let github = FakeGitHub::with_pull(main.trim(), head.as_str(), &feature.sent)
-        .with_open_pull_from("feature", SHOP_7, "Add the cart");
-    feature.focus(&mut opened, &github, Instant::now());
+    let host = FakeHost::with_pull(main.trim(), head.as_str(), &feature.sent).with_open_pull_from(
+        "feature",
+        SHOP_7,
+        "Add the cart",
+    );
+    feature.focus(&mut opened, &host, Instant::now());
     let offer = move_offer(&opened.review).unwrap();
 
     feature
         .mover_of(feature.subject.local().unwrap())
-        .run(&offer, &github)
+        .run(&offer, &host)
         .unwrap();
 
     assert_eq!(
@@ -762,20 +768,20 @@ fn a_thread_follows_its_lines_to_the_prs_head_and_one_whose_file_is_gone_becomes
 #[test]
 fn declining_hides_the_offer_for_that_pr_for_good_and_keeps_the_local_review() {
     let feature = Feature::with_work_in_progress();
-    let github = feature
-        .github()
+    let host = feature
+        .host()
         .with_open_pull_from("feature", SHOP_7, "Add the cart");
     let mut opened = feature.open();
-    feature.focus(&mut opened, &github, Instant::now());
+    feature.focus(&mut opened, &host, Instant::now());
 
     keep_the_local_review(&mut opened.review);
 
     assert_eq!(move_offer(&opened.review), None);
     assert!(local_review_is_on_disk(&feature));
     let mut reopened = feature.open();
-    feature.focus(&mut reopened, &github, Instant::now());
+    feature.focus(&mut reopened, &host, Instant::now());
     assert_eq!(move_offer(&reopened.review), None);
-    let another = feature.github().with_open_pull_from(
+    let another = feature.host().with_open_pull_from(
         "feature",
         "https://github.com/acme/shop/pull/8",
         "Again",
@@ -808,7 +814,7 @@ impl Feature {
 
     /// The PR's review is open, as when the reviewer opens the PR from the switcher: its basic tour is
     /// on disk, made at the PR's tips.
-    fn open_the_pr(&self, github: &FakeGitHub, head: &Sha) -> OpenedReview {
+    fn open_the_pr(&self, host: &FakeHost, head: &Sha) -> OpenedReview {
         let pr: PullRequestUrl = SHOP_7.parse().unwrap();
         let source = guided_review::local_git::LocalGit::find(&pr.repo, self.repo.path())
             .unwrap()
@@ -831,7 +837,7 @@ impl Feature {
             &self.repo.folders(),
         )
         .unwrap();
-        self.focus(&mut opened, github, Instant::now());
+        self.focus(&mut opened, host, Instant::now());
         opened
     }
 }
@@ -840,10 +846,10 @@ impl Feature {
 fn a_pr_review_offers_to_take_over_the_local_review_of_the_branch_it_is_opened_from() {
     let feature = Feature::with_work_in_progress();
     drop(feature.open());
-    let (github, head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
+    let (host, head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
 
-    let opened = feature.open_the_pr(&github, &head);
+    let opened = feature.open_the_pr(&host, &head);
 
     let offer = move_here_offer(&opened.review).unwrap();
     assert_eq!(offer.change_set, *feature.subject.local().unwrap());
@@ -861,16 +867,16 @@ fn a_pr_review_offers_to_take_over_the_local_review_of_the_branch_it_is_opened_f
 fn a_pr_review_offers_nothing_for_another_branch_or_without_a_local_review_and_asks_nothing_then() {
     let other_branch = Feature::with_work_in_progress();
     drop(other_branch.open());
-    let (github, head) = other_branch.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "another");
-    let opened = other_branch.open_the_pr(&github, &head);
+    let (host, head) = other_branch.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "another");
+    let opened = other_branch.open_the_pr(&host, &head);
     assert_eq!(move_here_offer(&opened.review), None);
 
     let no_local_review = Feature::with_work_in_progress();
-    let (github, head) = no_local_review.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
+    let (host, head) = no_local_review.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
     opened_without_a_local_review(&no_local_review);
-    let opened = no_local_review.open_the_pr(&github, &head);
+    let opened = no_local_review.open_the_pr(&host, &head);
     assert_eq!(move_here_offer(&opened.review), None);
 }
 
@@ -894,16 +900,16 @@ fn moving_into_an_open_pr_review_keeps_its_earlier_tick_and_the_moved_ticks_and_
             &feature.snapshot_head(),
         )
         .unwrap();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
-    let mut opened = feature.open_the_pr(&github, &pr_head);
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&host, &pr_head);
     opened.review.tick_file(&path("src/cart.rs")).unwrap();
     let offer = move_here_offer(&opened.review).unwrap();
 
     assert!(start_move(&mut opened.review).is_some());
     feature
         .mover_of(&offer.change_set)
-        .run(&offer.offer, &github)
+        .run(&offer.offer, &host)
         .unwrap();
     assert!(!local_review_is_on_disk(&feature));
     assert!(
@@ -911,7 +917,7 @@ fn moving_into_an_open_pr_review_keeps_its_earlier_tick_and_the_moved_ticks_and_
         "the open review's stale copy takes no more changes"
     );
 
-    let mut reopened = feature.open_the_pr(&github, &pr_head);
+    let mut reopened = feature.open_the_pr(&host, &pr_head);
     reopened.review.tick_file(&path("README.md")).unwrap();
     let state = pr_state(&feature);
     assert_eq!(
@@ -937,19 +943,19 @@ fn moving_into_an_open_pr_review_keeps_its_earlier_tick_and_the_moved_ticks_and_
 fn keeping_the_local_review_hides_the_pr_reviews_offer_and_the_local_ones_too() {
     let feature = Feature::with_work_in_progress();
     let local = feature.open();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
-    let mut opened = feature.open_the_pr(&github, &pr_head);
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&host, &pr_head);
     assert!(move_here_offer(&opened.review).is_some());
 
     keep_the_local_review(&mut opened.review);
 
     assert_eq!(move_here_offer(&opened.review), None);
-    let reopened = feature.open_the_pr(&github, &pr_head);
+    let reopened = feature.open_the_pr(&host, &pr_head);
     assert_eq!(move_here_offer(&reopened.review), None);
     drop(local);
     let mut local = feature.open();
-    feature.focus(&mut local, &github, Instant::now());
+    feature.focus(&mut local, &host, Instant::now());
     assert_eq!(move_offer(&local.review), None);
     assert!(local_review_is_on_disk(&feature));
 }
@@ -967,12 +973,12 @@ fn head_branch_lookups(feature: &Feature) -> usize {
 fn a_pr_review_asks_github_for_its_head_branch_once_and_not_again_when_it_comes_to_the_front() {
     let feature = Feature::with_work_in_progress();
     drop(feature.open());
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
-    let mut opened = feature.open_the_pr(&github, &pr_head);
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&host, &pr_head);
 
-    feature.focus(&mut opened, &github, Instant::now());
-    feature.focus(&mut opened, &github, Instant::now());
+    feature.focus(&mut opened, &host, Instant::now());
+    feature.focus(&mut opened, &host, Instant::now());
 
     assert_eq!(head_branch_lookups(&feature), 1);
     assert!(move_here_offer(&opened.review).is_some());
@@ -982,15 +988,15 @@ fn a_pr_review_asks_github_for_its_head_branch_once_and_not_again_when_it_comes_
 fn a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on_focus() {
     let feature = Feature::with_work_in_progress();
     drop(feature.open());
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
-    github.inject(GitHubFault::ReadsFail);
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
+    host.inject(HostFault::ReadsFail);
     let opened_at = Instant::now();
-    let mut opened = feature.open_the_pr(&github, &pr_head);
+    let mut opened = feature.open_the_pr(&host, &pr_head);
     let drive_at = |opened: &mut OpenedReview, after: Duration| {
         drive_without_agents(
             &mut opened.review,
-            &github,
+            &host,
             opened.source.as_ref(),
             opened_at + after,
         );
@@ -1001,7 +1007,7 @@ fn a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on
     assert_eq!(head_branch_lookups(&feature), 2);
     feature.focus(
         &mut opened,
-        &github,
+        &host,
         opened_at + PULL_OF_BRANCH_RETRY * 2 + a_second,
     );
     assert_eq!(
@@ -1010,7 +1016,7 @@ fn a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on
         "not on focus, nor before the longer wait"
     );
 
-    github.heal(&GitHubFault::ReadsFail);
+    host.heal(&HostFault::ReadsFail);
     drive_at(&mut opened, PULL_OF_BRANCH_RETRY * 3 + a_second * 2);
     assert_eq!(head_branch_lookups(&feature), 3);
     assert!(move_here_offer(&opened.review).is_some());
@@ -1020,8 +1026,8 @@ fn a_failed_look_up_of_the_head_branch_is_tried_again_later_and_later_but_not_on
 fn a_pr_review_finds_the_local_review_of_its_repo_by_its_tour_file_without_asking_the_clone() {
     let feature = Feature::with_work_in_progress();
     drop(feature.open());
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
     // The clone's origin now names another repo; only the local tour file still says acme/shop.
     feature
         .repo
@@ -1033,7 +1039,7 @@ fn a_pr_review_finds_the_local_review_of_its_repo_by_its_tour_file_without_askin
         "https://github.com/acme/elsewhere",
     ]);
 
-    let opened = feature.open_the_pr(&github, &pr_head);
+    let opened = feature.open_the_pr(&host, &pr_head);
 
     assert!(move_here_offer(&opened.review).is_some());
 }
@@ -1042,12 +1048,12 @@ fn a_pr_review_finds_the_local_review_of_its_repo_by_its_tour_file_without_askin
 fn a_kept_local_review_is_not_offered_again_when_the_pr_review_comes_back_to_the_front() {
     let feature = Feature::with_work_in_progress();
     drop(feature.open());
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
-    let mut opened = feature.open_the_pr(&github, &pr_head);
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&host, &pr_head);
 
     keep_the_local_review(&mut opened.review);
-    feature.focus(&mut opened, &github, Instant::now());
+    feature.focus(&mut opened, &host, Instant::now());
 
     assert_eq!(move_here_offer(&opened.review), None);
 }
@@ -1056,7 +1062,7 @@ fn a_kept_local_review_is_not_offered_again_when_the_pr_review_comes_back_to_the
 fn a_local_tour_pinned_to_another_folder_is_refused_by_the_move_and_nothing_is_carried() {
     let feature = Feature::with_work_in_progress();
     drop(feature.open());
-    let (github, _) = feature.open_a_pr_after_one_more_commit();
+    let (host, _) = feature.open_a_pr_after_one_more_commit();
     let tour_path = Tour::shown_path_for(&feature.repo.folders(), &feature.subject);
     let other = "local:/Users/me/Other/shop@feature";
     let pinned = std::fs::read_to_string(&tour_path).unwrap();
@@ -1068,7 +1074,7 @@ fn a_local_tour_pinned_to_another_folder_is_refused_by_the_move_and_nothing_is_c
 
     let moved = feature
         .mover_of(feature.subject.local().unwrap())
-        .run(&offer_of(SHOP_7, "Add the cart"), &github);
+        .run(&offer_of(SHOP_7, "Add the cart"), &host);
 
     let refused = format!("{:#}", moved.unwrap_err());
     assert!(refused.contains(other), "{refused}");
@@ -1086,8 +1092,8 @@ fn start_move(review: &mut Review) -> Option<StartedMove> {
 fn the_move_button_starts_the_move_the_review_offers_and_the_review_takes_no_changes_from_then() {
     let feature = Feature::with_work_in_progress();
     let mut local = feature.open();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut local, &github, Instant::now());
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &host, Instant::now());
 
     let started = start_move(&mut local.review).unwrap();
 
@@ -1096,8 +1102,8 @@ fn the_move_button_starts_the_move_the_review_offers_and_the_review_takes_no_cha
     assert_eq!(started.change_set, *feature.subject.local().unwrap());
     assert!(local.review.tick_file(&path("README.md")).is_err());
 
-    let github = github.with_head_branch(SHOP_7, "feature");
-    let mut in_the_pr = feature.open_the_pr(&github, &pr_head);
+    let host = host.with_head_branch(SHOP_7, "feature");
+    let mut in_the_pr = feature.open_the_pr(&host, &pr_head);
 
     let started = start_move(&mut in_the_pr.review).unwrap();
 
@@ -1119,8 +1125,8 @@ fn the_move_button_starts_nothing_without_an_offer() {
 fn a_failed_move_says_which_move_it_was_and_why_and_the_review_takes_changes_again() {
     let feature = Feature::with_work_in_progress();
     let mut local = feature.open();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut local, &github, Instant::now());
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &host, Instant::now());
     let failed = || JobOutcome::MoveToPr(Err(anyhow::anyhow!("no network")));
 
     start_move(&mut local.review).unwrap();
@@ -1130,8 +1136,8 @@ fn a_failed_move_says_which_move_it_was_and_why_and_the_review_takes_changes_aga
     assert_eq!(toast, "Could not move to acme/shop#7: no network");
     local.review.tick_file(&path("README.md")).unwrap();
 
-    let github = github.with_head_branch(SHOP_7, "feature");
-    let mut in_the_pr = feature.open_the_pr(&github, &pr_head);
+    let host = host.with_head_branch(SHOP_7, "feature");
+    let mut in_the_pr = feature.open_the_pr(&host, &pr_head);
     start_move(&mut in_the_pr.review).unwrap();
     let AfterJob::Stays { toast: Some(toast) } = in_the_pr.review.land_job(failed()) else {
         panic!("nothing is told");
@@ -1143,8 +1149,8 @@ fn a_failed_move_says_which_move_it_was_and_why_and_the_review_takes_changes_aga
 fn after_a_move_from_the_local_review_it_is_gone_and_the_pr_is_shown() {
     let feature = Feature::with_work_in_progress();
     let mut local = feature.open();
-    let (github, _) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut local, &github, Instant::now());
+    let (host, _) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &host, Instant::now());
     start_move(&mut local.review).unwrap();
 
     let after = local.review.land_job(JobOutcome::MoveToPr(Ok(())));
@@ -1160,9 +1166,9 @@ fn after_a_move_from_the_local_review_it_is_gone_and_the_pr_is_shown() {
 fn after_a_move_from_the_pr_side_the_local_review_is_dropped_and_the_pr_reopened() {
     let feature = Feature::with_work_in_progress();
     feature.open();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
-    let mut in_the_pr = feature.open_the_pr(&github, &pr_head);
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
+    let mut in_the_pr = feature.open_the_pr(&host, &pr_head);
     start_move(&mut in_the_pr.review).unwrap();
 
     let after = in_the_pr.review.land_job(JobOutcome::MoveToPr(Ok(())));
@@ -1177,8 +1183,8 @@ fn after_a_move_from_the_pr_side_the_local_review_is_dropped_and_the_pr_reopened
 fn update_and_not_now_are_refused_while_a_move_runs() {
     let feature = Feature::with_work_in_progress();
     let mut local = feature.open();
-    let (github, _) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut local, &github, Instant::now());
+    let (host, _) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &host, Instant::now());
     start_move(&mut local.review).unwrap();
 
     assert_eq!(local.review.start_job(ReplacingJob::Repin), None);
@@ -1192,8 +1198,8 @@ fn update_and_not_now_are_refused_while_a_move_runs() {
 fn a_reload_asked_for_while_a_move_runs_never_runs_once_the_review_is_gone() {
     let feature = Feature::with_work_in_progress();
     let mut local = feature.open();
-    let (github, _) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut local, &github, Instant::now());
+    let (host, _) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut local, &host, Instant::now());
     start_move(&mut local.review).unwrap();
     assert_eq!(local.review.start_job(ReplacingJob::Reload), None);
 
@@ -1206,8 +1212,8 @@ fn a_reload_asked_for_while_a_move_runs_never_runs_once_the_review_is_gone() {
 fn a_decline_that_could_not_be_kept_is_a_problem_the_reviewer_sees_and_one_that_was_kept_is_not() {
     let feature = Feature::with_work_in_progress();
     let mut opened = feature.open();
-    let (github, _) = feature.open_a_pr_after_one_more_commit();
-    feature.focus(&mut opened, &github, Instant::now());
+    let (host, _) = feature.open_a_pr_after_one_more_commit();
+    feature.focus(&mut opened, &host, Instant::now());
     let state_path = local_state_path(&feature);
     std::fs::create_dir_all(state_path.parent().unwrap()).unwrap();
     std::fs::write(&state_path, "{ not json").unwrap();
@@ -1250,9 +1256,9 @@ fn keeping_the_local_review_from_the_pr_side_that_could_not_be_written_is_a_prob
  {
     let feature = Feature::with_work_in_progress();
     drop(feature.open());
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
-    let mut opened = feature.open_the_pr(&github, &pr_head);
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
+    let mut opened = feature.open_the_pr(&host, &pr_head);
     let offered = opened.review.branch_offer();
     assert!(matches!(offered, Some(BranchOffer::MoveHere(_))));
     let local_state = local_state_path(&feature);
@@ -1277,9 +1283,9 @@ fn keeping_the_local_review_from_the_pr_side_that_could_not_be_written_is_a_prob
 fn a_rebuilt_review_keeps_what_github_said_of_its_branch_and_asks_it_nothing_again() {
     let feature = Feature::with_work_in_progress();
     let mut local = feature.open();
-    let (github, pr_head) = feature.open_a_pr_after_one_more_commit();
-    let github = github.with_head_branch(SHOP_7, "feature");
-    feature.focus(&mut local, &github, Instant::now());
+    let (host, pr_head) = feature.open_a_pr_after_one_more_commit();
+    let host = host.with_head_branch(SHOP_7, "feature");
+    feature.focus(&mut local, &host, Instant::now());
     let offered = local.review.branch_offer();
     assert!(matches!(offered, Some(BranchOffer::MoveToPr(_))));
 
@@ -1287,7 +1293,7 @@ fn a_rebuilt_review_keeps_what_github_said_of_its_branch_and_asks_it_nothing_aga
     rebuilt.review.carry_on_from(local.review);
     drive_without_agents(
         &mut rebuilt.review,
-        &github,
+        &host,
         rebuilt.source.as_ref(),
         Instant::now(),
     );
@@ -1295,7 +1301,7 @@ fn a_rebuilt_review_keeps_what_github_said_of_its_branch_and_asks_it_nothing_aga
     assert_eq!(rebuilt.review.branch_offer(), offered);
     assert_eq!(feature.sent.branch_lookups(), ["acme/shop:feature"]);
 
-    let in_the_pr = feature.open_the_pr(&github, &pr_head);
+    let in_the_pr = feature.open_the_pr(&host, &pr_head);
     let offered = in_the_pr.review.branch_offer();
     assert!(matches!(offered, Some(BranchOffer::MoveHere(_))));
     let pr: PullRequestUrl = SHOP_7.parse().unwrap();
@@ -1308,7 +1314,7 @@ fn a_rebuilt_review_keeps_what_github_said_of_its_branch_and_asks_it_nothing_aga
     rebuilt.review.carry_on_from(in_the_pr.review);
     drive_without_agents(
         &mut rebuilt.review,
-        &github,
+        &host,
         rebuilt.source.as_ref(),
         Instant::now(),
     );

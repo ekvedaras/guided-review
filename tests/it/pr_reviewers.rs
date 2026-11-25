@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
@@ -182,8 +182,8 @@ impl Pull {
         .unwrap()
     }
 
-    fn reviewed_by(&self, standings: Vec<Standing>) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent).with_standings(standings)
+    fn reviewed_by(&self, standings: Vec<Standing>) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent).with_standings(standings)
     }
 }
 
@@ -212,10 +212,10 @@ fn sent(outcome: ReviewOutcome, commit: &str) -> SubmittedReview {
     }
 }
 
-fn your_review_after(pull: &Pull, github: &FakeGitHub) -> (Review, YourReview) {
+fn your_review_after(pull: &Pull, host: &FakeHost) -> (Review, YourReview) {
     let mut review = pull.open();
-    review.pull_from_github();
-    drive_without_agents(&mut review, github, &pull.source(), Instant::now());
+    review.pull_from_host();
+    drive_without_agents(&mut review, host, &pull.source(), Instant::now());
     let yours = review.your_review().unwrap();
     (review, yours)
 }
@@ -223,11 +223,11 @@ fn your_review_after(pull: &Pull, github: &FakeGitHub) -> (Review, YourReview) {
 #[test]
 fn your_review_says_where_you_stand_and_when_you_sent_it() {
     let pull = Pull::new();
-    let github = pull
+    let host = pull
         .reviewed_by(vec![standing("me", ReviewOutcome::Approved, &pull.base)])
         .with_last_review(sent(ReviewOutcome::Commented, &pull.base));
 
-    let (_, yours) = your_review_after(&pull, &github);
+    let (_, yours) = your_review_after(&pull, &host);
 
     assert_eq!(yours.status, ReviewerStatus::Approved);
     assert_eq!(yours.title(), "You approved");
@@ -239,10 +239,10 @@ fn your_review_says_where_you_stand_and_when_you_sent_it() {
 #[test]
 fn marking_done_says_the_new_commits_were_checked() {
     let pull = Pull::new();
-    let github = pull
+    let host = pull
         .reviewed_by(vec![standing("me", ReviewOutcome::Approved, &pull.base)])
         .with_last_review(sent(ReviewOutcome::Approved, &pull.base));
-    let (mut review, _) = your_review_after(&pull, &github);
+    let (mut review, _) = your_review_after(&pull, &host);
 
     review.mark_done().unwrap();
     let yours = review.your_review().unwrap();
@@ -257,11 +257,11 @@ fn marking_done_says_the_new_commits_were_checked() {
 #[test]
 fn your_review_falls_back_to_the_last_one_sent_when_github_lists_no_standing() {
     let pull = Pull::new();
-    let github = pull
+    let host = pull
         .reviewed_by(Vec::new())
         .with_last_review(sent(ReviewOutcome::ChangesRequested, &pull.head));
 
-    let (_, yours) = your_review_after(&pull, &github);
+    let (_, yours) = your_review_after(&pull, &host);
 
     assert_eq!(yours.title(), "You requested changes");
     assert_eq!(yours.since(), "Last review 2026-11-18");
@@ -271,13 +271,13 @@ fn your_review_falls_back_to_the_last_one_sent_when_github_lists_no_standing() {
 #[test]
 fn a_review_asked_of_you_and_not_sent_yet_is_waiting() {
     let pull = Pull::new();
-    let github = pull.reviewed_by(vec![Standing::of(
+    let host = pull.reviewed_by(vec![Standing::of(
         person("me"),
         Whose::Viewers,
         Stance::Requested,
     )]);
 
-    let (_, yours) = your_review_after(&pull, &github);
+    let (_, yours) = your_review_after(&pull, &host);
 
     assert_eq!(yours.title(), "Your review is requested");
     assert_eq!(yours.since(), "");
@@ -286,14 +286,14 @@ fn a_review_asked_of_you_and_not_sent_yet_is_waiting() {
 #[test]
 fn the_sidebar_lines_name_the_viewer_you_and_say_which_reviews_came_before_new_commits() {
     let pull = Pull::new();
-    let github = pull.reviewed_by(vec![
+    let host = pull.reviewed_by(vec![
         standing("me", ReviewOutcome::Approved, &pull.base),
         standing("bob", ReviewOutcome::Approved, &pull.head),
     ]);
     let mut review = pull.open();
 
-    review.pull_from_github();
-    drive_without_agents(&mut review, &github, &pull.source(), Instant::now());
+    review.pull_from_host();
+    drive_without_agents(&mut review, &host, &pull.source(), Instant::now());
 
     let lines: Vec<(String, StanceAge)> = review
         .reviewer_lines()

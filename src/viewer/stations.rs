@@ -11,7 +11,7 @@ pub enum StationKind {
     AiReview,
     Fixes,
     YourReview,
-    GitHub,
+    Host,
 }
 
 impl StationKind {
@@ -21,7 +21,7 @@ impl StationKind {
             Self::AiReview => "AI review",
             Self::Fixes => "Fixes",
             Self::YourReview => "Your review",
-            Self::GitHub => "GitHub",
+            Self::Host => "GitHub",
         }
     }
 
@@ -124,13 +124,13 @@ impl Stations {
     pub fn home_of(&self, problem: &Problem) -> Option<StationKind> {
         let home = match problem.kind() {
             ProblemKind::ThreadsNotRead
-            | ProblemKind::GitHubNotAnswering
+            | ProblemKind::HostNotAnswering
             | ProblemKind::NotRead(_)
             | ProblemKind::ViewedNotSynced
             | ProblemKind::HandOffNotSent
             | ProblemKind::ReviewingMarkNotChanged
             | ProblemKind::ReadinessNotChanged
-            | ProblemKind::MergingNotChanged => StationKind::GitHub,
+            | ProblemKind::MergingNotChanged => StationKind::Host,
             ProblemKind::TourNotRefreshed
             | ProblemKind::TourNotReloaded
             | ProblemKind::ShowAgentFailed
@@ -168,7 +168,7 @@ impl Stations {
 const fn short_state(kind: ProblemKind) -> &'static str {
     match kind {
         ProblemKind::ThreadsNotRead => "threads not read",
-        ProblemKind::GitHubNotAnswering => "not answering",
+        ProblemKind::HostNotAnswering => "not answering",
         ProblemKind::NotRead(_) => "read failed",
         ProblemKind::ViewedNotSynced => "viewed marks not synced",
         ProblemKind::HandOffNotSent => "comment not handed off",

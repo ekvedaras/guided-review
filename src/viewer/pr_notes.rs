@@ -262,9 +262,9 @@ impl ToNotes {
     /// Reads the description just before writing it, so an edit made on the web since is kept.
     pub fn run(
         self,
-        github: &(impl PullRequestDescriptionPort + PictureUploadPort + ?Sized),
+        host: &(impl PullRequestDescriptionPort + PictureUploadPort + ?Sized),
     ) -> ToNotesOutcome {
-        let result = self.add(github).map_err(|error| format!("{error:#}"));
+        let result = self.add(host).map_err(|error| format!("{error:#}"));
         ToNotesOutcome {
             subject: self.subject,
             result,
@@ -273,15 +273,15 @@ impl ToNotes {
 
     fn add(
         &self,
-        github: &(impl PullRequestDescriptionPort + PictureUploadPort + ?Sized),
+        host: &(impl PullRequestDescriptionPort + PictureUploadPort + ?Sized),
     ) -> anyhow::Result<String> {
-        let description = github.pull_request_description(&self.pr)?;
+        let description = host.pull_request_description(&self.pr)?;
         if self.note.is_in(&description) {
             return Ok(description);
         }
         let mut uploaded = HashMap::new();
         for picture in self.note.pictures() {
-            let url = github.upload_picture(&self.pr, picture).with_context(|| {
+            let url = host.upload_picture(&self.pr, picture).with_context(|| {
                 format!(
                     "could not upload {}",
                     picture.file_name().unwrap_or_default().display()
@@ -292,14 +292,14 @@ impl ToNotes {
         let description = if uploaded.is_empty() {
             description
         } else {
-            github.pull_request_description(&self.pr)?
+            host.pull_request_description(&self.pr)?
         };
         if self.note.is_in(&description) {
             return Ok(description);
         }
         let changed = in_notes(&description, &self.note.folded(&uploaded))
             .context("could not find where Notes ends in the description")?;
-        github.set_pull_request_description(&self.pr, &changed)?;
+        host.set_pull_request_description(&self.pr, &changed)?;
         Ok(changed)
     }
 }

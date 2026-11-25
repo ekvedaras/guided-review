@@ -12,12 +12,12 @@ use crate::viewer::branch_link::{BranchOffer, LocalReviewsOfRepo};
 use crate::viewer::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
 };
-use crate::viewer::github_outage::Affected;
-use crate::viewer::github_outage::Read;
 use crate::viewer::hidden_text::HiddenText;
+use crate::viewer::host_outage::Affected;
+use crate::viewer::host_outage::Read;
 use crate::viewer::markdown::Markdown;
 use crate::viewer::ports::ReviewVerdict;
-use crate::viewer::ports::{GitHubError, PullOfBranch};
+use crate::viewer::ports::{HostError, PullOfBranch};
 use crate::viewer::pr_notes::{Note, NoteSubject, NotesButton, ToNotes, ToNotesOutcome};
 #[cfg(feature = "snapshots")]
 use crate::viewer::pr_origin::PullRequestOrigin;
@@ -119,7 +119,7 @@ impl ReviewCore {
 
     /// Whether the review has a PR page to open.
     pub fn can_open_on_github(&self) -> bool {
-        self.subject.has_github_page()
+        self.subject.has_host_page()
     }
 
     /// A local review whose branch has no open PR yet, so its agent can be asked to open one.
@@ -192,13 +192,13 @@ impl ReviewCore {
 
     pub fn pending_review_is(&mut self, exists: bool) {
         self.clear_problem(ProblemKind::NotRead(Read::PendingReview));
-        self.github_answered(Affected::PendingReview);
+        self.host_answered(Affected::PendingReview);
         self.comment_desk.pending_review_is(exists);
     }
 
     pub fn reviews_are(&mut self, reviews: PullRequestReviews) {
         self.clear_problem(ProblemKind::NotRead(Read::LastReview));
-        self.github_answered(Affected::LastReview);
+        self.host_answered(Affected::LastReview);
         self.reviewing_mark
             .last_review_is(reviews.viewer_last.as_ref());
         self.last_review = reviews.viewer_last;
@@ -239,7 +239,7 @@ impl ReviewCore {
     pub(super) fn reviewing_mark_landed(
         &mut self,
         change: ReactionChange,
-        result: Result<(), GitHubError>,
+        result: Result<(), HostError>,
     ) {
         match result {
             Ok(()) => {
@@ -304,7 +304,7 @@ impl ReviewCore {
 
     pub fn viewer_authorship_is(&mut self, authored: bool) {
         self.clear_problem(ProblemKind::NotRead(Read::Authorship));
-        self.github_answered(Affected::Authorship);
+        self.host_answered(Affected::Authorship);
         self.comment_desk.viewer_authorship_is(authored);
         self.reviewing_mark.viewer_authorship_is(authored);
         self.want_reviewing_mark_sent();

@@ -2,10 +2,10 @@ use std::time::Instant;
 
 use super::ReviewCore;
 use crate::merge_method::MergeMethod;
-use crate::viewer::github_outage::Affected;
-use crate::viewer::github_outage::Read;
+use crate::viewer::host_outage::Affected;
+use crate::viewer::host_outage::Read;
 use crate::viewer::merging::MergeChange;
-use crate::viewer::ports::GitHubError;
+use crate::viewer::ports::HostError;
 use crate::viewer::pr_controls::PrControls;
 use crate::viewer::pr_status::{CHECKS_RECHECK, Checks, PrStatus, Readiness};
 use crate::viewer::press_again::PressStep;
@@ -23,7 +23,7 @@ impl ReviewCore {
             return;
         }
         self.clear_problem(ProblemKind::NotRead(Read::PrStatus));
-        self.github_answered(Affected::PrStatus);
+        self.host_answered(Affected::PrStatus);
         if status
             .open()
             .is_some_and(|status| status.checks == Checks::Running)
@@ -96,18 +96,14 @@ impl ReviewCore {
         self.pr_controls.as_ref()?.merging_to_send()
     }
 
-    pub(super) fn readiness_landed(
-        &mut self,
-        readiness: Readiness,
-        result: Result<(), GitHubError>,
-    ) {
+    pub(super) fn readiness_landed(&mut self, readiness: Readiness, result: Result<(), HostError>) {
         if let Some(controls) = &mut self.pr_controls {
             let landed = controls.readiness_landed(readiness, result);
             self.pr_change_landed(ProblemKind::ReadinessNotChanged, landed);
         }
     }
 
-    pub(super) fn merging_landed(&mut self, change: MergeChange, result: Result<(), GitHubError>) {
+    pub(super) fn merging_landed(&mut self, change: MergeChange, result: Result<(), HostError>) {
         if let Some(controls) = &mut self.pr_controls {
             let landed = controls.merging_landed(change, result);
             self.pr_change_landed(ProblemKind::MergingNotChanged, landed);

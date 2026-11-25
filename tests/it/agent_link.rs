@@ -1,5 +1,5 @@
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::work::{drive_until_idle, kinds};
 use guided_review::local_git::LocalGit;
@@ -59,10 +59,10 @@ impl Pull {
         agents: &TourAgents,
         now: Instant,
     ) -> Vec<(WorkKind, AfterLanding)> {
-        let github = FakeGitHub::with_pull("main-tip", &self.head, &SentLog::default());
+        let host = FakeHost::with_pull("main-tip", &self.head, &SentLog::default());
         let source = self.source();
         let ports = WorkPorts {
-            github: &github,
+            host: &host,
             source: &source,
             agents,
         };
@@ -88,7 +88,7 @@ fn link_checks(ran: &[(WorkKind, AfterLanding)]) -> usize {
 /// A review whose follow of the tour agent just said the link is off, with the pulls from GitHub done.
 fn review_with_link_off(pull: &Pull, agents: &TourAgents, start: Instant) -> Review {
     let mut review = pull.open();
-    review.pull_from_github();
+    review.pull_from_host();
     pull.drive_at(&mut review, agents, start);
     review.tour_agent_is(&agents.lookup(&pr()));
     review

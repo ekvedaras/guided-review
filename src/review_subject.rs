@@ -57,12 +57,12 @@ impl ReviewSubject {
     }
 
     /// Whether the review has a PR page on GitHub to open.
-    pub const fn has_github_page(&self) -> bool {
+    pub const fn has_host_page(&self) -> bool {
         matches!(self, Self::PullRequest(_))
     }
 
     /// Whether the review's threads live on GitHub, rather than in the review's state file.
-    pub const fn has_github_threads(&self) -> bool {
+    pub const fn has_host_threads(&self) -> bool {
         matches!(self, Self::PullRequest(_))
     }
 
@@ -88,7 +88,7 @@ impl ReviewSubject {
     }
 
     /// The repo whose GitHub holds the review; a local change set holds none.
-    pub const fn github_repo(&self) -> Option<&RepoName> {
+    pub const fn host_repo(&self) -> Option<&RepoName> {
         match self {
             Self::PullRequest(pr) => Some(&pr.repo),
             Self::Local(_) => None,

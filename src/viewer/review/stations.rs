@@ -34,7 +34,7 @@ impl ReviewCore {
             self.your_review_station(),
         ];
         if self.subject.pull_request().is_some() {
-            stations.push(self.github_station(now));
+            stations.push(self.host_station(now));
         }
         Stations::new(stations).with_problems(&self.problems())
     }
@@ -159,8 +159,8 @@ impl ReviewCore {
         }
     }
 
-    fn github_station(&self, now: SystemTime) -> Station {
-        let station = |health, state: String| Station::new(StationKind::GitHub, health, state);
+    fn host_station(&self, now: SystemTime) -> Station {
+        let station = |health, state: String| Station::new(StationKind::Host, health, state);
         if self.sync_banner().is_some() {
             return station(NotStarted, "viewed marks off".to_owned());
         }

@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
 use crate::support::{FixtureRepo, file_path, png_of, svg_of};
 use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
 use guided_review::file_path::FilePath;
@@ -324,7 +324,7 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
     let source = pull.source();
     let mut review = pull.open(&source);
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", &pull.head, &sent);
+    let host = FakeHost::with_pull("main-tip", &pull.head, &sent);
 
     let place = review
         .open_comment_box(CommentGesture::OnFile(&file_path("logo.png")))
@@ -334,12 +334,12 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
         .type_in(&TextBox::Draft(place.clone()), "is the red intended?")
         .unwrap();
     let result = review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
 
     assert_eq!(result, Some(CommentResult::Sent));
     assert!(place.is_file_comment());
-    assert!(sent.github_calls().contains(&GitHubCall::AddThread {
+    assert!(sent.host_calls().contains(&HostCall::AddThread {
         pr: PR.parse().unwrap(),
         place,
         body: "is the red intended?".into()

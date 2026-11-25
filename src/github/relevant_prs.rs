@@ -7,7 +7,7 @@ use super::GitHub;
 use crate::json::at;
 use crate::pull_request::PullRequestUrl;
 use crate::viewer::{
-    GitHubError, PrAuthor, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort,
+    HostError, PrAuthor, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort,
     WhyListed,
 };
 
@@ -75,7 +75,7 @@ struct ReviewerJson {
 }
 
 impl RelevantPullRequestsPort for GitHub {
-    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, GitHubError> {
+    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, HostError> {
         let teams = self.teams_of_viewer()?;
         let (searched, left_out) = teams.split_at(teams.len().min(TEAM_SEARCH_LIMIT));
 
@@ -187,7 +187,7 @@ fn why_listed(pr: &PullRequestJson, me: &str, my_teams: &[String]) -> WhyListed 
 
 impl GitHub {
     /// The teams the viewer is a member of, read from GitHub once per app run.
-    fn teams_of_viewer(&self) -> Result<Vec<String>, GitHubError> {
+    fn teams_of_viewer(&self) -> Result<Vec<String>, HostError> {
         let mut known = self
             .viewer_teams
             .lock()

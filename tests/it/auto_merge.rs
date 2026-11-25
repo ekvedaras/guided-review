@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::pr_status::{PR, Pull};
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, blocked_merging};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, blocked_merging};
 use crate::support::work::drive_without_agents;
 use guided_review::build::Build;
 use guided_review::viewer::{
@@ -41,9 +41,9 @@ fn the_title_bar_button_says_what_a_click_offers_and_hides_where_the_viewer_cann
     );
 }
 
-fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeGitHub, Instant) {
+fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeHost, Instant) {
     let mut review = pull.open();
-    let github = pull.github().with_status(PrStatus::Open(OpenPrStatus {
+    let host = pull.host().with_status(PrStatus::Open(OpenPrStatus {
         readiness: Readiness::Ready,
         checks: Checks::Running,
         check_runs: Arc::default(),
@@ -51,16 +51,16 @@ fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeGitHub, Instant) 
         merging,
     }));
     let now = Instant::now();
-    pull.read(&mut review, &github, now);
-    (review, github, now)
+    pull.read(&mut review, &host, now);
+    (review, host, now)
 }
 
 fn merging_calls(pull: &Pull) -> Vec<MergeChange> {
     pull.sent
-        .github_calls()
+        .host_calls()
         .into_iter()
         .filter_map(|call| match call {
-            GitHubCall::ChangeMerging { change, .. } => Some(change),
+            HostCall::ChangeMerging { change, .. } => Some(change),
             _ => None,
         })
         .collect()
@@ -76,35 +76,31 @@ fn asked(step: PressStep) -> String {
 #[test]
 fn the_first_press_says_it_turns_on_auto_merge_with_a_merge_commit_and_sends_nothing() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_merging(&pull, blocked_merging());
+    let (mut review, host, now) = read_merging(&pull, blocked_merging());
 
     let note = asked(review.ask_to_change_merging(now));
 
     assert!(note.contains("turn on auto-merge"), "{note}");
     assert!(note.contains("merge commit"), "{note}");
     assert!(note.contains("again within 10 s"), "{note}");
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
     assert_eq!(merging_calls(&pull), []);
 }
 
 #[test]
 fn the_same_press_again_within_ten_seconds_turns_auto_merge_on() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_merging(&pull, blocked_merging());
+    let (mut review, host, now) = read_merging(&pull, blocked_merging());
     review.ask_to_change_merging(now);
 
     let later = now + Duration::from_secs(10);
     assert_eq!(review.ask_to_change_merging(later), PressStep::Sent);
-    drive_without_agents(&mut review, &github, &pull.source(), later);
+    drive_without_agents(&mut review, &host, &pull.source(), later);
 
-    assert!(
-        pull.sent
-            .github_calls()
-            .contains(&GitHubCall::ChangeMerging {
-                pr: PR.parse().unwrap(),
-                change: MergeChange::EnableAutoMerge(MergeMethod::Merge),
-            })
-    );
+    assert!(pull.sent.host_calls().contains(&HostCall::ChangeMerging {
+        pr: PR.parse().unwrap(),
+        change: MergeChange::EnableAutoMerge(MergeMethod::Merge),
+    }));
     assert_eq!(
         merging_calls(&pull),
         [MergeChange::EnableAutoMerge(MergeMethod::Merge)]
@@ -122,7 +118,7 @@ fn the_same_press_again_within_ten_seconds_turns_auto_merge_on() {
 #[test]
 fn a_repo_that_does_not_allow_the_chosen_method_gets_its_first_allowed_one_and_the_toast_says_so() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_merging(
+    let (mut review, host, now) = read_merging(
         &pull,
         Merging {
             methods: MergeMethods::only(&[MergeMethod::Squash, MergeMethod::Rebase]),
@@ -132,7 +128,7 @@ fn a_repo_that_does_not_allow_the_chosen_method_gets_its_first_allowed_one_and_t
 
     let note = asked(review.ask_to_change_merging(now));
     review.ask_to_change_merging(now);
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
 
     assert!(note.contains("squash"), "{note}");
     assert!(note.contains("does not allow merge commit"), "{note}");
@@ -145,12 +141,12 @@ fn a_repo_that_does_not_allow_the_chosen_method_gets_its_first_allowed_one_and_t
 #[test]
 fn the_merge_method_from_settings_is_used_where_the_repo_allows_it() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_merging(&pull, blocked_merging());
+    let (mut review, host, now) = read_merging(&pull, blocked_merging());
     review.prefer_merge_method(MergeMethod::Rebase);
 
     review.ask_to_change_merging(now);
     review.ask_to_change_merging(now);
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
 
     assert_eq!(
         merging_calls(&pull),
@@ -161,7 +157,7 @@ fn the_merge_method_from_settings_is_used_where_the_repo_allows_it() {
 #[test]
 fn with_auto_merge_on_the_same_key_turns_it_off() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_merging(
+    let (mut review, host, now) = read_merging(
         &pull,
         Merging {
             auto_merge: AutoMerge::On(MergeMethod::Squash),
@@ -172,7 +168,7 @@ fn with_auto_merge_on_the_same_key_turns_it_off() {
 
     let note = asked(review.ask_to_change_merging(now));
     review.ask_to_change_merging(now);
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
 
     assert!(note.contains("turn off auto-merge"), "{note}");
     assert_eq!(merging_calls(&pull), [MergeChange::DisableAutoMerge]);
@@ -188,7 +184,7 @@ fn with_auto_merge_on_the_same_key_turns_it_off() {
 #[test]
 fn when_nothing_blocks_the_pr_the_same_key_merges_it_now_after_the_second_press() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_merging(
+    let (mut review, host, now) = read_merging(
         &pull,
         Merging {
             mergeability: Mergeability::Now,
@@ -198,7 +194,7 @@ fn when_nothing_blocks_the_pr_the_same_key_merges_it_now_after_the_second_press(
 
     let note = asked(review.ask_to_change_merging(now));
     review.ask_to_change_merging(now);
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
 
     assert!(note.contains("merge the PR now"), "{note}");
     assert!(note.contains("merge commit"), "{note}");
@@ -213,7 +209,7 @@ fn when_nothing_blocks_the_pr_the_same_key_merges_it_now_after_the_second_press(
 fn from_the_confirming_press_until_github_answers_the_merge_is_in_flight_and_more_presses_send_nothing()
  {
     let pull = Pull::new();
-    let (mut review, github, now) = read_merging(
+    let (mut review, host, now) = read_merging(
         &pull,
         Merging {
             mergeability: Mergeability::Now,
@@ -231,7 +227,7 @@ fn from_the_confirming_press_until_github_answers_the_merge_is_in_flight_and_mor
     );
     assert_eq!(review.ask_to_change_merging(now), PressStep::Nothing);
     review.ask_to_change_merging(now);
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
 
     assert_eq!(review.merge_in_flight(), None);
     assert_eq!(
@@ -245,9 +241,9 @@ fn a_merged_or_closed_pr_says_so_and_neither_key_nor_the_palette_offers_a_change
     let pull = Pull::new();
     for (status, label) in [(PrStatus::Merged, "Merged"), (PrStatus::Closed, "Closed")] {
         let mut review = pull.open();
-        let github = pull.github().with_status(status.clone());
+        let host = pull.host().with_status(status.clone());
         let now = Instant::now();
-        pull.read(&mut review, &github, now);
+        pull.read(&mut review, &host, now);
 
         assert_eq!(review.pr_status(), Some(&status));
         assert_eq!(status.label(), label);
@@ -296,12 +292,12 @@ fn a_press_github_would_refuse_says_why_and_one_before_github_is_read_does_nothi
 #[test]
 fn a_change_github_does_not_take_is_a_problem_and_leaves_the_status_as_it_was() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_merging(&pull, blocked_merging());
-    github.inject(GitHubFault::ConnectionLost);
+    let (mut review, host, now) = read_merging(&pull, blocked_merging());
+    host.inject(HostFault::ConnectionLost);
     review.ask_to_change_merging(now);
     review.ask_to_change_merging(now);
 
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
 
     assert_eq!(
         review

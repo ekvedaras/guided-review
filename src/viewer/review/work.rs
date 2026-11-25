@@ -3,8 +3,8 @@ use std::time::Instant;
 use super::ReviewCore;
 use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
-use crate::viewer::github_outage::Read;
 use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
+use crate::viewer::host_outage::Read;
 use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::related_issues::RelatedIssues;
 use crate::viewer::tour_agent::{TourAgentState, TourKind};
@@ -36,7 +36,7 @@ impl ReviewCore {
 
     /// The window came to the front, or the review opened: GitHub and the clone are read again,
     /// and what waits to go to GitHub is sent.
-    pub(super) fn pull_from_github(&mut self) {
+    pub(super) fn pull_from_host(&mut self) {
         for kind in WorkKind::READ_AGAIN_ON_FOCUS {
             self.work.want(kind);
         }

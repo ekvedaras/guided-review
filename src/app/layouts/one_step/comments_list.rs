@@ -16,7 +16,7 @@ impl OneStepLayout {
         });
         match visit {
             ThreadVisit::OnScreen => self.scroll_to_thread(id, cx),
-            ThreadVisit::OnGitHub(url) => open_link(&url, cx),
+            ThreadVisit::OnHost(url) => open_link(&url, cx),
             ThreadVisit::Nowhere => {}
         }
     }

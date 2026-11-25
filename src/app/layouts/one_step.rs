@@ -63,11 +63,11 @@ use crate::open_review::AskSetup;
 use crate::tour::ToursOnDisk;
 use crate::update::running_build;
 use crate::viewer::{
-    AgentReplied, AiReviewAction, AskAt, CodeLink, Command, CommentGesture, Departure, Effect,
-    FileToggle, FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation,
-    Overlay, PieceLabels, Place, PressStep, Refusal, Reopen, ReopenAfterSave, Reopening,
-    RestartArgs, RestartGuard, RestartStep, Review, Screen, ScreenTravel, SettingsSheet, ToastTone,
-    Travel, ViewSwitch, WindowMoment,
+    AgentReplied, AiReviewAction, AskAt, CodeHost, CodeLink, Command, CommentGesture, Departure,
+    Effect, FileToggle, FileView, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, Overlay,
+    PieceLabels, Place, PressStep, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs,
+    RestartGuard, RestartStep, Review, Screen, ScreenTravel, SettingsSheet, ToastTone, Travel,
+    ViewSwitch, WindowMoment,
 };
 use crate::viewer::{FixReply, IssueDetails, NameHover, StationKind, WhyReply};
 use issue_card::IssueHover;
@@ -129,7 +129,7 @@ type OnTextSpot = Rc<dyn Fn(CodeGesture, TextSpot, &mut Window, &mut App)>;
 
 /// What the layout talks to outside the window.
 pub struct Collaborators {
-    pub github: Arc<dyn GitHubPort>,
+    pub host: Arc<dyn CodeHost>,
     /// `None` opens all code on GitHub.
     pub ide: Result<Ide, NoIde>,
     pub tour_work: TourWork,
@@ -219,7 +219,7 @@ impl OneStepLayout {
         cx: &mut Context<Self>,
     ) -> Self {
         let Collaborators {
-            github,
+            host,
             ide,
             tour_work,
         } = collaborators;
@@ -232,7 +232,7 @@ impl OneStepLayout {
                 review,
                 SessionWiring {
                     source,
-                    github,
+                    host,
                     tour_work,
                     frame_stats: frame_stats.clone(),
                 },

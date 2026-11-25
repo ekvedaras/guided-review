@@ -1,4 +1,4 @@
-use super::github_outage::Read;
+use super::host_outage::Read;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use crate::app_folders::NotRead;
 use crate::local_reviews_on_disk::UnreadableLocalTour;
 use crate::update::InTheWay;
 
-use super::github_outage::{Affected, Outage, OutageCause, waiting};
+use super::host_outage::{Affected, Outage, OutageCause, waiting};
 use super::merging::MergeChange;
 use super::pr_status::Readiness;
 use super::saved_state::RepinRunning;
@@ -24,7 +24,7 @@ pub enum Problem {
     /// The threads shown are as GitHub had them at the last read that went through.
     ThreadsNotRead(String),
     /// GitHub does not answer: one problem for all the reads that failed because of it.
-    GitHubNotAnswering(Outage),
+    HostNotAnswering(Outage),
     /// A read from GitHub failed, so what the screen shows for it is missing or as of an earlier read.
     NotRead(Read, String),
     /// A code link was clicked and its IDE command could not be run, so nothing opened.
@@ -83,7 +83,7 @@ pub enum ProblemKind {
     /// Cleared by a read of the threads that goes through.
     ThreadsNotRead,
     /// Cleared when each read it keeps from going through goes through.
-    GitHubNotAnswering,
+    HostNotAnswering,
     /// Cleared by a good read of the same thing from GitHub.
     NotRead(Read),
     /// Cleared by the next IDE command that runs.
@@ -134,7 +134,7 @@ impl Problem {
             Self::NotSaved(_) => ProblemKind::NotSaved,
             Self::ChangeNotKeptWhileRepinning => ProblemKind::ChangeNotKeptWhileRepinning,
             Self::ThreadsNotRead(_) => ProblemKind::ThreadsNotRead,
-            Self::GitHubNotAnswering(_) => ProblemKind::GitHubNotAnswering,
+            Self::HostNotAnswering(_) => ProblemKind::HostNotAnswering,
             Self::NotRead(read, _) => ProblemKind::NotRead(*read),
             Self::IdeNotStarted(_) => ProblemKind::IdeNotStarted,
             Self::CodeOnGitHub(_) => ProblemKind::CodeOnGitHub,
@@ -176,25 +176,25 @@ impl Problems {
     }
 
     /// A read failed because GitHub does not answer. Returns how long to wait before it is tried again.
-    pub fn github_not_answering(&mut self, cause: OutageCause, affected: Affected) -> Duration {
-        let mut outage = match self.raised.remove(&ProblemKind::GitHubNotAnswering) {
-            Some(Problem::GitHubNotAnswering(outage)) => outage,
+    pub fn host_not_answering(&mut self, cause: OutageCause, affected: Affected) -> Duration {
+        let mut outage = match self.raised.remove(&ProblemKind::HostNotAnswering) {
+            Some(Problem::HostNotAnswering(outage)) => outage,
             _ => Outage::new(cause),
         };
         let retry_in = outage.failed(cause, affected);
-        self.raise(Problem::GitHubNotAnswering(outage));
+        self.raise(Problem::HostNotAnswering(outage));
         retry_in
     }
 
     /// GitHub answered a read, with the data or with an error of its own: it is answering.
-    pub fn github_answered(&mut self, affected: Affected) {
-        let Some(Problem::GitHubNotAnswering(mut outage)) =
-            self.raised.remove(&ProblemKind::GitHubNotAnswering)
+    pub fn host_answered(&mut self, affected: Affected) {
+        let Some(Problem::HostNotAnswering(mut outage)) =
+            self.raised.remove(&ProblemKind::HostNotAnswering)
         else {
             return;
         };
         if !outage.answered(affected) {
-            self.raise(Problem::GitHubNotAnswering(outage));
+            self.raise(Problem::HostNotAnswering(outage));
         }
     }
 
@@ -207,7 +207,7 @@ impl Problems {
 impl Problem {
     /// A line under the problem, for what the headline leaves out.
     pub fn detail(&self) -> Option<String> {
-        let Self::GitHubNotAnswering(outage) = self else {
+        let Self::HostNotAnswering(outage) = self else {
             return None;
         };
         let affected: Vec<String> = outage
@@ -221,7 +221,7 @@ impl Problem {
     /// and the sidebar keeps it, so its note leaves by itself; other problems stay until dismissed.
     pub fn announcement(&self) -> Announcement {
         match self {
-            Self::GitHubNotAnswering(outage) => Announcement {
+            Self::HostNotAnswering(outage) => Announcement {
                 tone: ToastTone::Neutral,
                 text: format!("GitHub is not answering ({})", outage.cause()),
             },
@@ -236,7 +236,7 @@ impl Problem {
     /// told again when its words change.
     fn is_told_by(&self, earlier: &Self) -> bool {
         match (self, earlier) {
-            (Self::GitHubNotAnswering(_), Self::GitHubNotAnswering(_)) => true,
+            (Self::HostNotAnswering(_), Self::HostNotAnswering(_)) => true,
             _ => self == earlier,
         }
     }
@@ -249,7 +249,7 @@ pub struct Announcement {
 
 /// The notes to show now that the problems went from `before` to `after`.
 pub fn announcements(before: &[Problem], after: &[Problem]) -> Vec<Announcement> {
-    let is_outage = |problem: &Problem| matches!(problem, Problem::GitHubNotAnswering(_));
+    let is_outage = |problem: &Problem| matches!(problem, Problem::HostNotAnswering(_));
     let new = after
         .iter()
         .filter(|problem| !before.iter().any(|earlier| problem.is_told_by(earlier)))
@@ -265,7 +265,7 @@ pub fn announcements(before: &[Problem], after: &[Problem]) -> Vec<Announcement>
 impl fmt::Display for Problem {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::GitHubNotAnswering(outage) => write!(
+            Self::HostNotAnswering(outage) => write!(
                 formatter,
                 "GitHub is not answering ({}). Some things may be out of date; trying again in {}.",
                 outage.cause(),

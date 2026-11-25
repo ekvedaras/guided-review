@@ -1,4 +1,4 @@
-use super::ports::GitHubError;
+use super::ports::HostError;
 use super::pr_origin::PrAuthor;
 use crate::pull_request::PullRequestUrl;
 
@@ -6,7 +6,7 @@ use crate::pull_request::PullRequestUrl;
 pub trait RelevantPullRequestsPort: Send + Sync {
     /// Every open PR that involves the viewer or asks one of their teams for a review, newest
     /// update first, one entry per PR url.
-    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, GitHubError>;
+    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, HostError>;
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -4,7 +4,7 @@ use crate::review_subject::ReviewSubject;
 
 use super::active_pr::ActivePr;
 use super::local_row::LocalRow;
-use super::ports::GitHubError;
+use super::ports::HostError;
 use super::relevant_prs::{RelevantPullRequest, RelevantPullRequests};
 use super::remembered_prs::RememberedPullRequestsFile;
 use crate::tour::ToursOnDisk;
@@ -170,7 +170,7 @@ impl PrSwitcher {
     /// Takes the answer of the background read. A failed read keeps the rows listed before and says why.
     pub fn loaded(
         &mut self,
-        answer: Result<RelevantPullRequests, GitHubError>,
+        answer: Result<RelevantPullRequests, HostError>,
         folders: &AppFolders,
     ) {
         self.is_refreshing = false;

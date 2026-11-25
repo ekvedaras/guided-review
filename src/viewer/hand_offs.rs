@@ -15,7 +15,7 @@ use super::local_threads::LocalAuthor;
 
 use super::comments::SendMode;
 use super::hidden_text::HiddenText;
-use super::ports::{GitHubError, ReviewThreadsPort, ReviewWritesPort};
+use super::ports::{HostError, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
 use super::review::StepId;
 use super::review_thread::{AGENT_MARK, CommentId, ReviewThread, ThreadComment, ThreadId};
@@ -181,15 +181,15 @@ impl SeenMark {
         }
     }
 
-    fn put_on(github: &(impl ReviewThreadsPort + ?Sized), comment: &CommentId) -> Self {
-        match github.set_reaction(comment, Reaction::Eyes, ReactionChange::Add) {
+    fn put_on(host: &(impl ReviewThreadsPort + ?Sized), comment: &CommentId) -> Self {
+        match host.set_reaction(comment, Reaction::Eyes, ReactionChange::Add) {
             Ok(()) => Self::On,
             Err(error) => Self::NotPut(format!("{error:#}")),
         }
     }
 
-    fn take_off(github: &(impl ReviewThreadsPort + ?Sized), comment: &CommentId) -> Self {
-        match github.set_reaction(comment, Reaction::Eyes, ReactionChange::Remove) {
+    fn take_off(host: &(impl ReviewThreadsPort + ?Sized), comment: &CommentId) -> Self {
+        match host.set_reaction(comment, Reaction::Eyes, ReactionChange::Remove) {
             Ok(()) => Self::Off,
             Err(error) => Self::NotTakenOff(format!("{error:#}")),
         }
@@ -516,7 +516,7 @@ impl DeliveryRequest {
     pub(super) fn run(
         self,
         agents: &TourAgents,
-        github: &(impl ReviewThreadsPort + ?Sized),
+        host: &(impl ReviewThreadsPort + ?Sized),
     ) -> DeliveryOutcome {
         let sent = if self.anyway {
             agents.send_anyway(&self.subject, &self.text)
@@ -536,7 +536,7 @@ impl DeliveryRequest {
             Err(error) => Delivery::Failed(format!("{error:#}")),
         };
         let seen_mark = match (&how, &self.reviewer_comment) {
-            (Delivery::Delivered, Some(comment)) => SeenMark::put_on(github, comment),
+            (Delivery::Delivered, Some(comment)) => SeenMark::put_on(host, comment),
             _ => SeenMark::Off,
         };
         DeliveryOutcome {
@@ -1184,7 +1184,7 @@ pub enum Reviewed {
 impl From<&ThreadHome> for Reviewed {
     fn from(home: &ThreadHome) -> Self {
         match home {
-            ThreadHome::GitHub(_) => Self::PullRequest,
+            ThreadHome::Host(_) => Self::PullRequest,
             ThreadHome::StateFile(_) => Self::Local,
         }
     }
@@ -1271,16 +1271,16 @@ impl AgentReplyRequest {
 
     pub fn run(
         &self,
-        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
-    ) -> Result<AgentReplyDone, GitHubError> {
+        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+    ) -> Result<AgentReplyDone, HostError> {
         let (placement, working_on_it) = match &self.home {
-            ThreadHome::GitHub(pr) => self.post_on_github(github, pr)?,
+            ThreadHome::Host(pr) => self.post_on_github(host, pr)?,
             ThreadHome::StateFile(store) => self.keep_locally(store).map_err(|error| {
-                GitHubError::Other(error.context("could not write the local thread"))
+                HostError::Other(error.context("could not write the local thread"))
             })?,
         };
         let seen_mark = match &self.seen_mark_on {
-            Some(comment) => SeenMark::take_off(github, comment),
+            Some(comment) => SeenMark::take_off(host, comment),
             None => self.seen_mark.clone(),
         };
         Ok(AgentReplyDone {
@@ -1294,27 +1294,27 @@ impl AgentReplyRequest {
 
     fn post_on_github(
         &self,
-        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
         pr: &PullRequestUrl,
-    ) -> Result<(ReplyPlacement, Option<CommentId>), GitHubError> {
+    ) -> Result<(ReplyPlacement, Option<CommentId>), HostError> {
         Ok(match &self.kind {
             AgentReplyKind::Answer {
                 said,
                 replacing: Some(reply),
             } => {
-                github.edit_comment(reply, &format!("{AGENT_MARK} {said}"))?;
+                host.edit_comment(reply, &format!("{AGENT_MARK} {said}"))?;
                 (ReplyPlacement::ReplacedWorkingOnIt, None)
             }
             AgentReplyKind::Answer {
                 said,
                 replacing: None,
             } => (
-                self.post(github, pr, &format!("{AGENT_MARK} {said}"))?.0,
+                self.post(host, pr, &format!("{AGENT_MARK} {said}"))?.0,
                 None,
             ),
             AgentReplyKind::WorkingOnIt => {
                 let (placement, reply) =
-                    self.post(github, pr, &format!("{AGENT_MARK} {WORKING_ON_IT}"))?;
+                    self.post(host, pr, &format!("{AGENT_MARK} {WORKING_ON_IT}"))?;
                 (placement, Some(reply))
             }
         })
@@ -1351,16 +1351,16 @@ impl AgentReplyRequest {
     /// reply is posted at once.
     fn post(
         &self,
-        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
         pr: &PullRequestUrl,
         body: &str,
-    ) -> Result<(ReplyPlacement, CommentId), GitHubError> {
-        let (placement, mode) = if github.has_pending_review(pr)? {
+    ) -> Result<(ReplyPlacement, CommentId), HostError> {
+        let (placement, mode) = if host.has_pending_review(pr)? {
             (ReplyPlacement::JoinedPendingReview, SendMode::AddToReview)
         } else {
             (ReplyPlacement::PostedAtOnce, SendMode::CommentNow)
         };
-        let reply = github.reply_to_thread(pr, &self.thread, body, mode)?;
+        let reply = host.reply_to_thread(pr, &self.thread, body, mode)?;
         Ok((placement, reply))
     }
 }
@@ -1377,10 +1377,10 @@ pub(super) struct SeenMarkOffOutcome {
 }
 
 impl SeenMarkOff {
-    pub(super) fn run(self, github: &(impl ReviewThreadsPort + ?Sized)) -> SeenMarkOffOutcome {
+    pub(super) fn run(self, host: &(impl ReviewThreadsPort + ?Sized)) -> SeenMarkOffOutcome {
         SeenMarkOffOutcome {
             id: self.id,
-            seen_mark: SeenMark::take_off(github, &self.comment),
+            seen_mark: SeenMark::take_off(host, &self.comment),
         }
     }
 }

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use crate::support::FixtureRepo;
 use crate::support::fake_ports::{
-    FakeGitHub, GitHubCall, GitHubFault, ReadFailure, SentLog, blocked_merging,
+    FakeHost, HostCall, HostFault, ReadFailure, SentLog, blocked_merging,
 };
 use crate::support::work::drive_without_agents;
 use guided_review::build::Build;
@@ -42,8 +42,8 @@ impl Pull {
         }
     }
 
-    pub(crate) fn github(&self) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent)
+    pub(crate) fn host(&self) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent)
     }
 
     pub(crate) fn source(&self) -> LocalGit {
@@ -68,9 +68,9 @@ impl Pull {
         Review::open(tour, &self.source(), state_file).unwrap()
     }
 
-    pub(crate) fn read(&self, review: &mut Review, github: &FakeGitHub, now: Instant) {
-        review.pull_from_github();
-        drive_without_agents(review, github, &self.source(), now);
+    pub(crate) fn read(&self, review: &mut Review, host: &FakeHost, now: Instant) {
+        review.pull_from_host();
+        drive_without_agents(review, host, &self.source(), now);
     }
 }
 
@@ -96,12 +96,12 @@ fn open_part(review: &Review) -> Option<&OpenPrStatus> {
 fn the_status_is_unknown_until_github_is_read_and_then_what_github_says() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull
-        .github()
+    let host = pull
+        .host()
         .with_status(status(Readiness::Draft, Checks::Failing));
     assert_eq!(review.pr_status(), None);
 
-    pull.read(&mut review, &github, Instant::now());
+    pull.read(&mut review, &host, Instant::now());
 
     assert_eq!(
         review.pr_status(),
@@ -119,19 +119,19 @@ fn a_rollup_state_is_one_of_four_words() {
     assert_eq!(Checks::from_github_state(Some("EXPECTED")), Checks::Running);
 }
 
-fn failing(pull: &Pull, failure: ReadFailure) -> FakeGitHub {
-    let github = pull.github();
-    github.inject(GitHubFault::ReadsFailWith(failure));
-    github
+fn failing(pull: &Pull, failure: ReadFailure) -> FakeHost {
+    let host = pull.host();
+    host.inject(HostFault::ReadsFailWith(failure));
+    host
 }
 
 #[test]
 fn a_status_that_cannot_be_read_while_github_does_not_answer_is_one_more_thing_that_may_be_old() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = failing(&pull, ReadFailure::Status(503));
+    let host = failing(&pull, ReadFailure::Status(503));
 
-    pull.read(&mut review, &github, Instant::now());
+    pull.read(&mut review, &host, Instant::now());
 
     let problems = review.problems();
     assert_eq!(problems.len(), 1, "{problems:?}");
@@ -146,25 +146,25 @@ fn a_status_that_cannot_be_read_while_github_does_not_answer_is_one_more_thing_t
 fn the_status_last_read_stays_while_github_does_not_answer_and_is_read_again_when_it_does() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull
-        .github()
+    let host = pull
+        .host()
         .with_status(status(Readiness::Draft, Checks::Passing));
     let now = Instant::now();
-    pull.read(&mut review, &github, now);
-    github.inject(GitHubFault::ReadsFailWith(ReadFailure::Status(503)));
+    pull.read(&mut review, &host, now);
+    host.inject(HostFault::ReadsFailWith(ReadFailure::Status(503)));
 
-    pull.read(&mut review, &github, now + Duration::from_secs(1));
+    pull.read(&mut review, &host, now + Duration::from_secs(1));
     assert_eq!(
         review.pr_status(),
         Some(&status(Readiness::Draft, Checks::Passing))
     );
     assert_eq!(review.problems().len(), 1);
 
-    github.heal(&GitHubFault::ReadsFailWith(ReadFailure::Status(503)));
-    github.set_status(status(Readiness::Ready, Checks::Passing));
+    host.heal(&HostFault::ReadsFailWith(ReadFailure::Status(503)));
+    host.set_status(status(Readiness::Ready, Checks::Passing));
     drive_without_agents(
         &mut review,
-        &github,
+        &host,
         &pull.source(),
         now + Duration::from_secs(40),
     );
@@ -180,9 +180,9 @@ fn the_status_last_read_stays_while_github_does_not_answer_and_is_read_again_whe
 fn a_refusal_to_read_the_status_is_a_problem_of_its_own_that_is_not_tried_again() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = failing(&pull, ReadFailure::Status(404));
+    let host = failing(&pull, ReadFailure::Status(404));
 
-    pull.read(&mut review, &github, Instant::now());
+    pull.read(&mut review, &host, Instant::now());
 
     assert!(
         review.problems().contains(&Problem::NotRead(
@@ -199,22 +199,22 @@ fn a_refusal_to_read_the_status_is_a_problem_of_its_own_that_is_not_tried_again(
 fn checks_that_are_running_are_read_again_every_30_seconds_until_they_are_done() {
     let pull = Pull::new();
     let mut review = pull.open();
-    let github = pull
-        .github()
+    let host = pull
+        .host()
         .with_status(status(Readiness::Ready, Checks::Running));
     let mut now = Instant::now();
-    pull.read(&mut review, &github, now);
+    pull.read(&mut review, &host, now);
 
     let mut waits = Vec::new();
     for _ in 0..2 {
         let due = review.next_due().unwrap();
         waits.push(due - now);
         now = due;
-        drive_without_agents(&mut review, &github, &pull.source(), now);
+        drive_without_agents(&mut review, &host, &pull.source(), now);
     }
-    github.set_status(status(Readiness::Ready, Checks::Failing));
+    host.set_status(status(Readiness::Ready, Checks::Failing));
     let due = review.next_due().unwrap();
-    drive_without_agents(&mut review, &github, &pull.source(), due);
+    drive_without_agents(&mut review, &host, &pull.source(), due);
 
     assert_eq!(
         waits.iter().map(Duration::as_secs).collect::<Vec<_>>(),
@@ -232,41 +232,37 @@ fn checks_that_are_not_running_are_not_read_again_by_themselves() {
     for checks in [Checks::NoneRun, Checks::Passing, Checks::Failing] {
         let pull = Pull::new();
         let mut review = pull.open();
-        let github = pull.github().with_status(status(Readiness::Ready, checks));
+        let host = pull.host().with_status(status(Readiness::Ready, checks));
 
-        pull.read(&mut review, &github, Instant::now());
+        pull.read(&mut review, &host, Instant::now());
 
         assert_eq!(review.next_due(), None, "{checks:?}");
     }
 }
 
-fn read_status(
-    pull: &Pull,
-    readiness: Readiness,
-    may_change: bool,
-) -> (Review, FakeGitHub, Instant) {
+fn read_status(pull: &Pull, readiness: Readiness, may_change: bool) -> (Review, FakeHost, Instant) {
     let mut review = pull.open();
-    let github = pull.github().with_status(PrStatus::Open(OpenPrStatus {
+    let host = pull.host().with_status(PrStatus::Open(OpenPrStatus {
         viewer_may_change_readiness: may_change,
         ..open_status(readiness, Checks::Passing)
     }));
     let now = Instant::now();
-    pull.read(&mut review, &github, now);
-    (review, github, now)
+    pull.read(&mut review, &host, now);
+    (review, host, now)
 }
 
-fn readiness_calls(pull: &Pull) -> Vec<GitHubCall> {
+fn readiness_calls(pull: &Pull) -> Vec<HostCall> {
     pull.sent
-        .github_calls()
+        .host_calls()
         .into_iter()
-        .filter(|call| matches!(call, GitHubCall::SetReadiness { .. }))
+        .filter(|call| matches!(call, HostCall::SetReadiness { .. }))
         .collect()
 }
 
 #[test]
 fn the_first_press_says_what_pressing_again_does_and_changes_nothing() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_status(&pull, Readiness::Ready, true);
+    let (mut review, host, now) = read_status(&pull, Readiness::Ready, true);
 
     let step = review.ask_to_change_readiness(now);
 
@@ -276,23 +272,23 @@ fn the_first_press_says_what_pressing_again_does_and_changes_nothing() {
     assert!(note.contains("convert the PR to a draft"), "{note}");
     assert!(note.contains("again within 10 s"), "{note}");
     assert!(note.contains(" D "), "{note}");
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
     assert_eq!(readiness_calls(&pull), []);
 }
 
 #[test]
 fn the_same_press_again_within_ten_seconds_converts_a_ready_pr_to_a_draft() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_status(&pull, Readiness::Ready, true);
+    let (mut review, host, now) = read_status(&pull, Readiness::Ready, true);
     review.ask_to_change_readiness(now);
 
     let later = now + Duration::from_secs(10);
     assert_eq!(review.ask_to_change_readiness(later), PressStep::Sent);
-    drive_without_agents(&mut review, &github, &pull.source(), later);
+    drive_without_agents(&mut review, &host, &pull.source(), later);
 
     assert_eq!(
         readiness_calls(&pull),
-        [GitHubCall::SetReadiness {
+        [HostCall::SetReadiness {
             pr: PR.parse().unwrap(),
             readiness: Readiness::Draft
         }]
@@ -307,17 +303,17 @@ fn the_same_press_again_within_ten_seconds_converts_a_ready_pr_to_a_draft() {
 #[test]
 fn a_draft_is_marked_ready_by_the_same_key() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_status(&pull, Readiness::Draft, true);
+    let (mut review, host, now) = read_status(&pull, Readiness::Draft, true);
 
     let PressStep::Ask(note) = review.ask_to_change_readiness(now) else {
         panic!("not asked");
     };
     assert!(note.contains("mark the PR ready for review"), "{note}");
     review.ask_to_change_readiness(now);
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
 
     assert_eq!(
-        github.status_now().open().map(|status| status.readiness),
+        host.status_now().open().map(|status| status.readiness),
         Some(Readiness::Ready)
     );
 }
@@ -339,12 +335,12 @@ fn nothing_is_asked_where_github_would_refuse_or_the_status_is_not_known() {
 #[test]
 fn a_change_that_github_does_not_take_is_a_problem_and_leaves_the_status_as_it_was() {
     let pull = Pull::new();
-    let (mut review, github, now) = read_status(&pull, Readiness::Ready, true);
-    github.inject(GitHubFault::ConnectionLost);
+    let (mut review, host, now) = read_status(&pull, Readiness::Ready, true);
+    host.inject(HostFault::ConnectionLost);
     review.ask_to_change_readiness(now);
     review.ask_to_change_readiness(now);
 
-    drive_without_agents(&mut review, &github, &pull.source(), now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
 
     assert_eq!(
         open_part(&review).map(|status| status.readiness),
@@ -528,7 +524,7 @@ fn a_check_run_is_running_until_it_completed_and_then_passes_or_fails_by_its_con
 #[test]
 fn clicking_a_check_opens_its_run_and_one_without_a_page_or_the_more_row_opens_the_checks_page() {
     let pull = Pull::new();
-    let github = pull.github().with_status(status_with_runs(vec![
+    let host = pull.host().with_status(status_with_runs(vec![
         run(
             "lint",
             CheckState::Passing,
@@ -542,7 +538,7 @@ fn clicking_a_check_opens_its_run_and_one_without_a_page_or_the_more_row_opens_t
         run("legacy", CheckState::Passing, None),
     ]));
     let mut review = pull.open();
-    pull.read(&mut review, &github, Instant::now());
+    pull.read(&mut review, &host, Instant::now());
     let click = |index| review.decide(Intent::OpenCheck(index), WindowMoment::default());
     let checks_page = Effect::OpenChecksOnGitHub(PR.parse().unwrap());
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use guided_review::findings::FindingId;
@@ -67,9 +67,9 @@ impl Shop {
         let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
             .unwrap()
             .unwrap();
-        let github = FakeGitHub::with_pull("main-tip", &self.head, &SentLog::default());
+        let host = FakeHost::with_pull("main-tip", &self.head, &SentLog::default());
         let ports = WorkPorts {
-            github: &github,
+            host: &host,
             source: &source,
             agents,
         };

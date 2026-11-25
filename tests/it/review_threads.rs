@@ -1,5 +1,5 @@
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
 use crate::support::line;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
@@ -293,14 +293,14 @@ fn threads_are_pulled_from_github_for_the_tours_pr() {
     let shop = Shop::with_pull();
     let mut review = shop.open(steps());
     let sent = SentLog::default();
-    let mut github = FakeGitHub::with_pull("b", "h", &sent);
-    github.threads = vec![thread("t1", "app/Order.php", Side::Head, 7)];
+    let mut host = FakeHost::with_pull("b", "h", &sent);
+    host.threads = vec![thread("t1", "app/Order.php", Side::Head, 7)];
 
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
     assert_eq!(
-        sent.github_calls(),
-        [GitHubCall::ThreadsOf(
+        sent.host_calls(),
+        [HostCall::ThreadsOf(
             "https://github.com/acme/shop/pull/7".parse().unwrap()
         )]
     );

@@ -1,4 +1,4 @@
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use crate::support::{FixtureRepo, file_path, line};
@@ -70,9 +70,9 @@ impl Pull {
 
     fn deliver(&self, review: &mut Review, agents: &TourAgents) {
         let source = self.source();
-        let elsewhere = FakeGitHub::with_pull("main-tip", "head", &SentLog::default());
+        let elsewhere = FakeHost::with_pull("main-tip", "head", &SentLog::default());
         let ports = WorkPorts {
-            github: &elsewhere,
+            host: &elsewhere,
             source: &source,
             agents,
         };
@@ -112,8 +112,8 @@ fn comment(body: &str) -> ThreadComment {
 }
 
 fn handed_off(pull: &Pull) -> Review {
-    let mut github = FakeGitHub::with_pull("main-tip", &pull.head, &pull.sent);
-    github.threads = vec![thread_on_line_two(vec![comment("why caps?")])];
+    let mut host = FakeHost::with_pull("main-tip", &pull.head, &pull.sent);
+    host.threads = vec![thread_on_line_two(vec![comment("why caps?")])];
     let mut review = pull.open();
     let at = review
         .file_page()
@@ -138,7 +138,7 @@ fn handed_off(pull: &Pull) -> Review {
         .start_sending(&place, SendMode::AddToReview, Audience::Agent)
         .unwrap();
     assert_eq!(
-        review.apply_comment(request.run(&github)).unwrap(),
+        review.apply_comment(request.run(&host)).unwrap(),
         CommentResult::Sent
     );
     review

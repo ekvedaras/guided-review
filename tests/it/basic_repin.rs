@@ -1,5 +1,5 @@
-use crate::support::fake_ports::{FakeGitHub, SentLog};
-use crate::support::{FakeGitHub as ServedGitHub, FixtureRepo, GuidedReview, Run, file_path};
+use crate::support::fake_ports::{FakeHost, SentLog};
+use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run, file_path};
 use guided_review::local_git::LocalGit;
 use guided_review::opened_subject::TourRepinner;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
@@ -266,7 +266,7 @@ fn update_tour_re_pins_the_basic_tour_not_the_guided_one_beside_it_and_the_banne
     let mut old = shop.open();
     old.guided_tour_is(GuidedTourProgress::Ready);
     let second_head = shop.commit_second_head();
-    let github = FakeGitHub::with_pull(&shop.base, &second_head, &SentLog::default());
+    let host = FakeHost::with_pull(&shop.base, &second_head, &SentLog::default());
     let clone = shop.repo.path().to_path_buf();
     let repinner = TourRepinner {
         folders: shop.repo.folders(),
@@ -278,7 +278,7 @@ fn update_tour_re_pins_the_basic_tour_not_the_guided_one_beside_it_and_the_banne
         }),
     };
 
-    let mut repinned = repinner.run(&github).unwrap().review;
+    let mut repinned = repinner.run(&host).unwrap().review;
     repinned.carry_on_from(old);
 
     assert_eq!(repinned.basic_mode_label(), Some("Basic mode"));
@@ -291,7 +291,7 @@ fn update_tour_re_pins_the_basic_tour_not_the_guided_one_beside_it_and_the_banne
 }
 
 fn cli_repin(shop: &Shop, head: &str) -> Run {
-    let github = ServedGitHub::serving_pull("acme/shop", 7, &shop.base, head);
+    let github = FakeGitHub::serving_pull("acme/shop", 7, &shop.base, head);
     GuidedReview::new(&shop.repo, &github).run(&["repin", PR])
 }
 

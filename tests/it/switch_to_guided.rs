@@ -1,5 +1,5 @@
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeAskProcesses, FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeAskProcesses, FakeHost, HostFault, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, line, save_typing};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
@@ -581,15 +581,15 @@ fn a_reply_typed_while_the_guided_review_is_being_built_is_kept() {
 #[test]
 fn a_comment_queued_while_the_guided_review_is_being_built_is_kept() {
     let shop = Shop::new();
-    let github = FakeGitHub::with_pull("main-tip", &shop.second, &SentLog::default());
-    github.inject(GitHubFault::ConnectionLost);
+    let host = FakeHost::with_pull("main-tip", &shop.second, &SentLog::default());
+    host.inject(HostFault::ConnectionLost);
 
     let guided = switched_while(&shop, |basic| {
         let place = comment_box_on_first(basic);
         basic
             .type_in(&TextBox::Draft(place.clone()), "later")
             .unwrap();
-        let result = basic.send_comment(&place, SendMode::AddToReview, &github);
+        let result = basic.send_comment(&place, SendMode::AddToReview, &host);
         assert!(matches!(result.unwrap(), Some(CommentResult::Queued(_))));
     });
 
@@ -600,8 +600,8 @@ fn a_comment_queued_while_the_guided_review_is_being_built_is_kept() {
 #[test]
 fn a_hand_off_made_while_the_guided_review_is_being_built_is_kept() {
     let shop = Shop::new();
-    let mut github = FakeGitHub::with_pull("main-tip", &shop.second, &SentLog::default());
-    github.threads = vec![thread_on_first(vec![mine("why first?")])];
+    let mut host = FakeHost::with_pull("main-tip", &shop.second, &SentLog::default());
+    host.threads = vec![thread_on_first(vec![mine("why first?")])];
 
     let guided = switched_while(&shop, |basic| {
         let place = comment_box_on_first(basic);
@@ -612,7 +612,7 @@ fn a_hand_off_made_while_the_guided_review_is_being_built_is_kept() {
             .start_sending(&place, SendMode::AddToReview, Audience::Agent)
             .unwrap();
         assert_eq!(
-            basic.apply_comment(request.run(&github)).unwrap(),
+            basic.apply_comment(request.run(&host)).unwrap(),
             CommentResult::Sent
         );
     });

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::{FixtureRepo, folders_in};
 use guided_review::app_folders::AppFolders;
@@ -11,7 +11,7 @@ use guided_review::opened_subject::OpenedChangeSet;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{Tour, ToursOnDisk};
 use guided_review::viewer::{
-    ActivePr, NoGitHub, Pick, PrAuthor, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
+    ActivePr, NoHost, Pick, PrAuthor, PrSwitcher, RelevantPullRequest, RelevantPullRequests,
     ReviewStateFile, SwitcherRow, WhyListed,
 };
 
@@ -47,7 +47,7 @@ fn clone_named_in_config(folder: &Path) -> Config {
 fn found(folders: &AppFolders, config: &Config, agents: &FakeTourAgent) -> PrSwitcher {
     let mut switcher = PrSwitcher::default();
     switcher.local_found(
-        find_local_rows(folders, config, agents, &NoGitHub::default()),
+        find_local_rows(folders, config, agents, &NoHost::default()),
         folders,
     );
     switcher
@@ -341,7 +341,7 @@ fn local_rows_come_after_the_pull_requests_and_a_new_github_list_keeps_them() {
             &folders,
             &clone_named_in_config(repo.path()),
             &FakeTourAgent::new(),
-            &NoGitHub::default(),
+            &NoHost::default(),
         ),
         &folders,
     );
@@ -374,7 +374,7 @@ fn a_local_row_sits_with_the_pull_requests_of_its_repo() {
             &folders,
             &clone_named_in_config(repo.path()),
             &FakeTourAgent::new(),
-            &NoGitHub::default(),
+            &NoHost::default(),
         ),
         &folders,
     );
@@ -406,7 +406,7 @@ fn a_local_row_whose_branch_has_an_open_pr_says_so_and_one_without_says_nothing(
     let repo = shop_on_feature();
     let config = clone_named_in_config(repo.path());
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", "head", &sent).with_open_pull_from(
+    let host = FakeHost::with_pull("main-tip", "head", &sent).with_open_pull_from(
         "feature",
         SHOP_7,
         "Add the cart",
@@ -415,7 +415,7 @@ fn a_local_row_whose_branch_has_an_open_pr_says_so_and_one_without_says_nothing(
     let with_a_pr = {
         let mut switcher = PrSwitcher::default();
         switcher.local_found(
-            find_local_rows(&repo.folders(), &config, &FakeTourAgent::new(), &github),
+            find_local_rows(&repo.folders(), &config, &FakeTourAgent::new(), &host),
             &repo.folders(),
         );
         switcher
@@ -433,7 +433,7 @@ fn a_local_row_whose_branch_has_an_open_pr_says_so_and_one_without_says_nothing(
 fn a_local_review_that_declined_the_move_to_its_open_pr_shows_no_chip_of_it() {
     let repo = shop_on_feature();
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", "head", &sent).with_open_pull_from(
+    let host = FakeHost::with_pull("main-tip", "head", &sent).with_open_pull_from(
         "feature",
         SHOP_7,
         "Add the cart",
@@ -441,10 +441,10 @@ fn a_local_review_that_declined_the_move_to_its_open_pr_shows_no_chip_of_it() {
     let mut opened =
         guided_review::open_review::open_review(&subject_of(&repo), repo.path(), &repo.folders())
             .unwrap();
-    opened.review.pull_from_github();
+    opened.review.pull_from_host();
     crate::support::work::drive_without_agents(
         &mut opened.review,
-        &github,
+        &host,
         opened.source.as_ref(),
         std::time::Instant::now(),
     );
@@ -455,7 +455,7 @@ fn a_local_review_that_declined_the_move_to_its_open_pr_shows_no_chip_of_it() {
         &repo.folders(),
         &Config::default(),
         &FakeTourAgent::new(),
-        &github,
+        &host,
     );
 
     assert_eq!(rows.len(), 1);

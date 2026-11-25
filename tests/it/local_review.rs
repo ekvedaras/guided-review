@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::code_source::CodeSource;
@@ -390,17 +390,17 @@ fn only_a_pr_can_be_opened_on_github() {
 fn a_local_review_reads_and_sends_nothing_on_github_whatever_the_reviewer_does() {
     let feature = Feature::with_work_in_progress();
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", "snapshot", &sent);
+    let host = FakeHost::with_pull("main-tip", "snapshot", &sent);
     let source = feature.source();
     let mut review = feature.open();
 
-    review.pull_from_github();
-    let ran = drive_without_agents(&mut review, &github, &source, Instant::now());
+    review.pull_from_host();
+    let ran = drive_without_agents(&mut review, &host, &source, Instant::now());
     review.tick_file(&file_path("README.md")).unwrap();
     review.untick_file(&file_path("README.md")).unwrap();
     review.tick_file(&file_path("notes.txt")).unwrap();
-    review.pull_from_github();
-    let ran_after = drive_without_agents(&mut review, &github, &source, Instant::now());
+    review.pull_from_host();
+    let ran_after = drive_without_agents(&mut review, &host, &source, Instant::now());
     let finishing = review.finish_review_request(ReviewVerdict::Comment, "");
 
     assert_eq!(
@@ -422,7 +422,7 @@ fn a_local_review_reads_and_sends_nothing_on_github_whatever_the_reviewer_does()
     assert!(!review.not_synced());
     assert_eq!(review.sync_banner(), None);
     assert!(finishing.is_err());
-    assert_eq!(sent.github_calls(), []);
+    assert_eq!(sent.host_calls(), []);
     assert_eq!(review.problems(), []);
 }
 
@@ -638,7 +638,7 @@ fn a_local_reviews_github_port_refuses_every_call() {
     let opened = opened_by_the_app(&feature);
 
     let tips = opened
-        .github
+        .host
         .pull_request_tips(&"https://github.com/acme/shop/pull/7".parse().unwrap());
 
     assert!(tips.is_err());

@@ -45,7 +45,7 @@ use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
 use super::branch_link::BranchLink;
 use super::carried::ReadCarrier;
-use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
+use super::code_link::{CodeLinks, CodeOnWeb, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentDesk, CommentGesture};
 use super::comment_send::CommentRequest;
 use super::comments::Audience;
@@ -58,11 +58,11 @@ use super::file_block::FileBlock;
 use super::file_tree::{FileTree, FolderPath, TreeRow};
 use super::finding_placement::{FindingHome, FindingPlacement, FindingView};
 use super::finish_review::FinishAction;
-use super::github_outage::Read;
-use super::github_outage::{Affected, OutageCause};
 use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{AgentReplied, HandOffId};
 use super::highlight::{HighlightRequest, Highlights};
+use super::host_outage::Read;
+use super::host_outage::{Affected, OutageCause};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::local_thread_store::ThreadHome;
@@ -72,7 +72,7 @@ use super::name_desk::NameDesk;
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::piece_diff::PieceDiff;
-use super::ports::{AgentLaunch, GitHubError};
+use super::ports::{AgentLaunch, HostError};
 use super::pr_controls::PrControls;
 use super::pr_notes::PrNotes;
 use super::pr_origin::PullRequestOrigin;
@@ -257,7 +257,7 @@ pub struct ReviewCore {
     folded_folders: BTreeSet<FolderPath>,
     subject: ReviewSubject,
     /// Where code the IDE cannot open goes: the PR's repo on GitHub, or nowhere for a local review.
-    code_host: CodeHost,
+    code_on_web: CodeOnWeb,
     /// What a local review's overview shows; set by the app from the clone, `None` for a PR.
     local_facts: Option<LocalFacts>,
     /// What a local review is called in its window and sidebar; made when its facts arrive, not per frame.
@@ -650,9 +650,9 @@ impl ReviewCore {
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let subject = tour.pin().subject()?;
-        let code_host = subject
-            .github_repo()
-            .map_or(CodeHost::LocalClone, |repo| CodeHost::GitHub(repo.clone()));
+        let code_on_web = subject.host_repo().map_or(CodeOnWeb::LocalClone, |repo| {
+            CodeOnWeb::GitHub(repo.clone())
+        });
         let viewed_sync = if subject.syncs_viewed_marks() {
             ViewedSync::default()
         } else {
@@ -728,7 +728,7 @@ impl ReviewCore {
             file_tree,
             folded_folders: BTreeSet::new(),
             subject,
-            code_host,
+            code_on_web,
             local_heading,
             local_facts: None,
             branch_link,
@@ -1012,26 +1012,26 @@ impl ReviewCore {
             .any(|problem| problem.kind() == ProblemKind::ShowAgentFailed)
     }
 
-    pub fn could_not_read(&mut self, read: Read, error: &GitHubError) {
+    pub fn could_not_read(&mut self, read: Read, error: &HostError) {
         let affected = Affected::from(read);
-        if let GitHubError::NotAnswering(cause) = error {
+        if let HostError::NotAnswering(cause) = error {
             self.clear_problem(ProblemKind::NotRead(read));
-            self.github_not_answering(*cause, affected);
+            self.host_not_answering(*cause, affected);
         } else {
-            self.github_answered(affected);
+            self.host_answered(affected);
             self.raise_problem(Problem::NotRead(read, error.short_reason()));
         }
     }
 
     /// GitHub does not answer: one problem for all the reads that fail, and the read is tried
     /// again by itself, further off each time it fails.
-    fn github_not_answering(&mut self, cause: OutageCause, affected: Affected) {
-        let retry_in = self.problems.github_not_answering(cause, affected);
+    fn host_not_answering(&mut self, cause: OutageCause, affected: Affected) {
+        let retry_in = self.problems.host_not_answering(cause, affected);
         self.work.want_in(affected.retried_by(), retry_in);
     }
 
-    fn github_answered(&mut self, affected: Affected) {
-        self.problems.github_answered(affected);
+    fn host_answered(&mut self, affected: Affected) {
+        self.problems.host_answered(affected);
     }
 
     pub fn ide_not_started(&mut self, error: &impl fmt::Display) {
@@ -1044,7 +1044,7 @@ impl ReviewCore {
 
     pub fn pr_head_is(&mut self, head: Sha) {
         self.clear_problem(ProblemKind::NotRead(Read::PrHead));
-        self.github_answered(Affected::NewCommits);
+        self.host_answered(Affected::NewCommits);
         self.pr_head = Some(head);
     }
 
@@ -1148,7 +1148,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    host: &self.code_host,
+                    on_web: &self.code_on_web,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -1238,7 +1238,7 @@ impl ReviewCore {
     /// Kept in the state file only when it changed, since every window focus pulls it again.
     pub fn set_pr_description(&mut self, body: &str) -> anyhow::Result<()> {
         self.clear_problem(ProblemKind::NotRead(Read::PrDescription));
-        self.github_answered(Affected::Description);
+        self.host_answered(Affected::Description);
         if self.state.pr_description() != body {
             self.change_related_issues(|related| related.description_is(body));
             self.state.record(|state| state.saw_pr_description(body))?;
@@ -1288,7 +1288,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    host: &self.code_host,
+                    on_web: &self.code_on_web,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -1747,7 +1747,7 @@ impl ReviewCore {
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
     pub fn code_opener(&self, ide: Result<Ide, NoIde>) -> CodeOpener {
-        CodeOpener::new(ide, self.working_copy, &self.code_host, &self.head)
+        CodeOpener::new(ide, self.working_copy, &self.code_on_web, &self.head)
     }
 
     /// Asked of the clone on open and on each focus, not on each click.
@@ -1757,7 +1757,7 @@ impl ReviewCore {
 
     fn links(&self) -> CodeLinks<'_> {
         CodeLinks {
-            host: &self.code_host,
+            on_web: &self.code_on_web,
             base: &self.base,
             head: &self.head,
         }

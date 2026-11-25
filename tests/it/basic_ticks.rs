@@ -1,5 +1,5 @@
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use crate::support::{FixtureRepo, file_path};
 use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
@@ -61,10 +61,10 @@ impl Shop {
         Review::open_basic(tour, &source, state_file).unwrap()
     }
 
-    fn github(&self, files: &[&str]) -> FakeGitHub {
+    fn host(&self, files: &[&str]) -> FakeHost {
         files.iter().fold(
-            FakeGitHub::with_pull("main-tip", &self.head, &self.sent),
-            |github, path| github.viewing(path, ViewedState::Unviewed),
+            FakeHost::with_pull("main-tip", &self.head, &self.sent),
+            |host, path| host.viewing(path, ViewedState::Unviewed),
         )
     }
 
@@ -332,45 +332,45 @@ fn a_folder_shows_as_read_once_every_file_under_it_is() {
 #[test]
 fn viewed_marks_follow_file_ticks_one_to_one() {
     let shop = Shop::changing(&["a.txt", "b.txt"]);
-    let github = shop.github(&["a.txt", "b.txt"]);
+    let host = shop.host(&["a.txt", "b.txt"]);
     let mut review = shop.open();
-    review.sync(&github).unwrap();
+    review.sync(&host).unwrap();
 
     review.tick_file(&file_path("a.txt")).unwrap();
-    review.sync(&github).unwrap();
-    assert_eq!(github.viewed_state("a.txt"), ViewedState::Viewed);
-    assert_eq!(github.viewed_state("b.txt"), ViewedState::Unviewed);
+    review.sync(&host).unwrap();
+    assert_eq!(host.viewed_state("a.txt"), ViewedState::Viewed);
+    assert_eq!(host.viewed_state("b.txt"), ViewedState::Unviewed);
     assert!(!review.not_synced());
 
     review.untick_file(&file_path("a.txt")).unwrap();
-    review.sync(&github).unwrap();
-    assert_eq!(github.viewed_state("a.txt"), ViewedState::Unviewed);
+    review.sync(&host).unwrap();
+    assert_eq!(host.viewed_state("a.txt"), ViewedState::Unviewed);
 }
 
 #[test]
 fn a_change_on_githubs_page_ticks_and_unticks_the_file() {
     let shop = Shop::changing(&["a.txt", "b.txt"]);
-    let github = shop.github(&["a.txt", "b.txt"]);
+    let host = shop.host(&["a.txt", "b.txt"]);
     let mut review = shop.open();
-    review.sync(&github).unwrap();
+    review.sync(&host).unwrap();
 
-    github.set_viewed("b.txt", ViewedState::Viewed);
-    review.sync(&github).unwrap();
+    host.set_viewed("b.txt", ViewedState::Viewed);
+    review.sync(&host).unwrap();
     assert!(review.is_file_ticked(&file_path("b.txt")));
     assert!(!review.is_file_ticked(&file_path("a.txt")));
 
-    github.set_viewed("b.txt", ViewedState::Dismissed);
-    review.sync(&github).unwrap();
+    host.set_viewed("b.txt", ViewedState::Dismissed);
+    review.sync(&host).unwrap();
     assert!(!review.is_file_ticked(&file_path("b.txt")));
 }
 
 #[test]
 fn file_ticks_keep_working_when_viewed_sync_is_off() {
     let shop = Shop::changing(&["a.txt"]);
-    let github = shop.github(&["a.txt"]);
-    github.inject(GitHubFault::TokenRefused("GitHub refused the token".into()));
+    let host = shop.host(&["a.txt"]);
+    host.inject(HostFault::TokenRefused("GitHub refused the token".into()));
     let mut review = shop.open();
-    review.sync(&github).ok();
+    review.sync(&host).ok();
     assert!(review.sync_banner().is_some());
 
     review.tick_file(&file_path("a.txt")).unwrap();

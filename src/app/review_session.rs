@@ -33,9 +33,9 @@ use crate::code_source::CodeSource;
 use crate::github::{GhCloner, GitHub};
 use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
-    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CommentId,
-    CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal, FinishResult,
-    GitHubPort, HandOffButton, HandOffId, HoveredName, ImageCache, JobOutcome, JobProgress,
+    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CodeHost,
+    CommentId, CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal,
+    FinishResult, HandOffButton, HandOffId, HoveredName, ImageCache, JobOutcome, JobProgress,
     LineLocation, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour,
     ReplacingJob, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId,
     TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
@@ -141,7 +141,7 @@ pub struct ReviewSession {
     old_head: Option<OldHead>,
     refresh_brief: RefreshBrief,
     screen_list: ListState,
-    github: Arc<dyn GitHubPort>,
+    host: Arc<dyn CodeHost>,
     source: Arc<dyn CodeSource>,
     tour_work: TourWork,
     image_cache: ImageCache,
@@ -175,7 +175,7 @@ impl BoxHeight {
 /// What a session works with and reports to, all owned by whoever opens the review.
 pub struct SessionWiring {
     pub source: Arc<dyn CodeSource>,
-    pub github: Arc<dyn GitHubPort>,
+    pub host: Arc<dyn CodeHost>,
     pub tour_work: TourWork,
     pub frame_stats: FrameStatsHook,
 }
@@ -200,13 +200,13 @@ impl ReviewSession {
         }
         let SessionWiring {
             source,
-            github,
+            host,
             tour_work,
             frame_stats,
         } = wiring;
         let focus_subscription = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
-                this.review.pull_from_github();
+                this.review.pull_from_host();
                 this.run_due_work(cx);
             }
         });
@@ -264,7 +264,7 @@ impl ReviewSession {
                 .measure_all(),
             rows,
             review,
-            github,
+            host,
             source,
             tour_work,
             image_cache: ImageCache::in_folders(&folders),
@@ -359,8 +359,8 @@ impl ReviewSession {
     /// outcome back in the review, which may make more due; then sleeps until the next is due.
     fn run_due_work(&mut self, cx: &mut Context<Self>) {
         for work in self.review.due_work(Instant::now()) {
-            let (github, source, agents) = (
-                Arc::clone(&self.github),
+            let (host, source, agents) = (
+                Arc::clone(&self.host),
                 Arc::clone(&self.source),
                 self.tour_work.tour_agents.clone(),
             );
@@ -368,7 +368,7 @@ impl ReviewSession {
                 cx,
                 move || {
                     work.run(&WorkPorts {
-                        github: github.as_ref(),
+                        host: host.as_ref(),
                         source: source.as_ref(),
                         agents: &agents,
                     })
@@ -610,13 +610,13 @@ impl ReviewSession {
         (mode, audience): (SendMode, Audience),
         cx: &mut Context<Self>,
     ) {
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         let state_file = self.review.state_file();
         let place = place.clone();
         cx.spawn(async move |this, cx| {
             let outcome = cx
                 .background_executor()
-                .spawn(async move { request.run(github.as_ref()) })
+                .spawn(async move { request.run(host.as_ref()) })
                 .await;
             let mut outcome = Some(outcome);
             let applied = this.update(cx, |this, cx| {
@@ -661,10 +661,10 @@ impl ReviewSession {
     ) {
         let note = thread_action_note(&action);
         let request = self.review.thread_action_request(action);
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         self.run_off_thread(
             cx,
-            move || request.run(github.as_ref()),
+            move || request.run(host.as_ref()),
             move |this, outcome, cx| {
                 let result = this.change(cx, |review| review.apply_thread_action(outcome));
                 if let (ThreadActionResult::Done, Some(note)) = (&result, note) {
@@ -724,10 +724,10 @@ impl ReviewSession {
             Ok(request) => request,
             Err(refusal) => return on_done(&FinishResult::Refused(refusal), cx),
         };
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         self.run_off_thread(
             cx,
-            move || request.run(github.as_ref()),
+            move || request.run(host.as_ref()),
             move |this, outcome, cx| {
                 let result = this.change(cx, |review| review.apply_finish(outcome));
                 if result == FinishResult::Sent {
@@ -830,11 +830,9 @@ impl ReviewSession {
         let folders = self.tour_work.repinner.folders.clone();
         let run: Box<dyn FnOnce() -> JobOutcome + Send> = match started {
             StartedJob::Repin => {
-                let (repinner, github) = (
-                    Arc::clone(&self.tour_work.repinner),
-                    Arc::clone(&self.github),
-                );
-                Box::new(move || JobOutcome::Repin(repinner.run(github.as_ref())))
+                let (repinner, host) =
+                    (Arc::clone(&self.tour_work.repinner), Arc::clone(&self.host));
+                Box::new(move || JobOutcome::Repin(repinner.run(host.as_ref())))
             }
             StartedJob::Refresh => self.refresh_reporting_activity(cx),
             StartedJob::Reload => {
@@ -1563,12 +1561,12 @@ impl ReviewSession {
         self.start_background_work(cx);
     }
 
-    /// Three reads that fail the way a GitHub outage fails them, through the review's own path.
+    /// Three reads that fail the way a host outage fails them, through the review's own path.
     #[cfg(feature = "snapshots")]
     pub fn stage_outage(&mut self, cx: &mut Context<Self>) {
-        use crate::viewer::{GitHubError, OutageCause, Read};
+        use crate::viewer::{HostError, OutageCause, Read};
 
-        let outage = GitHubError::NotAnswering(OutageCause::ServerError(503));
+        let outage = HostError::NotAnswering(OutageCause::ServerError(503));
         self.review.could_not_read(Read::PrHead, &outage);
         self.review.could_not_read(Read::PrDescription, &outage);
         self.review.threads_not_read(&outage);
@@ -1578,7 +1576,7 @@ impl ReviewSession {
     #[cfg(feature = "snapshots")]
     pub fn unstage_outage(&mut self, cx: &mut Context<Self>) {
         self.review
-            .clear_problem(crate::viewer::ProblemKind::GitHubNotAnswering);
+            .clear_problem(crate::viewer::ProblemKind::HostNotAnswering);
         self.show_problems(cx);
     }
 
@@ -1713,7 +1711,7 @@ impl ReviewSession {
         .detach();
         self.follow_tour_agent(cx);
         self.resume_ai_review(cx);
-        self.review.pull_from_github();
+        self.review.pull_from_host();
         self.run_due_work(cx);
     }
 
@@ -1975,7 +1973,7 @@ impl ReviewSession {
         if self.is_viewed_wait_staged {
             use crate::viewer::{Station, StationHealth, StationKind};
             rows.stations.stage(Station::new(
-                StationKind::GitHub,
+                StationKind::Host,
                 StationHealth::Waiting,
                 "3 viewed marks waiting · 4 min",
             ));
@@ -1991,10 +1989,10 @@ impl ReviewSession {
         let Some(request) = self.change(cx, |review| review.start_adding_to_notes(subject)) else {
             return;
         };
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         self.run_off_thread(
             cx,
-            move || request.run(github.as_ref()),
+            move || request.run(host.as_ref()),
             |this, outcome, cx| {
                 // A save that is refused or fails is named by the review's problems.
                 this.change(cx, |review| review.apply_to_notes(outcome))
@@ -2139,10 +2137,10 @@ impl ReviewSession {
         let Some(removal) = self.review.close() else {
             return;
         };
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         let (landed, has_landed) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            if let Err(error) = removal.run(github.as_ref()) {
+            if let Err(error) = removal.run(host.as_ref()) {
                 eprintln!("could not take the reviewing mark off: {error:#}");
             }
             // The quit stopped waiting once the wait ran out, so nobody may be listening.

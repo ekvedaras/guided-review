@@ -43,7 +43,7 @@ const fn icon_of(kind: StationKind) -> Icon {
         StationKind::AiReview => Icon::ListChecks,
         StationKind::Fixes => Icon::Zap,
         StationKind::YourReview => Icon::Send,
-        StationKind::GitHub => Icon::Globe,
+        StationKind::Host => Icon::Globe,
     }
 }
 
@@ -516,7 +516,7 @@ impl OneStepLayout {
                     .chain(finish)
                     .collect()
             }
-            StationKind::GitHub => sidebar
+            StationKind::Host => sidebar
                 .viewed_sync_off
                 .clone()
                 .map(|reason| quiet(colors, format!("Viewed marks are not synced: {reason}")))

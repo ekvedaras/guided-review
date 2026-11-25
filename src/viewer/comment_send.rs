@@ -3,7 +3,7 @@
 use super::comments::{Audience, CommentDraft, CommentRefusal, QueuedComment, SendMode};
 use super::hand_offs::{SentComment, SentFrom};
 use super::local_thread_store::{LocalThreadStore, ThreadHome};
-use super::ports::{ChangeTipsPort, GitHubError, ReviewThreadsPort, ReviewWritesPort};
+use super::ports::{ChangeTipsPort, HostError, ReviewThreadsPort, ReviewWritesPort};
 use super::review_state::ReviewState;
 use super::review_thread::{ReviewThread, ThreadId};
 use super::used_findings::thread_made_of;
@@ -148,14 +148,13 @@ impl CommentRequest {
     /// A local review's comment never reaches GitHub: it becomes a thread in the state file.
     pub fn run(
         self,
-        github: &(impl ChangeTipsPort + ReviewWritesPort + ReviewThreadsPort + ?Sized),
+        host: &(impl ChangeTipsPort + ReviewWritesPort + ReviewThreadsPort + ?Sized),
     ) -> CommentOutcome {
         let (how, threads) = match &self.home {
-            ThreadHome::GitHub(pr) => {
-                let how = self.send(github, pr);
+            ThreadHome::Host(pr) => {
+                let how = self.send(host, pr);
                 let threads = matches!(how, Outcome::Sent).then(|| {
-                    github
-                        .review_threads(pr)
+                    host.review_threads(pr)
                         .map_err(|error| format!("{error:#}"))
                 });
                 (how, threads)
@@ -192,23 +191,23 @@ impl CommentRequest {
 
     fn send(
         &self,
-        github: &(impl ChangeTipsPort + ReviewWritesPort + ?Sized),
+        host: &(impl ChangeTipsPort + ReviewWritesPort + ?Sized),
         pr: &PullRequestUrl,
     ) -> Outcome {
         if !self.draft.is_placed_at(&self.tour_head) {
             return Outcome::Refused(CommentRefusal::CodeMoved);
         }
-        match github.pull_request_tips(pr) {
+        match host.pull_request_tips(pr) {
             Ok(tips) if tips.head == self.tour_head => {}
             Ok(_) => return Outcome::Refused(CommentRefusal::TourIsOld),
             Err(error) => return Outcome::Failed(format!("{error:#}")),
         }
         let sent = match self.mode {
             SendMode::AddToReview => {
-                github.add_review_thread(pr, &self.draft.place, &self.draft.body)
+                host.add_review_thread(pr, &self.draft.place, &self.draft.body)
             }
-            SendMode::CommentNow => match github.has_pending_review(pr) {
-                Ok(false) => github.comment_now(pr, &self.draft.place, &self.draft.body),
+            SendMode::CommentNow => match host.has_pending_review(pr) {
+                Ok(false) => host.comment_now(pr, &self.draft.place, &self.draft.body),
                 Ok(true) => return Outcome::Refused(CommentRefusal::PendingReviewExists),
                 Err(error) => return classify(&error),
             },
@@ -220,14 +219,14 @@ impl CommentRequest {
     }
 }
 
-fn classify(error: &GitHubError) -> Outcome {
+fn classify(error: &HostError) -> Outcome {
     match error {
-        GitHubError::ThreadNotCreated(reason) => Outcome::Rejected(reason.clone()),
-        GitHubError::PendingReviewExists => Outcome::Refused(CommentRefusal::PendingReviewExists),
-        GitHubError::NoAccess(no_access) => {
+        HostError::ThreadNotCreated(reason) => Outcome::Rejected(reason.clone()),
+        HostError::PendingReviewExists => Outcome::Refused(CommentRefusal::PendingReviewExists),
+        HostError::NoAccess(no_access) => {
             Outcome::Refused(CommentRefusal::NoAccess(no_access.reason().to_owned()))
         }
-        GitHubError::Other(error) => Outcome::Failed(format!("{error:#}")),
-        GitHubError::NotAnswering(_) => Outcome::Failed(error.to_string()),
+        HostError::Other(error) => Outcome::Failed(format!("{error:#}")),
+        HostError::NotAnswering(_) => Outcome::Failed(error.to_string()),
     }
 }

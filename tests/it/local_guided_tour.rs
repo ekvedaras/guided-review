@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::support::fake_ports::{FakeGitHub as FakePorts, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_without_agents;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, file_path};
@@ -364,10 +364,10 @@ fn tour_path_prints_the_local_guided_tour_path() {
 
 fn on_focus(review: &mut Review, source: &dyn guided_review::code_source::CodeSource) {
     let sent = SentLog::default();
-    let github = FakePorts::with_pull("main-tip", "snapshot", &sent);
-    review.pull_from_github();
-    drive_without_agents(review, &github, source, Instant::now());
-    assert_eq!(sent.github_calls(), []);
+    let host = FakeHost::with_pull("main-tip", "snapshot", &sent);
+    review.pull_from_host();
+    drive_without_agents(review, &host, source, Instant::now());
+    assert_eq!(sent.host_calls(), []);
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn after_update_a_guided_local_tour_offers_refresh_as_after_new_commits_on_a_pr(
 
     let updated = feature
         .repinner()
-        .run(&FakePorts::with_pull(
+        .run(&FakeHost::with_pull(
             "main-tip",
             "snapshot",
             &SentLog::default(),

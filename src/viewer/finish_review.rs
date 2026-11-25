@@ -3,7 +3,7 @@ use std::fmt;
 
 use crate::pull_request::PullRequestUrl;
 
-use super::ports::{GitHubError, ReviewWritesPort};
+use super::ports::{HostError, ReviewWritesPort};
 
 /// What finishing does: a PR takes a review on GitHub; a local review sends its queued tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,10 +69,10 @@ pub struct FinishOutcome {
 }
 
 impl FinishRequest {
-    pub fn run(self, github: &dyn ReviewWritesPort) -> FinishOutcome {
-        let result = match github.submit_review(&self.pr, self.verdict, &self.body) {
+    pub fn run(self, host: &dyn ReviewWritesPort) -> FinishOutcome {
+        let result = match host.submit_review(&self.pr, self.verdict, &self.body) {
             Ok(()) => FinishResult::Sent,
-            Err(GitHubError::NoAccess(no_access)) => {
+            Err(HostError::NoAccess(no_access)) => {
                 FinishResult::Refused(FinishRefusal::NoAccess(no_access.into_reason()))
             }
             Err(error) => FinishResult::Failed(format!("{error:#}")),

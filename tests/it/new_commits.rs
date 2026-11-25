@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::{FixtureRepo, drafts, on_github};
 use guided_review::local_git::LocalGit;
 use guided_review::opened_subject::TourRepinner;
@@ -498,17 +498,17 @@ fn after_a_re_pin_github_viewed_state_is_the_new_baseline_and_still_ticked_files
 {
     let shop = Shop::with_tour_at_first_head();
     let sent = SentLog::default();
-    let github_before = FakeGitHub::with_pull("main-tip", &shop.first_head, &sent)
+    let host_before = FakeHost::with_pull("main-tip", &shop.first_head, &sent)
         .viewing("old.txt", ViewedState::Viewed);
     let mut review = shop.open();
-    review.sync(&github_before).unwrap();
+    review.sync(&host_before).unwrap();
     review.tick(&"readme".into()).unwrap();
     review.tick(&"config".into()).unwrap();
     review.untick(&"old".into()).unwrap();
     drop(review);
     let second_head = shop.commit_second_head();
     shop.repin_onto(&second_head);
-    let github = FakeGitHub::with_pull("main-tip", &second_head, &sent)
+    let host = FakeHost::with_pull("main-tip", &second_head, &sent)
         .viewing("readme.txt", ViewedState::Dismissed)
         .viewing("config.yaml", ViewedState::Dismissed)
         .viewing("old.txt", ViewedState::Viewed)
@@ -516,16 +516,16 @@ fn after_a_re_pin_github_viewed_state_is_the_new_baseline_and_still_ticked_files
         .viewing("app/Pricing.php", ViewedState::Unviewed);
     let mut review = shop.open();
 
-    review.sync(&github).unwrap();
+    review.sync(&host).unwrap();
 
     assert_eq!(ticked(&review), ["readme"]);
-    assert_eq!(github.viewed_state("readme.txt"), ViewedState::Viewed);
-    assert_eq!(github.viewed_state("old.txt"), ViewedState::Unviewed);
-    assert_eq!(github.viewed_state("config.yaml"), ViewedState::Dismissed);
+    assert_eq!(host.viewed_state("readme.txt"), ViewedState::Viewed);
+    assert_eq!(host.viewed_state("old.txt"), ViewedState::Unviewed);
+    assert_eq!(host.viewed_state("config.yaml"), ViewedState::Dismissed);
     assert!(!review.not_synced());
 
-    github.set_viewed("readme.txt", ViewedState::Unviewed);
-    review.sync(&github).unwrap();
+    host.set_viewed("readme.txt", ViewedState::Unviewed);
+    review.sync(&host).unwrap();
     assert_eq!(ticked(&review), Vec::<String>::new());
 }
 
@@ -587,7 +587,7 @@ fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
     let shop = Shop::with_tour_at_first_head();
     shop.tick(&["total", "keep"]);
     let second_head = shop.commit_second_head();
-    let github = FakeGitHub::with_pull(&shop.base, &second_head, &SentLog::default());
+    let host = FakeHost::with_pull(&shop.base, &second_head, &SentLog::default());
     let clone = shop.repo.path().to_path_buf();
     let repinner = TourRepinner {
         folders: shop.repo.folders(),
@@ -599,7 +599,7 @@ fn repin_re_pins_to_the_pr_head_and_opens_the_review_on_the_new_tour() {
         }),
     };
 
-    let repinned = repinner.run(&github).unwrap();
+    let repinned = repinner.run(&host).unwrap();
 
     assert_eq!(repinned.review.head(), &Sha::new(&second_head));
     assert_eq!(
@@ -687,12 +687,12 @@ fn colours_and_context_lines_read_before_a_re_pin_do_not_reach_the_re_pinned_rev
 fn a_sync_answer_for_the_head_before_a_re_pin_leaves_the_re_pinned_review_s_ticks_alone() {
     let shop = Shop::with_tour_at_first_head();
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", &shop.first_head, &sent)
+    let host = FakeHost::with_pull("main-tip", &shop.first_head, &sent)
         .viewing("app/Order.php", ViewedState::Viewed);
     let mut before = shop.open();
-    before.sync(&github).unwrap();
-    github.set_viewed("app/Order.php", ViewedState::Unviewed);
-    let stale = before.sync_request().unwrap().run(&github);
+    before.sync(&host).unwrap();
+    host.set_viewed("app/Order.php", ViewedState::Unviewed);
+    let stale = before.sync_request().unwrap().run(&host);
     drop(before);
     let second_head = shop.commit_second_head();
     shop.repin_onto(&second_head);
