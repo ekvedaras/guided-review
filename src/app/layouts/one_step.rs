@@ -22,6 +22,7 @@ use crate::app::components::ask_panel::{AskPanel, HandToAgent, UseAsComment, ask
 use crate::app::components::button::{ButtonKind, ButtonSize, button_keys, icon_label_button};
 use crate::app::components::chip::{dropping_in, notice_band};
 use crate::app::components::comment_composer::CommentComposer;
+use crate::app::components::comments_sheet::CommentsSheet;
 use crate::app::components::diagram::{DiagramSet, Diagrams};
 use crate::app::components::diff_view::{
     CodeGesture, OnImageComment, OnNamePointer, OnRowGesture, RowGesture,
@@ -73,6 +74,7 @@ use issue_card::IssueHover;
 use name_card_hover::NameCardPlace;
 
 mod comments;
+mod comments_list;
 mod findings;
 #[cfg(feature = "snapshots")]
 mod gallery;
@@ -112,6 +114,7 @@ actions!(
         ToggleRead,
         ToggleShortcuts,
         ToggleFindingsList,
+        ToggleCommentsList,
         OpenPrOnGitHub,
         OpenIssue,
         AskToOpenPr,
@@ -188,6 +191,7 @@ pub struct OneStepLayout {
     pr_switcher: Entity<PrSwitcherView>,
     shortcuts: Entity<ShortcutsSheet>,
     findings: Entity<FindingsSheet>,
+    comments_list: Entity<CommentsSheet>,
     picture_zoom: Entity<PictureZoom>,
     settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
@@ -242,6 +246,7 @@ impl OneStepLayout {
                 this.screen_travel.arrive(session.read(cx).review());
                 this.use_code_opener_of_review(cx);
                 this.reopen_if_work_ended(cx);
+                this.refresh_comments_list(cx);
                 cx.notify();
             }),
             cx.subscribe_in(&session, window, |this, _, event, window, cx| match event {
@@ -291,6 +296,11 @@ impl OneStepLayout {
         let findings = cx.new(|cx| FindingsSheet::new(focus.clone(), cx));
         cx.subscribe_in(&findings, window, |this, sheet, event, window, cx| {
             this.findings_asked(sheet, event, window, cx);
+        })
+        .detach();
+        let comments_list = cx.new(|cx| CommentsSheet::new(focus.clone(), cx));
+        cx.subscribe_in(&comments_list, window, |this, _, event, _, cx| {
+            this.comments_list_asked(event, cx);
         })
         .detach();
         let picture_zoom = cx.new(|cx| PictureZoom::new(focus.clone(), cx));
@@ -417,6 +427,7 @@ impl OneStepLayout {
             pr_switcher,
             shortcuts,
             findings,
+            comments_list,
             picture_zoom,
             settings,
             loading,
@@ -1077,6 +1088,11 @@ impl OneStepLayout {
                 self.findings
                     .update(cx, |sheet, cx| sheet.toggle(list, window, cx));
             }
+            Effect::Toggle(Overlay::Comments) => {
+                let list = self.session.read(cx).review().comments_list();
+                self.comments_list
+                    .update(cx, |sheet, cx| sheet.toggle(list, window, cx));
+            }
             Effect::OpenSettings => self
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
@@ -1464,6 +1480,9 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &ToggleRead, window, cx| {
                 this.act(Intent::ToggleRead, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleCommentsList, window, cx| {
+                this.act(Intent::ToggleCommentsList, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ToggleFindingsList, window, cx| {
                 this.act(Intent::ToggleFindingsList, window, cx);
             }))
@@ -1577,6 +1596,7 @@ impl Render for OneStepLayout {
             .child(self.pr_switcher.clone())
             .child(self.shortcuts.clone())
             .child(self.findings.clone())
+            .child(self.comments_list.clone())
             .child(self.picture_zoom.clone())
             .children(name_card)
             .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))

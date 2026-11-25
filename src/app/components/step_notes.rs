@@ -40,7 +40,7 @@ impl RenderOnce for StepNotesCard {
                         .child(sized_icon(Icon::ListChecks, colors.accent, px(14.)))
                         .child(note_label("WHAT TO CHECK")),
                 )
-                .child(InlineMarkdown::new("step-check", &check))
+                .child(InlineMarkdown::new("step-check", &check).on(Tone::Accent))
         });
         let tldr = (!notes.tldr.is_empty()).then(|| {
             div()

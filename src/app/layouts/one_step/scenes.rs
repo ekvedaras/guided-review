@@ -33,7 +33,7 @@ use crate::viewer::{
     AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
     HoveredName, LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability,
     Merging, NameUnderPointer, OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind,
-    Readiness, TerminalId, TextBox,
+    Readiness, Review, TerminalId, TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue, Station, StationHealth, StationKind};
@@ -110,6 +110,7 @@ enum Scene {
     AiReviewFailed,
     AiReviewOnLines,
     AiReviewFindingsList,
+    CommentsList,
     AiReviewFixRequests,
     AiReviewFixed,
     AiReviewAskWhy,
@@ -122,7 +123,7 @@ enum Scene {
 }
 
 impl Scene {
-    const ALL: [Self; 73] = [
+    const ALL: [Self; 74] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -187,6 +188,7 @@ impl Scene {
         Self::AiReviewFailed,
         Self::AiReviewOnLines,
         Self::AiReviewFindingsList,
+        Self::CommentsList,
         Self::AiReviewFixRequests,
         Self::AiReviewFixed,
         Self::AiReviewAskWhy,
@@ -262,6 +264,7 @@ impl Scene {
             Self::AiReviewFailed => "82-ai-review-failed",
             Self::AiReviewOnLines => "83-ai-review-on-lines",
             Self::AiReviewFindingsList => "84-ai-review-findings-list",
+            Self::CommentsList => "96-comments-list",
             Self::AiReviewFixRequests => "85-ai-review-fix-requests",
             Self::AiReviewFixed => "94-ai-review-fixed",
             Self::AiReviewAskWhy => "86-ai-review-ask-why",
@@ -998,6 +1001,26 @@ impl OneStepLayout {
                     sheet.stage_dismissed_shown(cx);
                 });
             }
+            Scene::CommentsList => {
+                self.change_review(cx, |review| {
+                    review.go_forward();
+                    let first_line = |review: &Review| {
+                        review
+                            .page()
+                            .lines()
+                            .next()
+                            .map(|line| line.location.clone())
+                    };
+                    let on_first_step = first_line(review);
+                    review.go_forward();
+                    if let (Some(first), Some(second)) = (on_first_step, first_line(review)) {
+                        review.stage_comment_threads(&first, &second);
+                    }
+                });
+                let list = self.session.read(cx).review().comments_list();
+                self.comments_list
+                    .update(cx, |sheet, cx| sheet.toggle(list, window, cx));
+            }
             Scene::AiReviewOnLines => self.change_review(cx, |review| {
                 review.go_forward();
                 let first_line = review
@@ -1345,6 +1368,14 @@ impl OneStepLayout {
                 self.findings
                     .update(cx, |sheet, cx| sheet.close(window, cx));
                 self.change_review(cx, |review| review.ai_review_is(AiReview::NotRun));
+            }
+            Scene::CommentsList => {
+                self.comments_list
+                    .update(cx, |sheet, cx| sheet.close(window, cx));
+                self.change_review(cx, |review| {
+                    review.unstage_comment_threads();
+                    review.go_to_summary();
+                });
             }
             Scene::AiReviewOnLines | Scene::AiReviewOutdated => self.change_review(cx, |review| {
                 review.ai_review_is(AiReview::NotRun);

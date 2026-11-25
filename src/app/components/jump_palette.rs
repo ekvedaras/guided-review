@@ -130,6 +130,7 @@ fn action_icon(action: PaletteAction) -> Icon {
         | PaletteAction::RunAiReview => Icon::Sparkles,
         PaletteAction::SwitchToGuidedTour => Icon::ArrowRight,
         PaletteAction::FinishReview | PaletteAction::FindingsList => Icon::ListChecks,
+        PaletteAction::CommentsList => Icon::MessageSquare,
         PaletteAction::MarkDone => Icon::CircleCheck,
         PaletteAction::SendTasks => Icon::Send,
         PaletteAction::OpenOnGitHub | PaletteAction::OpenChecksOnGitHub => Icon::ExternalLink,

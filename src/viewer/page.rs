@@ -27,6 +27,7 @@ use super::jump::{JumpPlace, JumpTarget};
 use super::line_location::LineLocation;
 use super::overview::OverviewPage;
 use super::review::ReviewCore;
+use super::review_thread::ThreadId;
 use super::row_selection::{RowSelection, SelectedLines};
 use super::screen::Screen;
 use crate::file_path::FilePath;
@@ -227,6 +228,12 @@ impl Page {
         self.rows
             .iter()
             .position(|row| matches!(row, PageRow::Finding(finding) if finding.id == *id))
+    }
+
+    pub fn row_of_thread(&self, id: &ThreadId) -> Option<usize> {
+        self.rows
+            .iter()
+            .position(|row| matches!(row, PageRow::Thread { view, .. } if view.thread.id == *id))
     }
 
     /// The row of the comment box at `place`; `None` when this page does not show it.

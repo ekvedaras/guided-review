@@ -17,11 +17,11 @@ use std::sync::Arc;
 
 use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
 use crate::findings::FindingId;
-use crate::viewer::CommentPlace;
 use crate::viewer::{
     AskAt, BoxEdges, HiddenText, JumpTarget, LineKind, Page, PageRow, PinnedHeader, Review,
     RowSelection, SelectedRows, ShownLine, StepHeading, line_count,
 };
+use crate::viewer::{CommentPlace, ThreadId};
 
 /// What the PR description's `MarkdownView` is keyed by, so its folds can be told apart.
 pub const DESCRIPTION_KEY: &str = "pr-description";
@@ -196,6 +196,10 @@ impl PageRows {
 
     pub fn row_of_finding(&self, id: &FindingId) -> Option<usize> {
         self.page.as_deref()?.row_of_finding(id)
+    }
+
+    pub fn row_of_thread(&self, id: &ThreadId) -> Option<usize> {
+        self.page.as_deref()?.row_of_thread(id)
     }
 
     pub fn row_of_comment_box(&self, place: &CommentPlace) -> Option<usize> {

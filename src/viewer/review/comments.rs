@@ -12,6 +12,7 @@ use crate::viewer::comments::Audience;
 use crate::viewer::comments::{
     CommentPlace, CommentProblem, CommentRefusal, CommentResult, QueuedComment, SendMode,
 };
+use crate::viewer::comments_list::{CommentsList, ListedThread, ThreadVisit};
 use crate::viewer::github_outage::Affected;
 use crate::viewer::hand_offs::{HandOff, HandOffState, HandOffs, HandToAgentRefused, SentFrom};
 use crate::viewer::line_location::LineLocation;
@@ -54,6 +55,94 @@ impl ReviewCore {
         } else {
             self.github_answered(Affected::Comments);
             self.raise_problem(Problem::ThreadsNotRead(error.short_reason()));
+        }
+    }
+
+    pub fn has_threads(&self) -> bool {
+        !self.pulled_threads.is_empty()
+    }
+
+    /// Every thread of the review, in reading order, each with the screen that shows it.
+    pub fn comments_list(&self) -> CommentsList {
+        let mut listed: Vec<ListedThread> = Vec::new();
+        let mut steps_before = 0;
+        for screen in self.reading_order() {
+            if matches!(screen, Screen::Step(_)) {
+                steps_before += 1;
+            }
+            let title = self.screen_heading(&screen, steps_before);
+            listed.extend(
+                self.threads
+                    .on_screen(&screen)
+                    .threads()
+                    .iter()
+                    .map(|thread| ListedThread {
+                        thread: thread.clone(),
+                        shown_on: Some((screen.clone(), title.clone())),
+                    }),
+            );
+        }
+        let unshown: Vec<ListedThread> = self
+            .pulled_threads
+            .iter()
+            .filter(|thread| !listed.iter().any(|listed| listed.thread.id == thread.id))
+            .map(|thread| ListedThread {
+                thread: thread.clone(),
+                shown_on: None,
+            })
+            .collect();
+        listed.extend(unshown);
+        CommentsList::of(listed)
+    }
+
+    /// Goes to the screen that shows the thread, opening its step and the thread when folded.
+    pub fn go_to_thread(&mut self, id: &ThreadId) -> ThreadVisit {
+        let Some(thread) = self.pulled_threads.iter().find(|thread| thread.id == *id) else {
+            return ThreadVisit::Nowhere;
+        };
+        let is_folded = thread.is_folded_by_default() != self.thread_fold_flipped.contains(id);
+        let link = thread
+            .comments
+            .first()
+            .map(|comment| comment.url.clone())
+            .filter(|url| !url.is_empty());
+        let shown_on = self.reading_order().into_iter().find(|screen| {
+            self.threads
+                .on_screen(screen)
+                .threads()
+                .iter()
+                .any(|placed| placed.id == *id)
+        });
+        let Some(screen) = shown_on else {
+            return link.map_or(ThreadVisit::Nowhere, ThreadVisit::OnGitHub);
+        };
+        self.go_to_screen(screen);
+        if let Screen::Step(step) = self.screen.clone()
+            && self.is_folded(&step)
+        {
+            self.toggle_fold(&step);
+        }
+        if is_folded {
+            self.toggle_thread_fold(id);
+        }
+        ThreadVisit::OnScreen
+    }
+
+    /// "Step 3 · Title" with the number the page's "Step 3 of 8" gives, which counts steps in reading order.
+    fn screen_heading(&self, screen: &Screen, step_number: usize) -> String {
+        match screen {
+            Screen::Step(id) => {
+                let title = self
+                    .tour
+                    .guided()
+                    .and_then(|guided| guided.steps().into_iter().find(|step| step.id == *id))
+                    .map_or_default(|step| step.title.clone());
+                format!("Step {step_number} · {title}")
+            }
+            Screen::File(path) => path.to_string(),
+            Screen::SafetyNet => "Safety net".to_owned(),
+            Screen::Summary => "Summary".to_owned(),
+            Screen::Overview => "Overview".to_owned(),
         }
     }
 
@@ -336,11 +425,7 @@ impl ReviewCore {
     ) -> anyhow::Result<CommentResult> {
         let from_findings = outcome.request.findings_carried().to_vec();
         let threads = outcome.threads.clone();
-        let made = if from_findings.is_empty() {
-            None
-        } else {
-            outcome.thread_made(&self.pulled_threads)
-        };
+        let made = outcome.thread_made(&self.pulled_threads);
         let hand_offs_before = self.state.hand_offs().all().len();
         let code = self.code_commented_on(&outcome);
         let result = self.comment_desk.apply_comment(
@@ -349,13 +434,31 @@ impl ReviewCore {
             (sent_from(&self.screen), code),
         );
         self.note_new_hand_off(hand_offs_before);
+        let kept_on_screen = match (&result, &made) {
+            (Ok(CommentResult::Sent), Some(thread)) => self.keep_thread_on_this_screen(thread),
+            _ => Ok(()),
+        };
         self.show_pulled_threads(threads.as_ref());
         match result {
-            Ok(CommentResult::Sent) => self.decide_used(from_findings, made.as_ref())?,
+            Ok(CommentResult::Sent) => {
+                kept_on_screen?;
+                self.decide_used(from_findings, made.as_ref())?;
+            }
             Ok(CommentResult::Queued(_)) => self.decide_used(from_findings, None)?,
             _ => {}
         }
         result
+    }
+
+    /// The thread GitHub sends back shows under the same row on every step that shows it, so the step it
+    /// was written on is kept; the first step showing the row would take it otherwise.
+    fn keep_thread_on_this_screen(&mut self, thread: &ThreadId) -> anyhow::Result<()> {
+        let Screen::Step(step) = &self.screen else {
+            return Ok(());
+        };
+        let step = step.clone();
+        self.state
+            .record(|state| state.thread_written_on(thread.clone(), step))
     }
 
     /// The lines a task of a local review is about, as the page shows them; a PR's hand-off has none.

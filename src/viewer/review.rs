@@ -1681,6 +1681,7 @@ impl ReviewCore {
             &self.files,
             &self.pulled_threads,
             &self.followed_lines,
+            self.state.threads_written_on(),
             &display,
         );
         let findings = match &self.ai_review {
@@ -1850,6 +1851,7 @@ impl ReviewCore {
                 self.can_list_findings()
                     .then_some(PaletteAction::FindingsList),
             )
+            .chain(self.has_threads().then_some(PaletteAction::CommentsList))
             .chain(
                 self.run_ai_review_refusal()
                     .is_none()

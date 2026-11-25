@@ -61,6 +61,7 @@ use crate::viewer::{
 use crate::viewer::{FixReply, WhyReply};
 use components::ask_panel::AskPanel;
 use components::comment_composer::CommentComposer;
+use components::comments_sheet::CommentsSheet;
 use components::findings_sheet::FindingsSheet;
 use components::jump_palette::JumpPalette;
 use components::palette::Appearance;
@@ -72,9 +73,10 @@ use components::text_box;
 use layouts::one_step::{
     AskAboutStep, AskToOpenPr, CloseWindow, Collaborators, CopySelection, FocusNextChange,
     FocusPreviousChange, GoBack, GoForward, GoToNextUnread, OneStepLayout, OpenIssue,
-    OpenPrOnGitHub, ReadDown, ReadUp, ShowMoreAbove, ShowMoreBelow, ToggleAutoMerge, ToggleDraft,
-    ToggleFindingsList, ToggleFold, ToggleJump, TogglePieceLabels, TogglePrSwitcher, ToggleRead,
-    ToggleRenderedView, ToggleSettings, ToggleShortcuts, ToggleWhitespace, ToggleWrapLines,
+    OpenPrOnGitHub, ReadDown, ReadUp, ShowMoreAbove, ShowMoreBelow, ToggleAutoMerge,
+    ToggleCommentsList, ToggleDraft, ToggleFindingsList, ToggleFold, ToggleJump, TogglePieceLabels,
+    TogglePrSwitcher, ToggleRead, ToggleRenderedView, ToggleSettings, ToggleShortcuts,
+    ToggleWhitespace, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -1082,7 +1084,7 @@ pub fn apply_keymap(keymap: Keymap, cx: &mut App) {
 /// Every shortcut comes from the keymap the shortcuts sheet lists.
 fn bind_keys(keymap: &Keymap, cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
         AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
@@ -1090,6 +1092,7 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
         SettingsPanel::KEY_CONTEXT,
         ShortcutsSheet::KEY_CONTEXT,
         FindingsSheet::KEY_CONTEXT,
+        CommentsSheet::KEY_CONTEXT,
         PictureZoom::KEY_CONTEXT,
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
@@ -1139,6 +1142,7 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
                 Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
                 Command::FindingsList => KeyBinding::new(&keys, ToggleFindingsList, context),
+                Command::CommentsList => KeyBinding::new(&keys, ToggleCommentsList, context),
                 Command::OpenOnGitHub => KeyBinding::new(&keys, OpenPrOnGitHub, context),
                 Command::OpenIssue => KeyBinding::new(&keys, OpenIssue, context),
                 Command::OpenPr => KeyBinding::new(&keys, AskToOpenPr, context),

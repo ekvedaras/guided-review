@@ -20,6 +20,7 @@ mod code_link;
 mod comment_desk;
 mod comment_send;
 mod comments;
+mod comments_list;
 mod diff_display;
 mod diff_fence;
 mod diff_line;
@@ -110,6 +111,7 @@ mod used_findings;
 mod viewed_sync;
 mod word_diff;
 mod work_agenda;
+mod written_on;
 
 pub use crate::keys::{Chord, Key, KeyCap, Modifier, Modifiers};
 pub use crate::keys::{Command, KeyScope, ShortcutGroup, in_group};
@@ -149,6 +151,7 @@ pub use comments::{
     CommentDraft, CommentPlace, CommentProblem, CommentRefusal, CommentResult, QueuedComment,
     SendMode, Sending,
 };
+pub use comments_list::{CommentsList, CommentsListRow, CommentsSection, ScreenGroup, ThreadVisit};
 pub use diff_display::{
     ChangeId, DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext,
     hidden_lines_after, hidden_lines_before,

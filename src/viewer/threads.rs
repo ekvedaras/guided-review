@@ -17,7 +17,9 @@ use super::line_location::{LineLocation, Side};
 use super::outdated_lines::FollowedLines;
 use super::piece_diff::PieceDiff;
 use super::review::StepId;
+use super::screen::Screen;
 use super::used_findings::{FindingsOfThreads, UsedFinding};
+use super::written_on::WrittenOn;
 
 impl ReviewThread {
     /// Where the thread hangs: its line, or for an outdated thread where its lines were followed to.
@@ -94,13 +96,17 @@ pub(super) struct Placed<'a> {
     followed: &'a BTreeMap<ThreadId, FollowedLines>,
 }
 
-impl Placed<'_> {
+impl<'a> Placed<'a> {
     pub fn len(&self) -> usize {
         self.threads.len()
     }
 
     pub fn is_empty(&self) -> bool {
         self.threads.is_empty()
+    }
+
+    pub fn threads(&self) -> &'a [ReviewThread] {
+        self.threads
     }
 }
 
@@ -110,10 +116,13 @@ impl ThreadPlacement {
         files: &[ChangedFile],
         threads: &[ReviewThread],
         followed: &BTreeMap<ThreadId, FollowedLines>,
+        written_on: &WrittenOn,
         display: &DiffDisplay,
     ) -> Self {
         match tour {
-            Tour::Guided(guided) => Self::of_steps(guided, files, threads, followed, display),
+            Tour::Guided(guided) => {
+                Self::of_steps(guided, files, threads, (followed, written_on), display)
+            }
             Tour::Basic(_) => Self::of_files(files, threads, followed),
         }
     }
@@ -140,22 +149,29 @@ impl ThreadPlacement {
         }
     }
 
+    /// A thread goes to the step its writer wrote it on while that step still shows its line (or its
+    /// file), else to the first step that does, else to the safety net.
     fn of_steps(
         tour: &GuidedTour,
         files: &[ChangedFile],
         threads: &[ReviewThread],
-        followed: &BTreeMap<ThreadId, FollowedLines>,
+        (followed, written_on): (&BTreeMap<ThreadId, FollowedLines>, &WrittenOn),
         display: &DiffDisplay,
     ) -> Self {
         let steps = step_pieces(tour, files, display);
         let mut homes: BTreeMap<Home, Vec<ReviewThread>> = BTreeMap::new();
         for thread in threads {
-            let home = steps
-                .iter()
-                .find(|(_, parts)| match thread.anchor(followed.get(&thread.id)) {
-                    Some(anchor) => parts.iter().any(|piece| hangs_under_a_row(piece, &anchor)),
-                    None => parts.iter().any(|piece| thread.path == *piece.id.path()),
-                })
+            let anchor = thread.anchor(followed.get(&thread.id));
+            let shows = |(_, parts): &&(StepId, Vec<PieceDiff>)| match &anchor {
+                Some(anchor) => parts.iter().any(|piece| hangs_under_a_row(piece, anchor)),
+                None => parts.iter().any(|piece| thread.path == *piece.id.path()),
+            };
+            let written_on = written_on
+                .step_of(&thread.id)
+                .and_then(|step| steps.iter().find(|(id, _)| id == step))
+                .filter(shows);
+            let home = written_on
+                .or_else(|| steps.iter().find(shows))
                 .map_or(Home::SafetyNet, |(id, _)| Home::Step(id.clone()));
             homes.entry(home).or_default().push(thread.clone());
         }
@@ -175,6 +191,19 @@ impl ThreadPlacement {
 
     pub fn in_safety_net(&self) -> Placed<'_> {
         self.of_home(&Home::SafetyNet)
+    }
+
+    /// The summary and the overview hold no thread.
+    pub fn on_screen(&self, screen: &Screen) -> Placed<'_> {
+        match screen {
+            Screen::Step(id) => self.in_step(id),
+            Screen::File(path) => self.in_file(path),
+            Screen::SafetyNet => self.in_safety_net(),
+            Screen::Summary | Screen::Overview => Placed {
+                threads: &[],
+                followed: &self.followed,
+            },
+        }
     }
 
     fn of_home(&self, home: &Home) -> Placed<'_> {

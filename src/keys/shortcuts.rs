@@ -27,6 +27,7 @@ const L: Chord = key('l');
 const O: Chord = key('o');
 const D: Chord = key('d');
 const F: Chord = key('f');
+const C: Chord = key('c');
 const G: Chord = key('g');
 const I: Chord = key('i');
 const P: Chord = key('p');
@@ -121,6 +122,7 @@ pub enum Command {
     PreviousScreen,
     NextUnreadStep,
     FindingsList,
+    CommentsList,
     NextChange,
     PreviousChange,
     ReadDown,
@@ -199,11 +201,12 @@ impl Command {
         }
     }
 
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::NextUnreadStep,
         Self::FindingsList,
+        Self::CommentsList,
         Self::NextChange,
         Self::PreviousChange,
         Self::ReadDown,
@@ -244,6 +247,7 @@ impl Command {
             Self::PreviousScreen => &[LEFT, K],
             Self::NextUnreadStep => &[N],
             Self::FindingsList => &[F],
+            Self::CommentsList => &[C],
             Self::NextChange => &[TAB],
             Self::PreviousChange => &[SHIFT_TAB],
             Self::ReadDown => &[DOWN],
@@ -285,6 +289,7 @@ impl Command {
             Self::PreviousScreen => "previous_screen",
             Self::NextUnreadStep => "next_unread_step",
             Self::FindingsList => "findings_list",
+            Self::CommentsList => "comments_list",
             Self::NextChange => "next_change",
             Self::PreviousChange => "previous_change",
             Self::ReadDown => "read_down",
@@ -331,6 +336,7 @@ impl Command {
             | Self::PreviousScreen
             | Self::NextUnreadStep
             | Self::FindingsList
+            | Self::CommentsList
             | Self::NextChange
             | Self::PreviousChange
             | Self::ReadDown
@@ -368,6 +374,7 @@ impl Command {
             | Self::PreviousScreen
             | Self::NextUnreadStep
             | Self::FindingsList
+            | Self::CommentsList
             | Self::NextChange
             | Self::PreviousChange
             | Self::ReadDown
@@ -407,6 +414,7 @@ impl Command {
             Self::PreviousScreen => "Previous screen",
             Self::NextUnreadStep => "Next unread step",
             Self::FindingsList => "List the findings of the AI review",
+            Self::CommentsList => "List every comment thread, to go to one",
             Self::NextChange => "Focus the next change",
             Self::PreviousChange => "Focus the previous change",
             Self::ReadDown => "Scroll down through the focused change, then focus the next",

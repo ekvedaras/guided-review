@@ -10,7 +10,8 @@ use merman::{
     Engine, OperationControl, RenderOutput, RenderRequest, Renderer, SvgEnvironment, SvgRequest,
 };
 
-use crate::app::components::palette::{Appearance, Colors, INSTALLED_FONTS, TEXT_FONT, font_files};
+use crate::app::components::palette::{Appearance, Colors, TEXT_FONT, font_files};
+use crate::app::components::svg_picture;
 
 /// A diagram drawn as SVG for one appearance. Only this text is kept between steps;
 /// bitmaps are made from it again when the diagram is on screen.
@@ -36,18 +37,9 @@ impl Svg {
     }
 
     pub(super) fn tree(&self) -> Result<usvg::Tree, String> {
-        usvg::Tree::from_data(self.text.as_bytes(), &SVG_OPTIONS).map_err(|e| e.to_string())
+        svg_picture::parse(self.text.as_bytes()).map_err(|e| e.to_string())
     }
 }
-
-pub(super) static SVG_OPTIONS: LazyLock<usvg::Options<'static>> = LazyLock::new(|| {
-    let mut fonts = INSTALLED_FONTS.clone();
-    fonts.set_sans_serif_family(*TEXT_FONT);
-    usvg::Options {
-        fontdb: Arc::new(fonts),
-        ..Default::default()
-    }
-});
 
 /// Turns Mermaid text into SVG in our colours. Loading the font is the slow part,
 /// so there is one drawer per appearance for the life of the process.
@@ -122,8 +114,7 @@ impl Setup {
             return Err("no Mermaid diagram found".to_owned());
         };
         let text: Arc<str> = svg.svg().into();
-        let tree =
-            usvg::Tree::from_data(text.as_bytes(), &SVG_OPTIONS).map_err(|e| e.to_string())?;
+        let tree = svg_picture::parse(text.as_bytes()).map_err(|e| e.to_string())?;
         let (width, height) = drawn_size(&tree);
         Ok(Svg {
             text,

@@ -1,3 +1,4 @@
+use gpui::Image;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Div, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
@@ -17,7 +18,7 @@ use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
 use crate::app::code_selection::TextSpot;
 use crate::app::prose_selection::ProseSelections;
-use crate::image_facts::is_svg_path;
+use crate::image_facts::{PixelSize, is_svg_path};
 use crate::viewer::{
     Block, Capture, ColumnAlignment, FenceLine, Markdown, Run, Span, Table, fence_lines,
 };
@@ -26,8 +27,9 @@ use super::diagram::{DiagramSet, DiagramView};
 use super::diff_view::{byte_at, with_selection};
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
-use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, inside_edge};
+use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, Tone, inside_edge};
 use super::picture_zoom::{ZoomedPicture, zoom_picture};
+use super::svg_picture;
 
 /// The mark before an item of a list without numbers: a small dot, centred on the item's first line.
 pub fn bullet(colors: &Colors, line_height: gpui::Pixels) -> Div {
@@ -188,6 +190,9 @@ enum PreparedBlock {
     Table(PreparedTable),
     Picture {
         path: Arc<Path>,
+        /// An SVG drawn by the app, since gpui draws the emoji in it as boxes. `None` for any
+        /// other picture, and for an SVG that did not draw: gpui then reads the file.
+        drawn: Option<Arc<Image>>,
         /// Width over height, so the picture's room is kept before it loads.
         ratio: f32,
         /// Its width at the screen's two pixels to a point, the widest it is drawn.
@@ -200,10 +205,12 @@ impl PreparedBlock {
         match self {
             Self::Picture {
                 path,
+                drawn,
                 ratio,
                 widest,
             } => Some(ZoomedPicture {
                 path: Arc::clone(path),
+                drawn: drawn.clone(),
                 ratio: *ratio,
                 pixel_width: if is_svg_path(&path.to_string_lossy()) {
                     f32::INFINITY
@@ -386,10 +393,25 @@ fn prepare_block(block: &Block) -> PreparedBlock {
             ..
         } => PreparedBlock::Picture {
             path: Arc::from(path.as_path()),
+            drawn: drawn_svg(
+                path,
+                PixelSize {
+                    width: *width,
+                    height: *height,
+                },
+            ),
             ratio: *width as f32 / (*height).max(1) as f32,
             widest: *width as f32 / 2.,
         },
     }
+}
+
+/// Read here, once per summary text, not by gpui, which would draw some emoji of the SVG as boxes.
+fn drawn_svg(path: &Path, natural_size: PixelSize) -> Option<Arc<Image>> {
+    if !is_svg_path(&path.to_string_lossy()) {
+        return None;
+    }
+    svg_picture::image(&std::fs::read(path).ok()?, natural_size)
 }
 
 fn details_title(summary: &[Run]) -> Vec<Run> {
@@ -646,6 +668,7 @@ fn block_element(
         }
         PreparedBlock::Picture {
             path,
+            drawn,
             ratio,
             widest,
         } => {
@@ -675,11 +698,14 @@ fn block_element(
                     .size_full(),
                 )
                 .child(
-                    img(Arc::clone(path))
-                        .w(px(width))
-                        .h(px(width / ratio))
-                        .max_w_full()
-                        .rounded(px(INNER_RADIUS)),
+                    match drawn {
+                        Some(drawn) => img(Arc::clone(drawn)),
+                        None => img(Arc::clone(path)),
+                    }
+                    .w(px(width))
+                    .h(px(width / ratio))
+                    .max_w_full()
+                    .rounded(px(INNER_RADIUS)),
                 );
             div()
                 .flex()
@@ -729,6 +755,7 @@ fn table_view(
                             cell,
                             &format!("{row_key}-{index}"),
                             selectable_as,
+                            Tone::Neutral,
                             cx,
                         ));
                     cell_view.style().flex_grow = Some(column.weight);
@@ -883,6 +910,7 @@ fn code_line(colors: &Colors, line: &CodeLine) -> Div {
 pub struct InlineMarkdown {
     key: SharedString,
     text: Rc<InlineText>,
+    ground: Tone,
 }
 
 impl InlineMarkdown {
@@ -890,13 +918,27 @@ impl InlineMarkdown {
         Self {
             key: key.into(),
             text: parsed_inline(source),
+            ground: Tone::Neutral,
         }
+    }
+
+    /// Drawn on a callout of `tone`, so its inline code takes that tone's ground.
+    pub const fn on(mut self, tone: Tone) -> Self {
+        self.ground = tone;
+        self
     }
 }
 
 impl RenderOnce for InlineMarkdown {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        styled_text(&Colors::active(cx), &self.text, &self.key, None, cx)
+        styled_text(
+            &Colors::active(cx),
+            &self.text,
+            &self.key,
+            None,
+            self.ground,
+            cx,
+        )
     }
 }
 
@@ -951,7 +993,14 @@ fn inline_text(
 ) -> AnyElement {
     div()
         .text_size(gpui::rems(scale))
-        .child(styled_text(colors, text, key, selectable_as, cx))
+        .child(styled_text(
+            colors,
+            text,
+            key,
+            selectable_as,
+            Tone::Neutral,
+            cx,
+        ))
         .into_any_element()
 }
 
@@ -1025,9 +1074,9 @@ impl InlineText {
     }
 
     /// The rounded grounds of its inline code; `None` when it has none.
-    fn code_backgrounds(&self, layout: &TextLayout) -> Option<AnyElement> {
+    fn code_backgrounds(&self, layout: &TextLayout, ground: Tone) -> Option<AnyElement> {
         (!self.code_ranges.is_empty())
-            .then(|| code_backgrounds(layout.clone(), self.code_ranges.clone()))
+            .then(|| code_backgrounds(layout.clone(), self.code_ranges.clone(), ground))
     }
 
     /// How wide the text is in a table column, in `text_units`.
@@ -1051,6 +1100,7 @@ fn styled_text(
     inline: &Rc<InlineText>,
     key: &str,
     selectable_as: Option<&SharedString>,
+    ground: Tone,
     cx: &mut App,
 ) -> AnyElement {
     let row = selectable_as.map(|body| {
@@ -1077,7 +1127,7 @@ fn styled_text(
                 .map(|range| (range, code_font.clone())),
         );
     let layout = styled.layout().clone();
-    let backgrounds = inline.code_backgrounds(&layout);
+    let backgrounds = inline.code_backgrounds(&layout, ground);
     let text = selectable_text(styled_links(styled, inline, key), row, layout);
     match backgrounds {
         Some(backgrounds) => div()
@@ -1155,12 +1205,12 @@ fn styled_links(styled: StyledText, inline: &Rc<InlineText>, key: &str) -> AnyEl
 
 /// Rounded backgrounds behind inline code, one per line a code run covers. Drawn under the text,
 /// which is laid out by the time this paints.
-fn code_backgrounds(layout: TextLayout, ranges: Vec<Range<usize>>) -> AnyElement {
+fn code_backgrounds(layout: TextLayout, ranges: Vec<Range<usize>>, ground: Tone) -> AnyElement {
     canvas(
         |_, _, _| (),
         move |_, (), window, cx| {
             let colors = Colors::active(cx);
-            let (color, edge) = (colors.inline_code, colors.subtle_border);
+            let (color, edge) = colors.code_ground(ground);
             let line_height = layout.line_height();
             let inset = line_height * 0.1;
             let text = layout.text();

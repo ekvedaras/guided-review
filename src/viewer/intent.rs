@@ -27,6 +27,8 @@ pub enum Intent {
     NextFinding,
     /// From the sidebar's AI review row, its key and the palette: the list of findings, or closes it.
     ToggleFindingsList,
+    /// Its key and the palette: the list of the review's threads, or closes it.
+    ToggleCommentsList,
     /// Ticks or unticks the step on screen.
     ToggleRead,
     ToggleWrapLines,
@@ -84,6 +86,7 @@ impl From<PaletteAction> for Intent {
             PaletteAction::NextUnreadStep => Self::NextUnreadStep,
             PaletteAction::NextFinding => Self::NextFinding,
             PaletteAction::FindingsList => Self::ToggleFindingsList,
+            PaletteAction::CommentsList => Self::ToggleCommentsList,
             PaletteAction::MarkStepRead
             | PaletteAction::MarkStepUnread
             | PaletteAction::MarkFileRead
@@ -196,6 +199,8 @@ pub enum Overlay {
     Shortcuts,
     /// The AI review's findings, as a list to go through and act on in a batch.
     Findings,
+    /// The review's threads, to find one and go to it.
+    Comments,
 }
 
 /// Why an intent does nothing now.
@@ -270,6 +275,7 @@ impl Intent {
             | Self::ToggleAutoMerge
             | Self::ToggleJump
             | Self::ToggleFindingsList
+            | Self::ToggleCommentsList
             | Self::ToggleSettings
             | Self::ShowSettings
             | Self::ToggleShortcuts => true,
@@ -296,6 +302,7 @@ impl Intent {
             self,
             Self::ToggleJump
                 | Self::ToggleFindingsList
+                | Self::ToggleCommentsList
                 | Self::TogglePrSwitcher
                 | Self::ShowPrSwitcher
         );
@@ -329,6 +336,7 @@ impl ReviewCore {
             Intent::ToggleFindingsList if self.can_list_findings() => {
                 Effect::Toggle(Overlay::Findings)
             }
+            Intent::ToggleCommentsList if self.has_threads() => Effect::Toggle(Overlay::Comments),
             Intent::ToggleRead => match self.screen() {
                 Screen::Step(id) => {
                     Effect::Change(ReviewChange::ToggleTick(ReadSubject::Step(id.clone())))
@@ -374,6 +382,7 @@ impl ReviewCore {
             Intent::OpenPr if self.can_open_pr() => Effect::OpenPr,
             Intent::NextFinding
             | Intent::ToggleFindingsList
+            | Intent::ToggleCommentsList
             | Intent::OpenPr
             | Intent::MarkDone => Effect::Nothing,
             Intent::OpenOnGitHub => self

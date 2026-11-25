@@ -17,6 +17,7 @@ pub(super) const ADAPTER: Adapter = Adapter {
     triple_system: "apple-darwin",
     text_font: FontChoice::ComesWithOs("Helvetica Neue"),
     code_font: FontChoice::ComesWithOs("Menlo"),
+    emoji_families: &["Apple Color Emoji", ".AppleColorEmojiUI"],
     primary_key: PrimaryKey::Command,
     key_spelling: KeySpelling {
         primary: "⌘",

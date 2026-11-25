@@ -276,15 +276,16 @@ impl RenderOnce for DiffRow {
                 comment_button
                     .self_stretch()
                     .flex()
-                    .items_center()
                     .justify_center()
+                    .text_color(colors.accent)
+                    .font_weight(FontWeight::SEMIBOLD)
                     .opacity(0.)
                     .group_hover("diff-row", |button| button.opacity(1.))
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                         on_gesture(RowGesture::Press, &at, window, cx);
                     })
-                    .child(sized_icon(Icon::Plus, colors.accent, px(12.)))
+                    .child("+")
                     .into_any_element()
             }
             None => comment_button.into_any_element(),

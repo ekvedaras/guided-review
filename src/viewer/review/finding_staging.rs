@@ -1,12 +1,13 @@
-//! What a snapshot scene shows of the findings' fixes and threads.
+//! What a snapshot scene shows of the findings' fixes and threads, and of the comments list.
 
 use super::ReviewCore;
+use crate::file_path::FilePath;
 use crate::findings::{Anchor, Finding};
 use crate::viewer::ai_review::AiReview;
 use crate::viewer::finding_decisions::Fate;
 use crate::viewer::finding_threads::{FindingThreads, WhyAuthor};
 use crate::viewer::fix_requests::FixRequests;
-use crate::viewer::line_location::Side;
+use crate::viewer::line_location::{LineLocation, Side};
 use crate::viewer::review_thread::{CommentId, ReviewThread, ThreadComment, ThreadId};
 
 const STAGED_THREAD: &str = "staged-from-finding";
@@ -151,6 +152,111 @@ impl ReviewCore {
         self.record_reporting("the staged finding threads", |state| {
             *state.finding_threads_mut() = FindingThreads::staged(findings);
         });
+        self.place_threads();
+    }
+
+    /// Threads for the comments list on two steps, `first` and `second`: open ones (one with replies, one
+    /// a suggestion, one by an agent), a resolved one, and an outdated one on a file no screen shows.
+    pub fn stage_comment_threads(&mut self, first: &LineLocation, second: &LineLocation) {
+        let Ok(gone) = FilePath::new("src/removed_helper.rs") else {
+            return;
+        };
+        let thread = |id: &str,
+                      at: &LineLocation,
+                      path: FilePath,
+                      state: (bool, bool),
+                      bodies: &[(&str, &str)]| {
+            let (is_resolved, is_outdated) = state;
+            ReviewThread {
+                id: ThreadId::new(id),
+                is_resolved,
+                is_outdated,
+                line: (!is_outdated).then_some(at.line),
+                start_line: None,
+                side: at.side,
+                is_file_comment: false,
+                original_line: Some(at.line),
+                original_start_line: None,
+                original_commit: None,
+                path,
+                comments: bodies
+                    .iter()
+                    .enumerate()
+                    .map(|(position, (author, body))| ThreadComment {
+                        id: CommentId::new(&format!("{id}-{position}")),
+                        author: (*author).to_owned(),
+                        avatar_url: Some(format!(
+                            "https://avatars.githubusercontent.com/{author}?s=64"
+                        )),
+                        is_bot: false,
+                        by_agent: None,
+                        by_viewer: false,
+                        body: (*body).to_owned(),
+                        url: String::new(),
+                        reactions: Vec::new(),
+                    })
+                    .collect(),
+            }
+        };
+        let staged = vec![
+            thread(
+                "staged-comments-open",
+                first,
+                first.path.clone(),
+                (false, false),
+                &[
+                    (
+                        "octocat",
+                        "Why does this skip the cache when the key is empty?",
+                    ),
+                    (
+                        "ekvedaras",
+                        "An empty key means the entry was never written.",
+                    ),
+                    ("octocat", "Then say so in a comment, I read it as a bug."),
+                ],
+            ),
+            thread(
+                "staged-comments-suggestion",
+                first,
+                first.path.clone(),
+                (false, false),
+                &[("octocat", "```suggestion\nlet key = key.trim();\n```")],
+            ),
+            thread(
+                "staged-comments-resolved",
+                first,
+                first.path.clone(),
+                (true, false),
+                &[
+                    ("ekvedaras", "Nit: this name hides what it returns."),
+                    ("octocat", "Renamed."),
+                ],
+            ),
+            thread(
+                "staged-comments-agent",
+                second,
+                second.path.clone(),
+                (false, false),
+                &[("octocat", "🤖 This branch has no test that reaches it.")],
+            ),
+            thread(
+                "staged-comments-outdated",
+                second,
+                gone,
+                (false, true),
+                &[("octocat", "This helper is called from two places now.")],
+            ),
+        ];
+        self.staged_threads.clone_from(&staged);
+        self.pulled_threads.extend(staged);
+        self.place_threads();
+    }
+
+    pub fn unstage_comment_threads(&mut self) {
+        let staged = std::mem::take(&mut self.staged_threads);
+        self.pulled_threads
+            .retain(|thread| !staged.iter().any(|gone| gone.id == thread.id));
         self.place_threads();
     }
 }

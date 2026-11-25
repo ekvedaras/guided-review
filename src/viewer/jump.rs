@@ -197,6 +197,8 @@ pub enum PaletteAction {
     NextFinding,
     /// Opens the list of the AI review's findings.
     FindingsList,
+    /// Opens the list of the review's threads.
+    CommentsList,
     MarkStepRead,
     MarkStepUnread,
     /// A basic tour's read tick is per file.
@@ -257,6 +259,7 @@ impl PaletteAction {
             Self::NextUnreadStep => "Next unread step",
             Self::NextFinding => "Next finding",
             Self::FindingsList => "Findings list",
+            Self::CommentsList => "Comments list",
             Self::MarkStepRead => "Mark step as read",
             Self::MarkStepUnread => "Mark step as unread",
             Self::MarkFileRead => "Mark file as read",
@@ -300,6 +303,7 @@ impl PaletteAction {
         match self {
             Self::NextUnreadStep => Some(Command::NextUnreadStep),
             Self::FindingsList => Some(Command::FindingsList),
+            Self::CommentsList => Some(Command::CommentsList),
             Self::MarkStepRead
             | Self::MarkStepUnread
             | Self::MarkFileRead
