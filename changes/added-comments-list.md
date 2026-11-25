@@ -1,1 +1,1 @@
-Press `C` to list every comment thread of the review, and go to one with Enter or a click.
+Press `C` to list comment threads, open ones first, grouped by step, and go to one.

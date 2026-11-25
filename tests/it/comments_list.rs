@@ -139,12 +139,33 @@ fn thread(id: &str, path: &str, number: usize, comments: Vec<ThreadComment>) -> 
     }
 }
 
+fn headings(list: &CommentsList) -> Vec<(String, Vec<String>)> {
+    list.sections()
+        .iter()
+        .flat_map(|section| {
+            section.groups.iter().map(|group| {
+                (
+                    format!("{} / {}", section.title, group.heading),
+                    group.rows.iter().map(|row| row.id.to_string()).collect(),
+                )
+            })
+        })
+        .collect()
+}
+
+fn resolved(thread: ReviewThread) -> ReviewThread {
+    ReviewThread {
+        is_resolved: true,
+        ..thread
+    }
+}
+
 fn ids(list: &CommentsList) -> Vec<String> {
     list.rows().iter().map(|row| row.id.to_string()).collect()
 }
 
 #[test]
-fn rows_follow_the_reading_order_each_with_its_place_step_author_and_first_line() {
+fn rows_follow_the_reading_order_each_with_its_place_author_and_first_line() {
     let shop = Shop::with_pull();
     let review = shop.open_with(
         two_steps(),
@@ -172,18 +193,197 @@ fn rows_follow_the_reading_order_each_with_its_place_step_author_and_first_line(
     assert_eq!(ids(&list), ["on-order", "on-config"]);
     let order = &list.rows()[0];
     assert_eq!(order.place, "app/Order.php:7");
-    assert_eq!(order.screen_title.as_deref(), Some("Title of order"));
     assert_eq!(order.author, "alice");
     assert_eq!(order.first_line, "Why two?");
     assert_eq!(order.replies, 1);
+}
+
+#[test]
+fn rows_sit_under_the_heading_of_their_screen_with_the_step_number_the_page_shows() {
+    let shop = Shop::with_pull();
+    let review = shop.open_with(
+        two_steps(),
+        &[
+            thread(
+                "on-config",
+                "config.yml",
+                3,
+                vec![comment("bob", "Why three?")],
+            ),
+            thread(
+                "on-order",
+                "app/Order.php",
+                7,
+                vec![comment("alice", "Why two?")],
+            ),
+        ],
+    );
+
     assert_eq!(
-        list.rows()[1].screen_title.as_deref(),
-        Some("Title of config")
+        headings(&review.comments_list()),
+        [
+            (
+                "Open · 2 / Step 1 · Title of order".to_owned(),
+                vec!["on-order".to_owned()]
+            ),
+            (
+                "Open · 2 / Step 2 · Title of config".to_owned(),
+                vec!["on-config".to_owned()]
+            ),
+        ]
     );
 }
 
 #[test]
-fn a_thread_no_screen_shows_comes_last_with_no_screen() {
+fn open_threads_come_before_resolved_ones_each_in_reading_order() {
+    let shop = Shop::with_pull();
+    let review = shop.open_with(
+        two_steps(),
+        &[
+            resolved(thread(
+                "order-done",
+                "app/Order.php",
+                7,
+                vec![comment("alice", "Why two?")],
+            )),
+            thread(
+                "config-open",
+                "config.yml",
+                3,
+                vec![comment("bob", "Why three?")],
+            ),
+            thread(
+                "order-open",
+                "app/Order.php",
+                7,
+                vec![comment("carol", "Why 2?")],
+            ),
+        ],
+    );
+
+    let list = review.comments_list();
+
+    assert_eq!(ids(&list), ["order-open", "config-open", "order-done"]);
+    let sections = list.sections();
+    let titles: Vec<(&str, bool)> = sections
+        .iter()
+        .map(|section| (section.title.as_str(), section.is_resolved))
+        .collect();
+    assert_eq!(titles, [("Open · 2", false), ("Resolved · 1", true)]);
+    assert_eq!(
+        headings(&list)[2],
+        (
+            "Resolved · 1 / Step 1 · Title of order".to_owned(),
+            vec!["order-done".to_owned()]
+        )
+    );
+}
+
+#[test]
+fn a_section_with_no_thread_is_left_out() {
+    let shop = Shop::with_pull();
+    let review = shop.open_with(
+        two_steps(),
+        &[resolved(thread(
+            "only",
+            "config.yml",
+            3,
+            vec![comment("bob", "Why three?")],
+        ))],
+    );
+
+    let titles: Vec<String> = review
+        .comments_list()
+        .sections()
+        .iter()
+        .map(|section| section.title.clone())
+        .collect();
+
+    assert_eq!(titles, ["Resolved · 1"]);
+}
+
+#[test]
+fn a_comment_that_is_only_a_suggestion_reads_suggested_change() {
+    let shop = Shop::with_pull();
+    let review = shop.open_with(
+        two_steps(),
+        &[thread(
+            "suggesting",
+            "app/Order.php",
+            7,
+            vec![comment("alice", "```suggestion\nreturn 3;\n```")],
+        )],
+    );
+
+    let list = review.comments_list();
+    let row = &list.rows()[0];
+
+    assert_eq!(row.first_line, "Suggested change");
+    assert!(row.is_suggestion);
+}
+
+#[test]
+fn the_first_line_is_the_first_line_of_prose_not_a_fence() {
+    let shop = Shop::with_pull();
+    let review = shop.open_with(
+        two_steps(),
+        &[
+            thread(
+                "explained",
+                "app/Order.php",
+                7,
+                vec![comment(
+                    "alice",
+                    "Use this instead:\n```suggestion\nreturn 3;\n```",
+                )],
+            ),
+            thread(
+                "fenced",
+                "config.yml",
+                3,
+                vec![comment("bob", "```php\n\necho 1;\n```")],
+            ),
+        ],
+    );
+
+    let list = review.comments_list();
+    let rows = list.rows();
+    let first_lines: Vec<&str> = rows.iter().map(|row| row.first_line.as_str()).collect();
+
+    assert_eq!(first_lines, ["Use this instead:", "echo 1;"]);
+    assert!(rows.iter().all(|row| !row.is_suggestion));
+}
+
+#[test]
+fn a_row_carries_the_picture_of_its_author_and_whether_an_agent_wrote_it() {
+    let shop = Shop::with_pull();
+    let with_picture = ThreadComment {
+        avatar_url: Some("https://avatars.example/alice".to_owned()),
+        ..comment("alice", "Why two?")
+    };
+    let by_agent = comment("bob", "🤖 Why three?");
+    let review = shop.open_with(
+        two_steps(),
+        &[
+            thread("on-order", "app/Order.php", 7, vec![with_picture]),
+            thread("on-config", "config.yml", 3, vec![by_agent]),
+        ],
+    );
+
+    let list = review.comments_list();
+    let rows = list.rows();
+
+    assert_eq!(
+        rows[0].avatar_url.as_deref(),
+        Some("https://avatars.example/alice")
+    );
+    assert!(!rows[0].is_by_agent);
+    assert!(rows[1].is_by_agent);
+    assert_eq!(rows[1].author, "bob's agent");
+}
+
+#[test]
+fn a_thread_no_screen_shows_comes_last_under_not_in_this_tour() {
     let shop = Shop::with_pull();
     let review = shop.open_basic_with(&[
         thread(
@@ -204,10 +404,18 @@ fn a_thread_no_screen_shows_comes_last_with_no_screen() {
 
     assert_eq!(ids(&list), ["on-order", "on-gone"]);
     assert_eq!(
-        list.rows()[0].screen_title.as_deref(),
-        Some("app/Order.php")
+        headings(&list),
+        [
+            (
+                "Open · 2 / app/Order.php".to_owned(),
+                vec!["on-order".to_owned()]
+            ),
+            (
+                "Open · 2 / Not in this tour".to_owned(),
+                vec!["on-gone".to_owned()]
+            ),
+        ]
     );
-    assert_eq!(list.rows()[1].screen_title, None);
 }
 
 #[test]

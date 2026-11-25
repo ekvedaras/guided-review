@@ -373,11 +373,15 @@ fn place_of(anchor: &Anchor) -> String {
 
 /// Cut from the start, at a folder boundary when one fits, so the file name and the line stay.
 pub(super) fn shortened_place(place: &str) -> String {
+    shortened_place_within(place, PLACE_WIDTH)
+}
+
+pub(super) fn shortened_place_within(place: &str, width: usize) -> String {
     let count = place.chars().count();
-    if count <= PLACE_WIDTH {
+    if count <= width {
         return place.to_owned();
     }
-    let tail: String = place.chars().skip(count - (PLACE_WIDTH - 1)).collect();
+    let tail: String = place.chars().skip(count - (width - 1)).collect();
     let from_folder = tail.find('/').and_then(|slash| tail.get(slash..));
     format!("…{}", from_folder.unwrap_or(&tail))
 }

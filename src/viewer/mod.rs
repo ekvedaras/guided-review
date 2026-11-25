@@ -151,7 +151,7 @@ pub use comments::{
     CommentDraft, CommentPlace, CommentProblem, CommentRefusal, CommentResult, QueuedComment,
     SendMode, Sending,
 };
-pub use comments_list::{CommentsList, CommentsListRow, ThreadVisit};
+pub use comments_list::{CommentsList, CommentsListRow, CommentsSection, ScreenGroup, ThreadVisit};
 pub use diff_display::{
     ChangeId, DiffHunk, Edge, FilesAtHead, FilesAtHeadRequest, HiddenLines, MoreContext,
     hidden_lines_after, hidden_lines_before,

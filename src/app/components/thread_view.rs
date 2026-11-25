@@ -856,11 +856,27 @@ impl ThreadElement {
     }
 }
 
-/// A line that says the thread is waiting on GitHub, with the dot that breathes while it waits.
-/// An agent's comment shows the agent's mark with the person it works for small at its corner.
 fn avatar(colors: &Colors, comment: &ThreadComment, cx: &mut App) -> AnyElement {
-    if !comment.is_by_agent() {
-        return person_avatar(colors, comment, AVATAR_SIZE, cx);
+    author_avatar(
+        colors,
+        &comment.author,
+        comment.avatar_url.as_deref(),
+        comment.is_by_agent(),
+        cx,
+    )
+}
+
+/// The mark of whoever wrote a comment, as a thread draws it and as the comments list does. An agent's
+/// comment shows the agent's mark with the person it works for small at its corner.
+pub fn author_avatar(
+    colors: &Colors,
+    login: &str,
+    avatar_url: Option<&str>,
+    is_by_agent: bool,
+    cx: &mut App,
+) -> AnyElement {
+    if !is_by_agent {
+        return avatar_circle(colors, login, avatar_url, AVATAR_SIZE, cx);
     }
     let agent = div()
         .size_full()
@@ -877,7 +893,13 @@ fn avatar(colors: &Colors, comment: &ThreadComment, cx: &mut App) -> AnyElement 
         .p(px(1.))
         .rounded_full()
         .bg(colors.surface)
-        .child(person_avatar(colors, comment, AGENT_PERSON_SIZE, cx));
+        .child(avatar_circle(
+            colors,
+            login,
+            avatar_url,
+            AGENT_PERSON_SIZE,
+            cx,
+        ));
     div()
         .flex_none()
         .relative()
@@ -885,17 +907,6 @@ fn avatar(colors: &Colors, comment: &ThreadComment, cx: &mut App) -> AnyElement 
         .child(agent)
         .child(person)
         .into_any_element()
-}
-
-/// The author's picture as a circle, or their first letter in one while it downloads or when it cannot.
-fn person_avatar(colors: &Colors, comment: &ThreadComment, size: f32, cx: &mut App) -> AnyElement {
-    avatar_circle(
-        colors,
-        &comment.author,
-        comment.avatar_url.as_deref(),
-        size,
-        cx,
-    )
 }
 
 /// A person's picture as a circle, or their first letter in one while it downloads or when it cannot.
@@ -936,6 +947,7 @@ pub fn avatar_circle(
 const AVATAR_SIZE: f32 = 20.;
 const AGENT_PERSON_SIZE: f32 = 10.;
 
+/// A line that says the thread is waiting on GitHub, with the dot that breathes while it waits.
 fn busy_line(colors: &Colors, text: &'static str) -> gpui::Div {
     div()
         .flex()

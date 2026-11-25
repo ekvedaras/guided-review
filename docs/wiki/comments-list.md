@@ -4,7 +4,11 @@
 
 ## The list
 
-`C` (and the palette's Comments list) opens a sheet with one row per thread, in reading order: the screens in the order the reviewer reads them, each screen's threads in the order placement holds them. A thread no screen shows (a basic tour's thread on a file the PR does not change) comes last with no screen and opens on GitHub. The key does nothing while the review has no thread, like `F` with no findings.
+`C` (and the palette's Comments list) opens a sheet with one row per thread. Two sections, "Open · N" then "Resolved · N" (a section with no thread is left out). Inside a section the rows sit under one small heading per screen, in reading order: the screens in the order the reviewer reads them, each screen's threads in the order placement holds them. The heading is "Step 3 · <title>" (the number the page's "Step 3 of 8" shows: steps counted in reading order), "Safety net", a basic tour's file path, or "Not in this tour" for a thread no screen shows (a basic tour's thread on a file the PR does not change), which comes last and opens on GitHub. The key does nothing while the review has no thread, like `F` with no findings.
+
+Every row has the same slots, so the columns line up: avatar (an agent's comment shows the agent mark, as on the page), author, first line, `file:line`, replies (empty at 0) and the Outdated mark (empty when not outdated). A resolved row is dimmed; there is no Resolved badge. The place is cut from the start to 34 characters by the viewer, since the slot has one width. The first line is the first line of prose, skipping blank lines and code fences; a comment that starts with a suggestion fence reads "Suggested change", in italics. The cursor walks the thread rows only; headings are not stops.
+
+`CommentsList::sections()` gives sections, then screen groups, then rows; `rows()` gives the same rows flat, in cursor order. The grouping and the order are the viewer's; `comments_sheet.rs` only draws them.
 
 Going to a thread goes to its screen, opens the step when it is folded and unfolds the thread. Both folds are flips for the session, as a jump does.
 

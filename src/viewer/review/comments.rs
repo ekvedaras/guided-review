@@ -65,8 +65,12 @@ impl ReviewCore {
     /// Every thread of the review, in reading order, each with the screen that shows it.
     pub fn comments_list(&self) -> CommentsList {
         let mut listed: Vec<ListedThread> = Vec::new();
+        let mut steps_before = 0;
         for screen in self.reading_order() {
-            let title = self.screen_title(&screen);
+            if matches!(screen, Screen::Step(_)) {
+                steps_before += 1;
+            }
+            let title = self.screen_heading(&screen, steps_before);
             listed.extend(
                 self.threads
                     .on_screen(&screen)
@@ -124,13 +128,17 @@ impl ReviewCore {
         ThreadVisit::OnScreen
     }
 
-    fn screen_title(&self, screen: &Screen) -> String {
+    /// "Step 3 · Title" with the number the page's "Step 3 of 8" gives, which counts steps in reading order.
+    fn screen_heading(&self, screen: &Screen, step_number: usize) -> String {
         match screen {
-            Screen::Step(id) => self
-                .tour
-                .guided()
-                .and_then(|guided| guided.steps().into_iter().find(|step| step.id == *id))
-                .map_or_default(|step| step.title.clone()),
+            Screen::Step(id) => {
+                let title = self
+                    .tour
+                    .guided()
+                    .and_then(|guided| guided.steps().into_iter().find(|step| step.id == *id))
+                    .map_or_default(|step| step.title.clone());
+                format!("Step {step_number} · {title}")
+            }
             Screen::File(path) => path.to_string(),
             Screen::SafetyNet => "Safety net".to_owned(),
             Screen::Summary => "Summary".to_owned(),

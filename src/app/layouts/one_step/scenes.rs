@@ -33,7 +33,7 @@ use crate::viewer::{
     AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
     HoveredName, LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability,
     Merging, NameUnderPointer, OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind,
-    Readiness, TerminalId, TextBox,
+    Readiness, Review, TerminalId, TextBox,
 };
 use crate::viewer::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 use crate::viewer::{IssueDetails, IssueState, RelatedIssue, Station, StationHealth, StationKind};
@@ -1004,13 +1004,17 @@ impl OneStepLayout {
             Scene::CommentsList => {
                 self.change_review(cx, |review| {
                     review.go_forward();
-                    let first_line = review
-                        .page()
-                        .lines()
-                        .next()
-                        .map(|line| line.location.clone());
-                    if let Some(at) = first_line {
-                        review.stage_comment_threads(&at);
+                    let first_line = |review: &Review| {
+                        review
+                            .page()
+                            .lines()
+                            .next()
+                            .map(|line| line.location.clone())
+                    };
+                    let on_first_step = first_line(review);
+                    review.go_forward();
+                    if let (Some(first), Some(second)) = (on_first_step, first_line(review)) {
+                        review.stage_comment_threads(&first, &second);
                     }
                 });
                 let list = self.session.read(cx).review().comments_list();

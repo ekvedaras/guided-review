@@ -155,49 +155,55 @@ impl ReviewCore {
         self.place_threads();
     }
 
-    /// Three threads at `at`: one open with two replies, one resolved, and one outdated on a file no
-    /// screen shows.
-    pub fn stage_comment_threads(&mut self, at: &LineLocation) {
+    /// Threads for the comments list on two steps, `first` and `second`: open ones (one with replies, one
+    /// a suggestion, one by an agent), a resolved one, and an outdated one on a file no screen shows.
+    pub fn stage_comment_threads(&mut self, first: &LineLocation, second: &LineLocation) {
         let Ok(gone) = FilePath::new("src/removed_helper.rs") else {
             return;
         };
-        let thread =
-            |id: &str, path: FilePath, is_resolved, is_outdated, bodies: &[(&str, &str)]| {
-                ReviewThread {
-                    id: ThreadId::new(id),
-                    is_resolved,
-                    is_outdated,
-                    line: (!is_outdated).then_some(at.line),
-                    start_line: None,
-                    side: at.side,
-                    is_file_comment: false,
-                    original_line: Some(at.line),
-                    original_start_line: None,
-                    original_commit: None,
-                    path,
-                    comments: bodies
-                        .iter()
-                        .enumerate()
-                        .map(|(position, (author, body))| ThreadComment {
-                            id: CommentId::new(&format!("{id}-{position}")),
-                            author: (*author).to_owned(),
-                            avatar_url: None,
-                            is_bot: false,
-                            by_agent: None,
-                            by_viewer: false,
-                            body: (*body).to_owned(),
-                            url: String::new(),
-                            reactions: Vec::new(),
-                        })
-                        .collect(),
-                }
-            };
+        let thread = |id: &str,
+                      at: &LineLocation,
+                      path: FilePath,
+                      state: (bool, bool),
+                      bodies: &[(&str, &str)]| {
+            let (is_resolved, is_outdated) = state;
+            ReviewThread {
+                id: ThreadId::new(id),
+                is_resolved,
+                is_outdated,
+                line: (!is_outdated).then_some(at.line),
+                start_line: None,
+                side: at.side,
+                is_file_comment: false,
+                original_line: Some(at.line),
+                original_start_line: None,
+                original_commit: None,
+                path,
+                comments: bodies
+                    .iter()
+                    .enumerate()
+                    .map(|(position, (author, body))| ThreadComment {
+                        id: CommentId::new(&format!("{id}-{position}")),
+                        author: (*author).to_owned(),
+                        avatar_url: Some(format!(
+                            "https://avatars.githubusercontent.com/{author}?s=64"
+                        )),
+                        is_bot: false,
+                        by_agent: None,
+                        by_viewer: false,
+                        body: (*body).to_owned(),
+                        url: String::new(),
+                        reactions: Vec::new(),
+                    })
+                    .collect(),
+            }
+        };
         let staged = vec![
             thread(
                 "staged-comments-open",
-                at.path.clone(),
-                false,
-                false,
+                first,
+                first.path.clone(),
+                (false, false),
                 &[
                     (
                         "octocat",
@@ -211,20 +217,34 @@ impl ReviewCore {
                 ],
             ),
             thread(
+                "staged-comments-suggestion",
+                first,
+                first.path.clone(),
+                (false, false),
+                &[("octocat", "```suggestion\nlet key = key.trim();\n```")],
+            ),
+            thread(
                 "staged-comments-resolved",
-                at.path.clone(),
-                true,
-                false,
+                first,
+                first.path.clone(),
+                (true, false),
                 &[
                     ("ekvedaras", "Nit: this name hides what it returns."),
                     ("octocat", "Renamed."),
                 ],
             ),
             thread(
+                "staged-comments-agent",
+                second,
+                second.path.clone(),
+                (false, false),
+                &[("octocat", "🤖 This branch has no test that reaches it.")],
+            ),
+            thread(
                 "staged-comments-outdated",
+                second,
                 gone,
-                false,
-                true,
+                (false, true),
                 &[("octocat", "This helper is called from two places now.")],
             ),
         ];
