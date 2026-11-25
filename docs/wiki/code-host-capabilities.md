@@ -58,6 +58,7 @@ Issue #140 step 4, 2026-11-25. Before it, four modules outside the adapter knew 
 - `PullRequestUrl` stays the neutral PR identity and gains `host: HostSite`, which host the PR is on, read from its link. `HostSite::GitHub` is the one host; `HostSite::name` is the word the UI shows.
 - `host_web` (new) is a PR's host on the web: the PR's page, which is `PullRequestUrl`'s text form and so its subject key, its checks page, the ref its head is fetched by, a file at a commit (`HostSite::file_page`, `file_of_link`), and the repo a git remote points at. Each is a `match` on `HostSite` that asks the host's own shapes, so a second host is a compile error at every place it must answer.
 - `github_web` (new) is GitHub's shapes. It takes and gives a PR's parts (repo, number), not `PullRequestUrl`: when it built and read `PullRequestUrl` while `PullRequestUrl`'s text form asked it, deslop-please reported the five as a tangle. It is a top-level module, not `github::web`, since `github` sits above `viewer` (it implements the viewer's ports) and these shapes sit below it (`viewer::code_link` reaches them through `host_web`).
+- `PullRequestUrl::short`, how the host writes a reference to the PR in text, is `host_web`'s too (later the same day): GitHub's `owner/repo#7` comes from `github_web::pull_request_reference`; GitLab would write `group/project!7`.
 - `url_path` (new) percent-encodes a path in a link; it held twice, in `viewer::code_link` and `ide`.
 - A link of a host the app does not read is refused naming the hosts it reads: "not a PR link of a code host guided-review reads (GitHub): <link>"; a command's subject key says "neither a PR link of a code host guided-review reads (GitHub) nor a local change set key".
 - Cloning is a core port, `ClonePort`, a supertrait of `CodeHost`: every host's repos can be cloned. GitHub clones with `gh repo clone`; `NoHost` refuses, since a local review reads its own folder; the session clones through the review's host. `RepoCloner` and `GhCloner` are gone.
@@ -97,7 +98,6 @@ From my knowledge of GitLab, not checked against its docs:
 
 - The switcher's "Loading your pull requests from GitHub..." and "Refreshing from GitHub..." name GitHub while the list is read from every host the app reads.
 - The palette's and title bar's "Open on GitHub" and "Open checks on GitHub" keep GitHub in their names and labels; `open_on_github` is also a key name in `[keys]`, which a rename must keep reading.
-- `PullRequestUrl::short` writes `owner/repo#7`; GitLab writes `group/project!7`.
 - Snapshot sample data (`app::snapshots`, the staged findings' avatars) stays GitHub's.
 
 ## A local review knows its host

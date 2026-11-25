@@ -32,6 +32,11 @@ pub fn pull_request_page(repo: &RepoName, number: u64) -> String {
     format!("{SITE}{repo}/pull/{number}")
 }
 
+/// `owner/repo#7`, as GitHub links a PR in text.
+pub fn pull_request_reference(repo: &RepoName, number: u64) -> String {
+    format!("{repo}#{number}")
+}
+
 pub fn checks_page(repo: &RepoName, number: u64) -> String {
     format!("{}/checks", pull_request_page(repo, number))
 }

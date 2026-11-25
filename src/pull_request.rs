@@ -122,11 +122,6 @@ pub struct PullRequestUrl {
 }
 
 impl PullRequestUrl {
-    /// `owner/repo#number`
-    pub fn short(&self) -> String {
-        format!("{}#{}", self.repo, self.number)
-    }
-
     pub fn hosted_repo(&self) -> HostedRepo {
         HostedRepo {
             host: self.host,

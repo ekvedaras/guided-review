@@ -40,6 +40,14 @@ impl HostSite {
 }
 
 impl PullRequestUrl {
+    /// How the host writes a reference to the PR in text: GitHub's `owner/repo#7` (GitLab would
+    /// write `group/project!7`).
+    pub fn short(&self) -> String {
+        match self.host {
+            HostSite::GitHub => github_web::pull_request_reference(&self.repo, self.number),
+        }
+    }
+
     pub fn checks_page(&self) -> String {
         match self.host {
             HostSite::GitHub => github_web::checks_page(&self.repo, self.number),
