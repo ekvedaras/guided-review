@@ -16,16 +16,20 @@ use serde_json::json;
 use std::time::Instant;
 
 fn thread_on_line_ten(body: &str) -> ReviewThread {
+    thread_on_line(10, body)
+}
+
+fn thread_on_line(number: usize, body: &str) -> ReviewThread {
     ReviewThread {
         id: ThreadId::new("T1"),
         is_resolved: false,
         is_outdated: false,
         path: file_path("notes.txt"),
-        line: Some(line(10)),
+        line: Some(line(number)),
         start_line: None,
         side: Side::Head,
         is_file_comment: false,
-        original_line: Some(line(10)),
+        original_line: Some(line(number)),
         original_start_line: None,
         original_commit: None,
         comments: vec![ThreadComment {
@@ -54,6 +58,7 @@ fn numbered(change: impl Fn(usize) -> Option<&'static str>) -> String {
 }
 
 /// `notes.txt` changes on line 10 and on line 30: two hunks, a gap between them.
+/// `Pull::close_together` changes lines 10 and 14 instead, so the context of one reaches the other.
 struct Pull {
     repo: FixtureRepo,
     base: String,
@@ -63,6 +68,14 @@ struct Pull {
 
 impl Pull {
     fn new() -> Self {
+        Self::changing(30, "line thirty")
+    }
+
+    fn close_together() -> Self {
+        Self::changing(14, "line second")
+    }
+
+    fn changing(second: usize, second_text: &'static str) -> Self {
         let repo = FixtureRepo::cloned_from("acme/shop");
         repo.write("notes.txt", &numbered(|_| None));
         let base = repo.commit("base");
@@ -70,7 +83,7 @@ impl Pull {
             "notes.txt",
             &numbered(|number| match number {
                 10 => Some("line ten"),
-                30 => Some("line thirty"),
+                number if number == second => Some(second_text),
                 _ => None,
             }),
         );
@@ -112,13 +125,27 @@ impl Pull {
     }
 
     fn open_at(&self, head: &str) -> Review {
+        let steps = json!([{"id": "notes", "title": "Notes", "why": "because", "pieces": [{"file": "notes.txt"}], "children": []}]);
+        self.open_steps(head, steps)
+    }
+
+    /// One step per changed line of `close_together`, each with three lines of context around it, so lines 11 to 13 are on both.
+    fn open_in_two_steps(&self) -> Review {
+        let step = |id: &str, lines: [usize; 2]| json!({"id": id, "title": id, "why": "because", "pieces": [{"file": "notes.txt", "lines": lines}], "children": []});
+        self.open_steps(
+            &self.head,
+            json!([step("first", [7, 13]), step("second", [11, 17])]),
+        )
+    }
+
+    fn open_steps(&self, head: &str, steps: serde_json::Value) -> Review {
         let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
             "head": head,
             "title": "Notes",
             "summary": [],
-            "steps": [{"id": "notes", "title": "Notes", "why": "because", "pieces": [{"file": "notes.txt"}], "children": []}],
+            "steps": steps,
         }))
         .unwrap();
         let source = self.source();
@@ -344,6 +371,62 @@ fn a_sent_comment_is_replaced_by_its_thread_in_the_same_step_so_the_block_never_
     let threads = review.current_step().unwrap().threads;
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].thread.comments[0].body, "what I sent");
+}
+
+#[test]
+fn a_comment_sent_on_a_row_two_steps_show_stays_on_the_step_it_was_written_on() {
+    let pull = Pull::close_together();
+    let mut github = pull.github();
+    github.threads = vec![thread_on_line(12, "what I sent")];
+    let mut review = pull.open_in_two_steps();
+    review.go_to(&"second".into());
+    let place = comment_on(&mut review, "line 12");
+    typed(&mut review, &place, "what I sent");
+
+    review
+        .send_comment(&place, SendMode::AddToReview, &github)
+        .unwrap();
+
+    review.go_to(&"second".into());
+    assert_eq!(review.current_step().unwrap().threads.len(), 1);
+    review.go_to(&"first".into());
+    assert!(review.current_step().unwrap().threads.is_empty());
+}
+
+#[test]
+fn a_thread_stays_on_the_step_it_was_written_on_after_the_review_is_opened_again() {
+    let pull = Pull::close_together();
+    let mut github = pull.github();
+    github.threads = vec![thread_on_line(12, "what I sent")];
+    let mut review = pull.open_in_two_steps();
+    review.go_to(&"second".into());
+    let place = comment_on(&mut review, "line 12");
+    typed(&mut review, &place, "what I sent");
+    review
+        .send_comment(&place, SendMode::AddToReview, &github)
+        .unwrap();
+    drop(review);
+
+    let mut reopened = pull.open_in_two_steps();
+    reopened.set_threads(&github.threads);
+
+    reopened.go_to(&"second".into());
+    assert_eq!(reopened.current_step().unwrap().threads.len(), 1);
+}
+
+#[test]
+fn a_thread_by_someone_else_on_a_row_two_steps_show_goes_to_the_first_of_them() {
+    let pull = Pull::close_together();
+    let mut by_someone = thread_on_line(12, "why?");
+    by_someone.comments[0].by_viewer = false;
+    let mut review = pull.open_in_two_steps();
+
+    review.set_threads(&[by_someone]);
+
+    review.go_to(&"first".into());
+    assert_eq!(review.current_step().unwrap().threads.len(), 1);
+    review.go_to(&"second".into());
+    assert!(review.current_step().unwrap().threads.is_empty());
 }
 
 #[test]

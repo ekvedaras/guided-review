@@ -28,6 +28,7 @@ use super::local_threads::LocalThreads;
 use super::ports::Viewed;
 use super::review_thread::ThreadId;
 use super::screen::ReadSubject;
+use super::written_on::WrittenOn;
 use crate::tour::StepId;
 
 fn no_finding_decisions(section: &KeptSection<FindingDecisions>) -> bool {
@@ -44,6 +45,10 @@ fn no_finding_threads(section: &KeptSection<FindingThreads>) -> bool {
 
 fn not_done(section: &KeptSection<Option<ReadTick>>) -> bool {
     section.skips_when(Option::is_none)
+}
+
+fn no_written_on(section: &KeptSection<WrittenOn>) -> bool {
+    section.skips_when(WrittenOn::is_empty)
 }
 
 fn no_local_threads(section: &KeptSection<LocalThreads>) -> bool {
@@ -163,6 +168,9 @@ struct ViewerSections {
     /// The comments sent with Ask agent and where each is with the tour agent.
     #[serde(default)]
     hand_offs: KeptSection<HandOffs>,
+    /// The step each thread the reviewer started was written on, so it stays there.
+    #[serde(default, skip_serializing_if = "no_written_on")]
+    threads_written_on: KeptSection<WrittenOn>,
     /// The head the reviewer marked the review done at, with no new review sent. New commits move
     /// the head on, so the mark then says nothing.
     #[serde(default, skip_serializing_if = "not_done")]
@@ -355,6 +363,7 @@ impl ReviewState {
             ("comment_queue", viewer.comment_queue.is_unread()),
             ("pr_description", viewer.pr_description.is_unread()),
             ("hand_offs", viewer.hand_offs.is_unread()),
+            ("threads_written_on", viewer.threads_written_on.is_unread()),
             ("done_at", viewer.done_at.is_unread()),
             ("comment_drafts", typed.comment_drafts.is_unread()),
             ("reply_drafts", typed.reply_drafts.is_unread()),
@@ -697,6 +706,14 @@ impl ReviewState {
         replied: &AgentReplied,
     ) -> Result<(), AgentReplyRefused> {
         self.viewer.hand_offs.replied(id, replied)
+    }
+
+    pub(super) fn threads_written_on(&self) -> &WrittenOn {
+        &self.viewer.threads_written_on
+    }
+
+    pub(super) fn thread_written_on(&mut self, thread: ThreadId, step: StepId) {
+        self.viewer.threads_written_on.record(thread, step);
     }
 
     pub(super) fn hand_offs_mut(&mut self) -> &mut HandOffs {

@@ -1681,6 +1681,7 @@ impl ReviewCore {
             &self.files,
             &self.pulled_threads,
             &self.followed_lines,
+            self.state.threads_written_on(),
             &display,
         );
         let findings = match &self.ai_review {

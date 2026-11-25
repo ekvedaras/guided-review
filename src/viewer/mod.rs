@@ -111,6 +111,7 @@ mod used_findings;
 mod viewed_sync;
 mod word_diff;
 mod work_agenda;
+mod written_on;
 
 pub use crate::keys::{Chord, Key, KeyCap, Modifier, Modifiers};
 pub use crate::keys::{Command, KeyScope, ShortcutGroup, in_group};

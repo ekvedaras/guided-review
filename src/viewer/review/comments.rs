@@ -417,11 +417,7 @@ impl ReviewCore {
     ) -> anyhow::Result<CommentResult> {
         let from_findings = outcome.request.findings_carried().to_vec();
         let threads = outcome.threads.clone();
-        let made = if from_findings.is_empty() {
-            None
-        } else {
-            outcome.thread_made(&self.pulled_threads)
-        };
+        let made = outcome.thread_made(&self.pulled_threads);
         let hand_offs_before = self.state.hand_offs().all().len();
         let code = self.code_commented_on(&outcome);
         let result = self.comment_desk.apply_comment(
@@ -430,13 +426,31 @@ impl ReviewCore {
             (sent_from(&self.screen), code),
         );
         self.note_new_hand_off(hand_offs_before);
+        let kept_on_screen = match (&result, &made) {
+            (Ok(CommentResult::Sent), Some(thread)) => self.keep_thread_on_this_screen(thread),
+            _ => Ok(()),
+        };
         self.show_pulled_threads(threads.as_ref());
         match result {
-            Ok(CommentResult::Sent) => self.decide_used(from_findings, made.as_ref())?,
+            Ok(CommentResult::Sent) => {
+                kept_on_screen?;
+                self.decide_used(from_findings, made.as_ref())?;
+            }
             Ok(CommentResult::Queued(_)) => self.decide_used(from_findings, None)?,
             _ => {}
         }
         result
+    }
+
+    /// The thread GitHub sends back shows under the same row on every step that shows it, so the step it
+    /// was written on is kept; the first step showing the row would take it otherwise.
+    fn keep_thread_on_this_screen(&mut self, thread: &ThreadId) -> anyhow::Result<()> {
+        let Screen::Step(step) = &self.screen else {
+            return Ok(());
+        };
+        let step = step.clone();
+        self.state
+            .record(|state| state.thread_written_on(thread.clone(), step))
     }
 
     /// The lines a task of a local review is about, as the page shows them; a PR's hand-off has none.
