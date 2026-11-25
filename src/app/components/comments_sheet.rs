@@ -128,6 +128,7 @@ impl CommentsSheet {
         };
         children.push(
             div()
+                .flex_none()
                 .mx_2()
                 .px_2()
                 .pt_3()
@@ -144,6 +145,7 @@ impl CommentsSheet {
             let last = *next_position;
             children.push(
                 div()
+                    .flex_none()
                     .mx_2()
                     .px_2()
                     .pt_3()
@@ -197,6 +199,7 @@ impl CommentsSheet {
             place,
             None,
         )
+        .flex_none()
         .py_2()
         .on_click(cx.listener(move |this, _, window, cx| {
             this.open_thread(id.clone(), window, cx);
