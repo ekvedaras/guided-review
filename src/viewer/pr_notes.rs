@@ -10,7 +10,7 @@ use crate::pull_request::PullRequestUrl;
 use crate::tour::StepId;
 
 use super::markdown::local_files;
-use super::ports::{PictureUploadPort, PullRequestDescriptionPort};
+use super::ports::{CodeHost, HostError};
 
 const NOTES_HEADING: &str = "## Notes";
 
@@ -41,16 +41,28 @@ enum Attempt {
 
 /// The adds to the PR description that are running or failed, by subject. Not saved.
 #[derive(Debug, Default)]
-pub(super) struct PrNotes(BTreeMap<NoteSubject, Attempt>);
+pub(super) struct PrNotes {
+    attempts: BTreeMap<NoteSubject, Attempt>,
+    /// The host stores no pictures, so a note that shows one cannot be added.
+    without_picture_uploads: bool,
+}
 
 impl PrNotes {
+    pub(super) fn without_picture_uploads(&mut self) {
+        self.without_picture_uploads = true;
+    }
+
+    pub(super) fn can_add(&self, note: &Note) -> bool {
+        !self.without_picture_uploads || note.pictures().next().is_none()
+    }
+
     pub(super) fn button(
         &self,
         subject: &NoteSubject,
         description: &str,
         note: &Note,
     ) -> NotesButton {
-        match self.0.get(subject) {
+        match self.attempts.get(subject) {
             Some(Attempt::Adding) => NotesButton::Adding,
             _ if note.is_in(description) => NotesButton::InNotes,
             Some(Attempt::Failed(reason)) => NotesButton::Failed(Arc::clone(reason)),
@@ -64,10 +76,10 @@ impl PrNotes {
         subject: &NoteSubject,
         note: Note,
     ) -> Option<ToNotes> {
-        if matches!(self.0.get(subject), Some(Attempt::Adding)) {
+        if matches!(self.attempts.get(subject), Some(Attempt::Adding)) {
             return None;
         }
-        self.0.insert(subject.clone(), Attempt::Adding);
+        self.attempts.insert(subject.clone(), Attempt::Adding);
         Some(ToNotes {
             pr: pr.clone(),
             subject: subject.clone(),
@@ -79,11 +91,11 @@ impl PrNotes {
     pub(super) fn finish(&mut self, outcome: ToNotesOutcome) -> Option<String> {
         match outcome.result {
             Ok(description) => {
-                self.0.remove(&outcome.subject);
+                self.attempts.remove(&outcome.subject);
                 Some(description)
             }
             Err(reason) => {
-                self.0
+                self.attempts
                     .insert(outcome.subject, Attempt::Failed(reason.into()));
                 None
             }
@@ -260,10 +272,7 @@ pub struct ToNotesOutcome {
 
 impl ToNotes {
     /// Reads the description just before writing it, so an edit made on the web since is kept.
-    pub fn run(
-        self,
-        host: &(impl PullRequestDescriptionPort + PictureUploadPort + ?Sized),
-    ) -> ToNotesOutcome {
+    pub fn run(self, host: &dyn CodeHost) -> ToNotesOutcome {
         let result = self.add(host).map_err(|error| format!("{error:#}"));
         ToNotesOutcome {
             subject: self.subject,
@@ -271,17 +280,17 @@ impl ToNotes {
         }
     }
 
-    fn add(
-        &self,
-        host: &(impl PullRequestDescriptionPort + PictureUploadPort + ?Sized),
-    ) -> anyhow::Result<String> {
+    fn add(&self, host: &dyn CodeHost) -> anyhow::Result<String> {
         let description = host.pull_request_description(&self.pr)?;
         if self.note.is_in(&description) {
             return Ok(description);
         }
         let mut uploaded = HashMap::new();
         for picture in self.note.pictures() {
-            let url = host.upload_picture(&self.pr, picture).with_context(|| {
+            let uploads = host
+                .picture_uploads()
+                .ok_or_else(|| HostError::not_offered("picture uploads"))?;
+            let url = uploads.upload_picture(&self.pr, picture).with_context(|| {
                 format!(
                     "could not upload {}",
                     picture.file_name().unwrap_or_default().display()

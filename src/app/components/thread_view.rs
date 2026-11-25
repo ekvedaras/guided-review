@@ -508,7 +508,7 @@ impl ThreadElement {
     ) -> AnyElement {
         let thread_id = thread_id.clone();
         let mut offered = vec![SendAction::AddToReview];
-        if sending.on_github() {
+        if sending.to_host() {
             if can_reply_now {
                 offered.push(SendAction::CommentNow);
             }
@@ -599,7 +599,7 @@ impl ThreadElement {
                 let action = planned.action;
                 let act = Rc::clone(&act);
                 let task = |index: usize| sending.tasks().get(index).copied().map(task_button);
-                let (name, icon, label) = match (action, sending.on_github()) {
+                let (name, icon, label) = match (action, sending.to_host()) {
                     (SendAction::AddToReview | SendAction::SuggestChange, false) => {
                         let (icon, label) = task(0).unzip();
                         ("task-0", icon, label.unwrap_or("Add"))
@@ -1020,7 +1020,7 @@ impl RenderOnce for ThreadElement {
             ))
             .children(marks)
             .child(div().min_w_0().truncate().child(summary));
-        let on_github = self.sending.on_github();
+        let on_github = self.sending.to_host();
         let conversation_link =
             self.view
                 .thread

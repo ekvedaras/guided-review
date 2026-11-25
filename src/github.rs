@@ -20,12 +20,12 @@ use crate::viewer::{
     PrStatus, Readiness,
 };
 use crate::viewer::{
-    AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CommentId, CommentPlace, HeadBranch,
-    HostError, IssueDetails, IssueDetailsPort, IssueState, MergeRoute, NoAccess, OutageCause,
-    PictureUploadPort, PrAuthor, PullOfBranch, PullRequestDescriptionPort, PullRequestIssues,
-    PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort, PullRequestReviews,
-    PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange, ReactionCount,
-    RelatedIssue, RepoCloner, Resolution, ReviewOutcome, ReviewRecord, ReviewThread,
+    AvatarPort, ChangeTipsPort, CheckRun, CheckState, Checks, CodeHost, CommentId, CommentPlace,
+    HeadBranch, HostError, IssueDetails, IssueDetailsPort, IssueState, MergeRoute, MergingPort,
+    NoAccess, OutageCause, PictureUploadPort, PrAuthor, PullOfBranch, PullRequestDescriptionPort,
+    PullRequestIssues, PullRequestOrigin, PullRequestOriginPort, PullRequestReactionsPort,
+    PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort, Reaction, ReactionChange,
+    ReactionCount, RelatedIssue, RepoCloner, Resolution, ReviewOutcome, ReviewRecord, ReviewThread,
     ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, Reviewer, ReviewersOnGitHub, SendMode,
     Side, SubmittedReview, ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort,
     ViewedState, percent_encode_path,
@@ -894,7 +894,9 @@ impl PullRequestStatusPort for GitHub {
         .map_err(|error| error.context(format!("could not {doing} {pr}")))?;
         Ok(())
     }
+}
 
+impl MergingPort for GitHub {
     fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), HostError> {
         let id = self.pull_request_id(pr)?;
         let (mutation, method, doing) = match change {
@@ -925,6 +927,28 @@ impl PullRequestStatusPort for GitHub {
         )
         .map_err(|error| error.context(format!("could not {doing} {pr}")))?;
         Ok(())
+    }
+}
+
+impl CodeHost for GitHub {
+    fn viewed_marks(&self) -> Option<&dyn ViewedFilesPort> {
+        Some(self)
+    }
+
+    fn merging(&self) -> Option<&dyn MergingPort> {
+        Some(self)
+    }
+
+    fn pull_request_reactions(&self) -> Option<&dyn PullRequestReactionsPort> {
+        Some(self)
+    }
+
+    fn picture_uploads(&self) -> Option<&dyn PictureUploadPort> {
+        Some(self)
+    }
+
+    fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort> {
+        Some(self)
     }
 }
 

@@ -394,8 +394,9 @@ impl ReviewCore {
                 .pull_request()
                 .map_or(Effect::Nothing, |pr| Effect::OpenChecksOnGitHub(pr.clone())),
             Intent::OpenCheck(place) => {
-                let page = self
-                    .pr_status()
+                let status = self.pr_status();
+                let page = status
+                    .as_ref()
                     .and_then(|status| status.open())
                     .and_then(|status| status.check_list().shown.into_iter().nth(place))
                     .and_then(|check| check.page);

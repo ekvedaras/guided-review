@@ -1,5 +1,5 @@
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
+use crate::support::fake_ports::{Capability, FakeHost, HostCall, HostFault, SentLog};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName};
 use guided_review::review_subject::ReviewSubject;
@@ -265,6 +265,18 @@ fn hidden_mark(text: &str, start: &str) -> String {
         .unwrap_or_else(|| panic!("no {start} in {text}"));
     let (digest, _) = after.split_once("-->").unwrap();
     format!("{start}{digest}-->")
+}
+
+#[test]
+fn a_host_without_picture_uploads_offers_no_note_with_a_picture_but_still_a_diagram() {
+    let shop = Shop::new();
+    let host = shop.host("").without(Capability::PictureUploads);
+    let mut review = shop.open_with_summary("Look:\n\n![before](before.png)");
+    review.host_is(&host);
+
+    assert_eq!(review.notes_button(&before_png(&shop)), None);
+    assert_eq!(review.notes_button(&NoteSubject::ReviewerSummary), None);
+    assert_eq!(review.notes_button(&diagram()), Some(NotesButton::Add));
 }
 
 #[test]

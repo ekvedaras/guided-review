@@ -1,12 +1,12 @@
 //! A PR review's PR as GitHub has it, and what the reviewer asked to change of it: the draft state
 //! (`D`) and merging (`Shift+M`), each sent only on the same press again. A local review has none.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::jump::PaletteAction;
-use super::merging::{AutoMerge, MergeChange, MergeOffer};
+use super::merging::{AutoMerge, MergeChange, MergeOffer, Merging};
 use super::ports::HostError;
-use super::pr_status::{PrStatus, Readiness};
+use super::pr_status::{CHECKS_RECHECK, Checks, PrStatus, Readiness};
 use super::press_again::{PressAgain, PressStep};
 use super::problems::Problem;
 use crate::keys::Command;
@@ -17,40 +17,40 @@ use crate::review_subject::ReviewSubject;
 pub(super) struct PrControls {
     /// `None` until GitHub answers; kept as it was while a read fails.
     status: Option<PrStatus>,
-    /// The reviewer's merge method for this PR's repo, from Settings.
-    merge_method: MergeMethod,
     readiness: PressAgain<Readiness>,
-    merging: PressAgain<MergeChange>,
+    /// `None` on a host that has no merging: nothing offers it.
+    merging: Option<PressAgain<MergeChange>>,
 }
 
 impl PrControls {
     pub(super) fn of(subject: &ReviewSubject) -> Option<Self> {
-        subject.pull_request().map(|_| Self::default())
+        subject.pull_request().map(|_| Self {
+            merging: Some(PressAgain::default()),
+            ..Self::default()
+        })
     }
 
-    /// A rebuilt review goes on with what GitHub said and what the reviewer pressed; its merge
-    /// method is what the config says now.
-    pub(super) fn carry_on_from(&mut self, replaced: Self) {
-        *self = Self {
-            merge_method: self.merge_method,
-            ..replaced
-        };
+    pub(super) fn without_merging(&mut self) {
+        self.merging = None;
     }
 
-    pub(super) fn status(&self) -> Option<&PrStatus> {
-        self.status.as_ref()
+    pub(super) fn status(&self) -> Option<PrStatus> {
+        self.status.clone()
     }
 
-    pub(super) fn status_is(&mut self, status: PrStatus) {
+    /// How long until the status is read again: only while its checks run.
+    pub(super) fn status_is(&mut self, status: PrStatus) -> Option<Duration> {
+        let read_again = status
+            .open()
+            .is_some_and(|open| open.checks == Checks::Running)
+            .then_some(CHECKS_RECHECK);
         self.status = Some(status);
+        read_again
     }
 
-    pub(super) fn merge_method(&self) -> MergeMethod {
-        self.merge_method
-    }
-
-    pub(super) fn prefer_merge_method(&mut self, method: MergeMethod) {
-        self.merge_method = method;
+    pub(super) fn merging(&self) -> Option<Merging> {
+        self.merging.as_ref()?;
+        Some(self.status.as_ref()?.open()?.merging)
     }
 
     /// A merged or closed PR has nothing to change, so the key does nothing.
@@ -78,19 +78,25 @@ impl PrControls {
 
     /// A merged or closed PR has nothing to change, so the key does nothing, and nor does it while
     /// a confirmed change is on its way to GitHub.
-    pub(super) fn ask_to_change_merging(&mut self, now: Instant) -> PressStep {
-        let Some(status) = self.status.as_ref().and_then(PrStatus::open) else {
+    pub(super) fn ask_to_change_merging(
+        &mut self,
+        now: Instant,
+        preferred: MergeMethod,
+    ) -> PressStep {
+        let (Some(status), Some(merging)) = (
+            self.status.as_ref().and_then(PrStatus::open),
+            self.merging.as_mut(),
+        ) else {
             return PressStep::Nothing;
         };
-        if self.merging.to_send().is_some() {
+        if merging.to_send().is_some() {
             return PressStep::Nothing;
         }
-        let preferred = self.merge_method;
         let offered = status
             .merging
             .change(preferred)
             .map_err(|refusal| refusal.to_string());
-        self.merging.press(
+        merging.press(
             Command::ToggleAutoMerge,
             offered,
             now,
@@ -117,14 +123,14 @@ impl PrControls {
                 Readiness::Ready => PaletteAction::ConvertToDraft,
                 Readiness::Draft => PaletteAction::MarkReadyForReview,
             });
-        let merging =
-            status
-                .and_then(|status| status.merging.offer().ok())
-                .map(|offer| match offer {
-                    MergeOffer::EnableAutoMerge => PaletteAction::EnableAutoMerge,
-                    MergeOffer::DisableAutoMerge => PaletteAction::DisableAutoMerge,
-                    MergeOffer::MergeNow => PaletteAction::MergeNow,
-                });
+        let merging = status
+            .filter(|_| self.merging.is_some())
+            .and_then(|status| status.merging.offer().ok())
+            .map(|offer| match offer {
+                MergeOffer::EnableAutoMerge => PaletteAction::EnableAutoMerge,
+                MergeOffer::DisableAutoMerge => PaletteAction::DisableAutoMerge,
+                MergeOffer::MergeNow => PaletteAction::MergeNow,
+            });
         readiness.into_iter().chain(merging)
     }
 
@@ -134,11 +140,13 @@ impl PrControls {
 
     #[cfg(feature = "snapshots")]
     pub(super) fn stage_merging_to_send(&mut self, change: Option<MergeChange>) {
-        self.merging.stage_to_send(change);
+        if let Some(merging) = &mut self.merging {
+            merging.stage_to_send(change);
+        }
     }
 
     pub(super) fn merging_to_send(&self) -> Option<MergeChange> {
-        self.merging.to_send()
+        self.merging.as_ref()?.to_send()
     }
 
     /// A change GitHub took shows at once, until GitHub is read back; one it refused is a problem.
@@ -161,7 +169,9 @@ impl PrControls {
         change: MergeChange,
         result: Result<(), HostError>,
     ) -> Result<(), Problem> {
-        self.merging.landed(change);
+        if let Some(merging) = &mut self.merging {
+            merging.landed(change);
+        }
         result.map_err(|error| Problem::MergingNotChanged(change, error.short_reason()))?;
         let auto_merge = match change {
             MergeChange::EnableAutoMerge(method) => AutoMerge::On(method),

@@ -102,6 +102,8 @@ pub(super) struct RelatedIssues {
     shown: Arc<[RelatedIssue]>,
     /// What GitHub last said of each shown issue; an issue no longer shown keeps its entry.
     details: HashMap<IssueUrl, Arc<IssueDetails>>,
+    /// The host has no issue tracker to read details from: the issues show with no hover card.
+    without_tracker: bool,
 }
 
 impl RelatedIssues {
@@ -122,6 +124,7 @@ impl RelatedIssues {
             of_local_branch,
             shown: Arc::default(),
             details: HashMap::new(),
+            without_tracker: false,
         };
         issues.description_is(description);
         issues
@@ -159,8 +162,15 @@ impl RelatedIssues {
         }
     }
 
-    /// The shown issues GitHub has details of.
-    pub(super) fn shown_on_github(&self) -> Vec<IssueUrl> {
+    pub(super) fn without_tracker(&mut self) {
+        self.without_tracker = true;
+    }
+
+    /// The shown issues whose details the host's tracker has; none when it has no tracker.
+    pub(super) fn details_to_read(&self) -> Vec<IssueUrl> {
+        if self.without_tracker {
+            return Vec::new();
+        }
         self.shown
             .iter()
             .filter_map(|issue| match &issue.link {

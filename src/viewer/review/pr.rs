@@ -139,7 +139,8 @@ impl ReviewCore {
         HiddenText::hiding(self.state.pr_description())
     }
 
-    /// `None` when the tour has no such diagram, picture or summary, or the review has no PR.
+    /// `None` when the tour has no such diagram, picture or summary, the review has no PR, or the
+    /// note shows a picture and the host stores none.
     pub fn notes_button(&self, subject: &NoteSubject) -> Option<NotesButton> {
         self.subject.pull_request()?;
         let note = self.note(subject)?;
@@ -167,6 +168,11 @@ impl ReviewCore {
     }
 
     fn note(&self, subject: &NoteSubject) -> Option<Note> {
+        self.note_of_tour(subject)
+            .filter(|note| self.pr_notes.can_add(note))
+    }
+
+    fn note_of_tour(&self, subject: &NoteSubject) -> Option<Note> {
         match subject {
             NoteSubject::StepDiagram(step) => {
                 let found = self.step(step)?;

@@ -48,8 +48,9 @@ impl OneStepLayout {
         let local_heading = review.local_heading().map(SharedString::from);
         let is_local = local_heading.is_some();
         let can_open_on_github = review.can_open_on_github();
-        let status = review.pr_status().cloned();
+        let status = review.pr_status();
         let merge_in_flight = review.merge_in_flight();
+        let merging = review.merging();
         let jump = button(
             &colors,
             "title-bar-jump",
@@ -213,9 +214,11 @@ impl OneStepLayout {
                             }
                         }
                     }))
-                    .children(status.as_ref().and_then(PrStatus::open).and_then(|status| {
-                        merge_button(&colors, status.merging, merge_in_flight, cx)
-                    }))
+                    .children(
+                        merging.and_then(|merging| {
+                            merge_button(&colors, merging, merge_in_flight, cx)
+                        }),
+                    )
                     .child(div().flex_1())
                     .child(jump)
                     .children(self.issue_button(&colors, cx))

@@ -262,9 +262,9 @@ impl ReviewCore {
         })
     }
 
-    /// Only a PR has viewed marks on GitHub to keep in step with the ticks.
+    /// Only a PR on a host with viewed marks has marks to keep in step with the ticks.
     fn want_viewed_synced(&mut self) {
-        if self.subject.syncs_viewed_marks() {
+        if self.subject.pull_request().is_some() && self.viewed_sync.has_host_marks() {
             self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
         }
     }
@@ -408,13 +408,11 @@ impl ReviewCore {
         self.viewed_sync.not_synced(&self.state)
     }
 
-    /// `None` for a local review: GitHub has no viewed marks of it.
+    /// `None` for a local review, which has no PR, and on a host with no viewed marks.
     pub fn sync_request(&self) -> Option<SyncRequest> {
         let pr = self.subject.pull_request()?;
-        Some(
-            self.viewed_sync
-                .request(&self.state, &self.coverage(), pr, &self.head),
-        )
+        self.viewed_sync
+            .request(&self.state, &self.coverage(), pr, &self.head)
     }
 
     /// An error means something stays queued or unread; the next sync tries again.

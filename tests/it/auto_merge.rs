@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::pr_status::{PR, Pull};
-use crate::support::fake_ports::{FakeHost, HostCall, HostFault, blocked_merging};
+use crate::support::fake_ports::{Capability, FakeHost, HostCall, HostFault, blocked_merging};
 use crate::support::work::drive_without_agents;
 use guided_review::build::Build;
 use guided_review::viewer::{
@@ -53,6 +53,25 @@ fn read_merging(pull: &Pull, merging: Merging) -> (Review, FakeHost, Instant) {
     let now = Instant::now();
     pull.read(&mut review, &host, now);
     (review, host, now)
+}
+
+#[test]
+fn a_host_without_merging_offers_no_button_key_or_palette_action() {
+    let pull = Pull::new();
+    let host = pull.host().without(Capability::Merging);
+    let mut review = pull.open();
+    review.host_is(&host);
+    let now = Instant::now();
+    pull.read(&mut review, &host, now);
+
+    assert_eq!(review.merging(), None);
+    assert_eq!(review.ask_to_change_merging(now), PressStep::Nothing);
+    assert!(
+        !review
+            .palette_actions(Build::Local)
+            .into_iter()
+            .any(|action| action.command() == Some(Command::ToggleAutoMerge))
+    );
 }
 
 fn merging_calls(pull: &Pull) -> Vec<MergeChange> {
@@ -108,6 +127,7 @@ fn the_same_press_again_within_ten_seconds_turns_auto_merge_on() {
     assert_eq!(
         review
             .pr_status()
+            .as_ref()
             .and_then(PrStatus::open)
             .map(|status| status.merging.auto_merge),
         Some(AutoMerge::On(MergeMethod::Merge))
@@ -175,6 +195,7 @@ fn with_auto_merge_on_the_same_key_turns_it_off() {
     assert_eq!(
         review
             .pr_status()
+            .as_ref()
             .and_then(PrStatus::open)
             .map(|status| status.merging.auto_merge),
         Some(AutoMerge::Off)
@@ -202,7 +223,7 @@ fn when_nothing_blocks_the_pr_the_same_key_merges_it_now_after_the_second_press(
         merging_calls(&pull),
         [MergeChange::MergeNow(MergeMethod::Merge)]
     );
-    assert_eq!(review.pr_status(), Some(&PrStatus::Merged));
+    assert_eq!(review.pr_status(), Some(PrStatus::Merged));
 }
 
 #[test]
@@ -245,7 +266,7 @@ fn a_merged_or_closed_pr_says_so_and_neither_key_nor_the_palette_offers_a_change
         let now = Instant::now();
         pull.read(&mut review, &host, now);
 
-        assert_eq!(review.pr_status(), Some(&status));
+        assert_eq!(review.pr_status(), Some(status.clone()));
         assert_eq!(status.label(), label);
         assert_eq!(
             review.ask_to_change_merging(now),
@@ -302,6 +323,7 @@ fn a_change_github_does_not_take_is_a_problem_and_leaves_the_status_as_it_was() 
     assert_eq!(
         review
             .pr_status()
+            .as_ref()
             .and_then(PrStatus::open)
             .map(|status| status.merging.auto_merge),
         Some(AutoMerge::Off)

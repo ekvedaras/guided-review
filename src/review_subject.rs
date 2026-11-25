@@ -71,11 +71,6 @@ impl ReviewSubject {
         matches!(self, Self::PullRequest(_))
     }
 
-    /// Whether ticks are kept in step with the viewed marks GitHub keeps of a PR's files.
-    pub const fn syncs_viewed_marks(&self) -> bool {
-        matches!(self, Self::PullRequest(_))
-    }
-
     /// A local review's comments are tasks for the agent that wrote the code, and it finishes by
     /// sending them.
     pub const fn comments_are_agent_tasks(&self) -> bool {

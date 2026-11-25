@@ -1213,7 +1213,7 @@ impl ReviewSession {
     #[cfg(feature = "snapshots")]
     pub fn stage_pr_status(&mut self, status: crate::viewer::PrStatus, cx: &mut Context<Self>) {
         if self.pr_status_before_staging.is_none() {
-            self.pr_status_before_staging = self.review.pr_status().cloned();
+            self.pr_status_before_staging = self.review.pr_status();
         }
         self.review.pr_status_is(status.clone());
         self.staged_pr_status = Some(status);
@@ -1553,6 +1553,7 @@ impl ReviewSession {
 
     #[cfg(feature = "snapshots")]
     fn swapped_review(&mut self, cx: &mut Context<Self>) {
+        self.review.host_is(self.host.as_ref());
         self.image_pictures.clear();
         self.loading_images.clear();
         self.rows = PageRows::none();
@@ -1673,6 +1674,7 @@ impl ReviewSession {
         self.save_typing_now();
         let replaced = std::mem::replace(&mut self.review, repinned.review);
         self.review.carry_on_from(replaced);
+        self.review.host_is(self.host.as_ref());
         self.source = repinned.source;
         self.image_pictures.clear();
         self.loading_images.clear();

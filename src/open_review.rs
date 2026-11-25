@@ -48,9 +48,10 @@ pub fn open_review(
     let opened = OpenedSubject::in_folders(subject, folders, clones_from);
     // A local change set keeps the repo its clone names for every review rebuilt after this open.
     let subject = &opened.subject();
-    let (review, source) = opened.open_review()?;
+    let (mut review, source) = opened.open_review()?;
     let pick_code_source = opened.code_source_picker();
     let host = opened.host();
+    review.host_is(host.as_ref());
     let clone = source.local_clone().map(Path::to_path_buf);
     let config = Config::load_from(folders)?;
     let agent_folder = clone

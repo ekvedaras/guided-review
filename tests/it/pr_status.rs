@@ -88,8 +88,12 @@ fn status(readiness: Readiness, checks: Checks) -> PrStatus {
     PrStatus::Open(open_status(readiness, checks))
 }
 
-fn open_part(review: &Review) -> Option<&OpenPrStatus> {
-    review.pr_status().and_then(PrStatus::open)
+fn open_part(review: &Review) -> Option<OpenPrStatus> {
+    review
+        .pr_status()
+        .as_ref()
+        .and_then(PrStatus::open)
+        .cloned()
 }
 
 #[test]
@@ -105,7 +109,7 @@ fn the_status_is_unknown_until_github_is_read_and_then_what_github_says() {
 
     assert_eq!(
         review.pr_status(),
-        Some(&status(Readiness::Draft, Checks::Failing))
+        Some(status(Readiness::Draft, Checks::Failing))
     );
 }
 
@@ -156,7 +160,7 @@ fn the_status_last_read_stays_while_github_does_not_answer_and_is_read_again_whe
     pull.read(&mut review, &host, now + Duration::from_secs(1));
     assert_eq!(
         review.pr_status(),
-        Some(&status(Readiness::Draft, Checks::Passing))
+        Some(status(Readiness::Draft, Checks::Passing))
     );
     assert_eq!(review.problems().len(), 1);
 
@@ -171,7 +175,7 @@ fn the_status_last_read_stays_while_github_does_not_answer_and_is_read_again_whe
 
     assert_eq!(
         review.pr_status(),
-        Some(&status(Readiness::Ready, Checks::Passing))
+        Some(status(Readiness::Ready, Checks::Passing))
     );
     assert_eq!(review.problems(), []);
 }

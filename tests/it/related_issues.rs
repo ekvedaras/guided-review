@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
+use crate::support::fake_ports::{Capability, FakeHost, HostFault, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::build::Build;
 use guided_review::issue::{IssueLink, IssueUrl};
@@ -14,7 +14,7 @@ use guided_review::review_subject::{BranchName, ReviewSubject};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Command, Effect, Intent, IssueDetails, IssueState, PaletteAction, PullRequestIssues,
-    RelatedIssue, Review, ReviewStateFile, WindowMoment,
+    RelatedIssue, Review, ReviewStateFile, WindowMoment, WorkKind,
 };
 use serde_json::json;
 
@@ -442,6 +442,20 @@ fn the_details_of_the_shown_issues_are_read_after_github_names_them_and_kept_wit
             .issue_details(&IssueLink::GitHub(issue(99)))
             .is_none()
     );
+}
+
+#[test]
+fn a_host_without_an_issue_tracker_reads_no_issue_details_but_still_names_the_issues() {
+    let shop = Shop::new();
+    let host = host_with_details(&shop).without(Capability::IssueTracker);
+    let mut review = shop.open_with(json!({}));
+    review.host_is(&host);
+
+    review.pull_from_host();
+    let ran = drive_without_agents(&mut review, &host, &shop.source(), Instant::now());
+
+    assert!(!ran.contains(&WorkKind::PullIssueDetails), "{ran:?}");
+    assert_eq!(numbers(&review), [12, 13]);
 }
 
 #[test]

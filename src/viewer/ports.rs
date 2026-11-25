@@ -71,7 +71,8 @@ pub trait PullRequestOriginPort: Send + Sync {
     fn pull_request_origin(&self, pr: &PullRequestUrl) -> Result<PullRequestOrigin, HostError>;
 }
 
-/// What GitHub says of issues, which a review shows on a hover of its issue button.
+/// What the host's issue tracker says of issues, which a review shows on a hover of its issue button.
+/// Optional: a host whose PRs close issues elsewhere (Jira) has no such tracker.
 pub trait IssueDetailsPort: Send + Sync {
     /// The details of each of `issues` in one read, in no set order.
     fn issue_details(
@@ -80,7 +81,6 @@ pub trait IssueDetailsPort: Send + Sync {
     ) -> Result<Vec<(IssueUrl, IssueDetails)>, HostError>;
 }
 
-/// The viewer's reactions on the PR itself, which GitHub shows under its description.
 /// The PR's status: whether it is a draft, its checks, and what the viewer may change.
 pub trait PullRequestStatusPort: Send + Sync {
     fn pull_request_status(&self, pr: &PullRequestUrl) -> Result<PrStatus, HostError>;
@@ -91,11 +91,15 @@ pub trait PullRequestStatusPort: Send + Sync {
         pr: &PullRequestUrl,
         readiness: Readiness,
     ) -> Result<(), HostError>;
+}
 
-    /// Turns auto-merge on or off, or merges the PR now.
+/// Merging the PR from the app: auto-merge on or off, or merge now. Optional, as GitHub's
+/// auto-merge is its own: a host may merge only from its web page.
+pub trait MergingPort: Send + Sync {
     fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), HostError>;
 }
 
+/// The viewer's reactions on the PR itself, which GitHub shows under its description.
 pub trait PullRequestReactionsPort: Send + Sync {
     fn set_pull_request_reaction(
         &self,
@@ -105,6 +109,7 @@ pub trait PullRequestReactionsPort: Send + Sync {
     ) -> Result<(), HostError>;
 }
 
+/// Storing a picture with the host, for a PR description that shows it.
 pub trait PictureUploadPort: Send + Sync {
     /// The address GitHub keeps the picture at, open only to those who can see the PR's repository.
     fn upload_picture(&self, pr: &PullRequestUrl, picture: &Path) -> anyhow::Result<String>;
@@ -183,36 +188,30 @@ pub trait ReviewWritesPort: Send + Sync {
 }
 
 /// Everything the viewer core asks of the code host (GitHub now), for the app that holds one
-/// adapter for all of it.
-/// Core actions take only the port they need, so tests can put a fake behind it.
+/// adapter for all of it. Core actions take only the port they need, so tests can put a fake behind it.
+///
+/// The supertraits are what every host of PRs does. The rest are capabilities a host may lack; it
+/// hands each out as a port or `None`, and the review hides what has none, so what a host can do is
+/// said by the ports it has, never by a flag beside them that could say otherwise.
 pub trait CodeHost:
     ChangeTipsPort
     + PullsOfBranchPort
     + PullRequestDescriptionPort
-    + IssueDetailsPort
     + PullRequestOriginPort
-    + PullRequestReactionsPort
     + PullRequestStatusPort
-    + PictureUploadPort
-    + ViewedFilesPort
     + ReviewThreadsPort
     + ReviewWritesPort
 {
-}
+    /// GitHub's "viewed" checkbox per changed file. GitLab keeps it in the browser only.
+    fn viewed_marks(&self) -> Option<&dyn ViewedFilesPort>;
 
-impl<T> CodeHost for T where
-    T: ChangeTipsPort
-        + PullsOfBranchPort
-        + PullRequestDescriptionPort
-        + IssueDetailsPort
-        + PullRequestOriginPort
-        + PullRequestReactionsPort
-        + PullRequestStatusPort
-        + PictureUploadPort
-        + ViewedFilesPort
-        + ReviewThreadsPort
-        + ReviewWritesPort
-{
+    fn merging(&self) -> Option<&dyn MergingPort>;
+
+    fn pull_request_reactions(&self) -> Option<&dyn PullRequestReactionsPort>;
+
+    fn picture_uploads(&self) -> Option<&dyn PictureUploadPort>;
+
+    fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort>;
 }
 
 /// A code host failure a caller tells apart from the rest.
@@ -236,6 +235,12 @@ pub enum HostError {
 }
 
 impl HostError {
+    /// Work that needs a capability the host has none of. The review does not ask for such work, so
+    /// this is a refusal, not a failure to show.
+    pub fn not_offered(capability: &str) -> Self {
+        Self::NoAccess(NoAccess::new(format!("the code host has no {capability}")))
+    }
+
     /// What went wrong without what was being done: the sidebar says that itself.
     pub fn short_reason(&self) -> String {
         match self {

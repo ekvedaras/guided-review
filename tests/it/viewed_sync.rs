@@ -1,6 +1,6 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
+use crate::support::fake_ports::{Capability, FakeHost, HostCall, HostFault, SentLog};
 use crate::support::fake_tour_agent::FakeTourAgent;
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
@@ -118,6 +118,25 @@ fn all_unviewed(shop: &Shop) -> FakeHost {
         .fold(shop.host(), |host, path| {
             host.viewing(path, ViewedState::Unviewed)
         })
+}
+
+#[test]
+fn a_host_without_viewed_marks_is_never_synced_and_ticks_stay_ticks() {
+    let shop = Shop::with_pull();
+    let host = all_unviewed(&shop).without(Capability::ViewedMarks);
+    let mut review = shop.open();
+    review.host_is(&host);
+
+    let start = Instant::now();
+
+    review.tick(&"c-only".into()).unwrap();
+    assert!(!review.not_synced());
+    let mut ran = shop.drive_at(&mut review, &host, start);
+    ran.extend(shop.drive_at(&mut review, &host, start + PUSH_DEBOUNCE));
+
+    assert!(!ran.contains(&WorkKind::SyncViewed), "{ran:?}");
+    assert_eq!(review.sync_banner(), None);
+    assert!(ticked(&review).contains(&"c-only".to_owned()));
 }
 
 #[test]

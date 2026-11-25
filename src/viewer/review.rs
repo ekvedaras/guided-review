@@ -98,6 +98,7 @@ use crate::build::Build;
 use crate::file_path::FilePath;
 use crate::findings::{Finding, FindingId};
 use crate::ide::{Ide, NoIde};
+use crate::merge_method::MergeMethod;
 use crate::repin::RepinStatus;
 
 pub use crate::tour::StepId;
@@ -278,6 +279,9 @@ pub struct ReviewCore {
     standings: Vec<Standing>,
     /// `None` for a local review, which has no PR to change.
     pr_controls: Option<PrControls>,
+    /// The merge method Settings names for this PR's repo. Not carried to a rebuilt review: the
+    /// config may have changed.
+    merge_method: MergeMethod,
     files: Vec<ChangedFile>,
     /// Guided: summary, then parent, its children, the next parent (from the big picture to the
     /// details), then the safety net when it holds anything. Basic: overview, then the files in
@@ -544,8 +548,8 @@ impl ReviewCore {
         self.branch_link = replaced.branch_link;
         self.related_issues.carry_on_from(replaced.related_issues);
         self.pr_origin = replaced.pr_origin;
-        if let (Some(controls), Some(replaced)) = (&mut self.pr_controls, replaced.pr_controls) {
-            controls.carry_on_from(replaced);
+        if self.pr_controls.is_some() && replaced.pr_controls.is_some() {
+            self.pr_controls = replaced.pr_controls;
         }
         if !switched_to_guided {
             self.guided_tour = replaced.guided_tour;
@@ -653,11 +657,6 @@ impl ReviewCore {
         let code_on_web = subject.host_repo().map_or(CodeOnWeb::LocalClone, |repo| {
             CodeOnWeb::GitHub(repo.clone())
         });
-        let viewed_sync = if subject.syncs_viewed_marks() {
-            ViewedSync::default()
-        } else {
-            ViewedSync::without_github_marks()
-        };
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
         let mut reviewing_mark = ReviewingMark::new(head.clone());
         if state.is_done_at(&head) {
@@ -741,6 +740,7 @@ impl ReviewCore {
             last_review: None,
             standings: Vec::new(),
             pr_controls,
+            merge_method: MergeMethod::default(),
             files,
             steps_in_reading_order,
             has_uncovered_changes,
@@ -756,7 +756,7 @@ impl ReviewCore {
             state: SavedState::new(state, state_file),
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
-            viewed_sync,
+            viewed_sync: ViewedSync::default(),
             problems: {
                 let mut problems = Problems::default();
                 if let Some(reason) = source.fallback_reason() {
@@ -859,7 +859,7 @@ impl ReviewCore {
         if self.subject.comments_are_agent_tasks() {
             Sending::Tasks(&SendMode::LOCAL)
         } else {
-            Sending::GitHub
+            Sending::Host
         }
     }
 

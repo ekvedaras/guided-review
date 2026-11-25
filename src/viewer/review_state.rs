@@ -481,12 +481,12 @@ impl ReviewState {
         self.viewer.read_before.get(step)
     }
 
-    pub fn github_baseline_due(&self) -> bool {
+    pub fn host_baseline_due(&self) -> bool {
         *self.viewer.github_baseline_due
     }
 
     /// GitHub's state replaces what was seen before; only wishes it does not match yet stay queued.
-    pub(super) fn take_github_baseline(
+    pub(super) fn take_host_baseline(
         &mut self,
         on_github: &BTreeMap<FilePath, Viewed>,
         wishes: &BTreeMap<FilePath, Viewed>,
@@ -494,7 +494,7 @@ impl ReviewState {
         *self.viewer.viewed_on_github = on_github.clone();
         *self.viewer.unsent_viewed = wishes
             .iter()
-            .filter(|(path, viewed)| self.was_viewed_on_github(path) != **viewed)
+            .filter(|(path, viewed)| self.was_viewed_on_host(path) != **viewed)
             .map(|(path, viewed)| (path.clone(), *viewed))
             .collect();
         *self.viewer.github_baseline_due = false;
@@ -562,7 +562,7 @@ impl ReviewState {
         }
     }
 
-    pub(super) fn was_viewed_on_github(&self, path: &FilePath) -> Viewed {
+    pub(super) fn was_viewed_on_host(&self, path: &FilePath) -> Viewed {
         self.viewer
             .viewed_on_github
             .get(path)
@@ -570,13 +570,13 @@ impl ReviewState {
             .unwrap_or(Viewed::No)
     }
 
-    pub(super) fn saw_on_github(&mut self, path: &FilePath, viewed: Viewed) {
+    pub(super) fn saw_on_host(&mut self, path: &FilePath, viewed: Viewed) {
         self.viewer.viewed_on_github.insert(path.clone(), viewed);
     }
 
     /// A wish that equals what GitHub already says needs no push, so it cancels the queued one.
     pub(super) fn want_viewed(&mut self, path: &FilePath, viewed: Viewed) {
-        if self.was_viewed_on_github(path) == viewed {
+        if self.was_viewed_on_host(path) == viewed {
             self.viewer.unsent_viewed.remove(path);
         } else {
             self.viewer.unsent_viewed.insert(path.clone(), viewed);
@@ -596,7 +596,7 @@ impl ReviewState {
     }
 
     pub(super) fn sent_viewed(&mut self, path: &FilePath, viewed: Viewed) {
-        self.saw_on_github(path, viewed);
+        self.saw_on_host(path, viewed);
         if self.viewer.unsent_viewed.get(path) == Some(&viewed) {
             self.viewer.unsent_viewed.remove(path);
         }

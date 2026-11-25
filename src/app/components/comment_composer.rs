@@ -71,7 +71,7 @@ pub fn task_button(mode: SendMode) -> (Icon, &'static str) {
 fn offered_actions(capabilities: CommentCapabilities) -> Vec<SendAction> {
     let mut offered = vec![SendAction::AddToReview];
     let sending = capabilities.sending;
-    if sending.on_github() {
+    if sending.to_host() {
         if capabilities.comment_now {
             offered.push(SendAction::CommentNow);
         }
@@ -97,7 +97,7 @@ fn send_button_look(
     sending: Sending,
 ) -> (&'static str, Option<Icon>, &'static str) {
     let task = |index: usize| sending.tasks().get(index).copied().map(task_button);
-    match (action, sending.on_github()) {
+    match (action, sending.to_host()) {
         (SendAction::AddToReview, false) => task(0)
             .map_or(("send-task-0", None, "Add"), |(icon, label)| {
                 ("send-task-0", Some(icon), label)
@@ -315,7 +315,7 @@ impl RenderOnce for CommentComposer {
                     .text_sm()
                     .text_color(colors.muted_text)
                     .child(busy_dot(&colors, "composer-posting-dot"))
-                    .child(if sending.on_github() {
+                    .child(if sending.to_host() {
                         "Posting…"
                     } else {
                         "Sending…"

@@ -1,4 +1,4 @@
-use super::ports::{HostError, PullRequestReactionsPort};
+use super::ports::{CodeHost, HostError};
 use super::pr_reviewers::SubmittedReview;
 use super::reactions::{Reaction, ReactionChange};
 use crate::pull_request::{PullRequestUrl, Sha};
@@ -17,8 +17,11 @@ impl ReviewingMarkRemoval {
         Self { pr }
     }
 
-    pub fn run(&self, host: &(impl PullRequestReactionsPort + ?Sized)) -> Result<(), HostError> {
-        host.set_pull_request_reaction(&self.pr, REVIEWING_MARK, ReactionChange::Remove)
+    /// A host with no reactions never had the mark put on, so there is nothing to take off.
+    pub fn run(&self, host: &dyn CodeHost) -> Result<(), HostError> {
+        host.pull_request_reactions().map_or(Ok(()), |reactions| {
+            reactions.set_pull_request_reaction(&self.pr, REVIEWING_MARK, ReactionChange::Remove)
+        })
     }
 }
 
@@ -108,6 +111,13 @@ impl ReviewingMark {
             self.is_finished = true;
             self.to_send = self.is_asked_for.then_some(ReactionChange::Remove);
         }
+    }
+
+    /// A host with no reactions on a PR has nowhere to show the mark, so nothing puts it on.
+    pub(super) fn without_reactions(&mut self) {
+        self.is_finished = true;
+        self.is_asked_for = false;
+        self.to_send = None;
     }
 
     /// The review closes: true when the mark may be on GitHub, so it has to come off now. Nothing

@@ -16,8 +16,9 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::review_subject::{BranchName, WorkTreeRoot};
 use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
-    CodeOpener, Destination, Effect, IdeCaveat, Intent, NotInIde, Opened, PieceDiff, Review,
-    ReviewBuilder, ReviewStateFile, ReviewVerdict, Side, WindowMoment, WorkKind, WorkingCopy,
+    CodeOpener, Destination, Effect, IdeCaveat, Intent, NoHost, NotInIde, Opened, PieceDiff,
+    Review, ReviewBuilder, ReviewStateFile, ReviewVerdict, Side, WindowMoment, WorkKind,
+    WorkingCopy,
 };
 
 /// `main` with a README of two lines and a file that goes, then `feature` one commit ahead that adds
@@ -73,6 +74,7 @@ impl Feature {
             .facts(&change_set, &tour.pin.pinned_tips())
             .unwrap();
         let mut review = Review::open_basic(tour, &source, self.state_file()).unwrap();
+        review.host_is(&NoHost::default());
         review.local_facts_are(facts);
         review.working_copy_is(WorkingCopy::of(source.working_tree_is_at(&head)));
         review

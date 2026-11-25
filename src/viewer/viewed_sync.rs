@@ -6,29 +6,33 @@ use crate::pieces::ChangedFile;
 use crate::pull_request::{PullRequestUrl, Sha};
 use crate::tour::GuidedTour;
 
-use super::ports::{ChangeTipsPort, HostError, Viewed, ViewedFilesPort};
+use super::ports::{CodeHost, HostError, Viewed, ViewedFilesPort};
 use super::review_state::ReviewState;
 use super::screen::ReadSubject;
 
-/// Keeps GitHub's "viewed" marks and the read ticks in step. Ticks keep working when it is off.
+/// Keeps the host's "viewed" marks and the read ticks in step. Ticks keep working when it is off.
 #[derive(Default)]
 pub(super) struct ViewedSync {
     /// Why sync is switched off for this session; the app shows it as a banner.
     off_because: Option<String>,
-    /// A local review has no PR, so GitHub has no viewed marks of it: ticks stay ticks.
-    without_github_marks: bool,
+    /// The host has no viewed marks (a local review's has none): ticks stay ticks.
+    without_host_marks: bool,
 }
 
 impl ViewedSync {
-    pub(super) fn without_github_marks() -> Self {
+    pub(super) fn without_host_marks() -> Self {
         Self {
             off_because: None,
-            without_github_marks: true,
+            without_host_marks: true,
         }
     }
 
+    pub(super) fn has_host_marks(&self) -> bool {
+        !self.without_host_marks
+    }
+
     fn wishes_nothing(&self) -> bool {
-        self.without_github_marks || self.off_because.is_some()
+        self.without_host_marks || self.off_because.is_some()
     }
 
     pub(super) fn banner(&self) -> Option<&str> {
@@ -73,23 +77,27 @@ impl ViewedSync {
     }
 
     /// Everything the network part of a sync needs, owned, so it can run on a background thread.
+    /// `None` when the host has no marks to sync with.
     pub(super) fn request(
         &self,
         state: &ReviewState,
         coverage: &Coverage,
         pr: &PullRequestUrl,
         tour_head: &Sha,
-    ) -> SyncRequest {
+    ) -> Option<SyncRequest> {
+        if self.without_host_marks {
+            return None;
+        }
         let baseline_wishes = state
-            .github_baseline_due()
+            .host_baseline_due()
             .then(|| baseline_wishes(state, coverage));
-        SyncRequest {
+        Some(SyncRequest {
             pr: pr.clone(),
             tour_head: tour_head.clone(),
             unsent: state.unsent_viewed().clone(),
             baseline_wishes,
             is_off: self.off_because.is_some(),
-        }
+        })
     }
 
     /// Takes in what GitHub said. Returns what it unticked, and the error of the network part.
@@ -144,20 +152,20 @@ fn pull_viewed(
     state: &mut ReviewState,
     coverage: &Coverage,
     tour_head: &Sha,
-    on_github: &BTreeMap<FilePath, Viewed>,
+    on_host: &BTreeMap<FilePath, Viewed>,
 ) -> Vec<ReadSubject> {
     let unsent = state.unsent_viewed().clone();
     let is_viewed = |path: &FilePath| {
         unsent
             .get(path)
-            .or_else(|| on_github.get(path))
+            .or_else(|| on_host.get(path))
             .copied()
             .unwrap_or(Viewed::No)
     };
-    let changed: Vec<(&FilePath, Viewed)> = on_github
+    let changed: Vec<(&FilePath, Viewed)> = on_host
         .iter()
         .filter(|(path, now)| {
-            !unsent.contains_key(*path) && state.was_viewed_on_github(path) != **now
+            !unsent.contains_key(*path) && state.was_viewed_on_host(path) != **now
         })
         .map(|(path, now)| (path, *now))
         .collect();
@@ -177,9 +185,9 @@ fn pull_viewed(
             }
         }
     }
-    for (path, now) in on_github {
+    for (path, now) in on_host {
         if !unsent.contains_key(path) {
-            state.saw_on_github(path, *now);
+            state.saw_on_host(path, *now);
         }
     }
     unticked
@@ -269,7 +277,7 @@ pub struct SyncRequest {
 pub struct SyncOutcome {
     tour_head: Sha,
     sent: Vec<(FilePath, Viewed)>,
-    on_github: Option<BTreeMap<FilePath, Viewed>>,
+    on_host: Option<BTreeMap<FilePath, Viewed>>,
     baseline_wishes: Option<BTreeMap<FilePath, Viewed>>,
     error: Option<HostError>,
 }
@@ -283,7 +291,7 @@ impl SyncOutcome {
         Self {
             tour_head: tour_head.clone(),
             sent: Vec::new(),
-            on_github: None,
+            on_host: None,
             baseline_wishes: None,
             error: None,
         }
@@ -302,13 +310,13 @@ impl SyncOutcome {
         (sent, push_error): Pushed,
         read: Result<BTreeMap<FilePath, Viewed>, HostError>,
     ) -> Self {
-        let (on_github, read_error) = match read {
-            Ok(on_github) => (Some(on_github), None),
+        let (on_host, read_error) = match read {
+            Ok(on_host) => (Some(on_host), None),
             Err(error) => (None, Some(error)),
         };
         Self {
             sent,
-            on_github,
+            on_host,
             error: push_error.or(read_error),
             ..Self::nothing(tour_head)
         }
@@ -318,12 +326,12 @@ impl SyncOutcome {
     fn baseline_taken(
         tour_head: &Sha,
         wishes: BTreeMap<FilePath, Viewed>,
-        on_github: BTreeMap<FilePath, Viewed>,
+        on_host: BTreeMap<FilePath, Viewed>,
         (sent, error): Pushed,
     ) -> Self {
         Self {
             sent,
-            on_github: Some(on_github),
+            on_host: Some(on_host),
             baseline_wishes: Some(wishes),
             error,
             ..Self::nothing(tour_head)
@@ -339,20 +347,20 @@ impl SyncOutcome {
         tour_head: &Sha,
     ) -> (Vec<ReadSubject>, Option<HostError>) {
         let mut unticked = Vec::new();
-        match (&self.baseline_wishes, &self.on_github) {
-            (Some(wishes), Some(on_github)) => {
-                state.take_github_baseline(on_github, wishes);
+        match (&self.baseline_wishes, &self.on_host) {
+            (Some(wishes), Some(on_host)) => {
+                state.take_host_baseline(on_host, wishes);
                 for (path, viewed) in &self.sent {
                     state.sent_viewed(path, *viewed);
                 }
             }
             (Some(_), None) => {}
-            (None, on_github) => {
+            (None, on_host) => {
                 for (path, viewed) in &self.sent {
                     state.sent_viewed(path, *viewed);
                 }
-                if let Some(on_github) = on_github {
-                    unticked = pull_viewed(state, coverage, tour_head, on_github);
+                if let Some(on_host) = on_host {
+                    unticked = pull_viewed(state, coverage, tour_head, on_host);
                 }
             }
         }
@@ -365,50 +373,51 @@ type Pushed = (Vec<(FilePath, Viewed)>, Option<HostError>);
 
 impl SyncRequest {
     /// No sync while sync is off, or while the tour is behind the PR head.
-    pub fn run(self, host: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized)) -> SyncOutcome {
+    pub fn run(self, host: &dyn CodeHost) -> SyncOutcome {
         let pr = &self.pr;
         if self.is_off {
             return SyncOutcome::nothing(&self.tour_head);
         }
+        let Some(marks) = host.viewed_marks() else {
+            return SyncOutcome::failed(&self.tour_head, HostError::not_offered("viewed marks"));
+        };
         match host.pull_request_tips(pr) {
             Ok(tips) if tips.head == self.tour_head => {}
             Ok(_) => return SyncOutcome::nothing(&self.tour_head),
             Err(error) => return SyncOutcome::failed(&self.tour_head, error),
         }
         if let Some(wishes) = self.baseline_wishes {
-            Self::take_baseline(host, pr, &self.tour_head, wishes)
+            Self::take_baseline(marks, pr, &self.tour_head, wishes)
         } else {
-            let pushed = push(host, pr, &self.unsent);
-            SyncOutcome::pushed(&self.tour_head, pushed, read_viewed(host, pr))
+            let pushed = push(marks, pr, &self.unsent);
+            SyncOutcome::pushed(&self.tour_head, pushed, read_viewed(marks, pr))
         }
     }
 
     /// GitHub is read first, so only wishes it does not already match are pushed.
     fn take_baseline(
-        host: &(impl ChangeTipsPort + ViewedFilesPort + ?Sized),
+        host: &dyn ViewedFilesPort,
         pr: &PullRequestUrl,
         tour_head: &Sha,
         wishes: BTreeMap<FilePath, Viewed>,
     ) -> SyncOutcome {
-        let on_github = match read_viewed(host, pr) {
-            Ok(on_github) => on_github,
+        let on_host = match read_viewed(host, pr) {
+            Ok(on_host) => on_host,
             Err(error) => return SyncOutcome::failed(tour_head, error),
         };
         let differing: BTreeMap<FilePath, Viewed> = wishes
             .iter()
-            .filter(|(path, viewed)| {
-                on_github.get(*path).copied().unwrap_or(Viewed::No) != **viewed
-            })
+            .filter(|(path, viewed)| on_host.get(*path).copied().unwrap_or(Viewed::No) != **viewed)
             .map(|(path, viewed)| (path.clone(), *viewed))
             .collect();
         let pushed = push(host, pr, &differing);
-        SyncOutcome::baseline_taken(tour_head, wishes, on_github, pushed)
+        SyncOutcome::baseline_taken(tour_head, wishes, on_host, pushed)
     }
 }
 
 /// Stops at the first failure; what was not sent stays queued.
 fn push(
-    host: &(impl ViewedFilesPort + ?Sized),
+    host: &dyn ViewedFilesPort,
     pr: &PullRequestUrl,
     wishes: &BTreeMap<FilePath, Viewed>,
 ) -> Pushed {
@@ -423,7 +432,7 @@ fn push(
 }
 
 fn read_viewed(
-    host: &(impl ViewedFilesPort + ?Sized),
+    host: &dyn ViewedFilesPort,
     pr: &PullRequestUrl,
 ) -> Result<BTreeMap<FilePath, Viewed>, HostError> {
     Ok(host

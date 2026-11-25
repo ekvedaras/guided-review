@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
+use crate::support::fake_ports::{Capability, FakeHost, HostCall, HostFault, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
@@ -10,7 +10,7 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Effect, FinishAction, Intent, Problem, Reaction, ReactionChange, Review, ReviewOutcome,
-    ReviewStateFile, ReviewVerdict, SubmittedReview, WindowMoment,
+    ReviewStateFile, ReviewVerdict, SubmittedReview, WindowMoment, WorkKind,
 };
 use serde_json::json;
 
@@ -109,6 +109,19 @@ fn opening_someone_elses_pr_puts_eyes_on_it() {
     pull.come_to_front(&mut review, &host);
 
     assert_eq!(pull.eyes_changes(), vec![ReactionChange::Add]);
+}
+
+#[test]
+fn a_host_without_reactions_on_a_pr_is_never_asked_for_eyes() {
+    let pull = Pull::new();
+    let host = pull.host().without(Capability::PullRequestReactions);
+    let mut review = pull.open();
+    review.host_is(&host);
+
+    review.pull_from_host();
+    let ran = drive_without_agents(&mut review, &host, &pull.source(), Instant::now());
+
+    assert!(!ran.contains(&WorkKind::ChangeReviewingMark), "{ran:?}");
 }
 
 #[test]

@@ -71,8 +71,8 @@ impl ReviewBuilder {
         review
             .display_options_mut()
             .use_more_lines(config.more_lines());
+        review.read_merge_method_from(&config);
         if let Some(pr) = self.subject.pull_request() {
-            review.prefer_merge_method(config.merge_method(&pr.repo));
             review.local_reviews_of_repo_are(LocalReviewsOfRepo::on_disk(&self.folders, pr));
         }
         let unreadable = unreadable_local_tours(&self.folders);

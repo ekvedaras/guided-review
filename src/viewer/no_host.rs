@@ -1,28 +1,24 @@
-use std::path::Path;
-
 use super::comments::{CommentPlace, SendMode};
-use super::merging::MergeChange;
 use super::ports::ReviewVerdict;
 use super::ports::{
-    ChangeTipsPort, HostError, IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch,
-    PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
-    PullRequestStatusPort, PullsOfBranchPort, Resolution, ReviewThreadsPort, ReviewWritesPort,
-    Viewed, ViewedFile, ViewedFilesPort,
+    ChangeTipsPort, CodeHost, HostError, IssueDetailsPort, MergingPort, NoAccess,
+    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, Resolution,
+    ReviewThreadsPort, ReviewWritesPort, ViewedFilesPort,
 };
 use super::pr_origin::PullRequestOrigin;
 use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
 use super::reactions::{Reaction, ReactionChange};
-use super::related_issues::{IssueDetails, PullRequestIssues};
+use super::related_issues::PullRequestIssues;
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
-use crate::file_path::FilePath;
-use crate::issue::IssueUrl;
 use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName};
 use crate::review_subject::BranchName;
 use std::sync::Arc;
 
 /// The code host a local review holds: it only looks for the PR opened from its branch, when it was
-/// given a way to. Anything else a review did would be refused instead of reaching the network.
+/// given a way to. It has none of the optional capabilities, so the review offers none of them; a
+/// core call, which needs a PR a local review does not have, is refused instead of reaching the network.
 #[derive(Clone, Default)]
 pub struct NoHost {
     branch_lookups: Option<Arc<dyn PullsOfBranchPort>>,
@@ -65,23 +61,30 @@ fn refused<T>() -> Result<T, HostError> {
     )))
 }
 
-impl ChangeTipsPort for NoHost {
-    fn pull_request_tips(&self, _pr: &PullRequestUrl) -> Result<ChangeTips, HostError> {
-        refused()
+impl CodeHost for NoHost {
+    fn viewed_marks(&self) -> Option<&dyn ViewedFilesPort> {
+        None
+    }
+
+    fn merging(&self) -> Option<&dyn MergingPort> {
+        None
+    }
+
+    fn pull_request_reactions(&self) -> Option<&dyn PullRequestReactionsPort> {
+        None
+    }
+
+    fn picture_uploads(&self) -> Option<&dyn PictureUploadPort> {
+        None
+    }
+
+    fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort> {
+        None
     }
 }
 
-impl ViewedFilesPort for NoHost {
-    fn viewed_files(&self, _pr: &PullRequestUrl) -> Result<Vec<ViewedFile>, HostError> {
-        refused()
-    }
-
-    fn set_file_viewed(
-        &self,
-        _pr: &PullRequestUrl,
-        _path: &FilePath,
-        _viewed: Viewed,
-    ) -> Result<(), HostError> {
+impl ChangeTipsPort for NoHost {
+    fn pull_request_tips(&self, _pr: &PullRequestUrl) -> Result<ChangeTips, HostError> {
         refused()
     }
 }
@@ -110,15 +113,6 @@ impl PullRequestOriginPort for NoHost {
     }
 }
 
-impl IssueDetailsPort for NoHost {
-    fn issue_details(
-        &self,
-        _issues: &[IssueUrl],
-    ) -> Result<Vec<(IssueUrl, IssueDetails)>, HostError> {
-        refused()
-    }
-}
-
 impl PullRequestStatusPort for NoHost {
     fn pull_request_status(&self, _pr: &PullRequestUrl) -> Result<PrStatus, HostError> {
         refused()
@@ -130,27 +124,6 @@ impl PullRequestStatusPort for NoHost {
         _readiness: Readiness,
     ) -> Result<(), HostError> {
         refused()
-    }
-
-    fn change_merging(&self, _pr: &PullRequestUrl, _change: MergeChange) -> Result<(), HostError> {
-        refused()
-    }
-}
-
-impl PullRequestReactionsPort for NoHost {
-    fn set_pull_request_reaction(
-        &self,
-        _pr: &PullRequestUrl,
-        _reaction: Reaction,
-        _change: ReactionChange,
-    ) -> Result<(), HostError> {
-        refused()
-    }
-}
-
-impl PictureUploadPort for NoHost {
-    fn upload_picture(&self, _pr: &PullRequestUrl, _picture: &Path) -> anyhow::Result<String> {
-        Ok(refused()?)
     }
 }
 

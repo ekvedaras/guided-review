@@ -343,7 +343,10 @@ impl Work {
             Job::PullPrDescription(pr) => Done::PrDescription(host.pull_request_description(&pr)),
             Job::PullRelatedIssues(pr) => Done::RelatedIssues(host.pull_request_issues(&pr)),
             Job::PullPrOrigin(pr) => Done::PrOrigin(host.pull_request_origin(&pr)),
-            Job::PullIssueDetails(issues) => Done::IssueDetails(host.issue_details(&issues)),
+            Job::PullIssueDetails(issues) => Done::IssueDetails(match host.issue_tracker() {
+                Some(tracker) => tracker.issue_details(&issues),
+                None => Err(HostError::not_offered("issue tracker")),
+            }),
             Job::SyncViewed(request) => Done::SyncViewed(request.run(host)),
             // Outdated threads are followed to their lines in the same trip, so they never jump once shown.
             Job::PullThreads { home, head } => Done::Threads(match &home {
@@ -364,7 +367,12 @@ impl Work {
             Job::SendQueuedComment(request) => Done::QueuedComment(request.run(host)),
             Job::ChangeReviewingMark { pr, change } => Done::ReviewingMark {
                 change,
-                result: host.set_pull_request_reaction(&pr, REVIEWING_MARK, change),
+                result: match host.pull_request_reactions() {
+                    Some(reactions) => {
+                        reactions.set_pull_request_reaction(&pr, REVIEWING_MARK, change)
+                    }
+                    None => Err(HostError::not_offered("reactions on a PR")),
+                },
             },
             Job::ChangePrReadiness { pr, readiness } => Done::PrReadiness {
                 readiness,
@@ -372,7 +380,10 @@ impl Work {
             },
             Job::ChangeMerging { pr, change } => Done::Merging {
                 change,
-                result: host.change_merging(&pr, change),
+                result: match host.merging() {
+                    Some(merging) => merging.change_merging(&pr, change),
+                    None => Err(HostError::not_offered("merging")),
+                },
             },
             Job::TakeSeenMarksOff(requests) => Done::SeenMarksOff(
                 requests

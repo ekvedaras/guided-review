@@ -27,8 +27,8 @@ use guided_review::navigation::{ServerMessage, ServerMessages};
 use guided_review::pull_request::{ChangeTips, PullRequestUrl, Sha};
 use guided_review::viewer::{
     AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeTipsPort,
-    Checks, CommentId, CommentPlace, HostError, IssueDetails, IssueDetailsPort, NoAccess,
-    NotDelivered, OpenPrStatus, PictureUploadPort, PrStatus, PullOfBranch,
+    Checks, CodeHost, CommentId, CommentPlace, HostError, IssueDetails, IssueDetailsPort,
+    MergingPort, NoAccess, NotDelivered, OpenPrStatus, PictureUploadPort, PrStatus, PullOfBranch,
     PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin, PullRequestOriginPort,
     PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
     Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
@@ -189,8 +189,19 @@ impl ReadFailure {
     }
 }
 
+/// What a host may lack, for a test of a host that does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Capability {
+    ViewedMarks,
+    Merging,
+    PullRequestReactions,
+    PictureUploads,
+    IssueTracker,
+}
+
 pub struct FakeHost {
     pub sent: SentLog,
+    lacks: BTreeSet<Capability>,
     pub tips: (Sha, Sha),
     viewed: Mutex<BTreeMap<String, ViewedState>>,
     pub threads: Vec<ReviewThread>,
@@ -218,6 +229,7 @@ impl FakeHost {
     pub fn with_pull(base_branch_tip: &str, head: &str, sent: &SentLog) -> Self {
         Self {
             sent: sent.clone(),
+            lacks: BTreeSet::new(),
             tips: (Sha::new(base_branch_tip), Sha::new(head)),
             viewed: Mutex::default(),
             threads: Vec::new(),
@@ -245,6 +257,16 @@ impl FakeHost {
             origin: Mutex::default(),
             issue_details: Mutex::default(),
         }
+    }
+
+    /// A host with no port for `capability`, as GitLab has no viewed marks.
+    pub fn without(mut self, capability: Capability) -> Self {
+        self.lacks.insert(capability);
+        self
+    }
+
+    fn offers(&self, capability: Capability) -> bool {
+        !self.lacks.contains(&capability)
     }
 
     /// The PR is opened from `branch` of its own repo.
@@ -475,6 +497,29 @@ impl FakeHost {
     }
 }
 
+impl CodeHost for FakeHost {
+    fn viewed_marks(&self) -> Option<&dyn ViewedFilesPort> {
+        self.offers(Capability::ViewedMarks).then_some(self)
+    }
+
+    fn merging(&self) -> Option<&dyn MergingPort> {
+        self.offers(Capability::Merging).then_some(self)
+    }
+
+    fn pull_request_reactions(&self) -> Option<&dyn PullRequestReactionsPort> {
+        self.offers(Capability::PullRequestReactions)
+            .then_some(self)
+    }
+
+    fn picture_uploads(&self) -> Option<&dyn PictureUploadPort> {
+        self.offers(Capability::PictureUploads).then_some(self)
+    }
+
+    fn issue_tracker(&self) -> Option<&dyn IssueDetailsPort> {
+        self.offers(Capability::IssueTracker).then_some(self)
+    }
+}
+
 impl ChangeTipsPort for FakeHost {
     fn pull_request_tips(&self, pr: &PullRequestUrl) -> Result<ChangeTips, HostError> {
         self.sent.record(HostCall::TipsOf(pr.clone()));
@@ -558,7 +603,9 @@ impl PullRequestStatusPort for FakeHost {
         }
         Ok(())
     }
+}
 
+impl MergingPort for FakeHost {
     fn change_merging(&self, pr: &PullRequestUrl, change: MergeChange) -> Result<(), HostError> {
         self.sent.record(HostCall::ChangeMerging {
             pr: pr.clone(),

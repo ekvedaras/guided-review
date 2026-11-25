@@ -116,7 +116,7 @@ fn a_reopened_pr_review_keeps_what_github_said_and_a_first_press() {
         let mut reopened = pull.open();
         reopened.carry_on_from(replaced);
 
-        assert_eq!(reopened.pr_status(), Some(&both_changes_offered()), "{key}");
+        assert_eq!(reopened.pr_status(), Some(both_changes_offered()), "{key}");
         assert_eq!(
             pr_controls_of(&reopened),
             [Command::ToggleDraft, Command::ToggleAutoMerge],
