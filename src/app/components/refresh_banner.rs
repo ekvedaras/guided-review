@@ -1,6 +1,6 @@
 use gpui::{
-    App, ClickEvent, IntoElement, ParentElement, RenderOnce, SharedString,
-    StatefulInteractiveElement, Styled, Window, div,
+    App, ClickEvent, IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement, Styled,
+    Window, div,
 };
 
 use crate::viewer::{JobProgress, RefreshBrief};
@@ -10,6 +10,7 @@ use super::chip::{dropping_in, notice_band};
 use super::icon::Icon;
 use super::motion::busy_dot;
 use super::palette::{Colors, Tone};
+use super::selectable_text::SelectableText;
 
 type OnRefresh = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -89,9 +90,10 @@ impl RenderOnce for RefreshBanner {
             .on_click(self.on_refresh)
         });
         let redo_hint = self.brief.redo_hint().filter(|_| !is_running).map(|hint| {
-            div().child(SharedString::from(format!(
-                "{hint}. A full redo may read better: `/tour --redo` in claude."
-            )))
+            div().child(SelectableText::new(
+                "refresh-redo-hint",
+                format!("{hint}. A full redo may read better: `/tour --redo` in claude."),
+            ))
         });
         // The reason is a problem of the review, which the sidebar lists.
         let failed = matches!(self.progress, JobProgress::Failed(_)).then(|| {

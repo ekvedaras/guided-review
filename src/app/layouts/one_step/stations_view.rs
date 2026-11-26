@@ -17,6 +17,7 @@ use crate::app::components::markdown_view::InlineMarkdown;
 use crate::app::components::motion::{pulse, shimmer_text};
 use crate::app::components::palette::{CARD_RADIUS, Colors, INNER_RADIUS, Tone};
 use crate::app::components::reviews_block::ReviewsBlock;
+use crate::app::components::selectable_text::SelectableText;
 use crate::app::components::toast_stack::post_toast;
 use crate::app::components::tooltip::tooltip;
 use crate::app::review_session::ReviewSession;
@@ -101,14 +102,19 @@ fn problem_line(colors: &Colors, problem: &SidebarProblem, is_above_stepper: boo
                         } else {
                             colors.text
                         })
-                        .child(problem.headline.clone()),
+                        .child(SelectableText::new(
+                            format!("problem-{is_above_stepper}-{}", problem.headline),
+                            problem.headline.to_string(),
+                        )),
                 )
-                .children(
-                    problem
-                        .detail
-                        .clone()
-                        .map(|detail| div().text_color(colors.muted_text).child(detail)),
-                ),
+                .children(problem.detail.clone().map(|detail| {
+                    div()
+                        .text_color(colors.muted_text)
+                        .child(SelectableText::new(
+                            format!("problem-detail-{is_above_stepper}-{}", problem.headline),
+                            detail.to_string(),
+                        ))
+                })),
         )
 }
 
@@ -278,6 +284,9 @@ impl OneStepLayout {
                     )
                     .group("station")
                     .tooltip(tooltip(move |_| tip.clone()))
+                    .role(gpui::Role::Tab)
+                    .aria_label(format!("{}: {}", station.name, station.state))
+                    .aria_selected(is_open)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.picked_station = Some(kind);
                         cx.notify();
@@ -409,8 +418,21 @@ impl OneStepLayout {
             }))
             .into_any_element()
         });
+        let pick_agent = (kind == StationKind::Tour && sidebar.tour_agent.can_pick).then(|| {
+            icon_button(
+                colors,
+                "pick-tour-agent",
+                ButtonKind::Ghost,
+                ButtonSize::Small,
+                Icon::ChevronsUpDown,
+                "Pick the agent",
+            )
+            .on_click(cx.listener(|this, _, window, cx| this.open_agent_picker(window, cx)))
+            .into_any_element()
+        });
         run_again
             .into_iter()
+            .chain(pick_agent)
             .chain(Self::show_agent(colors, sidebar, kind, cx))
             .collect()
     }
@@ -519,7 +541,15 @@ impl OneStepLayout {
             StationKind::Host => sidebar
                 .viewed_sync_off
                 .clone()
-                .map(|reason| quiet(colors, format!("Viewed marks are not synced: {reason}")))
+                .map(|reason| {
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(SelectableText::new(
+                            "viewed-sync-off",
+                            format!("Viewed marks are not synced: {reason}"),
+                        ))
+                })
                 .into_iter()
                 .chain((station.health == StationHealth::Waiting).then(|| {
                     quiet(
@@ -585,6 +615,8 @@ impl OneStepLayout {
                         format!("station-line-state-{}", kind.short_name()),
                     ))),
             )
+            .role(gpui::Role::Button)
+            .aria_label(station.name.to_owned())
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.picked_station = Some(kind);
                 cx.notify();
@@ -676,7 +708,10 @@ impl OneStepLayout {
                             } else {
                                 colors.muted_text
                             })
-                            .child(ai_review.line.clone()),
+                            .child(SelectableText::new(
+                                "ai-review-line",
+                                ai_review.line.to_string(),
+                            )),
                     )
                 },
             )
@@ -749,21 +784,16 @@ impl OneStepLayout {
                 this.session.update(cx, ReviewSession::retry_agent_link);
             }))
         });
-        let choices = agent.choices.iter().map(|terminal| {
-            let chosen = terminal.clone();
+        let choices = (!agent.choices.is_empty()).then(|| {
             icon_label_button(
                 colors,
-                SharedString::from(format!("use-agent-{terminal}")),
+                "pick-one-of-several-agents",
                 ButtonKind::Secondary,
                 ButtonSize::Small,
                 Icon::Terminal,
-                format!("Use this agent: {terminal}"),
+                "Pick an agent",
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                let chosen = chosen.clone();
-                this.session
-                    .update(cx, |session, cx| session.use_tour_agent(chosen, cx));
-            }))
+            .on_click(cx.listener(|this, _, window, cx| this.open_agent_picker(window, cx)))
         });
         Some(
             div()
@@ -814,12 +844,9 @@ impl OneStepLayout {
                     .items_start()
                     .gap_1()
                     .child(button.opacity(0.5).cursor_not_allowed())
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(colors.muted_text)
-                            .child(refusal.reason()),
-                    ),
+                    .child(div().text_xs().text_color(colors.muted_text).child(
+                        SelectableText::new("guided-tour-refusal", refusal.reason().to_owned()),
+                    )),
             }
         });
         let stage = guided_tour.stage.as_ref().map(|stage| {

@@ -12,6 +12,7 @@
 mod support;
 
 mod active_pr;
+mod agent_choices;
 mod agent_link;
 mod agent_reply;
 mod ai_review;

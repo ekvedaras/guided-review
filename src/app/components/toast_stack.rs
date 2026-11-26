@@ -11,6 +11,7 @@ use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::icon::{Icon, sized_icon};
 use super::motion::rise_in;
 use super::palette::{CARD_RADIUS, Colors, TEXT_FONT};
+use super::selectable_text::SelectableText;
 
 /// The window's toasts. It lives in a global, so a toast posted just before the PR reopens (after
 /// Save in Settings) is still there in the new window.
@@ -166,7 +167,10 @@ impl Render for ToastShelf {
                                 .min_w_0()
                                 .text_sm()
                                 .text_color(colors.text)
-                                .child(self.text_of(toast)),
+                                .child(SelectableText::new(
+                                    format!("toast-text-{}", id.get()),
+                                    self.text_of(toast).to_string(),
+                                )),
                         )
                         .child(close),
                     SharedString::from(format!("toast-{}", id.get())),

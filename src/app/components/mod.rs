@@ -1,3 +1,4 @@
+pub mod agent_picker;
 pub mod ask_panel;
 pub mod button;
 pub mod card;
@@ -32,6 +33,7 @@ pub mod reviews_block;
 pub mod safety_net_view;
 pub mod scrollbar;
 pub mod segmented;
+pub mod selectable_text;
 pub mod settings_panel;
 pub mod shortcuts_sheet;
 pub mod sidebar_row;

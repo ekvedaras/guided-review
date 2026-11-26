@@ -245,6 +245,7 @@ impl JumpPalette {
     fn query_box(&self, cx: &mut Context<Self>) -> TextBox {
         let (on_edit, on_submit, on_cancel) = (cx.entity(), cx.entity(), cx.entity());
         TextBox::new("jump-query", &self.focus, &self.query, Lines::Single)
+            .label("Jump to a step or action")
             .on_edit(move |query, _, cx| {
                 on_edit.update(cx, |this, cx| {
                     this.query.clone_from(&query);
@@ -306,6 +307,10 @@ impl JumpPalette {
             }
             cx.notify();
         }))
+        .aria_label(match &shown.label {
+            ShownLabel::Action(name) => (*name).to_owned(),
+            ShownLabel::Step(_) | ShownLabel::Piece(_) => format!("Jump to result {}", index + 1),
+        })
         .on_click(cx.listener(move |this, _, window, cx| {
             this.selected = index;
             this.pick(window, cx);

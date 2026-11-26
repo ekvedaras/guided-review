@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, ClickEvent, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    Pixels, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    Pixels, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
     relative,
 };
 
@@ -165,6 +165,9 @@ impl RenderOnce for Segmented {
                 };
                 div()
                     .id(segment.id)
+                    .role(Role::Tab)
+                    .aria_label(segment.label.clone())
+                    .aria_selected(is_picked)
                     .relative()
                     .h(if is_compact {
                         COMPACT_SEGMENT_HEIGHT
@@ -200,6 +203,7 @@ impl RenderOnce for Segmented {
             });
         div()
             .id(self.id)
+            .role(Role::TabList)
             .flex_none()
             .p(if is_compact {
                 COMPACT_TRACK_PADDING

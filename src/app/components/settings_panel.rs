@@ -30,6 +30,7 @@ use super::icon::{Icon, sized_icon};
 use super::motion::{BOX_RISE, Edge, OVERLAY, STATE, fade_in, slide_in};
 use super::overlay::{close_presence, picker_row_at, rise_for, scrim_fade, touching_places};
 use super::palette::{CARD_RADIUS, CODE_FONT, Colors, TEXT_FONT, Tone, inside_edge};
+use super::selectable_text::SelectableText;
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 use super::title_bar::{TitleBarArea, title_inset};
@@ -526,6 +527,7 @@ impl SettingsPanel {
                     }
                     cx.notify();
                 }))
+                .aria_label(page.title().to_owned())
                 .on_click(cx.listener(move |this, _, _, cx| this.show_page(page, cx)))
                 .child(div().flex_1().child(page.title()))
                 .when(has_problem, |row| {
@@ -648,6 +650,7 @@ impl SettingsPanel {
             .text_sm()
             .child(
                 TextBox::new(id, focus, text, Lines::Single)
+                    .label("Setting value")
                     .on_edit(move |text, _, cx| {
                         panel.update(cx, |this, cx| {
                             this.edit(cx, |editing| on_edit(editing, text));
@@ -681,7 +684,10 @@ impl SettingsPanel {
                     .text_xs()
                     .text_color(colors.danger)
                     .child(sized_icon(Icon::CircleAlert, colors.danger, px(13.)))
-                    .child(message.clone())
+                    .child(SelectableText::new(
+                        format!("settings-problem-{message}"),
+                        message.to_string(),
+                    ))
             }))
     }
 
@@ -869,6 +875,7 @@ impl SettingsPanel {
                             ButtonSize::Regular,
                         )
                         .child("Keep editing")
+                        .aria_label("Keep editing")
                         .on_click(cx.listener(|this, _, _, cx| this.keep_editing(cx))),
                     )
                     .child(
@@ -932,6 +939,7 @@ impl SettingsPanel {
                         ButtonSize::Regular,
                     )
                     .child("Close")
+                    .aria_label("Close settings")
                     .on_click(cx.listener(|this, _, window, cx| this.request_close(window, cx))),
                 )
                 .child(
@@ -1182,7 +1190,10 @@ impl Render for SettingsPanel {
                             .gap_2()
                             .text_color(colors.danger)
                             .child(sized_icon(Icon::CircleAlert, colors.danger, px(16.)))
-                            .child(reason.clone()),
+                            .child(SelectableText::new(
+                                "settings-not-loaded",
+                                reason.to_string(),
+                            )),
                     ))
                     .into_any_element(),
                 None,
@@ -1214,7 +1225,9 @@ impl Render for SettingsPanel {
         };
         let notice = self.notice.clone().map(|notice| {
             dropping_in(
-                notice_band(&colors, Tone::Danger).py_3().child(notice),
+                notice_band(&colors, Tone::Danger)
+                    .py_3()
+                    .child(SelectableText::new("settings-notice", notice.to_string())),
                 "settings-notice-band",
             )
         });

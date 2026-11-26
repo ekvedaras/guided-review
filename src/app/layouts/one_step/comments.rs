@@ -270,6 +270,7 @@ impl OneStepLayout {
         button(colors, "send-tasks", kind, ButtonSize::Regular)
             .child(button_icon(colors, kind, ButtonSize::Regular, Icon::Send))
             .child(SharedString::from(format!("Send tasks ({queued})")))
+            .aria_label(format!("Send tasks ({queued})"))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.act(Intent::SendTasks, window, cx);
             }))

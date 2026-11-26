@@ -226,6 +226,7 @@ impl<'a> GuidedReview<'a> {
         let empty_gh_config = self.repo.home().join(".config/gh");
         std::fs::create_dir_all(&empty_gh_config).unwrap();
         let mut command = cargo_bin_cmd!("guided-review");
+        command.env_remove("HC_TERMINAL_ID");
         command.envs(self.env.iter().map(|(name, value)| (name, value)));
         if let Some(stdin) = &self.stdin {
             command.write_stdin(stdin.clone());

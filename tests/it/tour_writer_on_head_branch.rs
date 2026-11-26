@@ -221,3 +221,59 @@ fn the_reviewers_agent_that_already_has_the_prs_label_writes_the_tour() {
     assert_eq!(starts(&fake), 0);
     assert_eq!(fake.agents_of(PR_9), ["mine"]);
 }
+
+#[test]
+fn a_labelled_claude_now_working_in_another_repo_loses_the_label_to_the_claude_on_the_head_branch()
+{
+    let other_repo = clone_on("acme/blog", HEAD);
+    let head = clone_on("acme/shop", HEAD);
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .claude_in("t5", other_repo.path().to_str().unwrap())
+            .with_terminal("t5", Some(PR_9), AgentStatus::Working)
+            .claude_in("t6", head.path().to_str().unwrap())
+            .with_terminal("t6", None, AgentStatus::Idle),
+    );
+
+    let state = agents(&fake).lookup(&pr(PR_9));
+
+    assert_eq!(
+        state,
+        TourAgentState::Agent {
+            terminal: TerminalId::new("t6"),
+            status: AgentStatus::Idle
+        }
+    );
+    assert_eq!(fake.agents_of(PR_9), ["t6"]);
+}
+
+#[test]
+fn a_labelled_terminal_whose_claude_quit_is_no_agent() {
+    let head = clone_on("acme/shop", HEAD);
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .shell_in("t5", head.path().to_str().unwrap())
+            .with_terminal("t5", Some(PR_9), AgentStatus::Unreported),
+    );
+
+    assert_eq!(agents(&fake).lookup(&pr(PR_9)), TourAgentState::None);
+    assert_eq!(fake.agents_of(PR_9), Vec::<String>::new());
+}
+
+#[test]
+fn a_labelled_claude_that_switched_branch_in_a_clone_of_the_prs_repo_stays_its_agent() {
+    let switched = clone_on("acme/shop", "main-work");
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .claude_in("t5", switched.path().to_str().unwrap())
+            .with_terminal("t5", Some(PR_9), AgentStatus::Idle),
+    );
+
+    assert_eq!(
+        agents(&fake).lookup(&pr(PR_9)),
+        TourAgentState::Agent {
+            terminal: TerminalId::new("t5"),
+            status: AgentStatus::Idle
+        }
+    );
+}

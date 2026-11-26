@@ -213,6 +213,7 @@ fn classify(error: &HostError) -> ThreadActionResult {
         HostError::ThreadNotCreated(_)
         | HostError::NotAnswering(..)
         | HostError::NotOffered(_)
+        | HostError::Refused(_)
         | HostError::Other(_) => ThreadActionResult::Failed(format!("{error:#}")),
     }
 }

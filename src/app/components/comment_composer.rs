@@ -21,6 +21,7 @@ use super::finding_view::finding_chips;
 use super::icon::Icon;
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in};
 use super::palette::{Colors, Tone};
+use super::selectable_text::SelectableText;
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 use super::tooltip::tooltip;
@@ -217,6 +218,7 @@ impl RenderOnce for CommentComposer {
                 &self.draft.body,
                 Lines::Multi,
             )
+            .label("Comment")
             .on_edit(move |body, window, cx| on_type(body, window, cx))
             .on_submit(move |window, cx| {
                 if submits {
@@ -252,6 +254,7 @@ impl RenderOnce for CommentComposer {
                             "Ask agent now: posts the comment at once".into()
                         }))
                     })
+                    .aria_label(label)
                     .on_click(move |_, window, cx| on_click(window, cx))
             });
             div()
@@ -305,7 +308,10 @@ impl RenderOnce for CommentComposer {
                 div()
                     .text_sm()
                     .text_color(colors.danger)
-                    .child(shown(problem))
+                    .child(SelectableText::new(
+                        format!("composer-problem-{problem}"),
+                        shown(problem).to_string(),
+                    ))
             }))
             .children((self.state == BoxState::Sending).then(|| {
                 div()
@@ -369,10 +375,18 @@ impl RenderOnce for QueuedCommentNote {
                 )
             }))
             .child(self.queued.draft.body.clone())
-            .child(div().text_xs().text_color(colors.warning).child(format!(
-                "Not sent yet, will be tried again: {}",
-                self.queued.failed_because
-            )))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.warning)
+                    .child(SelectableText::new(
+                        format!("queued-failure-{}", self.queued.failed_because),
+                        format!(
+                            "Not sent yet, will be tried again: {}",
+                            self.queued.failed_because
+                        ),
+                    )),
+            )
             .child(
                 div().flex().ml(px(-8.)).child(
                     icon_label_button(

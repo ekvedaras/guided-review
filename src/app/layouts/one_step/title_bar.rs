@@ -69,6 +69,7 @@ impl OneStepLayout {
         ))
         .child("Jump")
         .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump, cx))
+        .aria_label("Jump to a step or action")
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::ToggleJump, window, cx)));
         let open_on_host = host.map(|host| {
             button(
@@ -90,6 +91,7 @@ impl OneStepLayout {
                 Command::OpenOnHost,
                 cx,
             ))
+            .aria_label(format!("Open on {}", host.name()))
             .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnHost, window, cx)))
         });
         let open_pr = review.can_open_pr().then(|| {
@@ -110,6 +112,7 @@ impl OneStepLayout {
             .tooltip(tooltip(|_| {
                 "Ask your agent to open the PR: it types `pr it`".into()
             }))
+            .aria_label("Open PR")
             .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenPr, window, cx)))
         });
         let mut switch_pr = div().id("title-bar-switch-pr");
@@ -134,6 +137,12 @@ impl OneStepLayout {
                 }
                 .into()
             }))
+            .role(gpui::Role::Button)
+            .aria_label(if is_local {
+                "Switch review"
+            } else {
+                "Switch pull request"
+            })
             .on_click(
                 cx.listener(|this, _, window, cx| this.act(Intent::TogglePrSwitcher, window, cx)),
             )
@@ -331,6 +340,11 @@ impl OneStepLayout {
         .when(several, |button| {
             button.tooltip(tooltip(move |_| tip.clone()))
         })
+        .aria_label(if several {
+            "Related issues"
+        } else {
+            "Open related issue"
+        })
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenIssue, window, cx)));
         let card = match (&*issues, self.issue_hover.shown()) {
             ([only], Some(0)) => Some(popover(self.issue_card_element(
@@ -460,6 +474,8 @@ impl OneStepLayout {
                     }
                     cx.notify();
                 }))
+                .role(gpui::Role::Button)
+                .aria_label(format!("Open issue {title}"))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.act(Intent::OpenIssueAt(place), window, cx);
                 }))
@@ -579,6 +595,7 @@ impl OneStepLayout {
                 Command::ToggleDraft,
                 cx,
             ))
+            .aria_label(format!("{} pull request, toggle draft", status.label()))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.act(Intent::ToggleDraft, window, cx);
             }))
@@ -624,6 +641,8 @@ impl OneStepLayout {
                 .rounded(px(INNER_RADIUS))
                 .cursor_pointer()
                 .hover(|row| row.bg(colors.hover))
+                .role(gpui::Role::Button)
+                .aria_label(format!("Open check {} ({state})", check.name))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.act(Intent::OpenCheck(place), window, cx);
                 }))
@@ -648,6 +667,8 @@ impl OneStepLayout {
                 .cursor_pointer()
                 .text_color(colors.muted_text)
                 .hover(|row| row.bg(colors.hover).text_color(colors.text))
+                .role(gpui::Role::Button)
+                .aria_label("Show more checks")
                 .on_click({
                     let past_the_list = list.shown.len();
                     cx.listener(move |this, _, window, cx| {

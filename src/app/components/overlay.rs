@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnimationElement, Bounds, Context, Deferred, Div, ElementId, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Point, Stateful, StatefulInteractiveElement, Styled, anchored, deferred,
-    div, point, px,
+    ParentElement, Pixels, Point, Role, Stateful, StatefulInteractiveElement, Styled, anchored,
+    deferred, div, point, px,
 };
 
 use crate::viewer::{Closing, Motion, Presence, Shown};
@@ -262,6 +262,7 @@ pub fn picker_row_at(
 ) -> Stateful<Div> {
     div()
         .id(id)
+        .role(Role::Button)
         .mx_2()
         .px_2()
         .flex()

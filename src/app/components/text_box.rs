@@ -5,9 +5,9 @@ use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, FocusHandle, GlobalElementId, InspectorElementId,
     InteractiveElement, IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, ParentElement, Pixels, Point, RenderOnce, SharedString, Style, Styled,
-    TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, WrappedLine, actions, div, fill,
-    point, px, relative, size,
+    MouseMoveEvent, ParentElement, Pixels, Point, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement, Style, Styled, TextAlign, TextRun, UTF16Selection, UnderlineStyle,
+    Window, WrappedLine, actions, div, fill, point, px, relative, size,
 };
 
 use crate::platform::{Os, TextEdit};
@@ -184,6 +184,7 @@ pub struct TextBox {
     focus: FocusHandle,
     text: String,
     lines: Lines,
+    label: SharedString,
     on_edit: Option<OnText>,
     on_submit: Option<OnKey>,
     on_submit_to_agent: Option<OnKey>,
@@ -201,6 +202,7 @@ impl TextBox {
             focus: focus.clone(),
             text: text.to_owned(),
             lines,
+            label: SharedString::from("Text"),
             on_edit: None,
             on_submit: None,
             on_submit_to_agent: None,
@@ -209,6 +211,12 @@ impl TextBox {
             on_suggest_change: None,
             on_cancel: None,
         }
+    }
+
+    /// What assistive technology calls the box.
+    pub fn label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = label.into();
+        self
     }
 
     pub fn on_edit(mut self, on_edit: impl Fn(String, &mut Window, &mut App) + 'static) -> Self {
@@ -288,8 +296,15 @@ impl RenderOnce for TextBox {
             Lines::Single => KEY_CONTEXT.to_owned(),
             Lines::Multi => format!("{KEY_CONTEXT} {MULTI_LINE}"),
         };
+        let role = match self.lines {
+            Lines::Single => Role::TextInput,
+            Lines::Multi => Role::MultilineTextInput,
+        };
         div()
             .id(self.id)
+            .role(role)
+            .aria_label(self.label)
+            .aria_value(self.text.clone())
             .key_context(key_context.as_str())
             .track_focus(&self.focus)
             .cursor(CursorStyle::IBeam)

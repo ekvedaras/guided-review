@@ -30,6 +30,7 @@ use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::{OVERLAY, PANEL_SLIDE, along, busy_dot, panel_level};
 use super::overlay::{close_presence, input_blocker};
 use super::palette::{CARD_RADIUS, Colors, TEXT_FONT};
+use super::selectable_text::SelectableText;
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 
@@ -351,6 +352,7 @@ impl AskPanel {
             &self.question,
             Lines::Single,
         )
+        .label("Question for the agent")
         .on_edit(move |question, _, cx| {
             on_edit.update(cx, |this, cx| {
                 this.question = question;
@@ -410,7 +412,10 @@ impl AskPanel {
             );
         }
         if let Some(failure) = &ask.failure {
-            block = block.child(div().text_color(colors.danger).child(failure.clone()));
+            block = block.child(div().text_color(colors.danger).child(SelectableText::new(
+                format!("ask-failure-{failure}"),
+                failure.clone(),
+            )));
         }
         if desk.code_changed_since(id) {
             block = block.child(

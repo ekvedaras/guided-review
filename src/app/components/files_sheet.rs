@@ -207,6 +207,7 @@ impl FilesSheet {
                             &self.query,
                             Lines::Single,
                         )
+                        .label("Search changed files")
                         .on_edit(move |query, _, cx| {
                             on_edit.update(cx, |this, cx| {
                                 this.list.set_query(&query);
@@ -259,6 +260,11 @@ impl FilesSheet {
             .py_1()
             .gap_2()
             .pl(px(8. + INDENT * row.depth as f32))
+            .aria_label(match &row.kind {
+                FilesListRowKind::Folder { label, .. } | FilesListRowKind::File { label, .. } => {
+                    label.clone()
+                }
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.list.put_cursor_on(position);
                 this.list.toggle_fold_under_cursor();
@@ -383,6 +389,8 @@ impl FilesSheet {
             .cursor_pointer()
             .hover(|row| row.bg(colors.hover))
             .when(place.is_current, |row| row.bg(colors.current))
+            .role(gpui::Role::Button)
+            .aria_label(place.heading.clone())
             .on_click(cx.listener(move |this, _, window, cx| this.go(nth, window, cx)))
             .child(read_mark(colors, place.is_read))
             .child(

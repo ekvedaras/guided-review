@@ -192,6 +192,8 @@ impl RenderOnce for DiagramView {
             });
             return frame
                 .cursor_pointer()
+                .role(gpui::Role::Button)
+                .aria_label("Zoom diagram")
                 .on_click(move |_, window, cx| zoom_diagram(zoomed.clone(), window, cx))
                 .child(div().flex().flex_col().children(strips));
         }

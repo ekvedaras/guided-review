@@ -55,7 +55,7 @@ pub enum Problem {
     SwitchFailed(String),
     /// Show agent was clicked and the terminal did not come up.
     ShowAgentFailed(String),
-    /// Use this agent was clicked and the terminal could not be made the change set's agent.
+    /// An agent was picked and the terminal could not be made the change set's agent.
     UseAgentFailed(String),
     /// The host refused to put the 👀 on the PR or take it off, so its author may read the wrong thing.
     ReviewingMarkNotChanged(String),
@@ -113,7 +113,7 @@ pub enum ProblemKind {
     SwitchFailed,
     /// Cleared by the next Show agent that brings the terminal up.
     ShowAgentFailed,
-    /// Cleared by the next Use this agent that goes through.
+    /// Cleared by the next pick of an agent that goes through.
     UseAgentFailed,
     /// Cleared by the next change of the 👀 on the PR that goes through.
     ReviewingMarkNotChanged,

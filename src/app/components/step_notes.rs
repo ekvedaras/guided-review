@@ -40,7 +40,11 @@ impl RenderOnce for StepNotesCard {
                         .child(sized_icon(Icon::ListChecks, colors.accent, px(14.)))
                         .child(note_label("WHAT TO CHECK")),
                 )
-                .child(InlineMarkdown::new("step-check", &check).on(Tone::Accent))
+                .child(
+                    InlineMarkdown::new("step-check", &check)
+                        .on(Tone::Accent)
+                        .selectable(),
+                )
         });
         let tldr = (!notes.tldr.is_empty()).then(|| {
             div()
@@ -54,12 +58,9 @@ impl RenderOnce for StepNotesCard {
                         .items_start()
                         .gap_3()
                         .child(bullet(&colors, TLDR_LINE))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(InlineMarkdown::new(format!("step-tldr-{index}"), &line)),
-                        )
+                        .child(div().flex_1().min_w_0().child(
+                            InlineMarkdown::new(format!("step-tldr-{index}"), &line).selectable(),
+                        ))
                 }))
         });
         div()

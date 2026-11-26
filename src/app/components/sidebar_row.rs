@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
-    SharedString, Stateful, StatefulInteractiveElement, Styled, div, phi, px,
+    Role, SharedString, Stateful, StatefulInteractiveElement, Styled, div, phi, px,
 };
 
 use super::chip::chip;
@@ -48,6 +48,7 @@ pub fn sidebar_row(
     let is_current = place == RowPlace::Current;
     div()
         .id(id)
+        .role(Role::Button)
         .relative()
         .line_height(px(LINE_HEIGHT))
         .mx_2()

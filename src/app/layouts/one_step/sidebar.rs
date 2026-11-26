@@ -17,6 +17,7 @@ use crate::app::components::markdown_view::InlineMarkdown;
 use crate::app::components::motion::{glide_to_share, turn_to};
 use crate::app::components::palette::{Colors, SIDEBAR_WIDTH, Tone, TrailStage};
 use crate::app::components::safety_net_view::SafetyNetIntro;
+use crate::app::components::selectable_text::SelectableText;
 use crate::app::components::sidebar_row::{
     RowMark, RowPlace, check_flag, count_badge, finding_badge, row_label, row_note, row_places,
     sidebar_row, skim_chip,
@@ -74,12 +75,9 @@ impl OneStepLayout {
             })),
         });
         let failure = match repin_progress {
-            JobProgress::Failed(reason) => Some(
-                div()
-                    .text_xs()
-                    .text_color(colors.danger)
-                    .child(SharedString::from(reason.to_string())),
-            ),
+            JobProgress::Failed(reason) => Some(div().text_xs().text_color(colors.danger).child(
+                SelectableText::new("sidebar-repin-failure", reason.to_string()),
+            )),
             JobProgress::Idle | JobProgress::Running { .. } => None,
         };
         div()
@@ -169,7 +167,10 @@ impl OneStepLayout {
                 div()
                     .text_xs()
                     .text_color(colors.danger)
-                    .child(format!("Not cloned: {reason}")),
+                    .child(SelectableText::new(
+                        "sidebar-clone-failure",
+                        format!("Not cloned: {reason}"),
+                    )),
             ),
             CloneOfferState::Offered | CloneOfferState::Cloning => None,
         };
@@ -334,6 +335,7 @@ impl OneStepLayout {
                 summary_place,
                 cx,
             )
+            .aria_label("Summary")
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| {
                     if is_basic {
@@ -376,6 +378,7 @@ impl OneStepLayout {
                                 cx,
                             )
                             .text_color(colors.muted_text)
+                            .aria_label(format!("Fold or unfold folder {path}"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.change_review(cx, |review| review.toggle_folder(&folder));
                             }))
@@ -419,6 +422,7 @@ impl OneStepLayout {
                                 place,
                                 cx,
                             )
+                            .aria_label(format!("Open file {path}"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.change_review(cx, |review| review.go_to_file(&file));
                             }))
@@ -471,6 +475,7 @@ impl OneStepLayout {
                 .when(step.is_skim && !step.is_current, |row| {
                     row.text_color(colors.muted_text)
                 })
+                .aria_label(format!("Go to step {id}"))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.change_review(cx, |review| review.go_to(&id));
                 }))
@@ -497,6 +502,7 @@ impl OneStepLayout {
                 safety_net_place,
                 cx,
             )
+            .aria_label("Safety net")
             .on_click(cx.listener(|this, _, _, cx| {
                 this.change_review(cx, |review| review.go_to_safety_net());
             }))
@@ -602,6 +608,7 @@ impl OneStepLayout {
             Command::Shortcuts,
             cx,
         ))
+        .aria_label("Keyboard shortcuts")
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::ToggleShortcuts, window, cx);
         }));
@@ -632,6 +639,7 @@ impl OneStepLayout {
                     Command::Settings,
                     cx,
                 ))
+                .aria_label("Settings")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.act(Intent::ToggleSettings, window, cx);
                 })),

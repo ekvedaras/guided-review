@@ -2,7 +2,7 @@ use gpui::Image;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Div, FontStyle, FontWeight, HighlightStyle, InteractiveElement,
-    InteractiveText, IntoElement, MouseButton, ParentElement, RenderOnce, SharedString,
+    InteractiveText, IntoElement, ParentElement, RenderOnce, SharedString,
     StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextLayout, UnderlineStyle,
     Window, canvas, div, fill, img, point, px,
 };
@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use crate::app::active_session::{details_are_open, toggle_details};
 use crate::app::code_links::open_link;
-use crate::app::code_selection::TextSpot;
 use crate::app::prose_selection::ProseSelections;
 use crate::image_facts::{PixelSize, is_svg_path};
 use crate::viewer::{
@@ -24,11 +23,12 @@ use crate::viewer::{
 };
 
 use super::diagram::{DiagramSet, DiagramView};
-use super::diff_view::{byte_at, with_selection};
+use super::diff_view::with_selection;
 use super::icon::{Icon, sized_icon};
 use super::motion::turn_to;
 use super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, INNER_RADIUS, Tone, inside_edge};
 use super::picture_zoom::{ZoomedPicture, zoom_picture};
+use super::selectable_text::selectable_text;
 use super::svg_picture;
 
 /// The mark before an item of a list without numbers: a small dot, centred on the item's first line.
@@ -684,6 +684,8 @@ fn block_element(
                 .self_start()
                 .max_w_full()
                 .cursor_pointer()
+                .role(gpui::Role::Button)
+                .aria_label("Zoom picture")
                 .on_click(move |_, window, cx| {
                     if let Some(zoomed) = &zoomed {
                         zoom_picture(zoomed.clone(), on_page.get(), window, cx);
@@ -809,6 +811,9 @@ fn details(
         .flex()
         .gap_2()
         .cursor_pointer()
+        .role(gpui::Role::Button)
+        .aria_label("Show or hide details")
+        .aria_expanded(open)
         .on_click(move |_, _, cx| {
             toggle_details(&toggled_key, cx);
         })
@@ -911,6 +916,7 @@ pub struct InlineMarkdown {
     key: SharedString,
     text: Rc<InlineText>,
     ground: Tone,
+    selectable: bool,
 }
 
 impl InlineMarkdown {
@@ -919,7 +925,19 @@ impl InlineMarkdown {
             key: key.into(),
             text: parsed_inline(source),
             ground: Tone::Neutral,
+            selectable: false,
         }
+    }
+
+    /// The reader can drag over it and copy it, as a body of its own under its key. Not for text
+    /// in a row that acts on a click, where a press must not start a selection.
+    pub const fn selectable(self) -> Self {
+        self.when_selectable(true)
+    }
+
+    pub const fn when_selectable(mut self, selectable: bool) -> Self {
+        self.selectable = selectable;
+        self
     }
 
     /// Drawn on a callout of `tone`, so its inline code takes that tone's ground.
@@ -931,11 +949,14 @@ impl InlineMarkdown {
 
 impl RenderOnce for InlineMarkdown {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        if self.selectable {
+            ProseSelections::body_drawn(&self.key, cx);
+        }
         styled_text(
             &Colors::active(cx),
             &self.text,
             &self.key,
-            None,
+            self.selectable.then_some(&self.key),
             self.ground,
             cx,
         )
@@ -1137,51 +1158,6 @@ fn styled_text(
             .into_any_element(),
         None => text,
     }
-}
-
-fn selectable_text(
-    text: AnyElement,
-    row: Option<(SharedString, usize)>,
-    layout: TextLayout,
-) -> AnyElement {
-    let Some((body, row)) = row else {
-        return text;
-    };
-    let (press_body, move_body) = (body.clone(), body);
-    let (press_layout, move_layout) = (layout.clone(), layout);
-    div()
-        .cursor_text()
-        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
-            let at = TextSpot {
-                row,
-                byte: byte_at(&press_layout, event.position),
-            };
-            match event.click_count {
-                2 => ProseSelections::press_twice(&press_body, at, cx),
-                _ => ProseSelections::press(press_body.clone(), at, cx),
-            }
-            window.refresh();
-        })
-        .on_mouse_move(move |event, window, cx| {
-            if event.pressed_button == Some(MouseButton::Left) {
-                let at = TextSpot {
-                    row,
-                    byte: byte_at(&move_layout, event.position),
-                };
-                ProseSelections::drag_over(&move_body, at, cx);
-                window.refresh();
-            }
-        })
-        .on_mouse_up(MouseButton::Left, |_, window, cx| {
-            ProseSelections::end_drag(cx);
-            window.refresh();
-        })
-        .on_mouse_up_out(MouseButton::Left, |_, window, cx| {
-            ProseSelections::end_drag(cx);
-            window.refresh();
-        })
-        .child(text)
-        .into_any_element()
 }
 
 fn styled_links(styled: StyledText, inline: &Rc<InlineText>, key: &str) -> AnyElement {

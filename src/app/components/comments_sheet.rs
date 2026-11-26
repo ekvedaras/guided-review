@@ -208,6 +208,7 @@ impl CommentsSheet {
             .mt_2()
             .py_2()
             .gap_2()
+            .aria_label("Show or hide resolved comments")
             .on_click(cx.listener(|this, _, _, cx| {
                 this.list.toggle_resolved_shown();
                 cx.notify();
@@ -262,6 +263,7 @@ impl CommentsSheet {
         )
         .flex_none()
         .py_2()
+        .aria_label(row.first_line.clone())
         .on_click(cx.listener(move |this, _, window, cx| {
             this.open_thread(id.clone(), window, cx);
         }))

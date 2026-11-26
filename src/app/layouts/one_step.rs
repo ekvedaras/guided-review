@@ -18,6 +18,7 @@ use crate::app::code_links::{
     open_code, open_code_hint, open_code_icon, open_code_label, open_link, use_code_opener,
 };
 use crate::app::code_selection::{CodeSelection, TextSpot};
+use crate::app::components::agent_picker::AgentPicker;
 use crate::app::components::ask_panel::{AskPanel, HandToAgent, UseAsComment, ask_button};
 use crate::app::components::button::{ButtonKind, ButtonSize, button_keys, icon_label_button};
 use crate::app::components::chip::{dropping_in, notice_band};
@@ -74,6 +75,7 @@ use crate::viewer::{FixReply, IssueDetails, NameHover, StationKind, WhyReply};
 use issue_card::IssueHover;
 use name_card_hover::NameCardPlace;
 
+mod agent_picker;
 mod comments;
 mod comments_list;
 mod files_list;
@@ -196,6 +198,7 @@ pub struct OneStepLayout {
     findings: Entity<FindingsSheet>,
     comments_list: Entity<CommentsSheet>,
     files_list: Entity<FilesSheet>,
+    agent_picker: Entity<AgentPicker>,
     picture_zoom: Entity<PictureZoom>,
     settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
@@ -311,6 +314,11 @@ impl OneStepLayout {
         let files_list = cx.new(|cx| FilesSheet::new(focus.clone(), cx));
         cx.subscribe_in(&files_list, window, |this, _, event, _, cx| {
             this.files_list_asked(event, cx);
+        })
+        .detach();
+        let agent_picker = cx.new(|cx| AgentPicker::new(focus.clone(), cx));
+        cx.subscribe_in(&agent_picker, window, |this, _, event, _, cx| {
+            this.agent_picker_asked(event, cx);
         })
         .detach();
         let picture_zoom = cx.new(|cx| PictureZoom::new(focus.clone(), cx));
@@ -439,6 +447,7 @@ impl OneStepLayout {
             findings,
             comments_list,
             files_list,
+            agent_picker,
             picture_zoom,
             settings,
             loading,
@@ -1617,6 +1626,7 @@ impl Render for OneStepLayout {
             .child(self.findings.clone())
             .child(self.comments_list.clone())
             .child(self.files_list.clone())
+            .child(self.agent_picker.clone())
             .child(self.picture_zoom.clone())
             .children(name_card)
             .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))

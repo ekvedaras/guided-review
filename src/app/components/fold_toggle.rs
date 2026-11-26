@@ -55,6 +55,7 @@ impl RenderOnce for FoldToggle {
         };
         let chevron = sized_icon(Icon::ChevronRight, colors.muted_text, px(12.));
         button(&colors, "fold-toggle", kind, ButtonSize::Small)
+            .aria_label(label.clone())
             .on_click(self.on_toggle)
             .child(turn_to(chevron, "fold-chevron", !self.folded, 1.))
             .child(label)

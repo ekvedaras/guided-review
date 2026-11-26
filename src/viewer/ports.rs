@@ -297,6 +297,10 @@ pub enum HostError {
     /// A server error, a timeout or no connection: the host as a whole is not answering.
     #[error("{host} is not answering ({cause})", host = .0.name(), cause = .1)]
     NotAnswering(HostSite, OutageCause),
+    /// The host understood the change and will not make it as the PR stands, for example a merge
+    /// that a required check still blocks (GitHub: an `UNPROCESSABLE` error). Its own words.
+    #[error("{0}")]
+    Refused(String),
     /// Built from an `anyhow::Error` by `From`, which tells an outage from the rest.
     #[error(transparent)]
     Other(anyhow::Error),

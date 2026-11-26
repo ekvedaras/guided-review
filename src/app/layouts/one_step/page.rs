@@ -85,7 +85,7 @@ impl OneStepLayout {
                     div()
                         .text_2xl()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(InlineMarkdown::new("summary-title", &title)),
+                        .child(InlineMarkdown::new("summary-title", &title).selectable()),
                 )
                 .into_any_element(),
             PageRow::SummaryStats(stats) => summary_stats(&colors, &stats).into_any_element(),
@@ -133,10 +133,12 @@ impl OneStepLayout {
                 .gap_3()
                 .max_w(READING_WIDTH)
                 .child(bullet(&colors, SUMMARY_LINE))
-                .child(div().flex_1().child(InlineMarkdown::new(
-                    format!("summary-bullet-{index}"),
-                    &summary_bullet,
-                )))
+                .child(
+                    div().flex_1().child(
+                        InlineMarkdown::new(format!("summary-bullet-{index}"), &summary_bullet)
+                            .selectable(),
+                    ),
+                )
                 .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepIntro(intro) => self.step_intro(&intro, index, cx).into_any_element(),
@@ -436,6 +438,8 @@ impl OneStepLayout {
                 .gap_3()
                 .cursor_pointer()
                 .hover(|row| row.bg(colors.hover))
+                .role(gpui::Role::Button)
+                .aria_label(format!("Open file {}", file.path))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.change_review(cx, |review| review.go_to_file(&path));
                 }))
@@ -516,12 +520,9 @@ impl OneStepLayout {
                     .items_start()
                     .gap_2()
                     .child(tour_place(&colors, "OVERVIEW", TourStop::On))
-                    .child(
-                        div()
-                            .text_2xl()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(InlineMarkdown::new("overview-title", &overview.title)),
-                    ),
+                    .child(div().text_2xl().font_weight(FontWeight::SEMIBOLD).child(
+                        InlineMarkdown::new("overview-title", &overview.title).selectable(),
+                    )),
             )
             .child(overview_stats(&colors, overview.stats))
             .children(description)
@@ -604,6 +605,7 @@ impl OneStepLayout {
                 control.is_showing_full_diff,
                 ButtonSize::Small,
             )
+            .aria_label("Full diff, not only the change since your read")
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| review.toggle_full_diff_of(&subject));
             }))
@@ -803,6 +805,9 @@ impl OneStepLayout {
                 !fold.is_folded,
                 1.,
             ))
+            .role(gpui::Role::Button)
+            .aria_label(format!("Fold {}", fold.path))
+            .aria_expanded(!fold.is_folded)
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| {
                     review.toggle_box_fold(&fold.screen, &fold.path);
@@ -831,11 +836,16 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
         .id("step-title")
         .text_2xl()
         .font_weight(FontWeight::SEMIBOLD)
-        .child(InlineMarkdown::new("step-title", &heading.title));
+        .child(
+            InlineMarkdown::new("step-title", &heading.title)
+                .when_selectable(!heading.folds_on_title_click),
+        );
     let title = if heading.folds_on_title_click {
         let id = heading.id.clone();
         title
             .cursor_pointer()
+            .role(gpui::Role::Button)
+            .aria_label("Fold or unfold this step")
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| review.toggle_fold(&id));
             }))
@@ -955,6 +965,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             ButtonKind::Ghost,
             ButtonSize::Regular,
         )
+        .aria_label("Previous")
         .on_click(cx.listener(|this, _, _, cx| {
             this.change_review(cx, |review| review.go_back());
         }))
@@ -1015,6 +1026,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             ButtonKind::Primary,
             ButtonSize::Large,
         )
+        .aria_label(label)
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::MarkReadAndGoOn, window, cx);
         }))
@@ -1342,6 +1354,8 @@ fn route_stop(stop: &RouteStopRow, cx: &mut Context<OneStepLayout>) -> impl Into
         .cursor_pointer()
         .hover(|row| row.bg(colors.hover))
         .active(|row| row.bg(colors.pressed))
+        .role(gpui::Role::Button)
+        .aria_label(format!("Go to step {}: {}", stop.number, stop.title))
         .on_click(cx.listener(move |this, _, _, cx| {
             let id = id.clone();
             this.change_review(cx, move |review| review.go_to(&id));
@@ -1496,6 +1510,7 @@ fn lead_button(
             .flex_shrink(1.)
             .min_w_0()
             .max_w(px(460.))
+            .aria_label("Continue at the next unread step")
             .on_click(cx.listener(move |this, _, _, cx| {
                 let place = place.clone();
                 this.change_review(cx, move |review| match &place {
@@ -1647,6 +1662,11 @@ fn toolbar_toggle(
         ButtonKind::Joined
     };
     icon_label_button(colors, id, kind, ButtonSize::Small, icon, label)
+        .aria_toggled(if is_on {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
         .child(button_keys(colors, kind, command, cx))
         .when(is_on, |toggle| {
             toggle.child(sized_icon(Icon::Check, colors.accent, px(12.)))
@@ -1667,6 +1687,13 @@ pub(super) fn tick_button(
     };
     button(&colors, "tick", kind, size)
         .gap_0()
+        .role(gpui::Role::CheckBox)
+        .aria_label("Mark as read")
+        .aria_toggled(if is_ticked {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
         .on_click(cx.listener(move |this, _, _, cx| this.toggle_tick(&id, cx)))
         .child(grow_when_shown(
             sized_icon(Icon::Check, colors.success, px(14.)),
@@ -1727,6 +1754,7 @@ fn notes_button(
         ))
     };
     let add = small(ButtonKind::Ghost, Icon::FilePlus)
+        .aria_label(labels.tooltip)
         .tooltip(tooltip(move |_| labels.tooltip.into()))
         .on_click(move |_, _, cx| {
             session.update(cx, |session, cx| session.add_to_notes(&subject, cx));

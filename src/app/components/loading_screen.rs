@@ -8,6 +8,7 @@ use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::icon::Icon;
 use super::motion::{OVERLAY, busy_dot, busy_sweep, fade_in};
 use super::palette::{CARD_RADIUS, CODE_FONT, Colors, SIDEBAR_WIDTH, TEXT_FONT};
+use super::selectable_text::SelectableText;
 use super::title_bar::TITLE_BAR_HEIGHT;
 use crate::app::tour_writer;
 use crate::review_subject::ReviewSubject;
@@ -116,65 +117,70 @@ impl Render for LoadingScreen {
             .when(is_busy, |status| {
                 status.child(busy_dot(&colors, "loading-dot"))
             })
-            .child(shown.status.clone());
-        let page = div()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .pt(px(80.))
-            .px_6()
-            .gap_4()
-            .bg(colors.background)
-            .font_family(*TEXT_FONT)
-            .text_color(colors.text)
-            .child(
-                div()
-                    .text_2xl()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(shown.title.clone()),
-            )
-            .child(status)
-            .child(div().w(px(320.)).when(is_busy, |track| {
-                track.child(busy_sweep(&colors, "loading-sweep"))
-            }))
-            .children(shown.failure.clone().map(|failure| {
-                div()
-                    .w_full()
-                    .max_w(px(860.))
-                    .px_4()
-                    .py_2()
-                    .rounded(px(CARD_RADIUS))
-                    .border_1()
-                    .border_color(colors.warning_border)
-                    .text_sm()
-                    .bg(colors.warning_background)
-                    .text_color(colors.warning)
-                    .child(failure)
-            }))
-            .child(
-                div()
-                    .id("loading-screen-lines")
-                    .w_full()
-                    .max_w(px(860.))
-                    .h(px(360.))
-                    .overflow_y_scroll()
-                    .p_3()
-                    .rounded(px(CARD_RADIUS))
-                    .bg(colors.surface)
-                    .font_family(*CODE_FONT)
-                    .text_xs()
-                    .text_color(colors.muted_text)
-                    .children(
-                        shown
-                            .lines
-                            .iter()
-                            .map(|line| div().whitespace_nowrap().child(line.clone())),
-                    ),
-            )
-            .child(actions);
+            .child(SelectableText::new(
+                "loading-status",
+                shown.status.to_string(),
+            ));
+        let page =
+            div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .pt(px(80.))
+                .px_6()
+                .gap_4()
+                .bg(colors.background)
+                .font_family(*TEXT_FONT)
+                .text_color(colors.text)
+                .child(div().text_2xl().font_weight(FontWeight::SEMIBOLD).child(
+                    SelectableText::new("loading-title", shown.title.to_string()),
+                ))
+                .child(status)
+                .child(div().w(px(320.)).when(is_busy, |track| {
+                    track.child(busy_sweep(&colors, "loading-sweep"))
+                }))
+                .children(shown.failure.clone().map(|failure| {
+                    div()
+                        .w_full()
+                        .max_w(px(860.))
+                        .px_4()
+                        .py_2()
+                        .rounded(px(CARD_RADIUS))
+                        .border_1()
+                        .border_color(colors.warning_border)
+                        .text_sm()
+                        .bg(colors.warning_background)
+                        .text_color(colors.warning)
+                        .child(SelectableText::new("loading-failure", failure.to_string()))
+                }))
+                .child(
+                    div()
+                        .id("loading-screen-lines")
+                        .w_full()
+                        .max_w(px(860.))
+                        .h(px(360.))
+                        .overflow_y_scroll()
+                        .p_3()
+                        .rounded(px(CARD_RADIUS))
+                        .bg(colors.surface)
+                        .font_family(*CODE_FONT)
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .whitespace_nowrap()
+                        .child(SelectableText::new(
+                            "loading-lines",
+                            shown
+                                .lines
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        )),
+                )
+                .child(actions);
         let screen = div()
             .absolute()
             .top(px(TITLE_BAR_HEIGHT))

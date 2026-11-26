@@ -18,6 +18,9 @@ pub struct ProseSelections {
 impl Global for ProseSelections {}
 
 impl ProseSelections {
+    /// A window root other than the review's that copies a prose selection with the copy key.
+    pub const KEY_CONTEXT: &str = "CopiesProse";
+
     pub fn install(cx: &mut App) {
         cx.set_global(Self::default());
     }

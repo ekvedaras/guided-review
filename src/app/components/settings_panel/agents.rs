@@ -211,6 +211,7 @@ impl SettingsPanel {
                     ButtonSize::Small,
                 )
                 .child(label.clone())
+                .aria_label(label.clone())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let picked = picked.clone();
                     this.edit(cx, |editing| {

@@ -1964,6 +1964,29 @@ impl ReviewSession {
         ));
     }
 
+    pub fn tour_agents(&self) -> TourAgents {
+        self.tour_work.tour_agents.clone()
+    }
+
+    /// Brings a terminal the agent picker lists to the front; a failure says why in a toast.
+    pub fn show_terminal(&mut self, terminal: TerminalId, cx: &mut Context<Self>) {
+        let agents = self.tour_work.tour_agents.clone();
+        self.run_off_thread(
+            cx,
+            move || agents.show_terminal(&terminal),
+            |_, shown, cx| {
+                if let Err(error) = shown {
+                    post_toast(
+                        cx,
+                        ToastTone::Danger,
+                        format!("Could not show the terminal: {error:#}"),
+                    );
+                }
+            },
+        )
+        .detach();
+    }
+
     pub fn show_tour_agent(&mut self, cx: &mut Context<Self>) {
         let agents = self.tour_work.tour_agents.clone();
         let subject = self.review.subject().clone();

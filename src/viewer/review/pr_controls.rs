@@ -121,12 +121,16 @@ impl ReviewCore {
         }
     }
 
-    /// A change the host took is read back, so the title bar shows what the host shows, checks and all.
+    /// A change the host took is read back, so the title bar shows what the host shows, checks and
+    /// all. One sent in place of a refused change goes next.
     fn pr_change_landed(&mut self, kind: ProblemKind, landed: Result<(), Problem>) {
         match landed {
             Ok(()) => {
                 self.clear_problem(kind);
                 self.work.want(WorkKind::PullPrStatus);
+                if self.merging_to_send().is_some() {
+                    self.work.want(WorkKind::ChangeMerging);
+                }
             }
             Err(problem) => self.raise_problem(problem),
         }

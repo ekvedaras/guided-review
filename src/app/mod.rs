@@ -59,6 +59,7 @@ use crate::viewer::{
     TourAgentPort, TourAgents, WriteDecision,
 };
 use crate::viewer::{FixReply, WhyReply};
+use components::agent_picker::AgentPicker;
 use components::ask_panel::AskPanel;
 use components::comment_composer::CommentComposer;
 use components::comments_sheet::CommentsSheet;
@@ -1086,8 +1087,9 @@ pub fn apply_keymap(keymap: Keymap, cx: &mut App) {
 /// Every shortcut comes from the keymap the shortcuts sheet lists.
 fn bind_keys(keymap: &Keymap, cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
+        AgentPicker::KEY_CONTEXT,
         AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
         PrSwitcherView::KEY_CONTEXT,
@@ -1107,8 +1109,9 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
             KeyScope::Window => Some(OneStepLayout::KEY_CONTEXT.to_owned()),
             KeyScope::TextBox => Some(text_box::TYPING_CONTEXT.to_owned()),
             KeyScope::NotTyping => Some(format!(
-                "{} && !{}",
+                "({} || {}) && !{}",
                 OneStepLayout::KEY_CONTEXT,
+                prose_selection::ProseSelections::KEY_CONTEXT,
                 text_box::TYPING_CONTEXT
             )),
         };
