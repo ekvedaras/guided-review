@@ -1,1 +1,1 @@
-Hover a Python or Go name to see its definitions and usages; Pyright answers Python once you allow language servers.
+Hover a Python or Go name for its definitions and usages; Pyright and gopls answer after you allow language servers.

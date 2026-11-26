@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::StatusReports;
+use super::{ServerEnvironment, StatusReports};
 use crate::navigation::MessageKind;
 
 pub(super) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -91,14 +91,13 @@ impl Connection {
         program: &PathBuf,
         args: &[String],
         folder: &std::path::Path,
+        environment: &ServerEnvironment,
         settings: Value,
         status: StatusReports,
         on_message: OnMessage,
     ) -> std::io::Result<Self> {
         let mut command = Command::new(program);
-        if let Some(path) = std::env::var_os("PATH") {
-            command.env("PATH", absolute_entries(&path));
-        }
+        environment.apply_to(&mut command);
         let mut child = command
             .args(args)
             .current_dir(folder)
@@ -232,6 +231,23 @@ impl Connection {
 impl Drop for Connection {
     fn drop(&mut self) {
         self.kill();
+    }
+}
+
+impl ServerEnvironment {
+    pub(super) fn apply_to(&self, command: &mut Command) {
+        match self {
+            Self::Inherited => {
+                if let Some(path) = std::env::var_os("PATH") {
+                    command.env("PATH", absolute_entries(&path));
+                }
+            }
+            Self::Only(variables) => {
+                command
+                    .env_clear()
+                    .envs(variables.iter().map(|(name, value)| (name, value)));
+            }
+        }
     }
 }
 

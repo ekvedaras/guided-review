@@ -998,7 +998,7 @@ fn a_python_name_asks_whether_pyright_may_answer() {
 }
 
 #[test]
-fn a_go_name_asks_no_question_since_no_server_answers_it() {
+fn a_go_name_asks_whether_gopls_may_answer() {
     let shop = Shop::with_changes(&[], |repo| {
         repo.write("src/basket.go", "package shop\n\ntype Basket struct{}\n");
     });
@@ -1011,8 +1011,10 @@ fn a_go_name_asks_no_question_since_no_server_answers_it() {
         &hover("src/basket.go", Side::Head, 3, "Basket"),
     ));
 
-    assert_eq!(question_of(&go), None);
-    assert_eq!(go.definitions.len(), 1, "the by-name lookup answered");
+    assert_eq!(
+        question_of(&go),
+        Some("Use language servers for acme/shop? gopls may build it".to_owned())
+    );
 }
 
 /// Answers with a definition in a file git does not hold, as rust-analyzer does for the standard library.

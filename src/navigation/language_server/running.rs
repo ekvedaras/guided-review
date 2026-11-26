@@ -60,6 +60,7 @@ impl Running {
             &launch.program,
             &launch.args,
             folder,
+            &launch.environment,
             launch.options.clone(),
             launch.status,
             on_message,

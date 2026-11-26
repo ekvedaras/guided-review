@@ -81,7 +81,7 @@ impl ServerCatalog for FakeCatalog {
         ];
         let mut launch = ServerLaunch::rust_analyzer(PathBuf::from("python3"));
         if self.servers == FakeServers::PerLanguage {
-            launch.name = ServerName::of(language).unwrap();
+            launch.name = ServerName::of(language);
             args.push(format!("{language:?}"));
         }
         let launch = launch.with_args(args);
@@ -878,11 +878,19 @@ fn a_location_in_the_borrowed_vendor_folder_shows_its_repo_path_and_opens_from_d
 /// The pinned server of `language` the app downloaded into its cache folder. It is not downloaded here
 /// unless `GUIDED_REVIEW_DOWNLOAD_SMOKE` is set, so a pin bump is tried by hand with that set.
 fn downloaded_server(language: Language) -> Option<Arc<ManagedServers>> {
+    downloaded_server_indexing_in(language, AppFolders::xdg().ok()?.server_indexes())
+}
+
+/// The same server, keeping what it indexes in `indexes` instead of the app's state folder.
+pub(crate) fn downloaded_server_indexing_in(
+    language: Language,
+    indexes: PathBuf,
+) -> Option<Arc<ManagedServers>> {
     let folders = AppFolders::xdg().ok()?;
     let managed = ManagedServers::new(
         ServerFolders {
             downloads: folders.language_servers(),
-            indexes: folders.server_indexes(),
+            indexes,
         },
         Arc::new(GitHub::from_env()),
         ServerPins::pinned(),

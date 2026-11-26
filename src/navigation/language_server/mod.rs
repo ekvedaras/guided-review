@@ -15,6 +15,7 @@ mod rpc;
 mod running;
 mod server_navigator;
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,7 +34,7 @@ pub use checkout::{Change, ChangedFile, Checkout, ServerCheckouts};
 pub use managed::{ManagedServers, ServerFolders};
 use notices::Notices;
 use pool::Pool;
-pub use recipes::{PackagePin, ReleasePin, ServerPins};
+pub use recipes::{ModulePin, PackagePin, ReleasePin, ServerPins};
 use rpc::locked;
 use server_navigator::ServerNavigator;
 
@@ -45,6 +46,16 @@ pub enum StatusReports {
     No,
 }
 
+/// What a server's process is given of the environment.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ServerEnvironment {
+    /// The app's own, with relative and empty `PATH` entries removed.
+    #[default]
+    Inherited,
+    /// These variables and no others, so none of the reviewer's settings reaches the server.
+    Only(Vec<(&'static str, OsString)>),
+}
+
 /// How to start one server.
 #[derive(Debug, Clone)]
 pub struct ServerLaunch {
@@ -54,6 +65,7 @@ pub struct ServerLaunch {
     /// Sent as `initializationOptions`, and as the answer to the server's configuration requests.
     pub options: Value,
     pub status: StatusReports,
+    pub environment: ServerEnvironment,
 }
 
 impl ServerLaunch {

@@ -1,5 +1,6 @@
-//! The language servers the app downloads itself, and the Node that runs the npm ones: pinned
-//! versions, checked by sha256 (sha512 for npm packages), kept in the cache folder.
+//! The language servers the app downloads itself, the Node that runs the npm ones and the Go that
+//! builds and runs gopls: pinned versions, checked by sha256 (sha512 for npm packages, the module
+//! hash for gopls), kept in the cache folder.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,8 +11,8 @@ use crate::update::{ReleasesPort, Target};
 
 use super::downloads::Downloads;
 use super::recipes::{
-    Intelephense, Node, NpmPackage, Pyright, RustAnalyzer, ServerPins, ServerRecipe,
-    TypeScriptLanguageServer,
+    GoToolchain, Gopls, Intelephense, Node, NpmPackage, Pyright, RustAnalyzer, ServerPins,
+    ServerRecipe, TypeScriptLanguageServer,
 };
 use super::{FallbackReason, ServerCatalog, ServerLaunch, Waiting};
 
@@ -32,6 +33,7 @@ pub struct ManagedServers {
     intelephense: Intelephense,
     typescript_language_server: TypeScriptLanguageServer,
     pyright: Pyright,
+    gopls: Gopls,
 }
 
 impl ManagedServers {
@@ -54,6 +56,11 @@ impl ManagedServers {
                     pin: pins.intelephense,
                     script: "package/lib/intelephense.js",
                 },
+                indexes: folders.indexes.clone(),
+            },
+            gopls: Gopls {
+                go: GoToolchain { pin: pins.go },
+                pin: pins.gopls,
                 indexes: folders.indexes,
             },
             pyright: Pyright {
@@ -80,29 +87,29 @@ impl ManagedServers {
         }
     }
 
-    fn recipe(&self, language: Language) -> Option<&dyn ServerRecipe> {
+    fn recipe(&self, language: Language) -> &dyn ServerRecipe {
         match language {
-            Language::Rust => Some(&self.rust_analyzer),
-            Language::Php => Some(&self.intelephense),
-            Language::TypeScript | Language::Tsx => Some(&self.typescript_language_server),
-            Language::Python => Some(&self.pyright),
-            Language::Go => None,
+            Language::Rust => &self.rust_analyzer,
+            Language::Php => &self.intelephense,
+            Language::TypeScript | Language::Tsx => &self.typescript_language_server,
+            Language::Python => &self.pyright,
+            Language::Go => &self.gopls,
         }
     }
 
-    fn recipes(&self) -> [&dyn ServerRecipe; 4] {
+    fn recipes(&self) -> [&dyn ServerRecipe; 5] {
         [
             &self.rust_analyzer,
             &self.intelephense,
             &self.typescript_language_server,
             &self.pyright,
+            &self.gopls,
         ]
     }
 
     /// Whether the server of `language` is in the cache folder, which asking for it never checks.
     pub fn is_downloaded(&self, language: Language) -> bool {
-        self.recipe(language)
-            .is_some_and(|recipe| recipe.is_downloaded(&self.downloads))
+        self.recipe(language).is_downloaded(&self.downloads)
     }
 
     /// Removes every download of a version this build does not pin, and what a stopped unpacking left.
@@ -124,7 +131,6 @@ impl ServerCatalog for ManagedServers {
         waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
         self.recipe(language)
-            .ok_or_else(|| FallbackReason::new("no language server answers this language"))?
             .launch(&self.downloads, codebase, waiting)
     }
 }

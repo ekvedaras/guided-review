@@ -16,8 +16,9 @@ pub use dependency_file::is_dependency_file;
 pub use git_grep::{FilesWithWord, GitGrep};
 pub use import::Import;
 pub use language_server::{
-    Change, ChangedFile, Checkout, LanguageServers, ManagedServers, PackagePin, ReleasePin,
-    ServerCatalog, ServerCheckouts, ServerFolders, ServerLaunch, ServerPins, Timeouts,
+    Change, ChangedFile, Checkout, LanguageServers, ManagedServers, ModulePin, PackagePin,
+    ReleasePin, ServerCatalog, ServerCheckouts, ServerEnvironment, ServerFolders, ServerLaunch,
+    ServerPins, Timeouts,
 };
 pub use lookup::{FILES_PARSED_AT_MOST, FileSearch, Lookups};
 pub use navigator::{

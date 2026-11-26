@@ -318,7 +318,7 @@ impl NameDesk {
         if servers.answer().is_some() {
             return None;
         }
-        ServerQuestion::about(&servers.codebase, language)
+        Some(ServerQuestion::about(&servers.codebase, language))
     }
 
     pub(super) fn answer(&mut self, answer: ServerAnswer) -> Option<Codebase> {

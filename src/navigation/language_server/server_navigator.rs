@@ -43,7 +43,7 @@ impl CodeNavigator for ServerNavigator {
             Ok(answer)
         };
         let Some((language, server)) = Language::for_path(request.at.path.as_str())
-            .and_then(|language| Some((language, ServerName::of(language)?)))
+            .map(|language| (language, ServerName::of(language)))
         else {
             return by_name(None);
         };

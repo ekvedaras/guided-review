@@ -91,16 +91,19 @@ impl ServerName {
         Self::new("Pyright")
     }
 
-    /// The server that answers files of `language`; `None` when no server does and names are
-    /// only looked up by name.
-    pub fn of(language: crate::language::Language) -> Option<Self> {
+    pub fn gopls() -> Self {
+        Self::new("gopls")
+    }
+
+    /// The server that answers files of `language`.
+    pub fn of(language: crate::language::Language) -> Self {
         use crate::language::Language;
         match language {
-            Language::Rust => Some(Self::rust_analyzer()),
-            Language::Php => Some(Self::intelephense()),
-            Language::TypeScript | Language::Tsx => Some(Self::typescript_language_server()),
-            Language::Python => Some(Self::pyright()),
-            Language::Go => None,
+            Language::Rust => Self::rust_analyzer(),
+            Language::Php => Self::intelephense(),
+            Language::TypeScript | Language::Tsx => Self::typescript_language_server(),
+            Language::Python => Self::pyright(),
+            Language::Go => Self::gopls(),
         }
     }
 }
