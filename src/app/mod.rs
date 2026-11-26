@@ -78,6 +78,7 @@ use layouts::one_step::{
     ToggleRead, ToggleRenderedView, ToggleSettings, ToggleShortcuts, ToggleWhitespace,
     ToggleWrapLines,
 };
+use layouts::one_step::{PROTO_SHEET_CONTEXT, ProtoNextVariant, ProtoToggleFileTree};
 use review_session::TourWork;
 use settings_window::SettingsWindow;
 use switcher_window::SwitcherWindow;
@@ -1098,6 +1099,20 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
         CommentComposer::KEY_CONTEXT,
         text_box::TYPING_CONTEXT
     );
+    let typing_is_not_navigation =
+        format!("{typing_is_not_navigation} && !{}", PROTO_SHEET_CONTEXT);
+    cx.bind_keys([
+        KeyBinding::new(
+            "t",
+            ProtoToggleFileTree,
+            Some(typing_is_not_navigation.as_str()),
+        ),
+        KeyBinding::new(
+            "shift-t",
+            ProtoNextVariant,
+            Some(typing_is_not_navigation.as_str()),
+        ),
+    ]);
     let bindings = Command::ALL.into_iter().flat_map(|command| {
         let context = match command.scope() {
             KeyScope::Page => Some(typing_is_not_navigation.clone()),

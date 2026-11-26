@@ -120,10 +120,13 @@ enum Scene {
     TitleBarMerging,
     FoldedMarkdownParts,
     StationsBusy,
+    ProtoTreeA,
+    ProtoTreeB,
+    ProtoTreeC,
 }
 
 impl Scene {
-    const ALL: [Self; 74] = [
+    const ALL: [Self; 77] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -198,6 +201,9 @@ impl Scene {
         Self::TitleBarMerging,
         Self::FoldedMarkdownParts,
         Self::StationsBusy,
+        Self::ProtoTreeA,
+        Self::ProtoTreeB,
+        Self::ProtoTreeC,
     ];
 
     fn file_name(self) -> &'static str {
@@ -276,6 +282,9 @@ impl Scene {
             Self::TitleBarMerging => "92-title-bar-merging",
             Self::FoldedMarkdownParts => "93-folded-markdown-parts",
             Self::StationsBusy => "95-sidebar-stations-busy",
+            Self::ProtoTreeA => "97-proto-tree-a",
+            Self::ProtoTreeB => "97-proto-tree-b",
+            Self::ProtoTreeC => "97-proto-tree-c",
         }
     }
 
@@ -1004,6 +1013,17 @@ impl OneStepLayout {
                     sheet.stage_dismissed_shown(cx);
                 });
             }
+            Scene::ProtoTreeA | Scene::ProtoTreeB | Scene::ProtoTreeC => {
+                self.proto_stage(
+                    match scene {
+                        Scene::ProtoTreeA => 0,
+                        Scene::ProtoTreeB => 1,
+                        _ => 2,
+                    },
+                    window,
+                    cx,
+                );
+            }
             Scene::CommentsList => {
                 self.change_review(cx, |review| {
                     review.go_forward();
@@ -1372,6 +1392,9 @@ impl OneStepLayout {
                 self.findings
                     .update(cx, |sheet, cx| sheet.close(window, cx));
                 self.change_review(cx, |review| review.ai_review_is(AiReview::NotRun));
+            }
+            Scene::ProtoTreeA | Scene::ProtoTreeB | Scene::ProtoTreeC => {
+                self.proto_unstage(window, cx);
             }
             Scene::CommentsList => {
                 self.comments_list

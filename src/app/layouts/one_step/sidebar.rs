@@ -279,6 +279,15 @@ impl OneStepLayout {
     }
 
     pub(super) fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let proto_files = self.proto_tree.shows_sidebar_files();
+        let proto_tabs = (self.proto_tree.variant
+            == super::prototype_file_tree::ProtoVariant::SidebarTab)
+            .then(|| self.proto_sidebar_tabs(cx));
+        let proto_rows = if proto_files {
+            self.proto_sidebar_files(cx)
+        } else {
+            Vec::new()
+        };
         let colors = Colors::active(cx);
         let session = self.session.read(cx);
         let sidebar = session.sidebar();
@@ -559,6 +568,7 @@ impl OneStepLayout {
                     ),
             )
             .child(header)
+            .children(proto_tabs)
             .child(
                 div()
                     .id("sidebar-steps")
@@ -569,10 +579,13 @@ impl OneStepLayout {
                     .flex()
                     .flex_col()
                     .gap_px()
-                    .child(summary_row)
-                    .children(step_rows)
-                    .children(tree_row_elements)
-                    .children(safety_net_row),
+                    .when(!proto_files, |list| {
+                        list.child(summary_row)
+                            .children(step_rows)
+                            .children(tree_row_elements)
+                            .children(safety_net_row)
+                    })
+                    .children(proto_rows),
             )
             .children(update_button(&colors, cx))
             .child(self.settings_row(&colors, cx))

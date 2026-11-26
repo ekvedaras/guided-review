@@ -269,6 +269,7 @@ pub use replacing_jobs::RepinnedTour;
 pub use replacing_jobs::{
     AfterJob, JobOutcome, JobProgress, ReplacingJob, ReplacingJobs, StartedJob,
 };
+pub use review::prototype_file_tree::{ProtoFile, ProtoFileTree, ProtoRowKind, ProtoStep};
 pub use review::{
     DEFAULT_WHY_QUESTION, FindingRefusal, FindingsBatch, OldHead, ReadProgress, ReadUnit,
     ReadingPlace, Review, RouteStop, SafetyNetSize, SidebarEntry, StepId, SummaryStats, TourLead,

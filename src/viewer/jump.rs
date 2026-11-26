@@ -34,6 +34,15 @@ pub struct JumpTarget {
 }
 
 impl JumpTarget {
+    /// PROTOTYPE #137: a file on a given screen, for the file tree prototype.
+    pub fn prototype_file(screen: Screen, path: FilePath) -> Self {
+        Self {
+            screen,
+            place: JumpPlace::File(path),
+            screen_title: String::new(),
+        }
+    }
+
     /// What the query is matched against: the step's title, the file's path or the piece's id.
     pub fn label(&self) -> Cow<'_, str> {
         match &self.place {

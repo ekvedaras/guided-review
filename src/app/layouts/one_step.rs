@@ -81,6 +81,8 @@ mod gallery;
 mod issue_card;
 mod name_card_hover;
 mod page;
+mod prototype_file_tree;
+pub use prototype_file_tree::{PROTO_SHEET_CONTEXT, ProtoNextVariant, ProtoToggleFileTree};
 #[cfg(feature = "snapshots")]
 mod scenes;
 mod scroll;
@@ -155,6 +157,7 @@ pub struct OneStepLayout {
     code_selection: Option<CodeSelection>,
     /// The sidebar row touching the current one that the mouse is on, so the current row squares the corners they share.
     hovered_touching_row: Option<(usize, RowPlace)>,
+    proto_tree: prototype_file_tree::ProtoTree,
     /// The station of the sidebar's stepper the reviewer clicked, whose card shows over the one picked for them.
     picked_station: Option<StationKind>,
     /// The mouse is on the title bar's status chip or on the list of checks it opens.
@@ -406,6 +409,7 @@ impl OneStepLayout {
             ask,
             code_selection: None,
             hovered_touching_row: None,
+            proto_tree: prototype_file_tree::ProtoTree::new(cx.focus_handle()),
             picked_station: None,
             checks_hover: ChecksHover::default(),
             issue_list_open: false,
@@ -1517,6 +1521,13 @@ impl Render for OneStepLayout {
                 }
             }))
             .on_action(cx.listener(Self::copy_selection))
+            .on_action(cx.listener(|this, _: &ProtoToggleFileTree, window, cx| {
+                this.proto_toggle(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ProtoNextVariant, window, cx| {
+                this.proto_next_variant(1, window, cx);
+            }))
+            .relative()
             .size_full()
             .flex()
             .bg(if is_writing_tour {
@@ -1586,6 +1597,7 @@ impl Render for OneStepLayout {
                     )
                     .child(screen),
             )
+            .children(self.proto_side_panel(cx))
             .when(self.ask.read(cx).is_shown(cx), |row| {
                 row.child(self.ask.clone())
             })
@@ -1599,6 +1611,8 @@ impl Render for OneStepLayout {
             .child(self.comments_list.clone())
             .child(self.picture_zoom.clone())
             .children(name_card)
+            .children(self.proto_popup(cx))
+            .child(self.proto_switcher(cx))
             .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))
             .children(frame_painted_marker)
     }

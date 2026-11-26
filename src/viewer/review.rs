@@ -13,6 +13,7 @@ mod kept;
 mod names;
 mod pr;
 mod pr_controls;
+pub mod prototype_file_tree;
 mod reading;
 mod run_ai_review;
 mod stations;
