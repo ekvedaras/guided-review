@@ -1,5 +1,6 @@
-//! The language servers the app downloads itself, and the Node that runs the npm ones: pinned
-//! versions, checked by sha256 (sha512 for npm packages), kept in the cache folder.
+//! The language servers the app downloads itself, the Node that runs the npm ones and the Go that
+//! builds and runs gopls: pinned versions, checked by sha256 (sha512 for npm packages, the module
+//! hash for gopls), kept in the cache folder.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,8 +11,8 @@ use crate::update::{ReleasesPort, Target};
 
 use super::downloads::Downloads;
 use super::recipes::{
-    Intelephense, Node, NpmPackage, RustAnalyzer, ServerPins, ServerRecipe,
-    TypeScriptLanguageServer,
+    GoToolchain, Gopls, Intelephense, Node, NpmPackage, Pyright, RustAnalyzer, ServerPins,
+    ServerRecipe, TypeScriptLanguageServer,
 };
 use super::{FallbackReason, ServerCatalog, ServerLaunch, Waiting};
 
@@ -31,6 +32,8 @@ pub struct ManagedServers {
     rust_analyzer: RustAnalyzer,
     intelephense: Intelephense,
     typescript_language_server: TypeScriptLanguageServer,
+    pyright: Pyright,
+    gopls: Gopls,
 }
 
 impl ManagedServers {
@@ -53,7 +56,20 @@ impl ManagedServers {
                     pin: pins.intelephense,
                     script: "package/lib/intelephense.js",
                 },
+                indexes: folders.indexes.clone(),
+            },
+            gopls: Gopls {
+                go: GoToolchain { pin: pins.go },
+                pin: pins.gopls,
                 indexes: folders.indexes,
+            },
+            pyright: Pyright {
+                node: node.clone(),
+                package: NpmPackage {
+                    name: "pyright",
+                    pin: pins.pyright,
+                    script: "package/langserver.index.js",
+                },
             },
             typescript_language_server: TypeScriptLanguageServer {
                 node,
@@ -76,14 +92,18 @@ impl ManagedServers {
             Language::Rust => &self.rust_analyzer,
             Language::Php => &self.intelephense,
             Language::TypeScript | Language::Tsx => &self.typescript_language_server,
+            Language::Python => &self.pyright,
+            Language::Go => &self.gopls,
         }
     }
 
-    fn recipes(&self) -> [&dyn ServerRecipe; 3] {
+    fn recipes(&self) -> [&dyn ServerRecipe; 5] {
         [
             &self.rust_analyzer,
             &self.intelephense,
             &self.typescript_language_server,
+            &self.pyright,
+            &self.gopls,
         ]
     }
 

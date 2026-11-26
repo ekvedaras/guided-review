@@ -54,11 +54,11 @@ impl DefinitionKind {
     }
 
     /// When two patterns name one node, the narrower kind wins: a method over a function,
-    /// a function over a constant.
+    /// a function over a constant, a Go struct or interface over a type.
     fn narrowness(self) -> u8 {
         match self {
             Self::Method => 2,
-            Self::Function => 1,
+            Self::Function | Self::Struct | Self::Interface => 1,
             _ => 0,
         }
     }
@@ -169,7 +169,7 @@ impl WordInFile {
                     place: place_of(path, tagged.name)?,
                     signature: signature.text.into(),
                     signature_origin: signature.origin.into(),
-                    doc: doc_comment_above(tagged.node, source).map(Into::into),
+                    doc: doc_of(tagged.node, source, language).map(Into::into),
                 })
             })
             .collect();
@@ -235,10 +235,14 @@ fn text_of<'a>(node: Node, source: &'a str) -> &'a str {
     source.get(node.byte_range()).unwrap_or_default()
 }
 
-/// The node a doc comment sits above: an exported TypeScript declaration's export statement.
+/// The node a doc comment sits above: an exported TypeScript declaration's export statement, a Go
+/// type's `type` declaration when it declares that type alone.
 fn outermost(node: Node) -> Node {
     node.parent()
-        .filter(|parent| parent.kind() == "export_statement")
+        .filter(|parent| {
+            parent.kind() == "export_statement"
+                || (parent.kind() == "type_declaration" && parent.named_child_count() == 1)
+        })
         .unwrap_or(node)
 }
 
@@ -253,8 +257,49 @@ fn signature_with_export(node: Node, source: &str) -> Signature {
     signature.finished()
 }
 
-/// The `///` or `/** */` comments right above a definition, past its Rust attributes.
-fn doc_comment_above(node: Node, source: &str) -> Option<String> {
+fn doc_of(node: Node, source: &str, language: Language) -> Option<String> {
+    match language {
+        Language::Python => docstring(node, source),
+        Language::Go => doc_comment_above(node, source, go_doc_text),
+        Language::Php | Language::TypeScript | Language::Tsx | Language::Rust => {
+            doc_comment_above(node, source, doc_text)
+        }
+    }
+}
+
+/// The string a Python class or function starts its body with.
+fn docstring(node: Node, source: &str) -> Option<String> {
+    let first = node.child_by_field_name("body")?.named_child(0)?;
+    let string = first
+        .named_child(0)
+        .filter(|string| first.kind() == "expression_statement" && string.kind() == "string")?;
+    let text = text_of(string, source).trim_start_matches(|c: char| c.is_ascii_alphabetic());
+    let quotes = ["\"\"\"", "'''", "\"", "'"]
+        .into_iter()
+        .find(|quotes| text.starts_with(quotes))?;
+    let inner = text.strip_prefix(quotes)?.strip_suffix(quotes)?;
+    let lines: Vec<&str> = inner.lines().map(str::trim).collect();
+    let doc = lines.join("\n");
+    let doc = doc.trim();
+    (!doc.is_empty()).then(|| doc.to_owned())
+}
+
+/// A Go doc comment is every `//` line right above the declaration.
+fn go_doc_text(comment: &str) -> Option<String> {
+    let comment = comment.trim();
+    if let Some(line) = comment.strip_prefix("//") {
+        return Some(line.strip_prefix(' ').unwrap_or(line).trim_end().to_owned());
+    }
+    let block = comment.strip_prefix("/*")?.strip_suffix("*/")?;
+    Some(block.trim().to_owned())
+}
+
+/// The doc comments right above a definition, past its Rust attributes.
+fn doc_comment_above(
+    node: Node,
+    source: &str,
+    doc_text: fn(&str) -> Option<String>,
+) -> Option<String> {
     let anchor = outermost(node);
     let mut first_row = anchor.start_position().row;
     let mut paragraphs: Vec<String> = Vec::new();

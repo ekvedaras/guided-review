@@ -418,6 +418,14 @@ pub(crate) fn push_signature(signature: &mut Signature, node: Node, source: &str
 /// `const Cart = () => {}`, `it("works", () => {})`.
 fn body_of(node: Node) -> Option<Node> {
     node.child_by_field_name("body").or_else(|| {
+        if node.kind() == "type_spec" {
+            // Go: the fields of `type Cart struct {`, the methods of `type Shape interface {`.
+            let shape = node.child_by_field_name("type")?;
+            let mut children = shape.walk();
+            return shape
+                .children(&mut children)
+                .find(|child| matches!(child.kind(), "field_declaration_list" | "{"));
+        }
         if node.kind() == "expression_statement" {
             let arguments = node.named_child(0)?.child_by_field_name("arguments")?;
             let callback = arguments

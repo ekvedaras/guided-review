@@ -315,7 +315,10 @@ impl NameDesk {
     pub(super) fn question_for(&self, key: &NameKey) -> Option<ServerQuestion> {
         let servers = self.servers.as_ref()?;
         let language = Language::for_path(key.path.as_str()).filter(|_| key.side == Side::Head)?;
-        (servers.answer().is_none()).then(|| ServerQuestion::about(&servers.codebase, language))
+        if servers.answer().is_some() {
+            return None;
+        }
+        Some(ServerQuestion::about(&servers.codebase, language))
     }
 
     pub(super) fn answer(&mut self, answer: ServerAnswer) -> Option<Codebase> {

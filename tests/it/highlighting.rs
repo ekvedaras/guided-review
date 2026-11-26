@@ -203,6 +203,47 @@ fn other_common_languages_are_coloured_too() {
 }
 
 #[test]
+fn python_go_and_sql_files_are_coloured() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("a.py", "total = 1\n");
+    repo.write("a.go", "package shop\n");
+    repo.write("a.sql", "SELECT 1;\n");
+    let base = repo.commit("base");
+    repo.write("a.py", "total = \"b\"\n");
+    repo.write("a.go", "package shop\n\nvar total = \"b\"\n");
+    repo.write("a.sql", "SELECT 'b' FROM orders;\n");
+    let head = repo.commit("head");
+    let (mut review, source) = open_review(&repo, &base, &head);
+
+    highlighted(&mut review, &source);
+
+    let all = lines(&review);
+    let python = captures_in(line_with(&all, Side::Head, "total = "));
+    let go = captures_in(line_with(&all, Side::Head, "var total"));
+    let sql = captures_in(line_with(&all, Side::Head, "SELECT"));
+    assert!(python.contains(&("\"b\"", Capture::String)), "{python:?}");
+    assert!(go.contains(&("var", Capture::Keyword)), "{go:?}");
+    assert!(sql.contains(&("SELECT", Capture::Keyword)), "{sql:?}");
+}
+
+#[test]
+fn python_go_and_sql_code_fences_are_coloured() {
+    for (fence, code) in [
+        ("python", "total = 1"),
+        ("py", "total = 1"),
+        ("go", "var total = 1"),
+        ("golang", "var total = 1"),
+        ("sql", "SELECT 1"),
+    ] {
+        let lines = guided_review::viewer::highlight_snippet(Some(fence), code);
+        assert!(
+            lines.iter().all(|spans| !spans.is_empty()),
+            "{fence} is plain"
+        );
+    }
+}
+
+#[test]
 fn a_php_code_fence_without_an_opening_tag_is_still_coloured() {
     let lines =
         guided_review::viewer::highlight_snippet(Some("php"), "$total = 1;\nreturn $total;");

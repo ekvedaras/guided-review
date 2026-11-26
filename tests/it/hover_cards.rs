@@ -977,6 +977,46 @@ fn the_question_names_the_server_of_the_hovered_files_language() {
     );
 }
 
+#[test]
+fn a_python_name_asks_whether_pyright_may_answer() {
+    let shop = Shop::with_changes(&[], |repo| {
+        repo.write("src/order.py", "class Order:\n    pass\n");
+    });
+    let source = shop.source();
+    let mut review = review_with_servers(&shop, &source, &language_server_adapter());
+
+    let python = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/order.py", Side::Head, 1, "Order"),
+    ));
+
+    assert_eq!(
+        question_of(&python),
+        Some("Use language servers for acme/shop? Pyright may build it".to_owned())
+    );
+}
+
+#[test]
+fn a_go_name_asks_whether_gopls_may_answer() {
+    let shop = Shop::with_changes(&[], |repo| {
+        repo.write("src/basket.go", "package shop\n\ntype Basket struct{}\n");
+    });
+    let source = shop.source();
+    let mut review = review_with_servers(&shop, &source, &language_server_adapter());
+
+    let go = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/basket.go", Side::Head, 3, "Basket"),
+    ));
+
+    assert_eq!(
+        question_of(&go),
+        Some("Use language servers for acme/shop? gopls may build it".to_owned())
+    );
+}
+
 /// Answers with a definition in a file git does not hold, as rust-analyzer does for the standard library.
 struct StandardLibraryNavigator;
 

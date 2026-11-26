@@ -42,6 +42,8 @@ pub(super) fn language_id(language: Language) -> &'static str {
         Language::Php => "php",
         Language::TypeScript => "typescript",
         Language::Tsx => "typescriptreact",
+        Language::Python => "python",
+        Language::Go => "go",
     }
 }
 

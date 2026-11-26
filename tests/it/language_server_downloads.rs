@@ -10,8 +10,8 @@ use guided_review::file_path::FilePath;
 use guided_review::local_git::LocalGit;
 use guided_review::navigation::{
     Answer, AnsweredBy, CodeNavigator, Column, FallbackReason, FileSearch, LanguageServers,
-    Lookups, ManagedServers, NavigationRequest, PackagePin, Place, ReleasePin, ServerCheckouts,
-    ServerFolders, ServerName, ServerPins, Timeouts, Waiting, Word,
+    Lookups, ManagedServers, ModulePin, NavigationRequest, PackagePin, Place, ReleasePin,
+    ServerCheckouts, ServerFolders, ServerName, ServerPins, Timeouts, Waiting, Word,
 };
 use guided_review::platform::Os;
 use guided_review::pull_request::Sha;
@@ -42,6 +42,31 @@ const INTELEPHENSE: &str = "9.9.9";
 const TYPESCRIPT_LANGUAGE_SERVER: &str = "8.8.8";
 
 const TYPESCRIPT: &str = "7.7.7";
+
+const PYRIGHT: &str = "6.6.6";
+
+const GO: &str = "1.99.9";
+
+const GOPLS: &str = "v5.5.5";
+
+const GOPLS_HASH: &str = "h1:pinned=";
+
+const BASKET: &str = "package shop
+
+type Basket struct{}
+
+func (b Basket) Total() int { return 3 }
+
+func (b Basket) Summary() int { return b.Total() }
+";
+
+const CART: &str = "class Cart:
+    def total(self) -> int:
+        return 3
+
+    def summary(self) -> str:
+        return str(self.total())
+";
 
 const SHAPES: &str = "class Circle {
     area(): number { return 1; }
@@ -80,6 +105,14 @@ fn typescript_language_server_url() -> String {
     format!(
         "https://registry.npmjs.org/typescript-language-server/-/typescript-language-server-{TYPESCRIPT_LANGUAGE_SERVER}.tgz"
     )
+}
+
+fn pyright_url() -> String {
+    format!("https://registry.npmjs.org/pyright/-/pyright-{PYRIGHT}.tgz")
+}
+
+fn go_url() -> String {
+    format!("https://go.dev/dl/go{GO}.darwin-arm64.tar.gz")
 }
 
 fn typescript_url() -> String {
@@ -155,6 +188,8 @@ impl Rig {
         repo.write("app/Jobs.php", JOBS);
         repo.write("src/shapes.ts", SHAPES);
         repo.write("src/shapes.tsx", SHAPES);
+        repo.write("app/cart.py", CART);
+        repo.write("shop/basket.go", BASKET);
         let head = Sha::new(&repo.commit("head"));
         let scratch = TempDir::new().unwrap();
         let script = json!({
@@ -203,6 +238,19 @@ impl Rig {
             ("package/package.json", "{}", 0o644),
             ("package/lib/tsserver.js", "// tsserver", 0o644),
         ]);
+        let pyright_archive = tarball(&[
+            ("package/package.json", "{}", 0o644),
+            ("package/langserver.index.js", "// the server", 0o644),
+        ]);
+        let go_archive = tarball(&[
+            (
+                "go/bin/go".to_owned(),
+                fake_go(scratch.path(), &fake, &script_file),
+                0o755,
+            ),
+            ("go/VERSION".to_owned(), format!("go{GO}"), 0o644),
+        ]);
+        std::fs::write(scratch.path().join("gopls-hash"), GOPLS_HASH).unwrap();
         let host = Arc::new(Host::default());
         host.files.lock().unwrap().extend([
             (url_of(TAG, TARGET), archive.clone()),
@@ -213,6 +261,8 @@ impl Rig {
                 typescript_language_server_archive.clone(),
             ),
             (typescript_url(), typescript_archive.clone()),
+            (pyright_url(), pyright_archive.clone()),
+            (go_url(), go_archive.clone()),
         ]);
         let pins = ServerPins {
             rust_analyzer: ReleasePin {
@@ -234,6 +284,18 @@ impl Rig {
             typescript: PackagePin {
                 version: TYPESCRIPT.to_owned(),
                 sha512: sha512_of(&typescript_archive),
+            },
+            pyright: PackagePin {
+                version: PYRIGHT.to_owned(),
+                sha512: sha512_of(&pyright_archive),
+            },
+            go: ReleasePin {
+                tag: GO.to_owned(),
+                sha256: vec![(TARGET, sha256_of(&go_archive))],
+            },
+            gopls: ModulePin {
+                version: GOPLS.to_owned(),
+                h1: GOPLS_HASH.to_owned(),
             },
         };
         let cache = scratch.path().join("cache/language-servers");
@@ -270,6 +332,16 @@ impl Rig {
     /// `$this->schedule()` in `run`.
     fn hover_schedule(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
         self.hover("app/Jobs.php", 7, 41, "schedule")
+    }
+
+    /// `self.total()` in `summary`.
+    fn hover_total(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
+        self.hover("app/cart.py", 6, 24, "total")
+    }
+
+    /// `b.Total()` in `Summary`.
+    fn hover_basket_total(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
+        self.hover("shop/basket.go", 7, 41, "Total")
     }
 
     /// `this.area()` in `describe`.
@@ -487,6 +559,221 @@ fn intelephense_keeps_its_index_in_a_folder_of_the_repo_under_the_state_folder()
             "storagePath": index.join("storage"),
             "globalStoragePath": index.join("global"),
         })
+    );
+}
+
+fn pyright() -> ServerName {
+    ServerName::new("Pyright")
+}
+
+#[test]
+fn the_first_python_hover_downloads_the_pinned_node_and_pyright_and_runs_pyright_on_that_node() {
+    let rig = Rig::new();
+
+    let (answer, waits) = rig.hover_total();
+    let answer = answer.unwrap();
+
+    assert_eq!(answer.answered_by, AnsweredBy::LanguageServer(pyright()));
+    assert_eq!(
+        waits[..2],
+        [
+            Waiting::Downloading(ServerName::new("Node")),
+            Waiting::Downloading(pyright())
+        ]
+    );
+    assert_eq!(rig.requested(), vec![node_url(TARGET), pyright_url()]);
+    let args = std::fs::read_to_string(rig.scratch.path().join("node-args")).unwrap();
+    assert_eq!(
+        args.trim(),
+        format!(
+            "{}/pyright-{PYRIGHT}/package/langserver.index.js --stdio",
+            rig.cache.display()
+        )
+    );
+}
+
+/// Pyright runs `python3` from PATH unless told an interpreter; one that is not there makes it run none.
+#[test]
+fn pyright_is_told_an_interpreter_where_nothing_is_so_it_runs_no_python() {
+    let rig = Rig::new();
+
+    rig.hover_total().0.unwrap();
+
+    let log = std::fs::read_to_string(rig.scratch.path().join("log")).unwrap();
+    let initialize: serde_json::Value = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|message| message["method"] == "initialize")
+        .unwrap();
+    let interpreter = initialize["params"]["initializationOptions"]["pythonPath"]
+        .as_str()
+        .map(PathBuf::from);
+    assert!(
+        interpreter
+            .as_ref()
+            .is_some_and(|path| path.starts_with(&rig.cache) && !path.exists()),
+        "{interpreter:?}"
+    );
+}
+
+/// A `go` that logs its arguments and environment. `go mod download -json` gives the hash in the
+/// file `gopls-hash`, and `go install` writes a gopls that logs its environment and runs the fake
+/// language server. Programs are named by full path, since the app gives Go a PATH of its own.
+fn fake_go(scratch: &Path, fake_server: &Path, script: &Path) -> String {
+    let python3 = std::process::Command::new("/bin/sh")
+        .args(["-c", "command -v python3"])
+        .output()
+        .unwrap();
+    let python3 = String::from_utf8(python3.stdout).unwrap();
+    let scratch = scratch.display();
+    format!(
+        "#!/bin/sh
+echo \"$@\" >> '{scratch}/go-args'
+/usr/bin/env > '{scratch}/go-env'
+case \"$1\" in
+  mod) printf '{{\"Path\": \"golang.org/x/tools/gopls\", \"Sum\": \"%s\"}}\\n' \"$(/bin/cat '{scratch}/gopls-hash')\" ;;
+  install)
+    printf '%s\\n' '#!/bin/sh' \"/usr/bin/env > '{scratch}/gopls-env'\" \"exec '{python3}' '{fake}' '{script}'\" > \"$GOBIN/gopls\"
+    /bin/chmod 755 \"$GOBIN/gopls\" ;;
+esac
+",
+        python3 = python3.trim(),
+        fake = fake_server.display(),
+        script = script.display(),
+    )
+}
+
+/// What `env` printed into `file`, without what the shell adds itself.
+fn environment_in(file: &Path) -> std::collections::BTreeMap<String, String> {
+    std::fs::read_to_string(file)
+        .unwrap()
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .filter(|(name, _)| !["PWD", "OLDPWD", "SHLVL", "_"].contains(name))
+        .map(|(name, value)| (name.to_owned(), value.to_owned()))
+        .collect()
+}
+
+fn gopls() -> ServerName {
+    ServerName::new("gopls")
+}
+
+#[test]
+fn the_first_go_hover_downloads_the_pinned_go_builds_the_pinned_gopls_with_it_and_starts_gopls() {
+    let rig = Rig::new();
+
+    let (answer, waits) = rig.hover_basket_total();
+    let answer = answer.unwrap();
+
+    assert_eq!(answer.answered_by, AnsweredBy::LanguageServer(gopls()));
+    assert_eq!(
+        waits[..2],
+        [
+            Waiting::Downloading(ServerName::new("Go")),
+            Waiting::Downloading(gopls())
+        ]
+    );
+    assert_eq!(rig.requested(), vec![go_url()]);
+    let go_args = std::fs::read_to_string(rig.scratch.path().join("go-args")).unwrap();
+    assert_eq!(
+        go_args.lines().collect::<Vec<_>>(),
+        [
+            format!("mod download -json golang.org/x/tools/gopls@{GOPLS}"),
+            format!("install golang.org/x/tools/gopls@{GOPLS}"),
+        ]
+    );
+    let built = rig.cache.join(format!("gopls-{GOPLS}"));
+    assert!(built.join("gopls").is_file());
+    assert!(!built.join("build").exists(), "the build caches are kept");
+}
+
+#[test]
+fn a_gopls_module_that_does_not_match_its_pinned_hash_is_not_built() {
+    let rig = Rig::new();
+    std::fs::write(rig.scratch.path().join("gopls-hash"), "h1:another=").unwrap();
+
+    let (answer, _) = rig.hover_basket_total();
+    let answer = answer.unwrap();
+
+    let note = note_of(&answer).expect("answered by name with a note");
+    assert!(note.contains("gopls could not be downloaded"), "{note}");
+    assert!(note.contains("does not match its pinned hash"), "{note}");
+    let go_args = std::fs::read_to_string(rig.scratch.path().join("go-args")).unwrap();
+    assert!(!go_args.contains("install"), "{go_args}");
+    assert!(!rig.cache.join(format!("gopls-{GOPLS}")).exists());
+}
+
+#[test]
+fn gopls_is_built_from_the_go_module_proxy_with_only_the_apps_go_settings() {
+    let rig = Rig::new();
+
+    rig.hover_basket_total().0.unwrap();
+
+    let go_root = rig.cache.join(format!("go-{GO}/go"));
+    let caches = rig.cache.join(format!("gopls-{GOPLS}.unpacking/build"));
+    let gopath = caches.join("gopath");
+    let path = |path: PathBuf| path.to_string_lossy().into_owned();
+    assert_eq!(
+        environment_in(&rig.scratch.path().join("go-env")),
+        [
+            ("PATH", path(go_root.join("bin"))),
+            ("GOROOT", path(go_root.clone())),
+            ("GOTOOLCHAIN", "local".to_owned()),
+            ("GOENV", "off".to_owned()),
+            ("GOFLAGS", "-modcacherw".to_owned()),
+            ("CGO_ENABLED", "0".to_owned()),
+            ("GOMODCACHE", path(gopath.join("pkg/mod"))),
+            ("GOPATH", path(gopath)),
+            ("GOCACHE", path(caches.join("gocache"))),
+            ("GOPROXY", "https://proxy.golang.org".to_owned()),
+            ("GOSUMDB", "sum.golang.org".to_owned()),
+            (
+                "GOBIN",
+                path(rig.cache.join(format!("gopls-{GOPLS}.unpacking")))
+            ),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect()
+    );
+}
+
+/// The reviewer's own Go settings (`GOFLAGS`, `GOPROXY`, `CC`, `GOPACKAGESDRIVER`, `go env -w`)
+/// and `HOME` never reach gopls: its `go` would run what they name. `GOTOOLCHAIN=local` keeps it on
+/// the pinned Go whatever `go.mod` or `go.work` name, cgo is off so no C compiler runs on the PR's
+/// files, and `GOPROXY=off` downloads no module.
+#[test]
+fn gopls_runs_with_only_the_apps_go_settings_and_its_caches_in_the_codebases_index_folder() {
+    let rig = Rig::new();
+
+    rig.hover_basket_total().0.unwrap();
+
+    let go_root = rig.cache.join(format!("go-{GO}/go"));
+    let caches = rig
+        .scratch
+        .path()
+        .join("state/server-indexes/acme/shop/gopls");
+    let gopath = caches.join("gopath");
+    let path = |path: PathBuf| path.to_string_lossy().into_owned();
+    assert_eq!(
+        environment_in(&rig.scratch.path().join("gopls-env")),
+        [
+            ("PATH", path(go_root.join("bin"))),
+            ("GOROOT", path(go_root.clone())),
+            ("GOTOOLCHAIN", "local".to_owned()),
+            ("GOENV", "off".to_owned()),
+            ("GOFLAGS", "-modcacherw".to_owned()),
+            ("CGO_ENABLED", "0".to_owned()),
+            ("GOMODCACHE", path(gopath.join("pkg/mod"))),
+            ("GOPATH", path(gopath)),
+            ("GOCACHE", path(caches.join("gocache"))),
+            ("GOPLSCACHE", path(caches.join("goplscache"))),
+            ("GOPROXY", "off".to_owned()),
+            ("GOPACKAGESDRIVER", "off".to_owned()),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_owned(), value))
+        .collect()
     );
 }
 
@@ -738,6 +1025,39 @@ fn removing_unpinned_downloads_keeps_the_pinned_typescript_language_server_and_t
             format!("typescript-{TYPESCRIPT}"),
             format!("typescript-language-server-{TYPESCRIPT_LANGUAGE_SERVER}"),
         ]
+    );
+}
+
+#[test]
+fn removing_unpinned_downloads_keeps_the_pinned_node_and_pyright() {
+    let rig = Rig::new();
+    rig.hover_total().0.unwrap();
+    std::fs::create_dir_all(rig.cache.join("pyright-0.0.1")).unwrap();
+
+    rig.managed.remove_unpinned().unwrap();
+
+    let mut downloads = rig.downloads();
+    downloads.sort();
+    assert_eq!(
+        downloads,
+        vec![format!("node-{NODE}"), format!("pyright-{PYRIGHT}")]
+    );
+}
+
+#[test]
+fn removing_unpinned_downloads_keeps_the_pinned_go_and_gopls() {
+    let rig = Rig::new();
+    rig.hover_basket_total().0.unwrap();
+    std::fs::create_dir_all(rig.cache.join("gopls-v0.0.1")).unwrap();
+    std::fs::create_dir_all(rig.cache.join("go-1.0.0")).unwrap();
+
+    rig.managed.remove_unpinned().unwrap();
+
+    let mut downloads = rig.downloads();
+    downloads.sort();
+    assert_eq!(
+        downloads,
+        vec![format!("go-{GO}"), format!("gopls-{GOPLS}")]
     );
 }
 
