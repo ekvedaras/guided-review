@@ -56,6 +56,7 @@ mod eval_adapters;
 mod fake_app;
 mod file_path;
 mod file_reads;
+mod files_list;
 mod finding_actions;
 mod finding_placement;
 mod findings_done;

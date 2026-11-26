@@ -1860,6 +1860,7 @@ impl ReviewCore {
                     .then_some(PaletteAction::FindingsList),
             )
             .chain(self.has_threads().then_some(PaletteAction::CommentsList))
+            .chain([PaletteAction::FilesList])
             .chain(
                 self.run_ai_review_refusal()
                     .is_none()

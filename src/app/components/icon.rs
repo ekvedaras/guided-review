@@ -29,6 +29,7 @@ pub enum Icon {
     Trash,
     FileText,
     FilePlus,
+    Folder,
     FolderOpen,
     FolderGit,
     Save,
@@ -58,7 +59,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Self; 52] = [
+    pub const ALL: [Self; 53] = [
         Self::Search,
         Self::ExternalLink,
         Self::PullRequest,
@@ -85,6 +86,7 @@ impl Icon {
         Self::Trash,
         Self::FileText,
         Self::FilePlus,
+        Self::Folder,
         Self::FolderOpen,
         Self::FolderGit,
         Self::Save,
@@ -141,6 +143,7 @@ impl Icon {
             Self::Trash => "icons/trash.svg",
             Self::FileText => "icons/file-text.svg",
             Self::FilePlus => "icons/file-plus.svg",
+            Self::Folder => "icons/folder.svg",
             Self::FolderOpen => "icons/folder-open.svg",
             Self::FolderGit => "icons/folder-git.svg",
             Self::Save => "icons/save.svg",

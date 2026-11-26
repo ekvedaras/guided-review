@@ -29,6 +29,7 @@ mod disk_news;
 mod display_options;
 mod file_block;
 mod file_tree;
+mod files_list;
 mod finding_decisions;
 mod finding_follow;
 mod finding_placement;
@@ -164,6 +165,7 @@ pub use display_options::DisplayOptions;
 pub use display_options::Focus;
 pub use file_block::FileBlock;
 pub use file_tree::{FileTree, FolderPath, TreeRow, TreeRowKind};
+pub use files_list::{FilePlace, FilesList, FilesListRow, FilesListRowKind, ListedFile};
 pub use finding_decisions::{Fate, FindingDecision, FindingDecisions};
 pub use finding_threads::{
     FindingThread, FindingThreads, NoQuestion, WhyAuthor, WhyDeliveryOutcome, WhyDeliveryRequest,

@@ -38,6 +38,7 @@ impl AssetSource for Assets {
             "icons/trash.svg" => include_bytes!("../../assets/icons/trash.svg"),
             "icons/file-text.svg" => include_bytes!("../../assets/icons/file-text.svg"),
             "icons/file-plus.svg" => include_bytes!("../../assets/icons/file-plus.svg"),
+            "icons/folder.svg" => include_bytes!("../../assets/icons/folder.svg"),
             "icons/folder-open.svg" => include_bytes!("../../assets/icons/folder-open.svg"),
             "icons/folder-git.svg" => include_bytes!("../../assets/icons/folder-git.svg"),
             "icons/save.svg" => include_bytes!("../../assets/icons/save.svg"),
