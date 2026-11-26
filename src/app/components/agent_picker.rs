@@ -268,45 +268,53 @@ impl AgentPicker {
                         div()
                             .flex()
                             .flex_wrap()
-                            .items_baseline()
-                            .gap_2()
+                            .items_center()
+                            .gap_x_2()
+                            .gap_y_1()
+                            .text_sm()
                             .child(
                                 div()
-                                    .text_sm()
-                                    .text_color(colors.muted_text)
-                                    .child(format!("{terminal} in")),
-                            )
-                            .child(
-                                div()
-                                    .text_lg()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(colors.text)
                                     .child(choice.space.clone()),
                             )
                             .child(
                                 div()
-                                    .text_sm()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1p5()
                                     .text_color(status_color(colors, choice.status))
+                                    .child(
+                                        div()
+                                            .size(px(6.))
+                                            .rounded_full()
+                                            .bg(status_color(colors, choice.status)),
+                                    )
                                     .child(choice.status.to_string()),
                             )
+                            .child(
+                                div()
+                                    .text_color(colors.muted_text)
+                                    .child(terminal.to_string()),
+                            )
                             .children(tags),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_family(*CODE_FONT)
-                            .text_color(colors.muted_text)
-                            .child(SelectableText::new(
-                                format!("agent-picker-folder-{terminal}"),
-                                choice.folder.display().to_string(),
-                            )),
                     )
                     .child(div().text_xs().text_color(colors.muted_text).child(
                         SelectableText::new(
                             format!("agent-picker-code-{terminal}"),
                             where_it_works,
                         ),
-                    )),
+                    ))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_family(*CODE_FONT)
+                            .text_color(colors.muted_text)
+                            .child(SelectableText::new(
+                                format!("agent-picker-folder-{terminal}"),
+                                choice.folder.display().to_string(),
+                            )),
+                    ),
             )
             .child(div().flex().flex_none().gap_2().child(show).children(pick))
     }
