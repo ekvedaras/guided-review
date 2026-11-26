@@ -43,6 +43,16 @@ const TYPESCRIPT_LANGUAGE_SERVER: &str = "8.8.8";
 
 const TYPESCRIPT: &str = "7.7.7";
 
+const PYRIGHT: &str = "6.6.6";
+
+const CART: &str = "class Cart:
+    def total(self) -> int:
+        return 3
+
+    def summary(self) -> str:
+        return str(self.total())
+";
+
 const SHAPES: &str = "class Circle {
     area(): number { return 1; }
 
@@ -80,6 +90,10 @@ fn typescript_language_server_url() -> String {
     format!(
         "https://registry.npmjs.org/typescript-language-server/-/typescript-language-server-{TYPESCRIPT_LANGUAGE_SERVER}.tgz"
     )
+}
+
+fn pyright_url() -> String {
+    format!("https://registry.npmjs.org/pyright/-/pyright-{PYRIGHT}.tgz")
 }
 
 fn typescript_url() -> String {
@@ -155,6 +169,7 @@ impl Rig {
         repo.write("app/Jobs.php", JOBS);
         repo.write("src/shapes.ts", SHAPES);
         repo.write("src/shapes.tsx", SHAPES);
+        repo.write("app/cart.py", CART);
         let head = Sha::new(&repo.commit("head"));
         let scratch = TempDir::new().unwrap();
         let script = json!({
@@ -203,6 +218,10 @@ impl Rig {
             ("package/package.json", "{}", 0o644),
             ("package/lib/tsserver.js", "// tsserver", 0o644),
         ]);
+        let pyright_archive = tarball(&[
+            ("package/package.json", "{}", 0o644),
+            ("package/langserver.index.js", "// the server", 0o644),
+        ]);
         let host = Arc::new(Host::default());
         host.files.lock().unwrap().extend([
             (url_of(TAG, TARGET), archive.clone()),
@@ -213,6 +232,7 @@ impl Rig {
                 typescript_language_server_archive.clone(),
             ),
             (typescript_url(), typescript_archive.clone()),
+            (pyright_url(), pyright_archive.clone()),
         ]);
         let pins = ServerPins {
             rust_analyzer: ReleasePin {
@@ -234,6 +254,10 @@ impl Rig {
             typescript: PackagePin {
                 version: TYPESCRIPT.to_owned(),
                 sha512: sha512_of(&typescript_archive),
+            },
+            pyright: PackagePin {
+                version: PYRIGHT.to_owned(),
+                sha512: sha512_of(&pyright_archive),
             },
         };
         let cache = scratch.path().join("cache/language-servers");
@@ -270,6 +294,11 @@ impl Rig {
     /// `$this->schedule()` in `run`.
     fn hover_schedule(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
         self.hover("app/Jobs.php", 7, 41, "schedule")
+    }
+
+    /// `self.total()` in `summary`.
+    fn hover_total(&self) -> (anyhow::Result<Answer>, Vec<Waiting>) {
+        self.hover("app/cart.py", 6, 24, "total")
     }
 
     /// `this.area()` in `describe`.
@@ -487,6 +516,60 @@ fn intelephense_keeps_its_index_in_a_folder_of_the_repo_under_the_state_folder()
             "storagePath": index.join("storage"),
             "globalStoragePath": index.join("global"),
         })
+    );
+}
+
+fn pyright() -> ServerName {
+    ServerName::new("Pyright")
+}
+
+#[test]
+fn the_first_python_hover_downloads_the_pinned_node_and_pyright_and_runs_pyright_on_that_node() {
+    let rig = Rig::new();
+
+    let (answer, waits) = rig.hover_total();
+    let answer = answer.unwrap();
+
+    assert_eq!(answer.answered_by, AnsweredBy::LanguageServer(pyright()));
+    assert_eq!(
+        waits[..2],
+        [
+            Waiting::Downloading(ServerName::new("Node")),
+            Waiting::Downloading(pyright())
+        ]
+    );
+    assert_eq!(rig.requested(), vec![node_url(TARGET), pyright_url()]);
+    let args = std::fs::read_to_string(rig.scratch.path().join("node-args")).unwrap();
+    assert_eq!(
+        args.trim(),
+        format!(
+            "{}/pyright-{PYRIGHT}/package/langserver.index.js --stdio",
+            rig.cache.display()
+        )
+    );
+}
+
+/// Pyright runs `python3` from PATH unless told an interpreter; one that is not there makes it run none.
+#[test]
+fn pyright_is_told_an_interpreter_where_nothing_is_so_it_runs_no_python() {
+    let rig = Rig::new();
+
+    rig.hover_total().0.unwrap();
+
+    let log = std::fs::read_to_string(rig.scratch.path().join("log")).unwrap();
+    let initialize: serde_json::Value = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|message| message["method"] == "initialize")
+        .unwrap();
+    let interpreter = initialize["params"]["initializationOptions"]["pythonPath"]
+        .as_str()
+        .map(PathBuf::from);
+    assert!(
+        interpreter
+            .as_ref()
+            .is_some_and(|path| path.starts_with(&rig.cache) && !path.exists()),
+        "{interpreter:?}"
     );
 }
 
@@ -738,6 +821,22 @@ fn removing_unpinned_downloads_keeps_the_pinned_typescript_language_server_and_t
             format!("typescript-{TYPESCRIPT}"),
             format!("typescript-language-server-{TYPESCRIPT_LANGUAGE_SERVER}"),
         ]
+    );
+}
+
+#[test]
+fn removing_unpinned_downloads_keeps_the_pinned_node_and_pyright() {
+    let rig = Rig::new();
+    rig.hover_total().0.unwrap();
+    std::fs::create_dir_all(rig.cache.join("pyright-0.0.1")).unwrap();
+
+    rig.managed.remove_unpinned().unwrap();
+
+    let mut downloads = rig.downloads();
+    downloads.sort();
+    assert_eq!(
+        downloads,
+        vec![format!("node-{NODE}"), format!("pyright-{PYRIGHT}")]
     );
 }
 

@@ -87,6 +87,10 @@ impl ServerName {
         Self::new("typescript-language-server")
     }
 
+    pub fn pyright() -> Self {
+        Self::new("Pyright")
+    }
+
     /// The server that answers files of `language`; `None` when no server does and names are
     /// only looked up by name.
     pub fn of(language: crate::language::Language) -> Option<Self> {
@@ -95,7 +99,8 @@ impl ServerName {
             Language::Rust => Some(Self::rust_analyzer()),
             Language::Php => Some(Self::intelephense()),
             Language::TypeScript | Language::Tsx => Some(Self::typescript_language_server()),
-            Language::Python | Language::Go => None,
+            Language::Python => Some(Self::pyright()),
+            Language::Go => None,
         }
     }
 }

@@ -1334,6 +1334,181 @@ fn the_real_typescript_language_server_loads_no_tsserver_plugin_that_the_prs_tsc
     assert!(!marker.exists(), "the PR's tsserver plugin was loaded");
 }
 
+const CART: &str = "class Cart:
+    \"\"\"A shopping cart.\"\"\"
+
+    def total(self) -> int:
+        \"\"\"Adds up the cart.\"\"\"
+        return 3
+
+    def summary(self) -> str:
+        return str(self.total())
+
+
+class Order:
+    def total(self) -> int:
+        return 4
+";
+
+/// Hovers `total` in `self.total()` with the real pyright in a repo whose head also holds what `plant`
+/// writes, given a marker file. Gives the answer and whether anything wrote the marker; `None` when the
+/// pinned pyright is not downloaded.
+fn the_real_pyright_hovering_total_with(
+    plant: impl FnOnce(&FixtureRepo, &Path),
+) -> Option<(Answer, bool)> {
+    let managed = downloaded_server(Language::Python)?;
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    repo.write("app/__init__.py", "");
+    repo.write("app/cart.py", CART);
+    let scratch = TempDir::new().unwrap();
+    let marker = scratch.path().join("ran");
+    plant(&repo, &marker);
+    let head = Sha::new(&repo.commit("head"));
+    let code = LocalGit::configured_clone(&crate::support::shop_on_github(), repo.path()).unwrap();
+    let servers = LanguageServers::new(
+        managed,
+        ServerCheckouts::new(scratch.path().join("checkouts")),
+        Timeouts::default(),
+        Arc::new(IgnoredServerMessages),
+    );
+    let by_name: Arc<dyn CodeNavigator> =
+        Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
+            file_path("app/cart.py"),
+        ]))));
+
+    let answer = servers
+        .navigator(shop_codebase(), by_name)
+        .navigate(
+            &code,
+            &NavigationRequest {
+                sha: head,
+                at: Place {
+                    path: file_path("app/cart.py"),
+                    line: line(9),
+                },
+                column: Column::try_from(24).unwrap(),
+                word: Word::new("total").unwrap(),
+            },
+            &|_| {},
+        )
+        .unwrap();
+    servers.stop_all();
+
+    Some((answer, marker.exists()))
+}
+
+#[test]
+fn the_real_pyright_finds_the_method_of_the_class_the_code_calls() {
+    let Some((answer, _)) = the_real_pyright_hovering_total_with(|_, _| {}) else {
+        eprintln!("the pinned pyright is not downloaded: skipped");
+        return;
+    };
+
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(ServerName::pyright())
+    );
+    let [definition] = &answer.lookup.definitions[..] else {
+        panic!("one definition: {:?}", answer.lookup.definitions);
+    };
+    assert_eq!(definition.place.path, file_path("app/cart.py"));
+    assert_eq!(definition.place.line, line(4));
+    assert_eq!(&*definition.signature, "(method) def total() -> int");
+    assert_eq!(definition.doc.as_deref(), Some("Adds up the cart."));
+}
+
+/// Run in a process of its own whose PATH starts with a folder holding a `python3` and a `python` that
+/// write a marker, by the test after it.
+#[test]
+#[ignore = "run by the_real_pyright_runs_no_python_from_the_path"]
+fn the_real_pyright_started_by_a_process_with_a_marking_python_on_its_path() {
+    if the_real_pyright_hovering_total_with(|_, _| {}).is_none() {
+        eprintln!("the pinned pyright is not downloaded: skipped");
+    }
+}
+
+#[test]
+fn the_real_pyright_runs_no_python_from_the_path() {
+    if downloaded_server(Language::Python).is_none() {
+        eprintln!("the pinned pyright is not downloaded: skipped");
+        return;
+    }
+    let scratch = TempDir::new().unwrap();
+    let marker = scratch.path().join("ran");
+    let bin = scratch.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for python in ["python3", "python"] {
+        write_executable(&bin.join(python), format!("{}exit 1\n", marking(&marker)));
+    }
+    let path = std::env::var("PATH").unwrap();
+
+    let run = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "language_server::the_real_pyright_started_by_a_process_with_a_marking_python_on_its_path",
+            "--ignored",
+        ])
+        .env("PATH", format!("{}:{path}", bin.display()))
+        .output()
+        .unwrap();
+
+    let said = String::from_utf8_lossy(&run.stdout);
+    assert!(run.status.success(), "{said}");
+    assert!(said.contains("1 passed"), "{said}");
+    assert!(!marker.exists(), "pyright ran a python found on PATH");
+}
+
+/// A venv in the PR's files, with a `python` that writes the marker.
+fn plant_venv(repo: &FixtureRepo, folder: &str, marker: &Path) {
+    repo.write(&format!("{folder}/lib/python3.12/site-packages/.keep"), "");
+    repo.write(&format!("{folder}/pyvenv.cfg"), "home = /usr/bin\n");
+    std::fs::create_dir_all(repo.path().join(folder).join("bin")).unwrap();
+    for python in ["python3", "python"] {
+        write_executable(
+            &repo.path().join(folder).join("bin").join(python),
+            format!("{}exit 1\n", marking(marker)),
+        );
+    }
+}
+
+fn assert_pyright_ran_nothing(ran: Option<(Answer, bool)>) {
+    let Some((answer, ran)) = ran else {
+        eprintln!("the pinned pyright is not downloaded: skipped");
+        return;
+    };
+    assert_eq!(
+        answer.answered_by,
+        AnsweredBy::LanguageServer(ServerName::pyright())
+    );
+    assert!(!ran, "pyright ran the PR's python");
+}
+
+#[test]
+fn the_real_pyright_runs_no_python_of_a_venv_that_the_prs_pyrightconfig_names() {
+    assert_pyright_ran_nothing(the_real_pyright_hovering_total_with(|repo, marker| {
+        repo.write("pyrightconfig.json", r#"{"venvPath": ".", "venv": "venv"}"#);
+        plant_venv(repo, "venv", marker);
+    }));
+}
+
+#[test]
+fn the_real_pyright_runs_no_python_that_the_prs_pyproject_names() {
+    assert_pyright_ran_nothing(the_real_pyright_hovering_total_with(|repo, marker| {
+        repo.write(
+            "pyproject.toml",
+            "[tool.pyright]\nvenvPath = \".\"\nvenv = \"venv\"\npythonPath = \"venv/bin/python\"\n",
+        );
+        plant_venv(repo, "venv", marker);
+    }));
+}
+
+#[test]
+fn the_real_pyright_runs_no_python_of_a_dot_venv_in_the_prs_files() {
+    assert_pyright_ran_nothing(the_real_pyright_hovering_total_with(|repo, marker| {
+        plant_venv(repo, ".venv", marker);
+    }));
+}
+
 #[test]
 fn a_review_at_another_head_moves_the_checkout_and_tells_the_running_server_which_files_changed() {
     let rig = Rig::answering_add();

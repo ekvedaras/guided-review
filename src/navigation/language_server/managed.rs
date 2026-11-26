@@ -10,7 +10,7 @@ use crate::update::{ReleasesPort, Target};
 
 use super::downloads::Downloads;
 use super::recipes::{
-    Intelephense, Node, NpmPackage, RustAnalyzer, ServerPins, ServerRecipe,
+    Intelephense, Node, NpmPackage, Pyright, RustAnalyzer, ServerPins, ServerRecipe,
     TypeScriptLanguageServer,
 };
 use super::{FallbackReason, ServerCatalog, ServerLaunch, Waiting};
@@ -31,6 +31,7 @@ pub struct ManagedServers {
     rust_analyzer: RustAnalyzer,
     intelephense: Intelephense,
     typescript_language_server: TypeScriptLanguageServer,
+    pyright: Pyright,
 }
 
 impl ManagedServers {
@@ -55,6 +56,14 @@ impl ManagedServers {
                 },
                 indexes: folders.indexes,
             },
+            pyright: Pyright {
+                node: node.clone(),
+                package: NpmPackage {
+                    name: "pyright",
+                    pin: pins.pyright,
+                    script: "package/langserver.index.js",
+                },
+            },
             typescript_language_server: TypeScriptLanguageServer {
                 node,
                 server: NpmPackage {
@@ -76,15 +85,17 @@ impl ManagedServers {
             Language::Rust => Some(&self.rust_analyzer),
             Language::Php => Some(&self.intelephense),
             Language::TypeScript | Language::Tsx => Some(&self.typescript_language_server),
-            Language::Python | Language::Go => None,
+            Language::Python => Some(&self.pyright),
+            Language::Go => None,
         }
     }
 
-    fn recipes(&self) -> [&dyn ServerRecipe; 3] {
+    fn recipes(&self) -> [&dyn ServerRecipe; 4] {
         [
             &self.rust_analyzer,
             &self.intelephense,
             &self.typescript_language_server,
+            &self.pyright,
         ]
     }
 

@@ -41,6 +41,7 @@ pub struct ServerPins {
     pub typescript_language_server: PackagePin,
     /// The tsserver typescript-language-server runs, whatever TypeScript the reviewed repo installs.
     pub typescript: PackagePin,
+    pub pyright: PackagePin,
 }
 
 impl ServerPins {
@@ -111,6 +112,10 @@ impl ServerPins {
             typescript: PackagePin {
                 version: "6.0.3".to_owned(),
                 sha512: "cb64efbb14993c3c906a490544f6472859be28a56a222b1d83dfc26709bd7edbca5cb3fc3515a3dfcfce0e335baf8dd2b285ea36e022b047f519d0b1a9671d07".to_owned(),
+            },
+            pyright: PackagePin {
+                version: "1.1.414".to_owned(),
+                sha512: "14f6596f9d637a90d7e1e3fb4c460378d16d984dd683092411c269bc7dff426512b23d04032dcb5eefb10784ff1560de8edb179427c5affadb5858f0bb0b97c3".to_owned(),
             },
         }
     }
@@ -282,8 +287,8 @@ pub(super) struct NpmPackage {
 
 impl NpmPackage {
     /// The registry tarball holds the package under `package/`, and `script` is in it. Intelephense,
-    /// typescript-language-server and typescript are each bundled with no dependencies, so no npm
-    /// installs anything.
+    /// typescript-language-server, typescript and pyright are each bundled with no dependencies, so no
+    /// npm installs anything.
     fn download(&self, downloads: &Downloads, script: &Path) -> anyhow::Result<()> {
         let (package, pin) = (self.name, &self.pin);
         let url = format!(
@@ -292,15 +297,12 @@ impl NpmPackage {
         );
         let archive =
             downloads.checked_download(&url, |archive| check_sha512(archive, &pin.sha512))?;
-        let folder = script
-            .ancestors()
-            .nth(3)
-            .context("the script has no package folder")?;
-        place(folder, |unpacking| {
+        let folder = downloads.folder(&self.folder());
+        place(&folder, |unpacking| {
             tar::Archive::new(GzDecoder::new(archive.as_slice()))
                 .unpack(unpacking)
                 .with_context(|| format!("could not unpack {url}"))?;
-            let inside = script.strip_prefix(folder)?;
+            let inside = script.strip_prefix(&folder)?;
             anyhow::ensure!(
                 unpacking.join(inside).is_file(),
                 "{url} has no {}",
@@ -408,6 +410,47 @@ impl ServerRecipe for TypeScriptLanguageServer {
     }
 }
 
+pub(super) struct Pyright {
+    pub(super) node: Node,
+    pub(super) package: NpmPackage,
+}
+
+impl Pyright {
+    /// A path in the app's own download folder where nothing is.
+    fn no_interpreter(&self, downloads: &Downloads) -> PathBuf {
+        downloads
+            .folder(&self.package.folder())
+            .join("no-python-interpreter")
+    }
+}
+
+impl ServerRecipe for Pyright {
+    fn folders(&self) -> Vec<String> {
+        vec![self.node.folder(), self.package.folder()]
+    }
+
+    fn is_downloaded(&self, downloads: &Downloads) -> bool {
+        self.node.binary(downloads).is_file() && self.package.script(downloads).is_file()
+    }
+
+    fn launch(
+        &self,
+        downloads: &Downloads,
+        _codebase: &Codebase,
+        waiting: &dyn Fn(Waiting),
+    ) -> Result<ServerLaunch, FallbackReason> {
+        let node = self.node.program(downloads, waiting)?;
+        let script = self
+            .package
+            .fetched(&ServerName::pyright(), downloads, waiting)?;
+        Ok(ServerLaunch::pyright(
+            node,
+            &script,
+            &self.no_interpreter(downloads),
+        ))
+    }
+}
+
 impl ServerLaunch {
     /// Build scripts, proc macros and check on save are off, so it builds nothing in the repo.
     pub fn rust_analyzer(program: PathBuf) -> Self {
@@ -450,6 +493,22 @@ impl ServerLaunch {
                 "tsserver": {"path": tsserver},
                 "disableAutomaticTypingAcquisition": true,
             }),
+        }
+    }
+
+    /// Pyright on the app's Node. Pyright runs a Python to learn the import paths and the version:
+    /// the client's `pythonPath`, else `python3` from PATH, in the server checkout. `no_interpreter`,
+    /// where nothing is, makes it run none; it then reads the stubs it ships and the repo's files.
+    /// Workspace files cannot name a Python (pyright 1.1.414 refuses `pythonPath` there) and a venv
+    /// they name is only read. Pyright reads `pythonPath` from the `python` section, which these
+    /// options answer as every other.
+    pub fn pyright(node: PathBuf, script: &Path, no_interpreter: &Path) -> Self {
+        Self {
+            name: ServerName::pyright(),
+            program: node,
+            args: vec![script.to_string_lossy().into_owned(), "--stdio".to_owned()],
+            status: StatusReports::No,
+            options: json!({"pythonPath": no_interpreter}),
         }
     }
 }
