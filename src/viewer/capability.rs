@@ -41,8 +41,8 @@ impl std::fmt::Display for Capability {
 }
 
 /// The capabilities a code host offers, read once from its ports (`HostCapabilities::of`). The
-/// review's work is planned on the UI thread and run with the ports lent on another, so the review
-/// cannot hold a port; it holds this. Each part of a review that shows a capability is built from it,
+/// review only plans its work; the host is lent to each job when it runs, so the review keeps no
+/// host and decides what to show from this copy. Each part of a review that shows a capability is built from it,
 /// so none shows a feature its host lacks. The default is a host that offers none.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HostCapabilities {
