@@ -71,11 +71,12 @@ impl ManagedServers {
         }
     }
 
-    fn recipe(&self, language: Language) -> &dyn ServerRecipe {
+    fn recipe(&self, language: Language) -> Option<&dyn ServerRecipe> {
         match language {
-            Language::Rust => &self.rust_analyzer,
-            Language::Php => &self.intelephense,
-            Language::TypeScript | Language::Tsx => &self.typescript_language_server,
+            Language::Rust => Some(&self.rust_analyzer),
+            Language::Php => Some(&self.intelephense),
+            Language::TypeScript | Language::Tsx => Some(&self.typescript_language_server),
+            Language::Python | Language::Go => None,
         }
     }
 
@@ -89,7 +90,8 @@ impl ManagedServers {
 
     /// Whether the server of `language` is in the cache folder, which asking for it never checks.
     pub fn is_downloaded(&self, language: Language) -> bool {
-        self.recipe(language).is_downloaded(&self.downloads)
+        self.recipe(language)
+            .is_some_and(|recipe| recipe.is_downloaded(&self.downloads))
     }
 
     /// Removes every download of a version this build does not pin, and what a stopped unpacking left.
@@ -111,6 +113,7 @@ impl ServerCatalog for ManagedServers {
         waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
         self.recipe(language)
+            .ok_or_else(|| FallbackReason::new("no language server answers this language"))?
             .launch(&self.downloads, codebase, waiting)
     }
 }

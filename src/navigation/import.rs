@@ -20,6 +20,8 @@ enum Module {
     PhpNamespace(Vec<String>),
     /// `./cart`, `../shop/cart`, `@/shop/cart`
     TypeScript(String),
+    /// `shop.cart`, `.cart`, `..shop.cart`
+    Python(String),
 }
 
 impl Import {
@@ -28,14 +30,29 @@ impl Import {
             Language::Rust => rust_imports(text),
             Language::Php => php_imports(text),
             Language::TypeScript | Language::Tsx => typescript_imports(text),
+            Language::Python => python_imports(text),
+            // A Go file imports packages, whose names its code spells `cart.Cart`.
+            Language::Go => Vec::new(),
         }
+    }
+
+    /// Whether `from` sees the names defined in `path` with no import: Go files of one folder are
+    /// one package.
+    pub fn not_needed_between(language: Language, from: &FilePath, path: &FilePath) -> bool {
+        let folder = |path: &FilePath| {
+            path.as_str()
+                .rsplit_once('/')
+                .map_or("", |(folder, _)| folder)
+                .to_owned()
+        };
+        language == Language::Go && folder(from) == folder(path)
     }
 
     /// The module segments a Rust import names, `crate`, `self` and `super` left out.
     pub fn module_names(&self) -> impl Iterator<Item = &str> {
         let segments = match &self.from {
             Module::Rust(segments) => segments.as_slice(),
-            Module::PhpNamespace(_) | Module::TypeScript(_) => &[],
+            Module::PhpNamespace(_) | Module::TypeScript(_) | Module::Python(_) => &[],
         };
         segments
             .iter()
@@ -49,6 +66,7 @@ impl Import {
             Module::Rust(segments) => rust_leads_to(segments, from, path),
             Module::PhpNamespace(namespace) => php_leads_to(namespace, path),
             Module::TypeScript(module) => typescript_leads_to(module, from, path),
+            Module::Python(module) => python_leads_to(module, from, path),
         }
     }
 }
@@ -150,6 +168,36 @@ fn typescript_leads_to(module: &str, from: &FilePath, path: &FilePath) -> bool {
                 .is_some_and(|before| before.ends_with('/'))
     };
     is_module(file) || file.strip_suffix("/index").is_some_and(is_module)
+}
+
+/// `shop.cart` leads to `src/shop/cart.py` or `shop/cart/__init__.py`; `.cart` and `..cart` start
+/// at the folder of `from` and its parent.
+fn python_leads_to(module: &str, from: &FilePath, path: &FilePath) -> bool {
+    let Some(file) = path
+        .as_str()
+        .strip_suffix(".py")
+        .or_else(|| path.as_str().strip_suffix(".pyi"))
+    else {
+        return false;
+    };
+    let file = file.strip_suffix("/__init__").unwrap_or(file);
+    let names = module.trim_start_matches('.');
+    let dots = module.len() - names.len();
+    let names = names.split('.').filter(|name| !name.is_empty());
+    if dots > 0 {
+        let mut resolved = segments_of(from.as_str());
+        for _ in 0..dots {
+            resolved.pop();
+        }
+        resolved.extend(names);
+        return file == resolved.join("/");
+    }
+    let wanted = names.collect::<Vec<_>>().join("/");
+    !wanted.is_empty()
+        && (file == wanted
+            || file
+                .strip_suffix(wanted.as_str())
+                .is_some_and(|before| before.ends_with('/')))
 }
 
 fn without_code_extension(text: &str) -> &str {
@@ -365,6 +413,41 @@ fn typescript_imports(text: &str) -> Vec<Import> {
             }
         }
         statement.clear();
+    }
+    imports
+}
+
+/// `from shop.cart import Cart, Item as I`, `from .cart import (\n    Cart,\n)`
+fn python_imports(text: &str) -> Vec<Import> {
+    let mut imports = Vec::new();
+    let mut lines = text.lines();
+    while let Some(line) = lines.next() {
+        let Some((module, names)) = line
+            .trim()
+            .strip_prefix("from ")
+            .and_then(|rest| rest.split_once(" import "))
+        else {
+            continue;
+        };
+        let mut names = names.trim().to_owned();
+        if names.starts_with('(') {
+            while !names.contains(')') {
+                let Some(next) = lines.next() else { break };
+                names.push(' ');
+                names.push_str(next.trim());
+            }
+        }
+        let names = names.trim_start_matches('(');
+        let names = names.split(')').next().unwrap_or(names);
+        for item in names.split(',') {
+            let name = item.split(" as ").next().unwrap_or(item).trim();
+            if !name.is_empty() && name != "*" {
+                imports.push(Import {
+                    name: name.to_owned(),
+                    from: Module::Python(module.trim().to_owned()),
+                });
+            }
+        }
     }
     imports
 }

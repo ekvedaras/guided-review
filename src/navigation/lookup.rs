@@ -94,6 +94,7 @@ impl Lookups {
             .into_iter()
             .filter(|import| import.name == word.as_str())
             .collect();
+        let language = Language::for_path(from.as_str());
         let mut definitions = found.definitions.to_vec();
         definitions.sort_by(|a, b| {
             let rank = |definition: &Definition| {
@@ -102,6 +103,9 @@ impl Lookups {
                 } else if imports
                     .iter()
                     .any(|import| import.leads_to(from, &definition.place.path))
+                    || language.is_some_and(|language| {
+                        Import::not_needed_between(language, from, &definition.place.path)
+                    })
                 {
                     Rank::Imported
                 } else {

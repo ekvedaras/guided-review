@@ -264,6 +264,143 @@ fn a_typescript_file_gives_its_definitions_and_usages() {
     );
 }
 
+const PYTHON_CART: &str = r#"from shop.item import Item
+
+
+class Cart:
+    """A cart of items."""
+
+    def total(self) -> int:
+        """What the items cost."""
+        return sum(item.price for item in self.items)
+
+
+def total(cart: Cart) -> int:
+    # not a docstring
+    return cart.total()
+"#;
+
+#[test]
+fn a_python_file_gives_its_definitions_with_signature_and_docstring() {
+    let cart = WordInFile::read(
+        &file_path("shop/cart.py"),
+        PYTHON_CART,
+        Language::Python,
+        &word("Cart"),
+    );
+    let total = WordInFile::read(
+        &file_path("shop/cart.py"),
+        PYTHON_CART,
+        Language::Python,
+        &word("total"),
+    );
+
+    assert_eq!(
+        definitions(&cart),
+        [(
+            DefinitionKind::Class,
+            "shop/cart.py:4".to_owned(),
+            "class Cart:",
+            Some("A cart of items."),
+        )]
+    );
+    assert_eq!(usages(&cart), [(12, "def total(cart: Cart) -> int:")]);
+    assert_eq!(
+        definitions(&total),
+        [
+            (
+                DefinitionKind::Method,
+                "shop/cart.py:7".to_owned(),
+                "def total(self) -> int:",
+                Some("What the items cost."),
+            ),
+            (
+                DefinitionKind::Function,
+                "shop/cart.py:12".to_owned(),
+                "def total(cart: Cart) -> int:",
+                None,
+            ),
+        ]
+    );
+    assert_eq!(usages(&total), [(14, "return cart.total()")]);
+}
+
+const GO_CART: &str = r"package shop
+
+// Cart holds items.
+type Cart struct {
+	items []Item
+}
+
+// Total is what the items cost.
+func (c *Cart) Total() int {
+	return len(c.items)
+}
+
+func Total(cart *Cart) int {
+	return cart.Total()
+}
+";
+
+#[test]
+fn a_go_file_gives_its_definitions_with_signature_and_doc_comment() {
+    let cart = WordInFile::read(
+        &file_path("shop/cart.go"),
+        GO_CART,
+        Language::Go,
+        &word("Cart"),
+    );
+    let total = WordInFile::read(
+        &file_path("shop/cart.go"),
+        GO_CART,
+        Language::Go,
+        &word("Total"),
+    );
+
+    assert_eq!(
+        definitions(&cart),
+        [(
+            DefinitionKind::Struct,
+            "shop/cart.go:4".to_owned(),
+            "type Cart struct",
+            Some("Cart holds items."),
+        )]
+    );
+    assert_eq!(
+        usages(&cart),
+        [
+            (9, "func (c *Cart) Total() int {"),
+            (13, "func Total(cart *Cart) int {")
+        ]
+    );
+    assert_eq!(
+        definitions(&total),
+        [
+            (
+                DefinitionKind::Method,
+                "shop/cart.go:9".to_owned(),
+                "func (c *Cart) Total() int",
+                Some("Total is what the items cost."),
+            ),
+            (
+                DefinitionKind::Function,
+                "shop/cart.go:13".to_owned(),
+                "func Total(cart *Cart) int",
+                None,
+            ),
+        ]
+    );
+    assert_eq!(usages(&total), [(14, "return cart.Total()")]);
+}
+
+#[test]
+fn python_and_go_files_are_parsed_but_not_cut_into_pieces() {
+    assert_eq!(Language::for_path("shop/cart.py"), Some(Language::Python));
+    assert_eq!(Language::for_path("shop/cart.go"), Some(Language::Go));
+    assert_eq!(Language::for_pieces("shop/cart.py"), None);
+    assert_eq!(Language::for_pieces("shop/cart.go"), None);
+}
+
 #[test]
 fn tsx_files_are_read_with_the_tsx_grammar() {
     let source = "export function Badge() {\n  return <Label text=\"x\" />;\n}\n";
@@ -618,6 +755,45 @@ fn a_typescript_definition_ranks_as_imported_when_the_import_resolves_to_its_fil
     );
 
     assert_eq!(ranked, ["src/shop/cart.ts", "lib/cart.ts"]);
+}
+
+#[test]
+fn a_python_definition_ranks_as_imported_when_the_from_import_names_its_module() {
+    let cart = "class Cart:\n    pass\n";
+    let files = [
+        ("lib/cart.py", cart),
+        ("src/shop/cart/__init__.py", cart),
+        (
+            "src/web/checkout.py",
+            "from shop.cart import (\n    Item,\n    Cart as C,\n)\n\nC()\n",
+        ),
+        ("src/shop/pay.py", "from .cart import Cart\n\nCart()\n"),
+    ];
+
+    assert_eq!(
+        ranked(&files, "Cart", "src/web/checkout.py"),
+        ["src/shop/cart/__init__.py", "lib/cart.py"]
+    );
+    assert_eq!(
+        ranked(&files, "Cart", "src/shop/pay.py"),
+        ["src/shop/cart/__init__.py", "lib/cart.py"]
+    );
+}
+
+#[test]
+fn a_go_definition_in_the_hovered_files_package_ranks_before_the_rest() {
+    let cart = "package shop\n\ntype Cart struct{}\n";
+    let ranked = ranked(
+        &[
+            ("aaa/cart.go", "package aaa\n\ntype Cart struct{}\n"),
+            ("shop/cart.go", cart),
+            ("shop/checkout.go", "package shop\n\nvar c Cart\n"),
+        ],
+        "Cart",
+        "shop/checkout.go",
+    );
+
+    assert_eq!(ranked, ["shop/cart.go", "aaa/cart.go"]);
 }
 
 #[test]

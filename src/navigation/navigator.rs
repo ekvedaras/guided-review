@@ -75,14 +75,28 @@ impl ServerName {
         Self(name.into())
     }
 
-    /// The server that answers files of `language`.
-    pub fn of(language: crate::language::Language) -> Self {
+    pub fn rust_analyzer() -> Self {
+        Self::new("rust-analyzer")
+    }
+
+    pub fn intelephense() -> Self {
+        Self::new("Intelephense")
+    }
+
+    pub fn typescript_language_server() -> Self {
+        Self::new("typescript-language-server")
+    }
+
+    /// The server that answers files of `language`; `None` when no server does and names are
+    /// only looked up by name.
+    pub fn of(language: crate::language::Language) -> Option<Self> {
         use crate::language::Language;
-        Self::new(match language {
-            Language::Rust => "rust-analyzer",
-            Language::Php => "Intelephense",
-            Language::TypeScript | Language::Tsx => "typescript-language-server",
-        })
+        match language {
+            Language::Rust => Some(Self::rust_analyzer()),
+            Language::Php => Some(Self::intelephense()),
+            Language::TypeScript | Language::Tsx => Some(Self::typescript_language_server()),
+            Language::Python | Language::Go => None,
+        }
     }
 }
 

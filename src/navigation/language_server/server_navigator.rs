@@ -42,13 +42,14 @@ impl CodeNavigator for ServerNavigator {
             answer.answered_by = AnsweredBy::ByName { because };
             Ok(answer)
         };
-        let Some(language) = Language::for_path(request.at.path.as_str()) else {
+        let Some((language, server)) = Language::for_path(request.at.path.as_str())
+            .and_then(|language| Some((language, ServerName::of(language)?)))
+        else {
             return by_name(None);
         };
         let Some(clone) = code.local_clone() else {
             return by_name(Some(FallbackReason::new(&format!(
-                "{} needs a local clone, and the code is read from the PR's host",
-                ServerName::of(language)
+                "{server} needs a local clone, and the code is read from the PR's host"
             ))));
         };
         let launch = match self.pool.launch_for(language, &self.codebase, waiting) {

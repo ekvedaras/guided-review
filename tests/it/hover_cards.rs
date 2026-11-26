@@ -977,6 +977,32 @@ fn the_question_names_the_server_of_the_hovered_files_language() {
     );
 }
 
+#[test]
+fn a_python_or_go_name_asks_no_question_since_no_server_answers_them() {
+    let shop = Shop::with_changes(&[], |repo| {
+        repo.write("src/order.py", "class Order:\n    pass\n");
+        repo.write("src/basket.go", "package shop\n\ntype Basket struct{}\n");
+    });
+    let source = shop.source();
+    let mut review = review_with_servers(&shop, &source, &language_server_adapter());
+
+    let python = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/order.py", Side::Head, 1, "Order"),
+    ));
+    let go = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/basket.go", Side::Head, 3, "Basket"),
+    ));
+
+    assert_eq!(question_of(&python), None);
+    assert_eq!(question_of(&go), None);
+    assert_eq!(python.definitions.len(), 1, "the by-name lookup answered");
+    assert_eq!(go.definitions.len(), 1, "the by-name lookup answered");
+}
+
 /// Answers with a definition in a file git does not hold, as rust-analyzer does for the standard library.
 struct StandardLibraryNavigator;
 

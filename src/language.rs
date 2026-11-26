@@ -13,15 +13,20 @@ pub enum Language {
     TypeScript,
     Tsx,
     Rust,
+    Python,
+    Go,
 }
 
-const EXTENSIONS: [(&str, Language); 6] = [
+const EXTENSIONS: [(&str, Language); 9] = [
     ("php", Language::Php),
     ("ts", Language::TypeScript),
     ("mts", Language::TypeScript),
     ("cts", Language::TypeScript),
     ("tsx", Language::Tsx),
     ("rs", Language::Rust),
+    ("py", Language::Python),
+    ("pyi", Language::Python),
+    ("go", Language::Go),
 ];
 
 impl Language {
@@ -38,8 +43,8 @@ impl Language {
         Self::for_path(path).filter(|language| language.cuts_into_pieces())
     }
 
-    /// Rust is parsed to find definitions and usages, but its files stay one piece each until
-    /// a change of its own teaches the outline Rust's symbols.
+    /// Rust, Python and Go are parsed to find definitions and usages, but their files stay one
+    /// piece each until a change of their own teaches the outline their symbols.
     pub fn cuts_into_pieces(self) -> bool {
         self.symbol_query().is_some()
     }
@@ -57,6 +62,8 @@ impl Language {
             Self::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Self::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Self::Python => tree_sitter_python::LANGUAGE.into(),
+            Self::Go => tree_sitter_go::LANGUAGE.into(),
         }
     }
 
@@ -65,7 +72,7 @@ impl Language {
         match self {
             Self::Php => Some(include_str!("../queries/php/symbols.scm")),
             Self::TypeScript | Self::Tsx => Some(include_str!("../queries/typescript/symbols.scm")),
-            Self::Rust => None,
+            Self::Rust | Self::Python | Self::Go => None,
         }
     }
 
@@ -91,11 +98,15 @@ impl Language {
         static TYPESCRIPT: OnceLock<Query> = OnceLock::new();
         static TSX: OnceLock<Query> = OnceLock::new();
         static RUST: OnceLock<Query> = OnceLock::new();
+        static PYTHON: OnceLock<Query> = OnceLock::new();
+        static GO: OnceLock<Query> = OnceLock::new();
         let (compiled, text) = match self {
             Self::Php => (&PHP, include_str!("../queries/php/tags.scm")),
             Self::TypeScript => (&TYPESCRIPT, include_str!("../queries/typescript/tags.scm")),
             Self::Tsx => (&TSX, include_str!("../queries/typescript/tags.scm")),
             Self::Rust => (&RUST, include_str!("../queries/rust/tags.scm")),
+            Self::Python => (&PYTHON, include_str!("../queries/python/tags.scm")),
+            Self::Go => (&GO, include_str!("../queries/go/tags.scm")),
         };
         compiled.get_or_init(|| Query::new(&self.grammar(), text).expect("valid tags query"))
     }
@@ -115,6 +126,11 @@ impl Language {
             },
             Self::TypeScript | Self::Tsx => node.kind() == "import_statement",
             Self::Rust => node.kind() == "use_declaration",
+            Self::Python => matches!(
+                node.kind(),
+                "import_statement" | "import_from_statement" | "future_import_statement"
+            ),
+            Self::Go => node.kind() == "import_declaration",
         }
     }
 
@@ -127,7 +143,7 @@ impl Language {
                         .split_once("::")
                         .is_some_and(|(class, _)| class.ends_with("Test"))
             }
-            Self::TypeScript | Self::Tsx | Self::Rust => false,
+            Self::TypeScript | Self::Tsx | Self::Rust | Self::Python | Self::Go => false,
         }
     }
 }

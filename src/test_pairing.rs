@@ -227,7 +227,7 @@ fn imported_names(language: Language, text: &str) -> Vec<String> {
     match language {
         Language::Php => php_imports(text),
         Language::TypeScript | Language::Tsx => typescript_imports(text),
-        Language::Rust => Import::all_in(language, text)
+        Language::Rust | Language::Python | Language::Go => Import::all_in(language, text)
             .iter()
             .flat_map(|import| {
                 import

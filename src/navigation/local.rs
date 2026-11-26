@@ -120,6 +120,16 @@ impl Rules<'_> {
                     | "shorthand_property_identifier"
                     | "shorthand_property_identifier_pattern"
             ),
+            Language::Python => {
+                node.kind() == "identifier"
+                    && node.parent().is_none_or(|parent| match parent.kind() {
+                        "attribute" => !is_field(parent, "attribute", node),
+                        "keyword_argument" => !is_field(parent, "name", node),
+                        "dotted_name" | "aliased_import" => false,
+                        _ => true,
+                    })
+            }
+            Language::Go => node.kind() == "identifier",
         }
     }
 
@@ -129,9 +139,12 @@ impl Rules<'_> {
                 Language::Php,
                 "function_definition" | "method_declaration" | "anonymous_function",
             ) => Scope::Closed,
-            (Language::Rust, "function_item") => Scope::Wall,
+            (Language::Rust, "function_item")
+            | (Language::Go, "function_declaration" | "method_declaration") => Scope::Wall,
             (Language::Php, "arrow_function")
             | (Language::Rust, "closure_expression")
+            | (Language::Python, "function_definition" | "lambda")
+            | (Language::Go, "func_literal")
             | (
                 Language::TypeScript | Language::Tsx,
                 "function_declaration"
@@ -181,6 +194,8 @@ impl Rules<'_> {
             Language::Php => php_binding(name),
             Language::Rust => rust_binding(name),
             Language::TypeScript | Language::Tsx => typescript_binding(name),
+            Language::Python => python_binding(name),
+            Language::Go => go_binding(name),
         }
     }
 
@@ -329,5 +344,66 @@ fn typescript_binding(name: Node) -> Option<DefinitionKind> {
             }
             _ => return None,
         }
+    }
+}
+
+/// `total = ...`, `def pay(cart, *items)`, `lambda item: ...`, `for line in lines`, `with open() as f`.
+fn python_binding(name: Node) -> Option<DefinitionKind> {
+    let mut node = name;
+    loop {
+        let parent = node.parent()?;
+        match parent.kind() {
+            "pattern_list"
+            | "tuple_pattern"
+            | "list_pattern"
+            | "list_splat_pattern"
+            | "dictionary_splat_pattern"
+            | "as_pattern_target" => node = parent,
+            "parameters" | "lambda_parameters" | "typed_parameter" => {
+                return Some(DefinitionKind::Parameter);
+            }
+            "default_parameter" | "typed_default_parameter" => {
+                return is_field(parent, "name", node).then_some(DefinitionKind::Parameter);
+            }
+            "assignment" | "for_statement" | "for_in_clause" => {
+                return is_field(parent, "left", node).then_some(DefinitionKind::Variable);
+            }
+            "named_expression" => {
+                return is_field(parent, "name", node).then_some(DefinitionKind::Variable);
+            }
+            "as_pattern" | "except_clause" => {
+                return is_field(parent, "alias", node).then_some(DefinitionKind::Variable);
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// `total := 0`, `var total int`, `func Pay(cart *Cart)`, `for _, item := range items`.
+/// A Go type is never an `identifier`, so every `identifier` right in a declaration is a name.
+fn go_binding(name: Node) -> Option<DefinitionKind> {
+    let parent = name.parent()?;
+    match parent.kind() {
+        "parameter_declaration" | "variadic_parameter_declaration" => {
+            Some(DefinitionKind::Parameter)
+        }
+        "var_spec" | "const_spec" => Some(DefinitionKind::Variable),
+        "expression_list" => {
+            let statement = parent.parent()?;
+            let declares = match statement.kind() {
+                "short_var_declaration" => is_field(statement, "left", parent),
+                "range_clause" => {
+                    let mut cursor = statement.walk();
+                    is_field(statement, "left", parent)
+                        && statement
+                            .children(&mut cursor)
+                            .any(|token| token.kind() == ":=")
+                }
+                "type_switch_statement" => is_field(statement, "alias", parent),
+                _ => false,
+            };
+            declares.then_some(DefinitionKind::Variable)
+        }
+        _ => None,
     }
 }

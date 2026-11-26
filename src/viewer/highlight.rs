@@ -179,6 +179,9 @@ enum HighlightLanguage {
     Rust,
     Bash,
     Yaml,
+    Python,
+    Go,
+    Sql,
 }
 
 impl HighlightLanguage {
@@ -198,6 +201,9 @@ impl HighlightLanguage {
             "rs" => Some(Self::Rust),
             "sh" | "bash" => Some(Self::Bash),
             "yml" | "yaml" => Some(Self::Yaml),
+            "py" | "pyi" => Some(Self::Python),
+            "go" => Some(Self::Go),
+            "sql" => Some(Self::Sql),
             _ => None,
         }
     }
@@ -210,6 +216,8 @@ impl HighlightLanguage {
             "shell" | "zsh" | "console" => "sh",
             "yaml" => "yml",
             "rust" => "rs",
+            "python" => "py",
+            "golang" => "go",
             "blade" => "blade.php",
             other => return Self::for_path(&format!("snippet.{other}")),
         };
@@ -227,7 +235,7 @@ impl HighlightLanguage {
     /// Compiling a language's queries takes milliseconds, so each is compiled once, on first use, and shared.
     /// Blade is drawn with the HTML configuration.
     fn configuration(self) -> Option<&'static HighlightConfiguration> {
-        const COMPILED_LANGUAGES: [HighlightLanguage; 10] = [
+        const COMPILED_LANGUAGES: [HighlightLanguage; 13] = [
             HighlightLanguage::Php,
             HighlightLanguage::TypeScript,
             HighlightLanguage::Tsx,
@@ -238,6 +246,9 @@ impl HighlightLanguage {
             HighlightLanguage::Rust,
             HighlightLanguage::Bash,
             HighlightLanguage::Yaml,
+            HighlightLanguage::Python,
+            HighlightLanguage::Go,
+            HighlightLanguage::Sql,
         ];
         static COMPILED: [OnceLock<Option<HighlightConfiguration>>; COMPILED_LANGUAGES.len()] =
             [const { OnceLock::new() }; COMPILED_LANGUAGES.len()];
@@ -339,6 +350,27 @@ impl HighlightLanguage {
                 "yaml",
                 tree_sitter_yaml::LANGUAGE.into(),
                 tree_sitter_yaml::HIGHLIGHTS_QUERY.to_owned(),
+                "",
+                "",
+            ),
+            Self::Python => (
+                "python",
+                tree_sitter_python::LANGUAGE.into(),
+                tree_sitter_python::HIGHLIGHTS_QUERY.to_owned(),
+                "",
+                "",
+            ),
+            Self::Go => (
+                "go",
+                tree_sitter_go::LANGUAGE.into(),
+                tree_sitter_go::HIGHLIGHTS_QUERY.to_owned(),
+                "",
+                "",
+            ),
+            Self::Sql => (
+                "sql",
+                tree_sitter_sequel::LANGUAGE.into(),
+                tree_sitter_sequel::HIGHLIGHTS_QUERY.to_owned(),
                 "",
                 "",
             ),

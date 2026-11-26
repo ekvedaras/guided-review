@@ -74,12 +74,13 @@ pub struct ServerQuestion {
 }
 
 impl ServerQuestion {
-    pub(super) fn about(codebase: &Codebase, language: Language) -> Self {
-        let server = ServerName::of(language);
-        Self {
+    /// `None` for a language no server answers.
+    pub(super) fn about(codebase: &Codebase, language: Language) -> Option<Self> {
+        let server = ServerName::of(language)?;
+        Some(Self {
             codebase: codebase.clone(),
             says: format!("Use language servers for {codebase}? {server} may build it").into(),
-        }
+        })
     }
 }
 

@@ -81,7 +81,7 @@ impl ServerCatalog for FakeCatalog {
         ];
         let mut launch = ServerLaunch::rust_analyzer(PathBuf::from("python3"));
         if self.servers == FakeServers::PerLanguage {
-            launch.name = ServerName::of(language);
+            launch.name = ServerName::of(language).unwrap();
             args.push(format!("{language:?}"));
         }
         let launch = launch.with_args(args);
@@ -776,11 +776,11 @@ fn a_slow_server_holds_up_no_hover_another_server_of_the_repo_answers() {
         assert!(!php.is_finished(), "the PHP hover ended first");
         assert_eq!(
             rust.answered_by,
-            AnsweredBy::LanguageServer(ServerName::of(Language::Rust))
+            AnsweredBy::LanguageServer(ServerName::rust_analyzer())
         );
         assert_eq!(
             php.join().unwrap().answered_by,
-            AnsweredBy::LanguageServer(ServerName::of(Language::Php))
+            AnsweredBy::LanguageServer(ServerName::intelephense())
         );
     });
 }

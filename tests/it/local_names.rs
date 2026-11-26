@@ -252,3 +252,91 @@ fn php_this_and_properties_are_looked_up_by_name_in_the_repo() {
     assert_eq!(property.reach, Reach::WholeRepo);
     assert_eq!(file.search.searches(), ["this", "deliveryDate"]);
 }
+
+const PYTHON_TOTAL: &str = r"LIMIT = 10
+
+
+def total(cart, items):
+    total = sum(items)
+    capped = min(total, LIMIT)
+    for item in items:
+        print(item)
+    return cart.total + capped + total
+
+
+def other():
+    total = 1
+    return total
+";
+
+#[test]
+fn a_python_variable_or_parameter_is_looked_up_in_its_function_only() {
+    let file = OneFile::new("shop/cart.py", PYTHON_TOTAL);
+
+    let variable = file.hover(6, "total, LIMIT");
+    let parameter = file.hover(5, "items)");
+    let loop_variable = file.hover(8, "item)");
+
+    assert_eq!(definitions(&variable), [(DefinitionKind::Variable, 5)]);
+    assert_eq!(&*variable.definitions[0].signature, "total = sum(items)");
+    assert_eq!(usage_lines(&variable), [6, 9]);
+    assert_eq!(definitions(&parameter), [(DefinitionKind::Parameter, 4)]);
+    assert_eq!(usage_lines(&parameter), [5, 7]);
+    assert_eq!(definitions(&loop_variable), [(DefinitionKind::Variable, 7)]);
+    assert_eq!(usage_lines(&loop_variable), [8]);
+    assert_eq!(variable.reach, Reach::EnclosingFunction);
+    assert_eq!(file.search.searches(), Vec::<String>::new());
+}
+
+#[test]
+fn a_python_function_module_name_or_attribute_is_looked_up_by_name_in_the_repo() {
+    let file = OneFile::new("shop/cart.py", PYTHON_TOTAL);
+
+    for (line, at) in [(4, "total(cart"), (6, "LIMIT"), (9, "total +")] {
+        assert_eq!(file.hover(line, at).reach, Reach::WholeRepo, "{at}");
+    }
+    assert_eq!(file.search.searches(), ["total", "LIMIT", "total"]);
+}
+
+const GO_TOTAL: &str = r"package shop
+
+const limit = 10
+
+func Total(cart *Cart, items []int) int {
+	total := 0
+	for _, item := range items {
+		total += item
+	}
+	capped := min(total, limit)
+	return cart.total + capped
+}
+";
+
+#[test]
+fn a_go_variable_or_parameter_is_looked_up_in_its_function_only() {
+    let file = OneFile::new("shop/cart.go", GO_TOTAL);
+
+    let variable = file.hover(10, "total, limit");
+    let parameter = file.hover(5, "items []");
+    let loop_variable = file.hover(8, "item");
+
+    assert_eq!(definitions(&variable), [(DefinitionKind::Variable, 6)]);
+    assert_eq!(&*variable.definitions[0].signature, "total := 0");
+    assert_eq!(usage_lines(&variable), [8, 10]);
+    assert_eq!(definitions(&parameter), [(DefinitionKind::Parameter, 5)]);
+    assert_eq!(usage_lines(&parameter), [7]);
+    assert_eq!(definitions(&loop_variable), [(DefinitionKind::Variable, 7)]);
+    assert_eq!(usage_lines(&loop_variable), [8]);
+    assert_eq!(variable.reach, Reach::EnclosingFunction);
+    assert_eq!(file.search.searches(), Vec::<String>::new());
+}
+
+#[test]
+fn a_go_function_constant_or_field_is_looked_up_by_name_in_the_repo() {
+    let file = OneFile::new("shop/cart.go", GO_TOTAL);
+
+    for (line, at) in [(5, "Total("), (10, "limit"), (11, "total +")] {
+        assert_eq!(file.hover(line, at).reach, Reach::WholeRepo, "{at}");
+    }
+    assert_eq!(file.search.searches(), ["Total", "limit", "total"]);
+}

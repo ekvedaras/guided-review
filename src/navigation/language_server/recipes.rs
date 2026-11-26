@@ -10,7 +10,6 @@ use serde_json::json;
 use sha2::{Digest as _, Sha512};
 
 use crate::codebase::Codebase;
-use crate::language::Language;
 use crate::platform::Os;
 use crate::update::{Cpu, Target, check_digest};
 
@@ -194,7 +193,7 @@ impl ServerRecipe for RustAnalyzer {
         waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
         let binary = self.binary(downloads);
-        downloads.downloaded(&ServerName::of(Language::Rust), &binary, waiting, || {
+        downloads.downloaded(&ServerName::rust_analyzer(), &binary, waiting, || {
             self.download(downloads, &binary)
         })?;
         Ok(ServerLaunch::rust_analyzer(binary).reporting_status())
@@ -360,7 +359,7 @@ impl ServerRecipe for Intelephense {
         let node = self.node.program(downloads, waiting)?;
         let script = self
             .package
-            .fetched(&ServerName::of(Language::Php), downloads, waiting)?;
+            .fetched(&ServerName::intelephense(), downloads, waiting)?;
         let index = self
             .indexes
             .join(codebase.state_folder())
@@ -400,7 +399,7 @@ impl ServerRecipe for TypeScriptLanguageServer {
         waiting: &dyn Fn(Waiting),
     ) -> Result<ServerLaunch, FallbackReason> {
         let node = self.node.program(downloads, waiting)?;
-        let name = ServerName::of(Language::TypeScript);
+        let name = ServerName::typescript_language_server();
         let script = self.server.fetched(&name, downloads, waiting)?;
         let tsserver = self.typescript.fetched(&name, downloads, waiting)?;
         Ok(ServerLaunch::typescript_language_server(
@@ -413,7 +412,7 @@ impl ServerLaunch {
     /// Build scripts, proc macros and check on save are off, so it builds nothing in the repo.
     pub fn rust_analyzer(program: PathBuf) -> Self {
         Self {
-            name: ServerName::new("rust-analyzer"),
+            name: ServerName::rust_analyzer(),
             program,
             args: Vec::new(),
             status: StatusReports::No,
@@ -428,7 +427,7 @@ impl ServerLaunch {
     /// Intelephense on the app's Node, keeping its index in `index`.
     pub fn intelephense(node: PathBuf, script: &Path, index: &Path) -> Self {
         Self {
-            name: ServerName::of(Language::Php),
+            name: ServerName::intelephense(),
             program: node,
             args: vec![script.to_string_lossy().into_owned(), "--stdio".to_owned()],
             status: StatusReports::No,
@@ -443,7 +442,7 @@ impl ServerLaunch {
     /// acquisition is off, since it runs npm to install `@types` packages the repo names.
     pub fn typescript_language_server(node: PathBuf, script: &Path, tsserver: &Path) -> Self {
         Self {
-            name: ServerName::of(Language::TypeScript),
+            name: ServerName::typescript_language_server(),
             program: node,
             args: vec![script.to_string_lossy().into_owned(), "--stdio".to_owned()],
             status: StatusReports::No,
