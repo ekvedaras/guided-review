@@ -4,7 +4,7 @@ use crate::support::FixtureRepo;
 use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
 use guided_review::open_review::open_review;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::tour::{BasicTour, TourPin};
@@ -149,6 +149,7 @@ fn basic_shop(findings: &[Value]) -> Review {
             pr: PR.to_owned(),
             local: None,
             repo: None,
+            host: None,
             base: Sha::new(&base),
             head: Sha::new(&head),
             previous_head: None,
@@ -162,11 +163,17 @@ fn basic_shop(findings: &[Value]) -> Review {
         json!({"pr": PR, "base": base, "head": head, "findings": findings}).to_string(),
     )
     .unwrap();
-    let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
+    let source = LocalGit::find(&crate::support::shop_on_github(), repo.path())
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(&repo.folders(), &pr());
-    let mut review = Review::open_basic(tour, &source, state_file).unwrap();
+    let mut review = Review::open_basic(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
     review.read_findings(&repo.folders());
     review
 }

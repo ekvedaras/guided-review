@@ -1,18 +1,19 @@
 //! A review subject opened to be read: the one place that tells a PR from a local change set for
 //! where the code comes from, how a tour is first made and how it moves on. The CLI's commands, the
-//! app's open and its Update ask an `OpenedSubject`; only the adapters inside know GitHub or git.
+//! app's open and its Update ask an `OpenedSubject`; only the adapters inside know the code host or git.
 
+mod hosts;
 mod local;
 mod pull_request;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub use hosts::{EveryHost, adapter_of, host_of};
 pub use local::OpenedChangeSet;
 
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::github::GitHub;
 use crate::local_git::LocalGit;
 use crate::pieces::{self, ChangedFile};
 use crate::pull_request::{ChangeTips, Sha};
@@ -20,8 +21,8 @@ use crate::repin::Repin;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{Tour, TourPin};
 use crate::viewer::{
-    ChangeTipsPort, GitHubPort, NoGitHub, PickCodeSource, RepinnedTour, Review, ReviewBuilder,
-    ReviewStateFile,
+    ChangeTipsPort, CodeHost, HostCapabilities, PickCodeSource, RepinnedTour, Review,
+    ReviewBuilder, ReviewStateFile,
 };
 use pull_request::OpenedPr;
 
@@ -54,7 +55,7 @@ impl OpenedSubject {
     }
 
     /// Makes the basic tour now, unless a tour is on disk already; true when made. A PR's is made at
-    /// the tips GitHub has now, a local change set's from a new snapshot of its folder.
+    /// the tips the host has now, a local change set's from a new snapshot of its folder.
     pub fn make_basic_tour_if_no_tour(&self) -> anyhow::Result<bool> {
         match &self.0 {
             Adapter::PullRequest(opened) => opened.make_basic_tour_if_no_tour(),
@@ -62,7 +63,7 @@ impl OpenedSubject {
         }
     }
 
-    /// What `outline`, `show` and `check` read. A PR is read at the tips GitHub has now; a local change
+    /// What `outline`, `show` and `check` read. A PR is read at the tips the host has now; a local change
     /// set at the snapshot its tour is pinned to, since the folder is not what the reviewer reads.
     pub fn code_to_read(&self) -> anyhow::Result<CodeAtTips> {
         match &self.0 {
@@ -79,7 +80,7 @@ impl OpenedSubject {
         }
     }
 
-    /// `repin`: a PR's guided tour, else its basic one, moves to the PR's head on GitHub; a local
+    /// `repin`: a PR's guided tour, else its basic one, moves to the PR's head on the host; a local
     /// review's shown tour moves to a new snapshot of its folder.
     pub fn repin(&self) -> anyhow::Result<Repin> {
         match &self.0 {
@@ -102,7 +103,9 @@ impl OpenedSubject {
             Adapter::PullRequest(opened) => opened.code_at(tour.pin())?,
             Adapter::Local(opened) => opened.code_of_shown(tour.pin())?,
         };
-        let review = ReviewBuilder::new(folders, &subject).build(tour, code.source.as_ref())?;
+        let host = HostCapabilities::of(self.host().as_ref());
+        let review =
+            ReviewBuilder::new(folders, &subject, host).build(tour, code.source.as_ref())?;
         if let Adapter::PullRequest(opened) = &self.0 {
             opened.after_open()?;
         }
@@ -110,7 +113,7 @@ impl OpenedSubject {
     }
 
     /// Picks the code source again for any tips, as the app does when the tour moves: a PR's clone or
-    /// GitHub, a local change set's own folder, whose git holds the snapshot.
+    /// the host, a local change set's own folder, whose git holds the snapshot.
     pub fn code_source_picker(&self) -> PickCodeSource {
         match &self.0 {
             Adapter::PullRequest(opened) => opened.code_source_picker(),
@@ -118,14 +121,12 @@ impl OpenedSubject {
         }
     }
 
-    /// The GitHub the review talks to. A local review has none to ask: its port refuses every call but
-    /// the look-up of a PR of its branch.
-    pub fn github(&self) -> Arc<dyn GitHubPort> {
+    /// The code host the review talks to. A local review has none to ask: its port refuses every call but
+    /// the look-up of a PR of its branch, on the host its origin is on.
+    pub fn host(&self) -> Arc<dyn CodeHost> {
         match &self.0 {
-            Adapter::PullRequest(opened) => Arc::new(opened.github().clone()),
-            Adapter::Local(_) => Arc::new(NoGitHub::looking_up_branches_with(Arc::new(
-                GitHub::from_env(),
-            ))),
+            Adapter::PullRequest(opened) => opened.host(),
+            Adapter::Local(opened) => host_of(&opened.subject()),
         }
     }
 
@@ -146,15 +147,16 @@ pub struct TourRepinner {
     pub folders: AppFolders,
     pub subject: ReviewSubject,
     pub pick_code_source: PickCodeSource,
+    pub host: HostCapabilities,
 }
 
 impl TourRepinner {
     /// Blocks on the network and on git; the app runs it off the main thread.
-    pub fn run(&self, github: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
+    pub fn run(&self, host: &dyn ChangeTipsPort) -> anyhow::Result<RepinnedTour> {
         let (tour, source) =
-            update_shown_tour(&self.subject, &self.folders, github, &self.pick_code_source)?;
-        let review =
-            ReviewBuilder::new(&self.folders, &self.subject).build(tour, source.as_ref())?;
+            update_shown_tour(&self.subject, &self.folders, host, &self.pick_code_source)?;
+        let review = ReviewBuilder::new(&self.folders, &self.subject, self.host)
+            .build(tour, source.as_ref())?;
         Ok(RepinnedTour {
             review,
             source: source.into(),
@@ -162,13 +164,13 @@ impl TourRepinner {
     }
 }
 
-/// Update in the app: the shown tour moves to a PR's head on GitHub, or to a new snapshot of a local
+/// Update in the app: the shown tour moves to a PR's head on the host, or to a new snapshot of a local
 /// change set's folder. It takes the app's ports, not an `OpenedSubject`, so tests put fakes behind
 /// them; the code source the new tips were read with comes back for the review built on them.
 pub fn update_shown_tour(
     subject: &ReviewSubject,
     folders: &AppFolders,
-    github: &dyn ChangeTipsPort,
+    host: &dyn ChangeTipsPort,
     pick_code_source: &PickCodeSource,
 ) -> anyhow::Result<(Tour, Box<dyn CodeSource>)> {
     match subject {
@@ -177,7 +179,7 @@ pub fn update_shown_tour(
                 folders,
                 pr,
                 &Tour::shown_path_for(folders, subject),
-                github,
+                host,
                 pick_code_source,
             )?;
             Ok((tour, source))
@@ -203,10 +205,10 @@ pub fn writer_folder(subject: &ReviewSubject, folders: &AppFolders) -> PathBuf {
 /// git. A subject that knows its repo keeps it.
 fn with_repo_of_its_clone(subject: &ReviewSubject) -> ReviewSubject {
     match subject {
-        ReviewSubject::Local(change_set) if change_set.repo().is_none() => ReviewSubject::from(
+        ReviewSubject::Local(change_set) if change_set.origin().is_none() => ReviewSubject::from(
             change_set
                 .clone()
-                .in_repo(LocalGit::origin_of(change_set.folder().as_path())),
+                .with_origin(LocalGit::origin_of(change_set.folder().as_path())),
         ),
         _ => subject.clone(),
     }

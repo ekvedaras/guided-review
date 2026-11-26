@@ -3,10 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::support::fake_app::{CliEnded, answering_one_request};
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
-use crate::support::{FakeGitHub as ServedGitHub, FixtureRepo, GuidedReview, Run, file_path};
+use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run, file_path};
 use guided_review::build::Build;
 use guided_review::findings::{Finding, FindingsFile};
 use guided_review::local_work_tree::LocalWorkTree;
@@ -76,22 +76,22 @@ impl Feature {
         let mut opened =
             open_review(&self.subject, self.repo.path(), &self.repo.folders()).unwrap();
         opened.review.go_to_file(&file_path("README.md"));
-        opened.review.pull_from_github();
+        opened.review.pull_from_host();
         self.run_work(&mut opened);
         opened
     }
 
-    fn github(&self) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", "snapshot", &self.sent)
+    fn host(&self) -> FakeHost {
+        FakeHost::with_pull("main-tip", "snapshot", &self.sent)
     }
 
     /// Runs what the review wants done, as the app does after every change: reads, and hand-offs
     /// typed into the agent.
     fn run_work(&self, opened: &mut OpenedReview) {
         let agents = TourAgents::new(Arc::clone(&self.agent) as Arc<dyn TourAgentPort>);
-        let github = self.github();
+        let host = self.host();
         let ports = WorkPorts {
-            github: &github,
+            host: &host,
             source: opened.source.as_ref(),
             agents: &agents,
         };
@@ -149,7 +149,7 @@ fn send_now(feature: &Feature, opened: &mut OpenedReview, on: &str, text: &str) 
         .unwrap();
     let result = opened
         .review
-        .apply_comment(request.run(&feature.github()))
+        .apply_comment(request.run(&feature.host()))
         .unwrap();
     feature.run_work(opened);
     result
@@ -218,7 +218,7 @@ fn send_now_keeps_a_local_thread_and_hands_the_task_to_the_change_sets_agent_wit
         opened.review.hand_offs().all()[0].state(),
         &HandOffState::Delivered
     );
-    assert_eq!(feature.sent.github_calls(), []);
+    assert_eq!(feature.sent.host_calls(), []);
 }
 
 const BUILD: &str = "test-build";
@@ -230,7 +230,7 @@ impl Feature {
     }
 
     fn agent_reply_to(&self, hand_off: &str, args: &[&str]) -> Run {
-        let github = ServedGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
+        let github = FakeGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
         let key = self.key();
         let run = GuidedReview::new(&self.repo, &github)
             .with_env("GUIDED_REVIEW_BUILD", Path::new(BUILD))
@@ -350,7 +350,7 @@ fn the_app_and_agent_reply_never_write_a_stale_thread_over_each_others_words() {
     let state = app.review.state_file().load().unwrap();
     let first = app.review.hand_offs().all()[0].id();
     let request = state.hand_offs().agent_working_on_it(&home, first).unwrap();
-    let done = request.run(&feature.github()).unwrap();
+    let done = request.run(&feature.host()).unwrap();
     app.review.hand_off_replied(first, done.replied()).unwrap();
     feature.run_work(&mut app);
     // The app saves its own copy of the review after the command wrote.
@@ -367,7 +367,7 @@ fn the_app_and_agent_reply_never_write_a_stale_thread_over_each_others_words() {
         mode: SendMode::SendNow,
         audience: Audience::Agent,
     });
-    app.review.apply_thread_action(reply.run(&feature.github()));
+    app.review.apply_thread_action(reply.run(&feature.host()));
     // The command answers once more, the app not showing the review now.
     feature.agent_reply(&["--body", "The world is fine."]);
 
@@ -381,7 +381,7 @@ fn the_app_and_agent_reply_never_write_a_stale_thread_over_each_others_words() {
         ]
     );
     assert_eq!(threads(&app)[0].thread.comments.len(), 3);
-    assert_eq!(feature.sent.github_calls(), []);
+    assert_eq!(feature.sent.host_calls(), []);
 }
 
 /// A thread action, as the app runs it.
@@ -389,7 +389,7 @@ fn act(feature: &Feature, opened: &mut OpenedReview, action: ThreadAction) -> Th
     let request = opened.review.thread_action_request(action);
     let result = opened
         .review
-        .apply_thread_action(request.run(&feature.github()));
+        .apply_thread_action(request.run(&feature.host()));
     feature.run_work(opened);
     result
 }
@@ -469,17 +469,17 @@ fn a_reply_is_a_follow_up_task_and_replies_edits_deletes_and_resolve_last_across
     assert!(shown[0].thread.is_resolved);
     assert!(shown[0].is_folded);
     assert_eq!(reopened.review.hand_offs().all().len(), 2);
-    assert_eq!(feature.sent.github_calls(), []);
+    assert_eq!(feature.sent.host_calls(), []);
 }
 
 /// Update, as the sidebar's button runs it, then the reads the re-pinned review wants.
 fn update(feature: &Feature, opened: &mut OpenedReview) {
-    let updated = opened.repinner.run(&feature.github()).unwrap();
+    let updated = opened.repinner.run(&feature.host()).unwrap();
     let replaced = std::mem::replace(&mut opened.review, updated.review);
     opened.review.carry_on_from(replaced);
     opened.source = updated.source;
     opened.review.go_to_file(&file_path("README.md"));
-    opened.review.pull_from_github();
+    opened.review.pull_from_host();
     feature.run_work(opened);
 }
 
@@ -509,7 +509,7 @@ fn after_update_a_local_thread_follows_its_line_and_one_whose_line_changed_shows
     assert!(followed.were_changed);
     assert_eq!(followed.before, ["world"]);
     assert_eq!(said(&changed)[0].1, "Say who the world is");
-    assert_eq!(feature.sent.github_calls(), []);
+    assert_eq!(feature.sent.host_calls(), []);
 }
 
 #[test]
@@ -621,7 +621,7 @@ fn suggest_change_puts_the_lines_in_the_task_the_agent_gets() {
         .unwrap();
     opened
         .review
-        .apply_comment(request.run(&feature.github()))
+        .apply_comment(request.run(&feature.host()))
         .unwrap();
     feature.run_work(&mut opened);
 
@@ -680,7 +680,7 @@ fn the_review_key_in_the_task_commands_is_quoted_when_the_folder_name_needs_it()
 fn agent_reply_to_an_unknown_hand_off_of_a_local_review_names_the_local_review() {
     let feature = Feature::with_work_in_progress();
     drop(task_sent(&feature));
-    let github = ServedGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
+    let github = FakeGitHub::serving_pull("acme/shop", 7, "aaa", "bbb");
     let key = feature.key();
 
     let run = GuidedReview::new(&feature.repo, &github)
@@ -744,7 +744,7 @@ fn add_to_tasks(
         .unwrap();
     let result = opened
         .review
-        .apply_comment(request.run(&feature.github()))
+        .apply_comment(request.run(&feature.host()))
         .unwrap();
     feature.run_work(opened);
     result
@@ -779,7 +779,7 @@ fn add_to_tasks_shows_the_task_under_its_lines_as_queued_and_hands_nothing_to_th
     assert_eq!(thread.hand_off_line.as_deref(), Some(QUEUED_LINE));
     assert_eq!(feature.typed_into_agent(), Vec::<String>::new());
     assert_eq!(opened.review.queued_tasks(), 1);
-    assert_eq!(feature.sent.github_calls(), []);
+    assert_eq!(feature.sent.host_calls(), []);
 }
 
 #[test]
@@ -911,7 +911,7 @@ fn send_tasks_hands_every_queued_task_to_the_agent_as_one_message_in_reading_ord
         Some("Delivered to the agent")
     );
     assert_eq!(opened.review.queued_tasks(), 0);
-    assert_eq!(feature.sent.github_calls(), []);
+    assert_eq!(feature.sent.host_calls(), []);
 }
 
 /// A Claude herdr has no status from may be waiting on a question the task text would answer, so the
@@ -1017,7 +1017,7 @@ fn answered_while_the_app_shows(feature: &Feature, app: &mut OpenedReview, nth: 
         .hand_offs()
         .agent_reply(&home, hand_off, body)
         .unwrap();
-    let done = request.run(&feature.github()).unwrap();
+    let done = request.run(&feature.host()).unwrap();
     app.review
         .hand_off_replied(hand_off, done.replied())
         .unwrap();

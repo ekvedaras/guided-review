@@ -1,15 +1,14 @@
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
-use crate::support::{FixtureRepo, file_path, line};
+use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
-    AgentStatus, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, HandOffState,
-    Review, ReviewStateFile, ReviewThread, Screen, SendMode, Side, TerminalId, TextBox,
-    ThreadComment, ThreadId, TourAgentPort, TourAgents, WorkPorts,
+    AgentStatus, Audience, CommentGesture, CommentPlace, CommentResult, HandOffState, Review,
+    ReviewStateFile, Screen, SendMode, TerminalId, TextBox, TourAgentPort, TourAgents, WorkPorts,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -39,7 +38,7 @@ impl Pull {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }
@@ -51,6 +50,7 @@ impl Pull {
                 pr: PR.to_owned(),
                 local: None,
                 repo: None,
+                host: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,
@@ -61,7 +61,13 @@ impl Pull {
             &self.repo.folders(),
             &PR.parse::<ReviewSubject>().unwrap(),
         );
-        let mut review = Review::open_basic(tour, &self.source(), state_file).unwrap();
+        let mut review = Review::open_basic(
+            tour,
+            &self.source(),
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         while review.screen() != &Screen::File(file_path("notes.txt")) {
             assert!(review.go_forward());
         }
@@ -70,9 +76,9 @@ impl Pull {
 
     fn deliver(&self, review: &mut Review, agents: &TourAgents) {
         let source = self.source();
-        let elsewhere = FakeGitHub::with_pull("main-tip", "head", &SentLog::default());
+        let elsewhere = FakeHost::with_pull("main-tip", "head", &SentLog::default());
         let ports = WorkPorts {
-            github: &elsewhere,
+            host: &elsewhere,
             source: &source,
             agents,
         };
@@ -80,40 +86,8 @@ impl Pull {
     }
 }
 
-fn thread_on_line_two(comments: Vec<ThreadComment>) -> ReviewThread {
-    ReviewThread {
-        id: ThreadId::new("T1"),
-        is_resolved: false,
-        is_outdated: false,
-        path: file_path("notes.txt"),
-        line: Some(line(2)),
-        start_line: None,
-        side: Side::Head,
-        is_file_comment: false,
-        original_line: Some(line(2)),
-        original_start_line: None,
-        original_commit: None,
-        comments,
-    }
-}
-
-fn comment(body: &str) -> ThreadComment {
-    ThreadComment {
-        avatar_url: None,
-        id: CommentId::new("C1"),
-        reactions: Vec::new(),
-        author: "me".into(),
-        is_bot: false,
-        by_agent: None,
-        by_viewer: true,
-        body: body.into(),
-        url: "https://github.com/acme/shop/pull/7#discussion_C1".into(),
-    }
-}
-
 fn handed_off(pull: &Pull) -> Review {
-    let mut github = FakeGitHub::with_pull("main-tip", &pull.head, &pull.sent);
-    github.threads = vec![thread_on_line_two(vec![comment("why caps?")])];
+    let host = FakeHost::with_pull("main-tip", &pull.head, &pull.sent);
     let mut review = pull.open();
     let at = review
         .file_page()
@@ -138,7 +112,7 @@ fn handed_off(pull: &Pull) -> Review {
         .start_sending(&place, SendMode::AddToReview, Audience::Agent)
         .unwrap();
     assert_eq!(
-        review.apply_comment(request.run(&github)).unwrap(),
+        review.apply_comment(request.run(&host)).unwrap(),
         CommentResult::Sent
     );
     review

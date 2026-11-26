@@ -22,7 +22,7 @@ pub enum Fate {
 pub struct FindingDecision {
     pub finding: Finding,
     pub fate: Fate,
-    /// The thread the comment that used it became, when GitHub or the local threads showed it.
+    /// The thread the comment that used it became, when the host or the local threads showed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<ThreadId>,
 }

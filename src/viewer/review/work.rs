@@ -3,8 +3,8 @@ use std::time::Instant;
 use super::ReviewCore;
 use crate::viewer::code_link::WorkingCopy;
 use crate::viewer::comments::CommentResult;
-use crate::viewer::github_outage::Read;
 use crate::viewer::hand_offs::{AgentReplied, HandOffButton, HandOffId};
+use crate::viewer::host_outage::Read;
 use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::related_issues::RelatedIssues;
 use crate::viewer::tour_agent::{TourAgentState, TourKind};
@@ -34,15 +34,15 @@ impl ReviewCore {
         self.work.next_due()
     }
 
-    /// The window came to the front, or the review opened: GitHub and the clone are read again,
-    /// and what waits to go to GitHub is sent.
-    pub(super) fn pull_from_github(&mut self) {
+    /// The window came to the front, or the review opened: the host and the clone are read again,
+    /// and what waits to go to the host is sent.
+    pub(super) fn pull_from_host(&mut self) {
         for kind in WorkKind::READ_AGAIN_ON_FOCUS {
             self.work.want(kind);
         }
     }
 
-    /// `None` when there is nothing of the kind to do now. Work with GitHub is never done for a local
+    /// `None` when there is nothing of the kind to do now. Work with the host is never done for a local
     /// review, which has no PR.
     fn job_of(&self, kind: WorkKind) -> Option<Job> {
         let pr = || self.subject.pull_request().cloned();
@@ -58,7 +58,7 @@ impl ReviewCore {
                 Job::CheckWorkingCopy(self.head.clone())
             }
             WorkKind::LookUpPullOfBranch => Job::LookUpPullOfBranch {
-                repo: self.local_facts.as_ref()?.repo.clone()?,
+                repo: self.local_facts.as_ref()?.origin.clone()?,
                 branch: self.subject.local()?.branch().clone(),
             },
             WorkKind::LookUpHeadBranch => {
@@ -68,7 +68,7 @@ impl ReviewCore {
             WorkKind::PullRelatedIssues => Job::PullRelatedIssues(pr()?),
             WorkKind::PullPrOrigin => Job::PullPrOrigin(pr()?),
             WorkKind::PullIssueDetails => {
-                let issues = self.related_issues.shown_on_github();
+                let issues = self.related_issues.details_to_read();
                 if issues.is_empty() {
                     return None;
                 }
@@ -126,9 +126,9 @@ impl ReviewCore {
 
     /// Reads the details of the issues again when the change shows others.
     pub(super) fn change_related_issues(&mut self, change: impl FnOnce(&mut RelatedIssues)) {
-        let before = self.related_issues.shown_on_github();
+        let before = self.related_issues.details_to_read();
         change(&mut self.related_issues);
-        if self.related_issues.shown_on_github() != before {
+        if self.related_issues.details_to_read() != before {
             self.work.want(WorkKind::PullIssueDetails);
         }
     }
@@ -171,7 +171,7 @@ impl ReviewCore {
             Done::PrDescription(Err(error)) => self.could_not_read(Read::PrDescription, &error),
             // The issue button is a shortcut, not something to warn of: a failed read keeps the last answer.
             Done::RelatedIssues(Ok(issues)) => {
-                self.change_related_issues(|related| related.github_says(issues));
+                self.change_related_issues(|related| related.host_says(issues));
             }
             // Like the issue button, the origin is no cause for a warning: a failed read keeps the last answer.
             Done::PrOrigin(Ok(origin)) => self.pr_origin = Some(origin),
@@ -197,8 +197,20 @@ impl ReviewCore {
             }
             Done::Reviews(Ok(reviews)) => self.reviews_are(reviews),
             Done::Reviews(Err(error)) => self.could_not_read(Read::LastReview, &error),
-            Done::PrStatus(Ok(status)) => self.pr_status_is(status),
-            Done::PrStatus(Err(error)) => self.could_not_read(Read::PrStatus, &error),
+            Done::PrStatus {
+                status: Ok(status),
+                merging,
+            } => {
+                self.pr_status_is(status);
+                match merging {
+                    Some(Ok(merging)) => self.pr_merging_is(merging),
+                    Some(Err(error)) => self.could_not_read(Read::PrStatus, &error),
+                    None => {}
+                }
+            }
+            Done::PrStatus {
+                status: Err(error), ..
+            } => self.could_not_read(Read::PrStatus, &error),
             Done::ReviewingMark { change, result } => self.reviewing_mark_landed(change, result),
             Done::PrReadiness { readiness, result } => self.readiness_landed(readiness, result),
             Done::Merging { change, result } => self.merging_landed(change, result),
@@ -284,9 +296,9 @@ impl ReviewCore {
         self.work.want(WorkKind::CheckAgentLink);
     }
 
-    /// The tour agent's reply is on GitHub: the hand-off is answered, and the threads and the
+    /// The tour agent's reply is on the host: the hand-off is answered, and the threads and the
     /// pending review are read again so the reply shows under the asked comment. While a re-pin runs it
-    /// is kept for the re-pinned review, which saves it: the agent's reply is on GitHub either way.
+    /// is kept for the re-pinned review, which saves it: the agent's reply is on the host either way.
     pub fn hand_off_replied(
         &mut self,
         id: HandOffId,

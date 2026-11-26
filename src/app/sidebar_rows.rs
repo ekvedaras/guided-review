@@ -2,6 +2,7 @@
 //! comes on every scroll step, asks the review nothing.
 
 use crate::app::components::finish_review::Finishing;
+use crate::pull_request::HostSite;
 use gpui::SharedString;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -90,7 +91,7 @@ impl SidebarReviews {
 /// How finishing reads in the sidebar.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SidebarFinish {
-    /// A review of the viewer's is on GitHub already, so finishing updates it.
+    /// A review of the viewer's is on the host already, so finishing updates it.
     pub has_last_review: bool,
     /// A re-review with nothing new to send can be marked done.
     pub can_mark_done: bool,
@@ -171,13 +172,13 @@ pub struct SidebarRows {
     /// Approve and Request changes show only on someone else's PR.
     pub finishing: Finishing,
     pub approve_warning: Option<ApproveWarning>,
-    /// Why viewed marks are not synced with GitHub this session.
+    /// Why viewed marks are not synced with the host this session.
     pub viewed_sync_off: Option<SharedString>,
-    /// The tour, the AI review, the fixes, your review and GitHub, as the stepper shows them.
+    /// The tour, the AI review, the fixes, your review and the host, as the stepper shows them.
     pub stations: Stations,
     /// What went wrong that the reviewer must know about, until it is put right.
     pub problems: Vec<SidebarProblem>,
-    /// Changed code no page shows, named so the reviewer reads it on GitHub.
+    /// Changed code no page shows, named so the reviewer reads it on the PR's host.
     pub changes_not_shown: Option<SharedString>,
     pub is_summary_current: bool,
     pub steps: Vec<SidebarStep>,
@@ -275,7 +276,10 @@ impl SidebarRows {
             viewed_sync_off: review
                 .sync_banner()
                 .map(|reason| SharedString::from(reason.to_owned())),
-            changes_not_shown: changes_not_shown_notice(&review.changes_not_shown()),
+            changes_not_shown: changes_not_shown_notice(
+                &review.changes_not_shown(),
+                review.subject().pull_request().map(|pr| pr.host),
+            ),
             problems: review
                 .problems()
                 .into_iter()
@@ -318,12 +322,16 @@ impl SidebarRows {
     }
 }
 
-fn changes_not_shown_notice(ids: &[String]) -> Option<SharedString> {
+fn changes_not_shown_notice(ids: &[String], host: Option<HostSite>) -> Option<SharedString> {
     (!ids.is_empty()).then(|| {
-        format!(
-            "Changed code not shown here, read it on GitHub: {}",
-            ids.join(", ")
-        )
+        let ids = ids.join(", ");
+        match host {
+            Some(host) => format!(
+                "Changed code not shown here, read it on {}: {ids}",
+                host.name()
+            ),
+            None => format!("Changed code not shown here: {ids}"),
+        }
         .into()
     })
 }
@@ -336,9 +344,10 @@ mod tests {
     fn changed_code_no_page_shows_is_named_in_the_sidebar() {
         let ids = ["app/Ghost.php#Ghost::run".to_owned()];
 
-        let notice = changes_not_shown_notice(&ids).unwrap();
+        let notice = changes_not_shown_notice(&ids, Some(HostSite::GitHub)).unwrap();
 
         assert!(notice.contains("app/Ghost.php#Ghost::run"));
-        assert_eq!(changes_not_shown_notice(&[]), None);
+        assert!(notice.contains("read it on GitHub"), "{notice}");
+        assert_eq!(changes_not_shown_notice(&[], Some(HostSite::GitHub)), None);
     }
 }

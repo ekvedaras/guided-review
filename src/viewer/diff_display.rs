@@ -14,13 +14,13 @@ use super::line_location::{LineLocation, Side};
 use super::word_diff::changed_words;
 
 /// GitHub's diff shows this many unchanged lines around a change; only those take comments.
-const GITHUB_CONTEXT_LINES: usize = 3;
+const DIFF_CONTEXT_LINES: usize = 3;
 
 /// Whether GitHub shows this head line in the diff of `hunks`: in a hunk or in the context around it.
-pub(super) fn is_in_github_diff(hunks: &[crate::code_source::Hunk], head_line: usize) -> bool {
+pub(super) fn is_in_pr_diff(hunks: &[crate::code_source::Hunk], head_line: usize) -> bool {
     hunks.iter().any(|hunk| {
-        head_line + GITHUB_CONTEXT_LINES > hunk.head_line_above()
-            && head_line < hunk.head_line_below() + GITHUB_CONTEXT_LINES
+        head_line + DIFF_CONTEXT_LINES > hunk.head_line_above()
+            && head_line < hunk.head_line_below() + DIFF_CONTEXT_LINES
     })
 }
 
@@ -150,7 +150,7 @@ pub enum PieceView {
     SinceRead(PieceId),
 }
 
-/// Which change of which piece: the n-th changed hunk of the piece's file, as GitHub cuts them.
+/// Which change of which piece: the n-th changed hunk of the piece's file, as the host cuts them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChangeId {
     piece: PieceView,
@@ -308,7 +308,7 @@ impl DiffDisplay<'_> {
                     edge,
                 };
                 let wanted = |edge| {
-                    GITHUB_CONTEXT_LINES + self.more_context.get(&more(edge)).copied().unwrap_or(0)
+                    DIFF_CONTEXT_LINES + self.more_context.get(&more(edge)).copied().unwrap_or(0)
                 };
                 let above = file_lines.unchanged_above(line_above, wanted(Edge::Above));
                 let below = file_lines.unchanged_below(line_below, wanted(Edge::Below));
@@ -510,7 +510,7 @@ impl FileLines<'_> {
             Side::Head,
             LineKind::Context {
                 base_line: self.base_line_of(head_line),
-                is_expanded: !is_in_github_diff(&self.file.hunks, head_line),
+                is_expanded: !is_in_pr_diff(&self.file.hunks, head_line),
             },
             &Line { number, text },
         ))
@@ -539,12 +539,12 @@ impl FileLines<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileText, is_in_github_diff};
+    use super::{FileText, is_in_pr_diff};
     use crate::code_source::{Hunk, Line};
     use crate::line_number::LineNumber;
 
     #[test]
-    fn a_head_line_is_in_the_github_diff_within_three_lines_of_a_hunk() {
+    fn a_head_line_is_in_the_pr_diff_within_three_lines_of_a_hunk() {
         let hunk = Hunk {
             header: "@@ -10 +10 @@".to_owned(),
             head_start: 10,
@@ -556,7 +556,7 @@ mod tests {
         };
 
         let shown: Vec<usize> = (1..=20)
-            .filter(|line| is_in_github_diff(std::slice::from_ref(&hunk), *line))
+            .filter(|line| is_in_pr_diff(std::slice::from_ref(&hunk), *line))
             .collect();
 
         assert_eq!(shown, (7..=13).collect::<Vec<_>>());

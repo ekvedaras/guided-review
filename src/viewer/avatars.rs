@@ -6,8 +6,8 @@ pub trait AvatarPort: Send + Sync {
     fn avatar(&self, url: &str) -> anyhow::Result<Vec<u8>>;
 }
 
-/// The comment authors' pictures, by their GitHub avatar address, downloaded once each per app run.
-/// One that failed stays a placeholder: avatars are not worth a retry or a problem.
+/// The comment authors' pictures, by the avatar address their host gives, downloaded once each per
+/// app run. One that failed stays a placeholder: avatars are not worth a retry or a problem.
 #[derive(Debug, Default)]
 pub struct Avatars {
     by_url: HashMap<String, AvatarState>,

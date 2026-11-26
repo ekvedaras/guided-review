@@ -15,7 +15,7 @@ use super::local_threads::LocalAuthor;
 
 use super::comments::SendMode;
 use super::hidden_text::HiddenText;
-use super::ports::{GitHubError, ReviewThreadsPort, ReviewWritesPort};
+use super::ports::{CodeHost, HostError, ReviewThreadsPort, ReviewWritesPort};
 use super::reactions::{Reaction, ReactionChange};
 use super::review::StepId;
 use super::review_thread::{AGENT_MARK, CommentId, ReviewThread, ThreadComment, ThreadId};
@@ -104,7 +104,7 @@ pub enum HandOffState {
     Queued,
     Delivered,
     Working,
-    /// The agent's reply on GitHub says it is working on it; its answer replaces that reply.
+    /// The agent's reply on the host says it is working on it; its answer replaces that reply.
     WorkingOnIt {
         reply: CommentId,
     },
@@ -160,7 +160,7 @@ impl HandOffState {
     }
 }
 
-/// The 👀 on the reviewer's comment, which says on GitHub that the tour agent has it.
+/// The 👀 on the reviewer's comment, which says on the host that the tour agent has it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SeenMark {
     #[default]
@@ -181,15 +181,22 @@ impl SeenMark {
         }
     }
 
-    fn put_on(github: &(impl ReviewThreadsPort + ?Sized), comment: &CommentId) -> Self {
-        match github.set_reaction(comment, Reaction::Eyes, ReactionChange::Add) {
+    /// A host with no reactions on comments gets no mark; the hand-off goes all the same.
+    fn put_on(host: &dyn CodeHost, comment: &CommentId) -> Self {
+        let Some(reactions) = host.comment_reactions() else {
+            return Self::Off;
+        };
+        match reactions.set_comment_reaction(comment, Reaction::Eyes, ReactionChange::Add) {
             Ok(()) => Self::On,
             Err(error) => Self::NotPut(format!("{error:#}")),
         }
     }
 
-    fn take_off(github: &(impl ReviewThreadsPort + ?Sized), comment: &CommentId) -> Self {
-        match github.set_reaction(comment, Reaction::Eyes, ReactionChange::Remove) {
+    fn take_off(host: &dyn CodeHost, comment: &CommentId) -> Self {
+        let Some(reactions) = host.comment_reactions() else {
+            return Self::Off;
+        };
+        match reactions.set_comment_reaction(comment, Reaction::Eyes, ReactionChange::Remove) {
             Ok(()) => Self::Off,
             Err(error) => Self::NotTakenOff(format!("{error:#}")),
         }
@@ -264,7 +271,7 @@ impl HandedComment {
         }
         if let Some(left_out) = &self.left_out {
             lines.push(format!(
-                "Left out of the comment, since GitHub hides it: {left_out}. The reviewer did not \
+                "Left out of the comment, since it does not show where the reviewer reads it: {left_out}. The reviewer did not \
                  see it, and it is no part of the request."
             ));
         }
@@ -300,7 +307,7 @@ pub struct HandOff {
     /// The thread before this comment, plain replies included.
     thread_so_far: Vec<ThreadMessage>,
     state: HandOffState,
-    /// The comment on GitHub, which carries the seen mark. `None` when the threads read after the send did not show it.
+    /// The comment on the host, which carries the seen mark. `None` when the threads read after the send did not show it.
     #[serde(default)]
     reviewer_comment: Option<CommentId>,
     #[serde(default)]
@@ -485,9 +492,13 @@ impl HandOff {
                  is clean, then `guided-review open {subject}`."
             )
         };
+        let markdown = subject.host().map_or_else(
+            || "Markdown".to_owned(),
+            |host| format!("{} markdown", host.name()),
+        );
         lines.push(format!(
             "Answer with `guided-review agent-reply {subject} {id} --body -` and the answer on stdin, in a quoted heredoc \
-             (`<<'EOF'`). Write it in GitHub markdown: answer the question in the first sentence, then at most 3 bullets, a \
+             (`<<'EOF'`). Write it in {markdown}: answer the question in the first sentence, then at most 3 bullets, a \
              blank line between paragraphs, code names in backticks. If the comment asks for a change to the \
              PR's code, first run `guided-review agent-reply {subject} {id} --working`: it posts \"{WORKING_ON_IT}\" on the \
              thread, and your answer replaces it. Make the change in your folder when it is a clone of the PR's repo on \
@@ -513,11 +524,7 @@ pub(super) struct DeliveryRequest {
 
 impl DeliveryRequest {
     /// A delivered hand-off puts the seen mark on the reviewer's comment.
-    pub(super) fn run(
-        self,
-        agents: &TourAgents,
-        github: &(impl ReviewThreadsPort + ?Sized),
-    ) -> DeliveryOutcome {
+    pub(super) fn run(self, agents: &TourAgents, host: &dyn CodeHost) -> DeliveryOutcome {
         let sent = if self.anyway {
             agents.send_anyway(&self.subject, &self.text)
         } else {
@@ -536,7 +543,7 @@ impl DeliveryRequest {
             Err(error) => Delivery::Failed(format!("{error:#}")),
         };
         let seen_mark = match (&how, &self.reviewer_comment) {
-            (Delivery::Delivered, Some(comment)) => SeenMark::put_on(github, comment),
+            (Delivery::Delivered, Some(comment)) => SeenMark::put_on(host, comment),
             _ => SeenMark::Off,
         };
         DeliveryOutcome {
@@ -587,7 +594,7 @@ pub(super) enum SentFrom {
     Elsewhere,
 }
 
-/// What a hand-off is made from: the comment as GitHub has it now, in the threads read right after the send.
+/// What a hand-off is made from: the comment as the host has it now, in the threads read right after the send.
 pub(super) struct SentComment<'a> {
     pub place: String,
     pub from: SentFrom,
@@ -674,7 +681,7 @@ impl HandOffs {
                 .find(|thread| {
                     !self.holds(&thread.id) && &thread.path == path && ends_with(thread, sent.body)
                 })
-                .ok_or_else(|| "GitHub shows no thread with the comment".to_owned())
+                .ok_or_else(|| "The PR's host shows no thread with the comment".to_owned())
         });
         let (thread, comment, state) = match found {
             Ok(thread) => (
@@ -687,7 +694,7 @@ impl HandOffs {
         self.push(sent, thread, comment, Vec::new(), state);
     }
 
-    /// The reply joined a thread GitHub already had, so the thread is known and the agent gets what was said in it.
+    /// The reply joined a thread the host already had, so the thread is known and the agent gets what was said in it.
     pub(super) fn record_reply(
         &mut self,
         thread_id: &ThreadId,
@@ -698,7 +705,7 @@ impl HandOffs {
             threads
                 .iter()
                 .find(|thread| &thread.id == thread_id)
-                .ok_or_else(|| "GitHub shows no such thread".to_owned())
+                .ok_or_else(|| "The PR's host shows no such thread".to_owned())
         });
         let mut sent = sent;
         let mut comment = None;
@@ -1023,7 +1030,7 @@ impl HandOffs {
         }
     }
 
-    /// The agent's reply is on GitHub, whatever the hand-off was doing before.
+    /// The agent's reply is on the host, whatever the hand-off was doing before.
     pub(super) fn replied(
         &mut self,
         id: HandOffId,
@@ -1143,7 +1150,7 @@ impl HandOffs {
 pub enum HandToAgentRefused {
     #[error("only a pull request has comments by others to hand to the agent")]
     NotAPullRequest,
-    #[error("the comment is not in the threads read from GitHub")]
+    #[error("the comment is not in the threads read from the PR's host")]
     NoSuchComment,
     #[error("it is your own comment: reply with Ask agent instead")]
     OwnComment,
@@ -1153,7 +1160,7 @@ pub enum HandToAgentRefused {
     NotSaved(String),
 }
 
-/// Why a reply from the tour agent is not posted, before GitHub is asked.
+/// Why a reply from the tour agent is not posted, before the host is asked.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AgentReplyRefused {
     #[error("no hand-off {id} {reviewed}; {}", known_ids(.known))]
@@ -1184,7 +1191,7 @@ pub enum Reviewed {
 impl From<&ThreadHome> for Reviewed {
     fn from(home: &ThreadHome) -> Self {
         match home {
-            ThreadHome::GitHub(_) => Self::PullRequest,
+            ThreadHome::Host(_) => Self::PullRequest,
             ThreadHome::StateFile(_) => Self::Local,
         }
     }
@@ -1245,7 +1252,7 @@ impl AgentReplyDone {
 #[derive(Debug)]
 enum AgentReplyKind {
     Answer {
-        /// What the agent said, without the robot GitHub needs in front of it.
+        /// What the agent said, without the robot the host needs in front of it.
         said: String,
         replacing: Option<CommentId>,
     },
@@ -1269,18 +1276,15 @@ impl AgentReplyRequest {
         &self.home
     }
 
-    pub fn run(
-        &self,
-        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
-    ) -> Result<AgentReplyDone, GitHubError> {
+    pub fn run(&self, host: &dyn CodeHost) -> Result<AgentReplyDone, HostError> {
         let (placement, working_on_it) = match &self.home {
-            ThreadHome::GitHub(pr) => self.post_on_github(github, pr)?,
+            ThreadHome::Host(pr) => self.post_on_host(host, pr)?,
             ThreadHome::StateFile(store) => self.keep_locally(store).map_err(|error| {
-                GitHubError::Other(error.context("could not write the local thread"))
+                HostError::Other(error.context("could not write the local thread"))
             })?,
         };
         let seen_mark = match &self.seen_mark_on {
-            Some(comment) => SeenMark::take_off(github, comment),
+            Some(comment) => SeenMark::take_off(host, comment),
             None => self.seen_mark.clone(),
         };
         Ok(AgentReplyDone {
@@ -1292,29 +1296,29 @@ impl AgentReplyRequest {
         })
     }
 
-    fn post_on_github(
+    fn post_on_host(
         &self,
-        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
         pr: &PullRequestUrl,
-    ) -> Result<(ReplyPlacement, Option<CommentId>), GitHubError> {
+    ) -> Result<(ReplyPlacement, Option<CommentId>), HostError> {
         Ok(match &self.kind {
             AgentReplyKind::Answer {
                 said,
                 replacing: Some(reply),
             } => {
-                github.edit_comment(reply, &format!("{AGENT_MARK} {said}"))?;
+                host.edit_comment(reply, &format!("{AGENT_MARK} {said}"))?;
                 (ReplyPlacement::ReplacedWorkingOnIt, None)
             }
             AgentReplyKind::Answer {
                 said,
                 replacing: None,
             } => (
-                self.post(github, pr, &format!("{AGENT_MARK} {said}"))?.0,
+                self.post(host, pr, &format!("{AGENT_MARK} {said}"))?.0,
                 None,
             ),
             AgentReplyKind::WorkingOnIt => {
                 let (placement, reply) =
-                    self.post(github, pr, &format!("{AGENT_MARK} {WORKING_ON_IT}"))?;
+                    self.post(host, pr, &format!("{AGENT_MARK} {WORKING_ON_IT}"))?;
                 (placement, Some(reply))
             }
         })
@@ -1351,16 +1355,16 @@ impl AgentReplyRequest {
     /// reply is posted at once.
     fn post(
         &self,
-        github: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
+        host: &(impl ReviewThreadsPort + ReviewWritesPort + ?Sized),
         pr: &PullRequestUrl,
         body: &str,
-    ) -> Result<(ReplyPlacement, CommentId), GitHubError> {
-        let (placement, mode) = if github.has_pending_review(pr)? {
+    ) -> Result<(ReplyPlacement, CommentId), HostError> {
+        let (placement, mode) = if host.has_pending_review(pr)? {
             (ReplyPlacement::JoinedPendingReview, SendMode::AddToReview)
         } else {
             (ReplyPlacement::PostedAtOnce, SendMode::CommentNow)
         };
-        let reply = github.reply_to_thread(pr, &self.thread, body, mode)?;
+        let reply = host.reply_to_thread(pr, &self.thread, body, mode)?;
         Ok((placement, reply))
     }
 }
@@ -1377,10 +1381,10 @@ pub(super) struct SeenMarkOffOutcome {
 }
 
 impl SeenMarkOff {
-    pub(super) fn run(self, github: &(impl ReviewThreadsPort + ?Sized)) -> SeenMarkOffOutcome {
+    pub(super) fn run(self, host: &dyn CodeHost) -> SeenMarkOffOutcome {
         SeenMarkOffOutcome {
             id: self.id,
-            seen_mark: SeenMark::take_off(github, &self.comment),
+            seen_mark: SeenMark::take_off(host, &self.comment),
         }
     }
 }

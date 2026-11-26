@@ -47,7 +47,7 @@ impl CodeNavigator for ServerNavigator {
         };
         let Some(clone) = code.local_clone() else {
             return by_name(Some(FallbackReason::new(&format!(
-                "{} needs a local clone, and the code is read from GitHub",
+                "{} needs a local clone, and the code is read from the PR's host",
                 ServerName::of(language)
             ))));
         };

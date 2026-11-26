@@ -19,7 +19,7 @@ use crate::viewer::{PickCodeSource, ReviewStateFile, repin_tour};
 use super::CodeAtTips;
 
 /// The local adapter: a local change set's code is its folder's git, read at the snapshot the tour is
-/// pinned to, and no GitHub. It alone moves the snapshot ref, under the tour-and-ref lock.
+/// pinned to, and no host. It alone moves the snapshot ref, under the tour-and-ref lock.
 pub struct OpenedChangeSet {
     change_set: LocalChangeSet,
     folders: AppFolders,

@@ -32,12 +32,12 @@ pub trait CodeSource: Send + Sync {
             change_set.folder().as_path().display()
         )
     }
-    /// The clone this source reads, so a file can be opened in an IDE. `None` for GitHub.
+    /// The clone this source reads, so a file can be opened in an IDE. `None` for the host.
     fn local_clone(&self) -> Option<&Path> {
         None
     }
 
-    /// Why the code is read from GitHub though the PR's repo has a clone; `None` when it is not.
+    /// Why the code is read from the host though the PR's repo has a clone; `None` when it is not.
     fn fallback_reason(&self) -> Option<&str> {
         None
     }

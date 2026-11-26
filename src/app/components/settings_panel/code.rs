@@ -119,7 +119,7 @@ impl SettingsPanel {
                     .child(Self::shown_text(colors, template))
                     .into_any_element(),
                 None => note_row(colors, Icon::Globe)
-                    .child("Code links open the file on GitHub.")
+                    .child("Code links open the file on its code host.")
                     .into_any_element(),
             })
         };

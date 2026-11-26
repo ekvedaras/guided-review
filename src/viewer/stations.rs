@@ -1,9 +1,10 @@
 //! The stations of a review: the work around reading it (the tour, the AI review, the fixes, the
-//! reviewer's own review, GitHub), each with how it stands, for the sidebar's stepper.
+//! reviewer's own review, the host), each with how it stands, for the sidebar's stepper.
 
 use std::time::Duration;
 
 use super::problems::{Problem, ProblemKind};
+use crate::pull_request::HostSite;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StationKind {
@@ -11,7 +12,7 @@ pub enum StationKind {
     AiReview,
     Fixes,
     YourReview,
-    GitHub,
+    Host,
 }
 
 impl StationKind {
@@ -21,7 +22,7 @@ impl StationKind {
             Self::AiReview => "AI review",
             Self::Fixes => "Fixes",
             Self::YourReview => "Your review",
-            Self::GitHub => "GitHub",
+            Self::Host => "Code host",
         }
     }
 
@@ -49,6 +50,10 @@ pub enum StationHealth {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Station {
     pub kind: StationKind,
+    /// What the card and the tooltip call it: the PR's host's own name for the host station.
+    pub name: &'static str,
+    /// The name under the station's icon.
+    pub short_name: &'static str,
     pub health: StationHealth,
     /// A few words on how it stands, as "3 findings" or "new commits".
     pub state: String,
@@ -58,8 +63,19 @@ impl Station {
     pub fn new(kind: StationKind, health: StationHealth, state: impl Into<String>) -> Self {
         Self {
             kind,
+            name: kind.name(),
+            short_name: kind.short_name(),
             health,
             state: state.into(),
+        }
+    }
+
+    /// The station of the PR's host, named after it.
+    pub fn of_host(host: HostSite, health: StationHealth, state: impl Into<String>) -> Self {
+        Self {
+            name: host.name(),
+            short_name: host.name(),
+            ..Self::new(StationKind::Host, health, state)
         }
     }
 
@@ -68,7 +84,7 @@ impl Station {
     }
 }
 
-/// The stations in the order the work goes: a local review has no GitHub station.
+/// The stations in the order the work goes: a local review has no host station.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stations {
     stations: Vec<Station>,
@@ -120,17 +136,17 @@ impl Stations {
     }
 
     /// The station whose card names a problem; `None` puts it above the stepper, as it is about
-    /// this Mac. A GitHub problem of a review with no GitHub station goes there too.
+    /// this Mac. A host problem of a review with no host station goes there too.
     pub fn home_of(&self, problem: &Problem) -> Option<StationKind> {
         let home = match problem.kind() {
             ProblemKind::ThreadsNotRead
-            | ProblemKind::GitHubNotAnswering
+            | ProblemKind::HostNotAnswering
             | ProblemKind::NotRead(_)
             | ProblemKind::ViewedNotSynced
             | ProblemKind::HandOffNotSent
             | ProblemKind::ReviewingMarkNotChanged
             | ProblemKind::ReadinessNotChanged
-            | ProblemKind::MergingNotChanged => StationKind::GitHub,
+            | ProblemKind::MergingNotChanged => StationKind::Host,
             ProblemKind::TourNotRefreshed
             | ProblemKind::TourNotReloaded
             | ProblemKind::ShowAgentFailed
@@ -168,7 +184,7 @@ impl Stations {
 const fn short_state(kind: ProblemKind) -> &'static str {
     match kind {
         ProblemKind::ThreadsNotRead => "threads not read",
-        ProblemKind::GitHubNotAnswering => "not answering",
+        ProblemKind::HostNotAnswering => "not answering",
         ProblemKind::NotRead(_) => "read failed",
         ProblemKind::ViewedNotSynced => "viewed marks not synced",
         ProblemKind::HandOffNotSent => "comment not handed off",
@@ -183,7 +199,7 @@ const fn short_state(kind: ProblemKind) -> &'static str {
     }
 }
 
-/// How long viewed marks have waited to reach GitHub, said in the sidebar.
+/// How long viewed marks have waited to reach the host, said in the sidebar.
 pub fn waited(time: Duration) -> String {
     match time.as_secs() {
         0..60 => "under a minute".to_owned(),

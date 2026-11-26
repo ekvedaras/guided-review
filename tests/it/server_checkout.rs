@@ -2,7 +2,7 @@ use std::path::Path;
 
 use guided_review::codebase::Codebase;
 use guided_review::navigation::{Change, ChangedFile, ServerCheckouts};
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use tempfile::TempDir;
 
 use crate::support::{FixtureRepo, write_executable};
@@ -16,7 +16,7 @@ struct Rig {
 }
 
 fn shop() -> Codebase {
-    Codebase::GitHub(RepoName::new("acme", "shop"))
+    Codebase::Hosted(crate::support::shop_on_github())
 }
 
 impl Rig {

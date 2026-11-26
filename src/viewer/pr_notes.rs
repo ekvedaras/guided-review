@@ -9,8 +9,9 @@ use crate::hex;
 use crate::pull_request::PullRequestUrl;
 use crate::tour::StepId;
 
+use super::capability::{Capability, HostCapabilities};
 use super::markdown::local_files;
-use super::ports::{PictureUploadPort, PullRequestDescriptionPort};
+use super::ports::{CodeHost, HostError};
 
 const NOTES_HEADING: &str = "## Notes";
 
@@ -40,17 +41,32 @@ enum Attempt {
 }
 
 /// The adds to the PR description that are running or failed, by subject. Not saved.
-#[derive(Debug, Default)]
-pub(super) struct PrNotes(BTreeMap<NoteSubject, Attempt>);
+#[derive(Debug)]
+pub(super) struct PrNotes {
+    attempts: BTreeMap<NoteSubject, Attempt>,
+    /// A host that stores no pictures takes no note that shows one.
+    has_picture_uploads: bool,
+}
 
 impl PrNotes {
+    pub(super) fn for_host(host: HostCapabilities) -> Self {
+        Self {
+            attempts: BTreeMap::new(),
+            has_picture_uploads: host.has(Capability::PictureUploads),
+        }
+    }
+
+    pub(super) fn can_add(&self, note: &Note) -> bool {
+        self.has_picture_uploads || note.pictures().next().is_none()
+    }
+
     pub(super) fn button(
         &self,
         subject: &NoteSubject,
         description: &str,
         note: &Note,
     ) -> NotesButton {
-        match self.0.get(subject) {
+        match self.attempts.get(subject) {
             Some(Attempt::Adding) => NotesButton::Adding,
             _ if note.is_in(description) => NotesButton::InNotes,
             Some(Attempt::Failed(reason)) => NotesButton::Failed(Arc::clone(reason)),
@@ -64,10 +80,10 @@ impl PrNotes {
         subject: &NoteSubject,
         note: Note,
     ) -> Option<ToNotes> {
-        if matches!(self.0.get(subject), Some(Attempt::Adding)) {
+        if matches!(self.attempts.get(subject), Some(Attempt::Adding)) {
             return None;
         }
-        self.0.insert(subject.clone(), Attempt::Adding);
+        self.attempts.insert(subject.clone(), Attempt::Adding);
         Some(ToNotes {
             pr: pr.clone(),
             subject: subject.clone(),
@@ -75,15 +91,15 @@ impl PrNotes {
         })
     }
 
-    /// The description GitHub now holds, when the add went through.
+    /// The description the host now holds, when the add went through.
     pub(super) fn finish(&mut self, outcome: ToNotesOutcome) -> Option<String> {
         match outcome.result {
             Ok(description) => {
-                self.0.remove(&outcome.subject);
+                self.attempts.remove(&outcome.subject);
                 Some(description)
             }
             Err(reason) => {
-                self.0
+                self.attempts
                     .insert(outcome.subject, Attempt::Failed(reason.into()));
                 None
             }
@@ -143,7 +159,7 @@ impl Note {
     }
 
     /// The summary as written, its pictures uploaded and its links to other files of the tour's
-    /// `folder` left as their text, since GitHub cannot open those.
+    /// `folder` left as their text, since the host cannot open those.
     pub(super) fn reviewer_summary(summary: &str, folder: &Path) -> Option<Self> {
         let files = local_files(summary, folder);
         let mut contents = vec![summary.as_bytes().to_vec()];
@@ -260,28 +276,25 @@ pub struct ToNotesOutcome {
 
 impl ToNotes {
     /// Reads the description just before writing it, so an edit made on the web since is kept.
-    pub fn run(
-        self,
-        github: &(impl PullRequestDescriptionPort + PictureUploadPort + ?Sized),
-    ) -> ToNotesOutcome {
-        let result = self.add(github).map_err(|error| format!("{error:#}"));
+    pub fn run(self, host: &dyn CodeHost) -> ToNotesOutcome {
+        let result = self.add(host).map_err(|error| format!("{error:#}"));
         ToNotesOutcome {
             subject: self.subject,
             result,
         }
     }
 
-    fn add(
-        &self,
-        github: &(impl PullRequestDescriptionPort + PictureUploadPort + ?Sized),
-    ) -> anyhow::Result<String> {
-        let description = github.pull_request_description(&self.pr)?;
+    fn add(&self, host: &dyn CodeHost) -> anyhow::Result<String> {
+        let description = host.pull_request_description(&self.pr)?;
         if self.note.is_in(&description) {
             return Ok(description);
         }
         let mut uploaded = HashMap::new();
         for picture in self.note.pictures() {
-            let url = github.upload_picture(&self.pr, picture).with_context(|| {
+            let uploads = host
+                .picture_uploads()
+                .ok_or_else(|| HostError::NotOffered(Capability::PictureUploads))?;
+            let url = uploads.upload_picture(&self.pr, picture).with_context(|| {
                 format!(
                     "could not upload {}",
                     picture.file_name().unwrap_or_default().display()
@@ -292,14 +305,14 @@ impl ToNotes {
         let description = if uploaded.is_empty() {
             description
         } else {
-            github.pull_request_description(&self.pr)?
+            host.pull_request_description(&self.pr)?
         };
         if self.note.is_in(&description) {
             return Ok(description);
         }
         let changed = in_notes(&description, &self.note.folded(&uploaded))
             .context("could not find where Notes ends in the description")?;
-        github.set_pull_request_description(&self.pr, &changed)?;
+        host.set_pull_request_description(&self.pr, &changed)?;
         Ok(changed)
     }
 }

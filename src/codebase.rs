@@ -4,15 +4,15 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use crate::pull_request::RepoName;
+use crate::pull_request::HostedRepo;
 use crate::review_subject::{ReviewSubject, WorkTreeRoot};
 
-/// What language servers are opted into and run on: a GitHub repo, or a local folder that has no
-/// GitHub origin. Written as `owner/repo` or as the folder's absolute path, which no `owner/repo`
-/// can be mistaken for.
+/// What language servers are opted into and run on: a repo on a code host, or a local folder whose
+/// origin is on no host the app reads. Written as the repo's text form (`owner/repo` on GitHub) or as
+/// the folder's absolute path, which no repo can be mistaken for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Codebase {
-    GitHub(RepoName),
+    Hosted(HostedRepo),
     Folder(WorkTreeRoot),
 }
 
@@ -25,19 +25,19 @@ impl Codebase {
     /// is its own codebase.
     pub fn of(subject: &ReviewSubject) -> Self {
         match subject {
-            ReviewSubject::PullRequest(pr) => Self::GitHub(pr.repo.clone()),
+            ReviewSubject::PullRequest(pr) => Self::Hosted(pr.hosted_repo()),
             ReviewSubject::Local(change_set) => change_set
-                .repo()
+                .origin()
                 .cloned()
-                .map_or_else(|| Self::Folder(change_set.folder().clone()), Self::GitHub),
+                .map_or_else(|| Self::Folder(change_set.folder().clone()), Self::Hosted),
         }
     }
 
     /// Where the app keeps this codebase's files under a state folder (server checkout, server
-    /// index): `owner/repo`, or `_folders/<folder name>-<short hash of the path>`.
+    /// index): the repo's files folder, or `_folders/<folder name>-<short hash of the path>`.
     pub fn state_folder(&self) -> PathBuf {
         match self {
-            Self::GitHub(repo) => PathBuf::from(repo.owner()).join(repo.name()),
+            Self::Hosted(repo) => repo.files_folder(),
             Self::Folder(folder) => PathBuf::from(FOLDERS_OWNER).join(folder.stem()),
         }
     }
@@ -46,7 +46,7 @@ impl Codebase {
 impl fmt::Display for Codebase {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::GitHub(repo) => repo.fmt(f),
+            Self::Hosted(repo) => repo.fmt(f),
             Self::Folder(folder) => folder.as_path().display().fmt(f),
         }
     }
@@ -59,6 +59,6 @@ impl FromStr for Codebase {
         if Path::new(text).is_absolute() {
             return WorkTreeRoot::new(PathBuf::from(text)).map(Self::Folder);
         }
-        text.parse().map(Self::GitHub)
+        text.parse().map(Self::Hosted)
     }
 }

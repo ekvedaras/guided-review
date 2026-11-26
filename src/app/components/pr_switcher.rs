@@ -12,7 +12,6 @@ use gpui::{
 
 use crate::app::tour_writer;
 use crate::config::Config;
-use crate::github::GitHub;
 use crate::local_change_sets::find_local_rows;
 use crate::opened_subject::OpenedChangeSet;
 use crate::review_subject::ReviewSubject;
@@ -38,6 +37,17 @@ use super::sidebar_row::RowPlace;
 use super::text_box::TextBox;
 use super::text_input::Lines;
 use super::thread_view::avatar_circle;
+use crate::pull_request::HostSite;
+
+/// The list is read from every host the app reads, so the wait names them all; made once, not per frame.
+static LOADING: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "Loading your pull requests from {}...",
+        HostSite::all_named()
+    )
+});
+static REFRESHING: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| format!("Refreshing from {}...", HostSite::all_named()));
 
 /// A row is two lines high, a repo's name one: `PrSwitcher::ROW_LINES` and `HEADING_LINES`.
 const LINE_HEIGHT: Pixels = px(28.);
@@ -77,11 +87,12 @@ impl PrSwitching {
     pub fn refresh(&self, cx: &mut App) {
         self.list.update(cx, |list, _| list.refreshing());
         let relevant = Arc::clone(&self.relevant);
-        let (list, active, folders, agents) = (
+        let (list, active, folders, agents, pulls) = (
             self.list.clone(),
             self.active.clone(),
             self.folders.clone(),
             Arc::clone(&self.agents),
+            Arc::clone(&self.head_branches),
         );
         cx.spawn(async move |cx| {
             let answer = cx
@@ -100,7 +111,7 @@ impl PrSwitching {
                 .spawn(async move {
                     // A config that cannot be read is Settings' to report; here it only names no clones.
                     let config = Config::load_from(&looked_in).unwrap_or_default();
-                    find_local_rows(&looked_in, &config, agents.as_ref(), &GitHub::from_env())
+                    find_local_rows(&looked_in, &config, agents.as_ref(), pulls.as_ref())
                 })
                 .await;
             list.update(cx, |list, cx| {
@@ -844,7 +855,7 @@ impl Render for PrSwitcherView {
             switcher.is_finding_local(),
         );
         let busy: Vec<&str> = [
-            (is_refreshing && !is_loading).then_some("Refreshing from GitHub..."),
+            (is_refreshing && !is_loading).then_some(REFRESHING.as_str()),
             is_finding_local.then_some("Looking in your folders..."),
         ]
         .into_iter()
@@ -869,7 +880,7 @@ impl Render for PrSwitcherView {
             });
         let sticky = self.sticky_heading(&colors).filter(|_| overflows);
         let empty_text = if is_loading {
-            "Loading your pull requests from GitHub..."
+            LOADING.as_str()
         } else {
             "No pull request matches."
         };

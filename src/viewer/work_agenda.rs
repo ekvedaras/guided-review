@@ -2,23 +2,24 @@
 //! dropped. The review decides what each outcome makes due next; the app only runs each `Work`
 //! with the ports and lands its outcome, and tests drive the same loop in line.
 
-use crate::viewer::github_outage::Affected;
+use crate::viewer::host_outage::Affected;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use crate::code_source::CodeSource;
 use crate::issue::IssueUrl;
 use crate::local_work_tree::OnDisk;
-use crate::pull_request::{ChangeTips, PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{ChangeTips, HostedRepo, PullRequestUrl, Sha};
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
+use super::capability::Capability;
 use super::comment_send::{CommentOutcome, CommentRequest};
 use super::fix_requests::{FixDeliveryOutcome, FixDeliveryRequest};
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
 use super::local_thread_store::ThreadHome;
-use super::merging::MergeChange;
+use super::merging::{MergeChange, Merging};
 use super::outdated_lines::{FollowedLines, follow_outdated};
-use super::ports::{GitHubError, GitHubPort, PullOfBranch};
+use super::ports::{CodeHost, HostError, PullOfBranch};
 use super::pr_origin::PullRequestOrigin;
 use super::pr_reviewers::PullRequestReviews;
 use super::pr_status::{PrStatus, Readiness};
@@ -37,7 +38,7 @@ pub const AGENT_START_RETRY: Duration = Duration::from_secs(3);
 pub const AGENT_LINK_RECHECK: Duration = Duration::from_secs(30);
 /// How often a local review's folder is looked at again while the review is open.
 pub const WORKING_TREE_RECHECK: Duration = Duration::from_secs(30);
-/// How long to wait before looking again for the PR of a local review's branch after GitHub did not answer.
+/// How long to wait before looking again for the PR of a local review's branch after the host did not answer.
 pub const PULL_OF_BRANCH_RETRY: Duration = Duration::from_secs(60);
 
 /// The kinds of work, in the order due work of several kinds starts in.
@@ -78,7 +79,7 @@ enum WhileRunning {
 
 impl WorkKind {
     /// What a window coming to the front reads and sends again. A review turns each into work only
-    /// when it has a use for it: a PR's GitHub work, a local review's look at its folder.
+    /// when it has a use for it: a PR's work with its host, a local review's look at its folder.
     /// A PR's head branch is not among them: it never changes, so it is looked up once per open.
     pub(super) const READ_AGAIN_ON_FOCUS: [Self; 15] = [
         Self::CheckPrHead,
@@ -231,7 +232,7 @@ impl WorkAgenda {
 
 /// What a `Work` runs with. Borrowed, so the app can lend its shared ports and tests their fakes.
 pub struct WorkPorts<'a> {
-    pub github: &'a dyn GitHubPort,
+    pub host: &'a dyn CodeHost,
     pub source: &'a dyn CodeSource,
     pub agents: &'a TourAgents,
 }
@@ -250,7 +251,7 @@ pub(super) enum Job {
     },
     CheckWorkingCopy(Sha),
     LookUpPullOfBranch {
-        repo: RepoName,
+        repo: HostedRepo,
         branch: BranchName,
     },
     LookUpHeadBranch(PullRequestUrl),
@@ -321,9 +322,9 @@ impl Work {
 
     pub fn run(self, ports: &WorkPorts<'_>) -> WorkOutcome {
         let kind = self.kind();
-        let github = ports.github;
+        let host = ports.host;
         let done = match self.job {
-            Job::CheckPrHead(pr) => Done::PrHead(github.pull_request_tips(&pr)),
+            Job::CheckPrHead(pr) => Done::PrHead(host.pull_request_tips(&pr)),
             Job::CheckWorkingTree {
                 change_set,
                 snapshot,
@@ -337,50 +338,70 @@ impl Work {
                 Done::WorkingCopy(ports.source.working_tree_is_at(&head))
             }
             Job::LookUpPullOfBranch { repo, branch } => {
-                Done::PullOfBranch(github.open_pull_of_branch(&repo, &branch))
+                Done::PullOfBranch(host.open_pull_of_branch(&repo, &branch))
             }
-            Job::LookUpHeadBranch(pr) => Done::HeadBranch(github.pull_request_head_branch(&pr)),
-            Job::PullPrDescription(pr) => Done::PrDescription(github.pull_request_description(&pr)),
-            Job::PullRelatedIssues(pr) => Done::RelatedIssues(github.pull_request_issues(&pr)),
-            Job::PullPrOrigin(pr) => Done::PrOrigin(github.pull_request_origin(&pr)),
-            Job::PullIssueDetails(issues) => Done::IssueDetails(github.issue_details(&issues)),
-            Job::SyncViewed(request) => Done::SyncViewed(request.run(github)),
+            Job::LookUpHeadBranch(pr) => Done::HeadBranch(host.pull_request_head_branch(&pr)),
+            Job::PullPrDescription(pr) => Done::PrDescription(host.pull_request_description(&pr)),
+            Job::PullRelatedIssues(pr) => Done::RelatedIssues(host.pull_request_issues(&pr)),
+            Job::PullPrOrigin(pr) => Done::PrOrigin(host.pull_request_origin(&pr)),
+            Job::PullIssueDetails(issues) => Done::IssueDetails(match host.issue_tracker() {
+                Some(tracker) => tracker.issue_details(&issues),
+                None => Err(HostError::NotOffered(Capability::IssueTracker)),
+            }),
+            Job::SyncViewed(request) => Done::SyncViewed(request.run(host)),
             // Outdated threads are followed to their lines in the same trip, so they never jump once shown.
             Job::PullThreads { home, head } => Done::Threads(match &home {
-                ThreadHome::GitHub(pr) => github.review_threads(pr).map(|threads| {
+                ThreadHome::Host(pr) => host.review_threads(pr).map(|threads| {
                     let followed = follow_outdated(&threads, ports.source, &head);
                     (threads, followed)
                 }),
                 ThreadHome::StateFile(store) => store
                     .threads_and_followed_at(ports.source, &head)
-                    .map_err(GitHubError::Other),
+                    .map_err(HostError::Other),
             }),
             Job::PullPendingReview(pr) => Done::PendingReview {
-                exists: github.has_pending_review(&pr),
-                authored: github.viewer_authored(&pr),
+                exists: host.has_pending_review(&pr),
+                authored: host.viewer_authored(&pr),
             },
-            Job::PullReviews(pr) => Done::Reviews(github.reviews(&pr)),
-            Job::PullPrStatus(pr) => Done::PrStatus(github.pull_request_status(&pr)),
-            Job::SendQueuedComment(request) => Done::QueuedComment(request.run(github)),
+            Job::PullReviews(pr) => Done::Reviews(host.reviews(&pr)),
+            Job::PullPrStatus(pr) => {
+                let status = host.pull_request_status(&pr);
+                let merging = match (&status, host.merging()) {
+                    (Ok(PrStatus::Open(_)), Some(merging)) => {
+                        Some(merging.pull_request_merging(&pr))
+                    }
+                    _ => None,
+                };
+                Done::PrStatus { status, merging }
+            }
+            Job::SendQueuedComment(request) => Done::QueuedComment(request.run(host)),
             Job::ChangeReviewingMark { pr, change } => Done::ReviewingMark {
                 change,
-                result: github.set_pull_request_reaction(&pr, REVIEWING_MARK, change),
+                result: match host.pull_request_reactions() {
+                    Some(reactions) => {
+                        reactions.set_pull_request_reaction(&pr, REVIEWING_MARK, change)
+                    }
+                    None => Err(HostError::NotOffered(Capability::PullRequestReactions)),
+                },
             },
             Job::ChangePrReadiness { pr, readiness } => Done::PrReadiness {
                 readiness,
-                result: github.set_pull_request_readiness(&pr, readiness),
+                result: host.set_pull_request_readiness(&pr, readiness),
             },
             Job::ChangeMerging { pr, change } => Done::Merging {
                 change,
-                result: github.change_merging(&pr, change),
+                result: match host.merging() {
+                    Some(merging) => merging.change_merging(&pr, change),
+                    None => Err(HostError::NotOffered(Capability::Merging)),
+                },
             },
             Job::TakeSeenMarksOff(requests) => Done::SeenMarksOff(
                 requests
                     .into_iter()
-                    .map(|request| request.run(github))
+                    .map(|request| request.run(host))
                     .collect(),
             ),
-            Job::DeliverHandOff(request) => Done::Delivery(request.run(ports.agents, github)),
+            Job::DeliverHandOff(request) => Done::Delivery(request.run(ports.agents, host)),
             Job::DeliverFixRequests(request) => Done::FixDelivery(request.run(ports.agents)),
             Job::CheckAgentLink(pr) => Done::AgentLink(ports.agents.lookup(&pr)),
         };
@@ -400,35 +421,39 @@ pub struct WorkOutcome {
 }
 
 pub(super) enum Done {
-    PrHead(Result<ChangeTips, GitHubError>),
+    PrHead(Result<ChangeTips, HostError>),
     WorkingTree(Result<OnDisk, String>),
     WorkingCopy(bool),
-    PullOfBranch(Result<Option<PullOfBranch>, GitHubError>),
-    HeadBranch(Result<Option<BranchName>, GitHubError>),
-    PrDescription(Result<String, GitHubError>),
-    RelatedIssues(Result<PullRequestIssues, GitHubError>),
-    PrOrigin(Result<PullRequestOrigin, GitHubError>),
-    IssueDetails(Result<Vec<(IssueUrl, IssueDetails)>, GitHubError>),
+    PullOfBranch(Result<Option<PullOfBranch>, HostError>),
+    HeadBranch(Result<Option<BranchName>, HostError>),
+    PrDescription(Result<String, HostError>),
+    RelatedIssues(Result<PullRequestIssues, HostError>),
+    PrOrigin(Result<PullRequestOrigin, HostError>),
+    IssueDetails(Result<Vec<(IssueUrl, IssueDetails)>, HostError>),
     SyncViewed(SyncOutcome),
-    Threads(Result<(Vec<ReviewThread>, BTreeMap<ThreadId, FollowedLines>), GitHubError>),
+    Threads(Result<(Vec<ReviewThread>, BTreeMap<ThreadId, FollowedLines>), HostError>),
     PendingReview {
-        exists: Result<bool, GitHubError>,
-        authored: Result<bool, GitHubError>,
+        exists: Result<bool, HostError>,
+        authored: Result<bool, HostError>,
     },
-    Reviews(Result<PullRequestReviews, GitHubError>),
-    PrStatus(Result<PrStatus, GitHubError>),
+    Reviews(Result<PullRequestReviews, HostError>),
+    /// `merging` is read only for an open PR on a host that merges from the app.
+    PrStatus {
+        status: Result<PrStatus, HostError>,
+        merging: Option<Result<Merging, HostError>>,
+    },
     QueuedComment(CommentOutcome),
     ReviewingMark {
         change: ReactionChange,
-        result: Result<(), GitHubError>,
+        result: Result<(), HostError>,
     },
     PrReadiness {
         readiness: Readiness,
-        result: Result<(), GitHubError>,
+        result: Result<(), HostError>,
     },
     Merging {
         change: MergeChange,
-        result: Result<(), GitHubError>,
+        result: Result<(), HostError>,
     },
     SeenMarksOff(Vec<SeenMarkOffOutcome>),
     Delivery(DeliveryOutcome),

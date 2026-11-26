@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
 use crate::file_path::FilePath;
-use crate::pull_request::RepoName;
+use crate::pull_request::HostedRepo;
 use crate::review_subject::{BranchName, WorkTreeRoot};
 
 /// What the overview of a local review shows, computed from git each time and never stored.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocalFacts {
-    pub repo: Option<RepoName>,
+    pub origin: Option<HostedRepo>,
     pub folder: WorkTreeRoot,
     pub branch: BranchName,
     pub default_branch: BranchName,

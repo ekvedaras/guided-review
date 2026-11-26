@@ -7,7 +7,7 @@ use guided_review::local_facts::LocalChange;
 use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::{LocalWorkTree, OpenRefusal, snapshot_ref};
 use guided_review::opened_subject::OpenedChangeSet;
-use guided_review::pull_request::Sha;
+use guided_review::pull_request::{HostSite, HostedRepo, RepoName, Sha};
 use guided_review::review_subject::{LocalChangeSet, ReviewSubject};
 
 use crate::support::{FixtureRepo, file_path};
@@ -90,6 +90,36 @@ fn a_folder_inside_a_clone_resolves_to_the_clones_root_and_its_current_branch() 
     );
     assert_eq!(change_set.branch().as_str(), "feature");
     assert_eq!(change_set.repo().unwrap().to_string(), "acme/shop");
+}
+
+#[test]
+fn a_change_set_keeps_the_code_host_its_origin_is_on() {
+    let repo = shop_with_work_in_progress();
+
+    let change_set = work_tree(&repo).change_set().unwrap();
+
+    assert_eq!(
+        change_set.origin(),
+        Some(&HostedRepo {
+            host: HostSite::GitHub,
+            repo: RepoName::new("acme", "shop"),
+        })
+    );
+}
+
+#[test]
+fn a_clone_whose_origin_is_on_a_host_the_app_does_not_read_names_no_origin() {
+    let repo = shop_with_work_in_progress();
+    repo.git(&[
+        "remote",
+        "set-url",
+        "origin",
+        "git@gitlab.com:acme/shop.git",
+    ]);
+
+    let change_set = work_tree(&repo).change_set().unwrap();
+
+    assert_eq!(change_set.origin(), None);
 }
 
 #[test]
@@ -347,7 +377,7 @@ fn the_facts_list_the_commits_and_mark_each_file_committed_uncommitted_or_both()
     assert_eq!(facts.commit_subjects, ["Add the cart", "Add payment"]);
     assert_eq!(facts.default_branch.as_str(), "main");
     assert_eq!(facts.branch.as_str(), "feature");
-    assert_eq!(facts.repo.as_ref().unwrap().to_string(), "acme/shop");
+    assert_eq!(facts.origin.as_ref().unwrap().repo.to_string(), "acme/shop");
     assert_eq!(facts.folder.as_path(), repo.path().canonicalize().unwrap());
     assert_eq!(
         facts.change_of(&file_path("src/pay.rs")),

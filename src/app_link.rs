@@ -97,7 +97,7 @@ impl From<OpenRequest> for OpenRequestOnTheWire {
         let is_a_pr = request
             .subject
             .parse::<ReviewSubject>()
-            .is_ok_and(|subject| subject.has_github_page());
+            .is_ok_and(|subject| subject.has_host_page());
         Self {
             pr: is_a_pr.then(|| request.subject.clone()),
             subject: Some(request.subject),
@@ -113,7 +113,7 @@ impl From<OpenRequest> for OpenRequestOnTheWire {
 #[serde(rename_all = "snake_case")]
 pub enum Request {
     Open(OpenRequest),
-    /// The tour agent's reply to a hand-off is on GitHub.
+    /// The tour agent's reply to a hand-off is on the host.
     AgentReplied {
         pr: String,
         hand_off: HandOffId,

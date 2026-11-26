@@ -38,7 +38,7 @@ A failure the reviewer must know about goes into `Review::problems()` (`Problem`
 
 ### Domain types (2026-11)
 
-Introduced so a wrong mix-up does not compile and rewording a label cannot change behaviour: `StepId` (`f3ede3b`), `FilePath` (`0f3c548`, `e6185a7`, `4cc79ef`), `PieceId` (`b036dce`, `b38a1e1`), `LineNumber` as `NonZeroU32` (`9efcdb2`), `CommentPlace` (`65f42c1`, `8fdcca5`), `JumpPlace` (`756757d`), `CommentProblem` (`d0b7859`), `ImageMark` (`027d7eb`), `GitHubError` (`ae36a27`, `173b93f`), `ThreadId` and `CommentId` (`059a454`), thread-action refusals as plain values (`d08398d`), and enums in place of `bool` parameters (`ab9171d`, `4249f90`, `c0d5b28`, `2a49590`). `TextDraft` keeps an anchor and a head instead of a reversed flag (`cce762e`).
+Introduced so a wrong mix-up does not compile and rewording a label cannot change behaviour: `StepId` (`f3ede3b`), `FilePath` (`0f3c548`, `e6185a7`, `4cc79ef`), `PieceId` (`b036dce`, `b38a1e1`), `LineNumber` as `NonZeroU32` (`9efcdb2`), `CommentPlace` (`65f42c1`, `8fdcca5`), `JumpPlace` (`756757d`), `CommentProblem` (`d0b7859`), `ImageMark` (`027d7eb`), `GitHubError`, now `HostError` (`ae36a27`, `173b93f`), `ThreadId` and `CommentId` (`059a454`), thread-action refusals as plain values (`d08398d`), and enums in place of `bool` parameters (`ab9171d`, `4249f90`, `c0d5b28`, `2a49590`). `TextDraft` keeps an anchor and a head instead of a reversed flag (`cce762e`).
 
 ### Decisions with reasons
 

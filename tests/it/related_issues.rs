@@ -1,8 +1,9 @@
+use guided_review::github::names;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use crate::support::work::drive_without_agents;
 use guided_review::build::Build;
 use guided_review::issue::{IssueLink, IssueUrl};
@@ -12,9 +13,10 @@ use guided_review::open_review::open_review;
 use guided_review::pull_request::RepoName;
 use guided_review::review_subject::{BranchName, ReviewSubject};
 use guided_review::tour::GuidedTour;
+use guided_review::viewer::Capability;
 use guided_review::viewer::{
     Command, Effect, Intent, IssueDetails, IssueState, PaletteAction, PullRequestIssues,
-    RelatedIssue, Review, ReviewStateFile, WindowMoment,
+    RelatedIssue, Review, ReviewStateFile, WindowMoment, WorkKind,
 };
 use serde_json::json;
 
@@ -36,7 +38,7 @@ fn linked(number: u64, title: &str) -> RelatedIssue {
 fn details(title: &str, body: &str) -> IssueDetails {
     IssueDetails {
         title: title.into(),
-        state: IssueState::of_github("CLOSED", Some("NOT_PLANNED")),
+        state: names::issue_state_of("CLOSED", Some("NOT_PLANNED")),
         author: Some("ada".into()),
         labels: Arc::from([Arc::from("bug")]),
         assignees: Arc::from([Arc::from("grace")]),
@@ -78,12 +80,20 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }
 
     fn open_with(&self, extra: serde_json::Value) -> Review {
+        self.open_with_on(extra, crate::support::fake_ports::every_capability())
+    }
+
+    fn open_with_on(
+        &self,
+        extra: serde_json::Value,
+        capabilities: guided_review::viewer::HostCapabilities,
+    ) -> Review {
         let mut tour = json!({
             "pr": PR,
             "base": self.base,
@@ -97,16 +107,16 @@ impl Shop {
             .extend(extra.as_object().unwrap().clone());
         let tour: GuidedTour = serde_json::from_value(tour).unwrap();
         let state_file = ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse().unwrap());
-        Review::open(tour, &self.source(), state_file).unwrap()
+        Review::open(tour, &self.source(), state_file, capabilities).unwrap()
     }
 
-    fn github(&self, issues: PullRequestIssues) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent).with_issues(issues)
+    fn host(&self, issues: PullRequestIssues) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent).with_issues(issues)
     }
 
-    fn read(&self, review: &mut Review, github: &FakeGitHub) {
-        review.pull_from_github();
-        drive_without_agents(review, github, &self.source(), Instant::now());
+    fn read(&self, review: &mut Review, host: &FakeHost) {
+        review.pull_from_host();
+        drive_without_agents(review, host, &self.source(), Instant::now());
     }
 }
 
@@ -167,6 +177,11 @@ fn a_description_names_the_issues_it_is_part_of_by_number_repo_and_number_or_lin
     assert_eq!(part_of("Part of the plan, see #12"), Vec::<String>::new());
     assert_eq!(part_of("Fixes a bug in #12"), Vec::<String>::new());
     assert_eq!(part_of("Suffix #12, prefix: #13"), Vec::<String>::new());
+}
+
+#[test]
+fn a_reference_with_a_repo_path_github_cannot_have_names_no_issue() {
+    assert_eq!(part_of("Part of acme/stock/old#4"), Vec::<String>::new());
 }
 
 #[test]
@@ -245,9 +260,9 @@ fn with_no_linked_issue_the_issues_the_description_is_part_of_come_before_the_to
 
 #[test]
 fn a_pull_request_named_as_an_issue_reads_as_merged_once_merged() {
-    assert_eq!(IssueState::of_github("MERGED", None), IssueState::Merged);
+    assert_eq!(names::issue_state_of("MERGED", None), IssueState::Merged);
     assert_eq!(IssueState::Merged.label(), "Merged");
-    assert_eq!(IssueState::of_github("OPEN", None), IssueState::Open);
+    assert_eq!(names::issue_state_of("OPEN", None), IssueState::Open);
 }
 
 #[test]
@@ -268,12 +283,12 @@ fn an_issue_url_reads_and_writes_as_its_github_page() {
 fn a_pr_shows_the_issues_github_links_to_it_before_the_tours_and_the_branchs() {
     let shop = Shop::new();
     let mut review = shop.open_with(json!({"issue": issue(3).to_string()}));
-    let github = shop.github(PullRequestIssues {
+    let host = shop.host(PullRequestIssues {
         linked: vec![linked(12, "Totals are wrong"), linked(13, "Totals round")],
         head_branch: Some(BranchName::new("44-totals").unwrap()),
     });
 
-    shop.read(&mut review, &github);
+    shop.read(&mut review, &host);
 
     assert_eq!(numbers(&review), [12, 13]);
     assert_eq!(
@@ -286,13 +301,13 @@ fn a_pr_shows_the_issues_github_links_to_it_before_the_tours_and_the_branchs() {
 fn with_no_linked_issue_the_guided_tours_issue_comes_before_the_branchs() {
     let shop = Shop::new();
     let mut review = shop.open_with(json!({"issue": issue(3).to_string()}));
-    let github = shop.github(PullRequestIssues {
+    let host = shop.host(PullRequestIssues {
         linked: vec![],
         head_branch: Some(BranchName::new("44-totals").unwrap()),
     });
 
     assert_eq!(numbers(&review), [3]);
-    shop.read(&mut review, &github);
+    shop.read(&mut review, &host);
 
     assert_eq!(numbers(&review), [3]);
 }
@@ -301,13 +316,13 @@ fn with_no_linked_issue_the_guided_tours_issue_comes_before_the_branchs() {
 fn with_no_linked_issue_and_no_tour_issue_the_prs_head_branch_names_it() {
     let shop = Shop::new();
     let mut review = shop.open_with(json!({}));
-    let github = shop.github(PullRequestIssues {
+    let host = shop.host(PullRequestIssues {
         linked: vec![],
         head_branch: Some(BranchName::new("feat/44-totals").unwrap()),
     });
 
     assert_eq!(numbers(&review), Vec::<u64>::new());
-    shop.read(&mut review, &github);
+    shop.read(&mut review, &host);
 
     assert_eq!(numbers(&review), [44]);
 }
@@ -318,7 +333,7 @@ fn a_reopened_review_keeps_what_github_linked() {
     let mut replaced = shop.open_with(json!({}));
     shop.read(
         &mut replaced,
-        &shop.github(PullRequestIssues {
+        &shop.host(PullRequestIssues {
             linked: vec![linked(12, "Totals are wrong")],
             head_branch: None,
         }),
@@ -356,7 +371,7 @@ fn the_issue_key_opens_the_one_issue_lists_several_and_does_nothing_with_none() 
     let mut several = shop.open_with(json!({}));
     shop.read(
         &mut several,
-        &shop.github(PullRequestIssues {
+        &shop.host(PullRequestIssues {
             linked: vec![linked(12, "a"), linked(13, "b")],
             head_branch: None,
         }),
@@ -406,8 +421,8 @@ fn the_palette_offers_the_issue_only_when_there_is_one_and_i_is_its_key() {
     );
 }
 
-fn github_with_details(shop: &Shop) -> FakeGitHub {
-    shop.github(PullRequestIssues {
+fn host_with_details(shop: &Shop) -> FakeHost {
+    shop.host(PullRequestIssues {
         linked: vec![linked(12, "Totals are wrong"), linked(13, "Totals round")],
         head_branch: None,
     })
@@ -423,7 +438,7 @@ fn the_details_of_the_shown_issues_are_read_after_github_names_them_and_kept_wit
     let shop = Shop::new();
     let mut review = shop.open_with(json!({}));
 
-    shop.read(&mut review, &github_with_details(&shop));
+    shop.read(&mut review, &host_with_details(&shop));
 
     let first = review
         .issue_details(&IssueLink::GitHub(issue(12)))
@@ -445,14 +460,30 @@ fn the_details_of_the_shown_issues_are_read_after_github_names_them_and_kept_wit
 }
 
 #[test]
+fn a_host_without_an_issue_tracker_reads_no_issue_details_but_still_names_the_issues() {
+    let shop = Shop::new();
+    let host = host_with_details(&shop).without(Capability::IssueTracker);
+    let mut review = shop.open_with_on(
+        json!({}),
+        guided_review::viewer::HostCapabilities::of(&host),
+    );
+
+    review.pull_from_host();
+    let ran = drive_without_agents(&mut review, &host, &shop.source(), Instant::now());
+
+    assert!(!ran.contains(&WorkKind::PullIssueDetails), "{ran:?}");
+    assert_eq!(numbers(&review), [12, 13]);
+}
+
+#[test]
 fn a_failed_read_of_details_keeps_what_was_read_and_a_rebuilt_review_keeps_it_too() {
     let shop = Shop::new();
     let mut review = shop.open_with(json!({}));
-    let github = github_with_details(&shop);
-    shop.read(&mut review, &github);
+    let host = host_with_details(&shop);
+    shop.read(&mut review, &host);
 
-    github.inject(GitHubFault::ReadsFail);
-    shop.read(&mut review, &github);
+    host.inject(HostFault::ReadsAnswerAnError);
+    shop.read(&mut review, &host);
 
     assert!(
         review
@@ -473,7 +504,7 @@ fn a_ticket_has_no_details_to_read() {
     let shop = Shop::new();
     let mut review = shop.open_with(json!({"issue": "https://tickets.example/5631"}));
 
-    shop.read(&mut review, &github_with_details(&shop));
+    shop.read(&mut review, &host_with_details(&shop));
 
     assert!(
         review

@@ -1,7 +1,7 @@
 use crate::support::FixtureRepo;
 use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, TourPin};
 use guided_review::viewer::{
@@ -31,7 +31,7 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }
@@ -46,6 +46,7 @@ impl Shop {
             pr: PR.to_owned(),
             local: None,
             repo: None,
+            host: None,
             base: Sha::new(&self.base),
             head: Sha::new(&self.head),
             previous_head: None,
@@ -54,7 +55,13 @@ impl Shop {
 
     fn basic(&self) -> Review {
         let tour = BasicTour::new(self.pin(), "Orders cost two".to_owned());
-        Review::open_basic(tour, &self.source(), self.state_file()).unwrap()
+        Review::open_basic(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 
     fn guided(&self) -> Review {
@@ -63,7 +70,13 @@ impl Shop {
             "steps": [{"id": "a", "title": "A", "why": "w", "pieces": [{"file": "a.txt"}]}],
         }))
         .unwrap();
-        Review::open(tour, &self.source(), self.state_file()).unwrap()
+        Review::open(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 }
 

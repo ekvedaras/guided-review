@@ -1220,9 +1220,9 @@ fn local_overview_card(colors: &Colors, local: &LocalFacts) -> impl IntoElement 
                 .text_sm()
                 .children(
                     local
-                        .repo
+                        .origin
                         .as_ref()
-                        .map(|repo| local_fact(colors, "Repo", repo.to_string())),
+                        .map(|origin| local_fact(colors, "Repo", origin.repo.to_string())),
                 )
                 .child(local_fact(
                     colors,
@@ -1699,13 +1699,13 @@ impl NotesLabels {
         add: "Add to PR notes",
         adding: "Uploading to PR notes…",
         done: "In PR notes",
-        tooltip: "Upload this picture to GitHub and put it under Notes in the PR description, folded",
+        tooltip: "Upload this picture to the PR's host and put it under Notes in the PR description, folded",
     };
     const SUMMARY: Self = Self {
         add: "Add summary to PR notes",
         adding: "Adding summary to PR notes…",
         done: "Summary in PR notes",
-        tooltip: "Put this summary under Notes in the PR description, folded, its pictures uploaded to GitHub",
+        tooltip: "Put this summary under Notes in the PR description, folded, its pictures uploaded to the PR's host",
     };
 }
 

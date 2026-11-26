@@ -14,6 +14,7 @@ mod ask_desk;
 mod ask_target;
 mod avatars;
 mod branch_link;
+mod capability;
 mod carried;
 mod clone_offer;
 mod code_link;
@@ -36,11 +37,11 @@ mod findings_list;
 mod finish_review;
 mod fix_requests;
 mod focused_change;
-mod github_outage;
 mod guided_tour;
 mod hand_offs;
 mod hidden_text;
 mod highlight;
+mod host_outage;
 mod image_preview;
 mod intent;
 mod jump;
@@ -58,7 +59,7 @@ mod name_desk;
 mod name_highlights;
 mod name_hover;
 mod new_commits;
-mod no_github;
+mod no_host;
 mod outdated_lines;
 mod overview;
 mod page;
@@ -139,10 +140,10 @@ pub use ask_desk::{
 pub use ask_target::{AskTarget, Unavailable};
 pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub use branch_link::{BranchOffer, local_reviews_of_repo};
-pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState, RepoCloner};
-pub(crate) use code_link::percent_encode_path;
+pub use capability::{Capability, HostCapabilities};
+pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState};
 pub use code_link::{
-    CodeHost, CodeLink, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy,
+    CodeLink, CodeOnWeb, CodeOpener, Destination, IdeCaveat, NotInIde, Opened, WorkingCopy,
 };
 pub use comment_desk::{BoxState, CommentBox, CommentGesture, TextBox, land_elsewhere};
 pub use comment_send::{CommentOutcome, CommentRequest};
@@ -171,13 +172,12 @@ pub use finding_threads::{
 pub use findings_list::{Batch, FindingLine, FindingsList, FindingsListRow};
 pub use finish_review::{
     ApproveWarning, FinishAction, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
+    ReviewVerdict,
 };
 pub use fix_requests::{
     FixNote, FixReply, FixRequest, FixRequests, FixState, FixTiming, NoFixRequest,
 };
 pub use focused_change::{ChangeInView, PageChange, ReadStep};
-pub use github_outage::Read;
-pub use github_outage::{Affected, Outage, OutageCause, backoff};
 pub use guided_tour::{GuidedTourBanner, GuidedTourProgress, GuidedTourRefusal, GuidedTourStage};
 pub use hand_offs::{
     AgentReplied, AgentReplyDone, AgentReplyRefused, AgentReplyRequest, HandOff, HandOffButton,
@@ -188,6 +188,8 @@ pub use hidden_text::{HiddenPart, HiddenText};
 pub use highlight::{
     Capture, HighlightRequest, Highlights, Span, highlight_file_lines, highlight_snippet,
 };
+pub use host_outage::Read;
+pub use host_outage::{Affected, Outage, OutageCause, backoff};
 pub use image_preview::{
     ImageCache, ImageMark, ImagePreview, ImagePreviewRequest, ImageSide, LoadedImage,
 };
@@ -217,7 +219,7 @@ pub use name_highlights::NameHighlights;
 pub use name_highlights::USAGES_SHOWN;
 pub use name_hover::{HoverTicket, NameHover};
 pub use new_commits::{PickCodeSource, catch_up_findings, repin_tour};
-pub use no_github::NoGitHub;
+pub use no_host::NoHost;
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use overview::{OverviewFile, OverviewPage, OverviewStats};
 pub use page::{
@@ -229,19 +231,19 @@ pub use page::{
 };
 pub use piece_diff::PieceDiff;
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
-pub use ports::ReviewVerdict;
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, ChangeTipsPort, GitHubError, GitHubPort,
-    IssueDetailsPort, NoAccess, PictureUploadPort, PullOfBranch, PullRequestDescriptionPort,
-    PullRequestOriginPort, PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort,
-    RefreshWriter, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed,
+    AgentLaunch, AgentLauncher, AgentPort, ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost,
+    CommentReactionsPort, HostError, HostedCodePort, IssueDetailsPort, MergingPort, NoAccess,
+    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
+    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, RefreshWriter,
+    RelevantPullRequestsPort, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed,
     ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
 pub use pr_reviewers::{
     CLAMPED_BODY_LINES, PullRequestReviews, ReviewOutcome, ReviewRecord, Reviewer, ReviewerKind,
-    ReviewerLine, ReviewerStatus, ReviewersOnGitHub, Stance, StanceAge, Standing, SubmittedReview,
+    ReviewerLine, ReviewerStatus, ReviewersOnHost, Stance, StanceAge, Standing, SubmittedReview,
     Whose, YourReview,
 };
 pub use pr_status::{
@@ -257,9 +259,7 @@ pub use reactions::{Reaction, ReactionChange, ReactionCount};
 pub use refresh::TourRefresher;
 pub use refresh_brief::{RefreshBrief, StaleStep};
 pub use related_issues::{IssueDetails, IssueState, PullRequestIssues, RelatedIssue};
-pub use relevant_prs::{
-    RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort, WhyListed,
-};
+pub use relevant_prs::{RelevantPullRequest, RelevantPullRequests, WhyListed};
 pub use remembered_prs::RememberedPullRequestsFile;
 pub use rendered_view::{BlockChange, FileView, RenderedBlock, Rendering, ViewSwitch};
 pub use reopen_after_save::{

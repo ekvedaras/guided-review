@@ -1,4 +1,4 @@
-//! What GitHub says of merging the PR: whether auto-merge is on, whether anything blocks a merge,
+//! What the host says of merging the PR: whether auto-merge is on, whether anything blocks a merge,
 //! the merge methods the repo allows and what the viewer may do. From it, the one thing the
 //! auto-merge key offers: turn auto-merge on or off, or merge now when nothing blocks the PR.
 
@@ -46,30 +46,20 @@ impl MergeMethods {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoMerge {
     Off,
-    /// GitHub merges by itself, with this method, once nothing blocks the PR.
+    /// The host merges by itself, with this method, once nothing blocks the PR.
     On(MergeMethod),
 }
 
-/// Whether a merge of the open PR would go through now: GitHub's `mergeStateStatus`.
+/// Whether a merge of the open PR would go through now (GitHub: `mergeStateStatus`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mergeability {
     /// Nothing blocks it, so GitHub refuses auto-merge and takes a merge at once.
     Now,
-    /// Checks, reviews, rules, conflicts or a draft hold it back, or GitHub has not worked it out yet.
+    /// Checks, reviews, rules, conflicts or a draft hold it back, or the host has not worked it out yet.
     Blocked,
 }
 
-impl Mergeability {
-    /// `UNSTABLE` (checks that are not required fail) and `HAS_HOOKS` merge like `CLEAN`.
-    pub fn from_github(merge_state_status: &str) -> Self {
-        match merge_state_status {
-            "CLEAN" | "UNSTABLE" | "HAS_HOOKS" => Self::Now,
-            _ => Self::Blocked,
-        }
-    }
-}
-
-/// What GitHub says of merging the open PR, and what the viewer may do about it.
+/// What the host says of merging the open PR, and what the viewer may do about it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Merging {
     pub mergeability: Mergeability,
@@ -107,15 +97,15 @@ pub enum MergeRefusal {
 impl fmt::Display for MergeRefusal {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str(match self {
-            Self::MayNotDisableAutoMerge => "GitHub does not let you turn off this PR's auto-merge",
+            Self::MayNotDisableAutoMerge => "You may not turn off this PR's auto-merge",
             Self::MayNotMerge => "Only people with write access can merge the PR",
             Self::RepoDisallowsAutoMerge => "The repo does not allow auto-merge",
-            Self::MayNotEnableAutoMerge => "GitHub does not let you turn on auto-merge for this PR",
+            Self::MayNotEnableAutoMerge => "You may not turn on auto-merge for this PR",
         })
     }
 }
 
-/// What the confirmed press asks GitHub to do.
+/// What the confirmed press asks the host to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeChange {
     EnableAutoMerge(MergeMethod),
@@ -125,7 +115,7 @@ pub enum MergeChange {
 
 impl Merging {
     /// Turn auto-merge off while it is on; merge now while nothing blocks the PR; else turn
-    /// auto-merge on. Each only where GitHub says the viewer may.
+    /// auto-merge on. Each only where the host says the viewer may.
     pub fn offer(self) -> Result<MergeOffer, MergeRefusal> {
         match (self.mergeability, self.auto_merge) {
             (_, AutoMerge::On(_)) if self.viewer_may_disable_auto_merge => {

@@ -7,6 +7,7 @@ use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 
 use super::branch_link::LocalReviewsOfRepo;
+use super::capability::HostCapabilities;
 use super::code_link::WorkingCopy;
 use super::new_commits::PickCodeSource;
 use super::new_commits::catch_up_findings;
@@ -23,14 +24,16 @@ use crate::tour::GuidedTour;
 pub struct ReviewBuilder {
     folders: AppFolders,
     subject: ReviewSubject,
+    host: HostCapabilities,
 }
 
 impl ReviewBuilder {
     /// A local change set's `subject` names its repo, which the review looks up its branch's PR in.
-    pub fn new(folders: &AppFolders, subject: &ReviewSubject) -> Self {
+    pub fn new(folders: &AppFolders, subject: &ReviewSubject, host: HostCapabilities) -> Self {
         Self {
             folders: folders.clone(),
             subject: subject.clone(),
+            host,
         }
     }
 
@@ -60,8 +63,8 @@ impl ReviewBuilder {
             eprintln!("could not follow the findings to the review's commits: {error:#}");
         }
         let mut review = match tour {
-            Tour::Basic(tour) => Review::open_basic(tour, source, state_file)?,
-            Tour::Guided(tour) => Review::open(tour, source, state_file)?,
+            Tour::Basic(tour) => Review::open_basic(tour, source, state_file, self.host)?,
+            Tour::Guided(tour) => Review::open(tour, source, state_file, self.host)?,
         };
         if let Some(facts) = local_facts {
             review.local_facts_are(facts);
@@ -71,8 +74,8 @@ impl ReviewBuilder {
         review
             .display_options_mut()
             .use_more_lines(config.more_lines());
+        review.read_merge_method_from(&config);
         if let Some(pr) = self.subject.pull_request() {
-            review.prefer_merge_method(config.merge_method(&pr.repo));
             review.local_reviews_of_repo_are(LocalReviewsOfRepo::on_disk(&self.folders, pr));
         }
         let unreadable = unreadable_local_tours(&self.folders);
@@ -89,6 +92,7 @@ pub struct TourReloader {
     pub folders: AppFolders,
     pub subject: ReviewSubject,
     pub pick_code_source: PickCodeSource,
+    pub host: HostCapabilities,
 }
 
 impl TourReloader {
@@ -97,7 +101,7 @@ impl TourReloader {
         let tour =
             GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
         let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;
-        let review = ReviewBuilder::new(&self.folders, &self.subject)
+        let review = ReviewBuilder::new(&self.folders, &self.subject, self.host)
             .build(Tour::Guided(tour), source.as_ref())?;
         Ok(RepinnedTour {
             review,

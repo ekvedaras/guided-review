@@ -1,6 +1,6 @@
 //! `guided-review agent-reply`: the agent answers a hand-off, or says it is working on it, then the
 //! hand-off takes that on, in the running app when it shows the review, else in the state file. A PR's
-//! answer goes on GitHub; a local review's goes on its local thread in the state file, which only ever
+//! answer goes on the host; a local review's goes on its local thread in the state file, which only ever
 //! changes by a locked read and write of that thread, so the app and this command never write over
 //! each other's thread.
 
@@ -12,8 +12,7 @@ use anyhow::Context;
 use crate::app_link::{Answer, AppFolder, Request, tell_app};
 use crate::findings::FindingId;
 use crate::viewer::{
-    AgentReplied, HandOffId, ReplyPlacement, ReviewStateFile, ReviewThreadsPort, ReviewWritesPort,
-    ThreadHome, WhyReply,
+    AgentReplied, CodeHost, HandOffId, ReplyPlacement, ReviewStateFile, ThreadHome, WhyReply,
 };
 
 /// What the agent posts on the hand-off's thread.
@@ -79,7 +78,7 @@ pub fn why_reply(
 
 /// Says where the reply went. Nothing is posted for a hand-off the review does not have.
 pub fn agent_reply(
-    github: &(impl ReviewThreadsPort + ReviewWritesPort),
+    host: &dyn CodeHost,
     folders: &AppFolders,
     subject: &ReviewSubject,
     id: HandOffId,
@@ -93,7 +92,7 @@ pub fn agent_reply(
         AgentReply::WorkingOnIt => state.hand_offs().agent_working_on_it(&home, id)?,
     };
     let done = request
-        .run(github)
+        .run(host)
         .with_context(|| format!("could not post the reply to {id} on {subject}"))?;
     mark_replied(folders, &state_file, subject, id, done.replied())?;
     let what = match reply {

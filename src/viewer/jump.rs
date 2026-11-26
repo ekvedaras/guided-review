@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 
+use crate::pull_request::HostSite;
+
 use crate::file_path::FilePath;
 use crate::keys::Command;
 use crate::pieces::{ChangedFile, PieceId};
@@ -223,24 +225,25 @@ pub enum PaletteAction {
     /// Starts the review agent: the AI review of the subject.
     RunAiReview,
     FinishReview,
-    /// A re-review with nothing new to send: done, with no review on GitHub.
+    /// A re-review with nothing new to send: done, with no review on the host.
     MarkDone,
     /// A local review's finish: its queued tasks go to the change set's agent.
     SendTasks,
     /// A local review's ask to its agent to open the PR of its branch.
     OpenPr,
-    OpenOnGitHub,
-    /// GitHub's checks page of the PR.
-    OpenChecksOnGitHub,
+    /// The PR's page on its host, named after the host.
+    OpenOnHost(HostSite),
+    /// The PR's checks page on its host.
+    OpenChecksOnHost(HostSite),
     /// Offered only where the review knows its issue; lists them when there are several.
     OpenIssue,
     /// Offered only where the PR is ready and the viewer may change it.
     ConvertToDraft,
     /// Offered only where the PR is a draft and the viewer may change it.
     MarkReadyForReview,
-    /// Offered only where GitHub lets the viewer turn it on and something blocks the merge.
+    /// Offered only where the host lets the viewer turn it on and something blocks the merge.
     EnableAutoMerge,
-    /// Offered only while auto-merge is on and GitHub lets the viewer turn it off.
+    /// Offered only while auto-merge is on and the host lets the viewer turn it off.
     DisableAutoMerge,
     /// Offered only where nothing blocks the merge and the viewer may merge.
     MergeNow,
@@ -282,8 +285,8 @@ impl PaletteAction {
             Self::MarkDone => "Mark review done",
             Self::SendTasks => "Send tasks",
             Self::OpenPr => "Open PR",
-            Self::OpenOnGitHub => "Open on GitHub",
-            Self::OpenChecksOnGitHub => "Open checks on GitHub",
+            Self::OpenOnHost(HostSite::GitHub) => "Open on GitHub",
+            Self::OpenChecksOnHost(HostSite::GitHub) => "Open checks on GitHub",
             Self::OpenIssue => "Open related issue",
             Self::ConvertToDraft => "Convert to draft",
             Self::MarkReadyForReview => "Mark as ready for review",
@@ -330,8 +333,8 @@ impl PaletteAction {
             | Self::FinishReview
             | Self::MarkDone
             | Self::SendTasks
-            | Self::OpenOnGitHub
-            | Self::OpenChecksOnGitHub
+            | Self::OpenOnHost(_)
+            | Self::OpenChecksOnHost(_)
             | Self::CheckForUpdates
             | Self::RestartApp => None,
         }

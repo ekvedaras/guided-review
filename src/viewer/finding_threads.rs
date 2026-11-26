@@ -1,5 +1,5 @@
 //! Ask why: the reviewer's questions about a finding and the review agent's answers, on a thread of the
-//! finding's own. It lives in the review's state file for a PR too, since a PR's threads are GitHub's.
+//! finding's own. It lives in the review's state file for a PR too, since a PR's threads are the host's.
 
 use super::kept_values::KeptEntries;
 use crate::prompt_safety::shell_word;

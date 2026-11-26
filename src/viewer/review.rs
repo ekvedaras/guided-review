@@ -29,7 +29,7 @@ use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::navigation::{FileSearch, Lookups};
 use crate::pieces::{self, ChangedFile, PieceId};
-use crate::pull_request::{ChangeTips, Sha};
+use crate::pull_request::{ChangeTips, HostSite, Sha};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
@@ -44,8 +44,9 @@ use super::ask_context;
 use super::ask_desk::{AskDesk, AskProcesses};
 use super::ask_target::{AskTarget, Unavailable};
 use super::branch_link::BranchLink;
+use super::capability::HostCapabilities;
 use super::carried::ReadCarrier;
-use super::code_link::{CodeHost, CodeLinks, CodeOpener, WorkingCopy};
+use super::code_link::{CodeLinks, CodeOnWeb, CodeOpener, WorkingCopy};
 use super::comment_desk::{CommentDesk, CommentGesture};
 use super::comment_send::CommentRequest;
 use super::comments::Audience;
@@ -58,11 +59,11 @@ use super::file_block::FileBlock;
 use super::file_tree::{FileTree, FolderPath, TreeRow};
 use super::finding_placement::{FindingHome, FindingPlacement, FindingView};
 use super::finish_review::FinishAction;
-use super::github_outage::Read;
-use super::github_outage::{Affected, OutageCause};
 use super::guided_tour::GuidedTourProgress;
 use super::hand_offs::{AgentReplied, HandOffId};
 use super::highlight::{HighlightRequest, Highlights};
+use super::host_outage::Read;
+use super::host_outage::{Affected, OutageCause};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
 use super::local_thread_store::ThreadHome;
@@ -72,7 +73,7 @@ use super::name_desk::NameDesk;
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::piece_diff::PieceDiff;
-use super::ports::{AgentLaunch, GitHubError};
+use super::ports::{AgentLaunch, HostError};
 use super::pr_controls::PrControls;
 use super::pr_notes::PrNotes;
 use super::pr_origin::PullRequestOrigin;
@@ -98,6 +99,7 @@ use crate::build::Build;
 use crate::file_path::FilePath;
 use crate::findings::{Finding, FindingId};
 use crate::ide::{Ide, NoIde};
+use crate::merge_method::MergeMethod;
 use crate::repin::RepinStatus;
 
 pub use crate::tour::StepId;
@@ -210,7 +212,7 @@ pub struct RouteStop {
     pub has_check: bool,
 }
 
-/// What the summary counts about the PR, all of it known without GitHub but the threads.
+/// What the summary counts about the PR, all of it known without the host but the threads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SummaryStats {
     pub steps: usize,
@@ -256,28 +258,31 @@ pub struct ReviewCore {
     /// Folders the reviewer folded. Not saved: a reopened app shows the tree unfolded.
     folded_folders: BTreeSet<FolderPath>,
     subject: ReviewSubject,
-    /// Where code the IDE cannot open goes: the PR's repo on GitHub, or nowhere for a local review.
-    code_host: CodeHost,
+    /// Where code the IDE cannot open goes: the PR's repo on the host, or nowhere for a local review.
+    code_on_web: CodeOnWeb,
     /// What a local review's overview shows; set by the app from the clone, `None` for a PR.
     local_facts: Option<LocalFacts>,
     /// What a local review is called in its window and sidebar; made when its facts arrive, not per frame.
     local_heading: Option<Arc<str>>,
     branch_link: BranchLink,
     related_issues: RelatedIssues,
-    /// What GitHub last said of the PR's author and branches; `None` until it answers, and always for a local review.
+    /// What the host last said of the PR's author and branches; `None` until it answers, and always for a local review.
     pr_origin: Option<PullRequestOrigin>,
     base: Sha,
     head: Sha,
-    /// Unknown until GitHub answers.
+    /// Unknown until the host answers.
     pr_head: Option<Sha>,
     /// A local review's folder against the snapshot it reads; unknown until the folder is looked at.
     on_disk: Option<OnDisk>,
-    /// What GitHub last said of the viewer's sent review; kept as it was while a read fails.
+    /// What the host last said of the viewer's sent review; kept as it was while a read fails.
     last_review: Option<SubmittedReview>,
     /// Where each reviewer stands, as last read.
     standings: Vec<Standing>,
     /// `None` for a local review, which has no PR to change.
     pr_controls: Option<PrControls>,
+    /// The merge method Settings names for this PR's repo. Not carried to a rebuilt review: the
+    /// config may have changed.
+    merge_method: MergeMethod,
     files: Vec<ChangedFile>,
     /// Guided: summary, then parent, its children, the next parent (from the big picture to the
     /// details), then the safety net when it holds anything. Basic: overview, then the files in
@@ -285,7 +290,7 @@ pub struct ReviewCore {
     steps_in_reading_order: Vec<Screen>,
     has_uncovered_changes: bool,
     pulled_threads: Vec<ReviewThread>,
-    /// A snapshot scene's threads, kept over the threads GitHub answers with while the scene shows.
+    /// A snapshot scene's threads, kept over the threads the host answers with while the scene shows.
     #[cfg(feature = "snapshots")]
     staged_threads: Vec<ReviewThread>,
     followed_lines: BTreeMap<ThreadId, FollowedLines>,
@@ -349,8 +354,9 @@ impl Review {
         tour: GuidedTour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
+        host: HostCapabilities,
     ) -> anyhow::Result<Self> {
-        ReviewCore::open(Tour::Guided(tour), source, state_file).map(Self::keeping_page_of)
+        ReviewCore::open(Tour::Guided(tour), source, state_file, host).map(Self::keeping_page_of)
     }
 
     /// A review with no steps: it opens on the overview and reads one screen per changed file.
@@ -358,8 +364,9 @@ impl Review {
         tour: BasicTour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
+        host: HostCapabilities,
     ) -> anyhow::Result<Self> {
-        ReviewCore::open(Tour::Basic(tour), source, state_file).map(Self::keeping_page_of)
+        ReviewCore::open(Tour::Basic(tour), source, state_file, host).map(Self::keeping_page_of)
     }
 
     /// The pictures of the screen that are not loaded yet; the app loads them off the main thread
@@ -644,22 +651,23 @@ impl ReviewCore {
         tour: Tour,
         source: &dyn CodeSource,
         state_file: ReviewStateFile,
+        host: HostCapabilities,
     ) -> anyhow::Result<Self> {
         let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
         let parts_not_read = state.parts_not_read();
         let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let subject = tour.pin().subject()?;
-        let code_host = subject
-            .github_repo()
-            .map_or(CodeHost::LocalClone, |repo| CodeHost::GitHub(repo.clone()));
-        let viewed_sync = if subject.syncs_viewed_marks() {
-            ViewedSync::default()
-        } else {
-            ViewedSync::without_github_marks()
-        };
+        let pr_host = subject.pull_request().map(|pr| pr.host);
+        let code_on_web =
+            subject
+                .pull_request()
+                .map_or(CodeOnWeb::LocalClone, |pr| CodeOnWeb::Host {
+                    site: pr.host,
+                    repo: pr.repo.clone(),
+                });
         let (base, head) = (tour.pin().base.clone(), tour.pin().head.clone());
-        let mut reviewing_mark = ReviewingMark::new(head.clone());
+        let mut reviewing_mark = ReviewingMark::new(head.clone(), host);
         if state.is_done_at(&head) {
             reviewing_mark.done();
         }
@@ -712,8 +720,8 @@ impl ReviewCore {
         display_options.cut_markdown(&files);
         let local_heading = Self::heading_of(&subject, None);
         let branch_link = BranchLink::of(&subject);
-        let related_issues = RelatedIssues::of(&subject, &tour, state.pr_description());
-        let pr_controls = PrControls::of(&subject);
+        let related_issues = RelatedIssues::of(&subject, &tour, state.pr_description(), host);
+        let pr_controls = PrControls::of(&subject, host);
         let names = NameDesk::new(Arc::new(Lookups::new(FileSearch::for_source(
             source,
             files
@@ -728,7 +736,7 @@ impl ReviewCore {
             file_tree,
             folded_folders: BTreeSet::new(),
             subject,
-            code_host,
+            code_on_web,
             local_heading,
             local_facts: None,
             branch_link,
@@ -741,6 +749,7 @@ impl ReviewCore {
             last_review: None,
             standings: Vec::new(),
             pr_controls,
+            merge_method: MergeMethod::default(),
             files,
             steps_in_reading_order,
             has_uncovered_changes,
@@ -756,11 +765,11 @@ impl ReviewCore {
             state: SavedState::new(state, state_file),
             fold_flipped: BTreeSet::new(),
             box_fold_flipped: BTreeSet::new(),
-            viewed_sync,
+            viewed_sync: ViewedSync::for_host(host),
             problems: {
                 let mut problems = Problems::default();
-                if let Some(reason) = source.fallback_reason() {
-                    problems.raise(Problem::CodeOnGitHub(reason.to_owned()));
+                if let (Some(reason), Some(host)) = (source.fallback_reason(), pr_host) {
+                    problems.raise(Problem::CodeOnHost(host, reason.to_owned()));
                 }
                 if let Some(backup) = saved_review_kept_as {
                     problems.raise(Problem::SavedReviewNotRead(backup));
@@ -773,9 +782,9 @@ impl ReviewCore {
             changes_since,
             full_diff_shown: BTreeSet::new(),
             working_copy: WorkingCopy::Elsewhere,
-            comment_desk: CommentDesk::default(),
+            comment_desk: CommentDesk::for_host(host),
             display_options,
-            pr_notes: PrNotes::default(),
+            pr_notes: PrNotes::for_host(host),
             ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
             jobs: ReplacingJobs::default(),
@@ -854,12 +863,11 @@ impl ReviewCore {
         }
     }
 
-    /// A local review's boxes send tasks for its agent, a PR's send to GitHub.
+    /// A local review's boxes send tasks for its agent, a PR's send to the PR's host.
     pub fn sending(&self) -> Sending {
-        if self.subject.comments_are_agent_tasks() {
-            Sending::Tasks(&SendMode::LOCAL)
-        } else {
-            Sending::GitHub
+        match self.subject.pull_request() {
+            Some(pr) if !self.subject.comments_are_agent_tasks() => Sending::Host(pr.host),
+            _ => Sending::Tasks(&SendMode::LOCAL),
         }
     }
 
@@ -1012,26 +1020,26 @@ impl ReviewCore {
             .any(|problem| problem.kind() == ProblemKind::ShowAgentFailed)
     }
 
-    pub fn could_not_read(&mut self, read: Read, error: &GitHubError) {
+    pub fn could_not_read(&mut self, read: Read, error: &HostError) {
         let affected = Affected::from(read);
-        if let GitHubError::NotAnswering(cause) = error {
+        if let HostError::NotAnswering(host, cause) = error {
             self.clear_problem(ProblemKind::NotRead(read));
-            self.github_not_answering(*cause, affected);
+            self.host_not_answering(*host, *cause, affected);
         } else {
-            self.github_answered(affected);
+            self.host_answered(affected);
             self.raise_problem(Problem::NotRead(read, error.short_reason()));
         }
     }
 
-    /// GitHub does not answer: one problem for all the reads that fail, and the read is tried
+    /// The host does not answer: one problem for all the reads that fail, and the read is tried
     /// again by itself, further off each time it fails.
-    fn github_not_answering(&mut self, cause: OutageCause, affected: Affected) {
-        let retry_in = self.problems.github_not_answering(cause, affected);
+    fn host_not_answering(&mut self, host: HostSite, cause: OutageCause, affected: Affected) {
+        let retry_in = self.problems.host_not_answering(host, cause, affected);
         self.work.want_in(affected.retried_by(), retry_in);
     }
 
-    fn github_answered(&mut self, affected: Affected) {
-        self.problems.github_answered(affected);
+    fn host_answered(&mut self, affected: Affected) {
+        self.problems.host_answered(affected);
     }
 
     pub fn ide_not_started(&mut self, error: &impl fmt::Display) {
@@ -1044,7 +1052,7 @@ impl ReviewCore {
 
     pub fn pr_head_is(&mut self, head: Sha) {
         self.clear_problem(ProblemKind::NotRead(Read::PrHead));
-        self.github_answered(Affected::NewCommits);
+        self.host_answered(Affected::NewCommits);
         self.pr_head = Some(head);
     }
 
@@ -1148,7 +1156,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    host: &self.code_host,
+                    on_web: &self.code_on_web,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -1210,8 +1218,8 @@ impl ReviewCore {
         let change_set = subject.local()?;
         let branch = change_set.branch().as_str();
         Some(
-            match facts.and_then(|facts| facts.repo.as_ref()) {
-                Some(repo) => format!("Local changes · {repo} · {branch}"),
+            match facts.and_then(|facts| facts.origin.as_ref()) {
+                Some(origin) => format!("Local changes · {} · {branch}", origin.repo),
                 None => format!("Local changes · {branch}"),
             }
             .into(),
@@ -1238,7 +1246,7 @@ impl ReviewCore {
     /// Kept in the state file only when it changed, since every window focus pulls it again.
     pub fn set_pr_description(&mut self, body: &str) -> anyhow::Result<()> {
         self.clear_problem(ProblemKind::NotRead(Read::PrDescription));
-        self.github_answered(Affected::Description);
+        self.host_answered(Affected::Description);
         if self.state.pr_description() != body {
             self.change_related_issues(|related| related.description_is(body));
             self.state.record(|state| state.saw_pr_description(body))?;
@@ -1288,7 +1296,7 @@ impl ReviewCore {
             });
             if !showing_full_diff {
                 let links_from_read_head = CodeLinks {
-                    host: &self.code_host,
+                    on_web: &self.code_on_web,
                     base: &read_head,
                     head: &self.head,
                 };
@@ -1449,7 +1457,7 @@ impl ReviewCore {
     }
 
     /// Puts the Ask's latest answer into the comment box on its lines, after any text already
-    /// there. The reviewer edits and sends it; nothing goes to GitHub here.
+    /// there. The reviewer edits and sends it; nothing goes to the host here.
     fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
         if matches!(
             ask.place,
@@ -1747,7 +1755,7 @@ impl ReviewCore {
 
     /// Opens code links and the links of the tour's text at the commits this review reads.
     pub fn code_opener(&self, ide: Result<Ide, NoIde>) -> CodeOpener {
-        CodeOpener::new(ide, self.working_copy, &self.code_host, &self.head)
+        CodeOpener::new(ide, self.working_copy, &self.code_on_web, &self.head)
     }
 
     /// Asked of the clone on open and on each focus, not on each click.
@@ -1757,7 +1765,7 @@ impl ReviewCore {
 
     fn links(&self) -> CodeLinks<'_> {
         CodeLinks {
-            host: &self.code_host,
+            on_web: &self.code_on_web,
             base: &self.base,
             head: &self.head,
         }
@@ -1867,10 +1875,10 @@ impl ReviewCore {
             )
             .chain(self.can_open_pr().then_some(PaletteAction::OpenPr))
             .chain((!self.related_issues().is_empty()).then_some(PaletteAction::OpenIssue))
-            .chain(self.subject.pull_request().into_iter().flat_map(|_| {
+            .chain(self.subject.pull_request().into_iter().flat_map(|pr| {
                 [
-                    PaletteAction::OpenOnGitHub,
-                    PaletteAction::OpenChecksOnGitHub,
+                    PaletteAction::OpenOnHost(pr.host),
+                    PaletteAction::OpenChecksOnHost(pr.host),
                 ]
             }))
             .chain([

@@ -1,9 +1,8 @@
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
 use crate::support::line;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -37,7 +36,7 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }
@@ -78,7 +77,13 @@ impl Shop {
                 .parse::<ReviewSubject>()
                 .unwrap(),
         );
-        Review::open(tour, &source, state_file).unwrap()
+        Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 }
 
@@ -293,14 +298,14 @@ fn threads_are_pulled_from_github_for_the_tours_pr() {
     let shop = Shop::with_pull();
     let mut review = shop.open(steps());
     let sent = SentLog::default();
-    let mut github = FakeGitHub::with_pull("b", "h", &sent);
-    github.threads = vec![thread("t1", "app/Order.php", Side::Head, 7)];
+    let mut host = FakeHost::with_pull("b", "h", &sent);
+    host.threads = vec![thread("t1", "app/Order.php", Side::Head, 7)];
 
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
     assert_eq!(
-        sent.github_calls(),
-        [GitHubCall::ThreadsOf(
+        sent.host_calls(),
+        [HostCall::ThreadsOf(
             "https://github.com/acme/shop/pull/7".parse().unwrap()
         )]
     );

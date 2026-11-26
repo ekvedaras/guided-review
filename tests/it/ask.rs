@@ -7,7 +7,7 @@ use crate::support::{FixtureRepo, file_path};
 use guided_review::config::{AskSettings, Config};
 use guided_review::local_git::LocalGit;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AgentLauncher, AgentPort, AskTarget, Asks, Author, LineLocation, Place, Review,
@@ -53,7 +53,7 @@ fn shop_titled(title: &str) -> Shop {
         }],
     }))
     .unwrap();
-    let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
+    let source = LocalGit::find(&crate::support::shop_on_github(), repo.path())
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(
@@ -61,7 +61,13 @@ fn shop_titled(title: &str) -> Shop {
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
     Shop {
-        review: Review::open(tour, &source, state_file).unwrap(),
+        review: Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap(),
         head: Sha::new(&head),
     }
 }
@@ -472,5 +478,25 @@ fn an_ask_handed_to_the_reviewers_own_agent_carries_the_chat_and_lets_it_change_
              Do what the reviewer's last message asks. You may change files in your working folder. \
              Answer here in the terminal; nothing goes to GitHub."
         )
+    );
+}
+
+#[test]
+fn an_ask_of_a_local_review_with_no_origin_handed_to_the_agent_names_no_host() {
+    let ask: guided_review::viewer::Ask = serde_json::from_value(json!({
+        "id": 3,
+        "place": {"kind": "step", "step": "order"},
+        "head": "h",
+        "messages": [{"author": "reviewer", "text": "Draw the flow"}],
+    }))
+    .unwrap();
+    let local: guided_review::review_subject::ReviewSubject =
+        "local:/tmp/shop@feature".parse().unwrap();
+
+    let text = ask.hand_off_text(&local, "the whole change");
+
+    assert!(
+        text.ends_with("Answer here in the terminal; nothing goes to the code host."),
+        "{text}"
     );
 }

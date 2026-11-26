@@ -14,7 +14,7 @@ use guided_review::navigation::{
     ServerCatalog, ServerCheckouts, ServerFolders, ServerLaunch, ServerMessage, ServerMessages,
     ServerName, ServerPins, Timeouts, Waiting, Word,
 };
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::tour::GuidedTour;
 use guided_review::update::Target;
 use guided_review::viewer::{
@@ -27,7 +27,7 @@ use crate::support::fake_ports::{IgnoredServerMessages, RecordedServerMessages};
 use crate::support::{FixtureRepo, file_path, line, require_python3, write_executable};
 
 fn shop_codebase() -> Codebase {
-    Codebase::GitHub(RepoName::new("acme", "shop"))
+    Codebase::Hosted(crate::support::shop_on_github())
 }
 
 const LIB: &str = "/// Adds two numbers.
@@ -189,8 +189,8 @@ impl Rig {
         column: usize,
         word: &str,
     ) -> (anyhow::Result<Answer>, Vec<Waiting>) {
-        let code =
-            LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap();
+        let code = LocalGit::configured_clone(&crate::support::shop_on_github(), self.repo.path())
+            .unwrap();
         let waits = Mutex::new(Vec::new());
         let answer = self
             .servers
@@ -215,8 +215,8 @@ impl Rig {
     fn hover_add_at_a_new_head(&self, text: &str) -> (anyhow::Result<Answer>, Vec<Waiting>) {
         self.repo.write("src/lib.rs", text);
         let head = Sha::new(&self.repo.commit("later head"));
-        let code =
-            LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap();
+        let code = LocalGit::configured_clone(&crate::support::shop_on_github(), self.repo.path())
+            .unwrap();
         let answer = self
             .servers
             .navigator(shop_codebase(), self.by_name())
@@ -748,7 +748,8 @@ fn a_slow_server_holds_up_no_hover_another_server_of_the_repo_answers() {
         ]))));
     let navigator = servers.navigator(shop_codebase(), by_name);
     let hover = |path: &str, number: usize, column: usize, word: &str| {
-        let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+        let code =
+            LocalGit::configured_clone(&crate::support::shop_on_github(), repo.path()).unwrap();
         navigator
             .navigate(
                 &code,
@@ -905,7 +906,7 @@ fn the_real_rust_analyzer_finds_a_definition() {
     );
     repo.write("src/lib.rs", LIB);
     let head = Sha::new(&repo.commit("head"));
-    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let code = LocalGit::configured_clone(&crate::support::shop_on_github(), repo.path()).unwrap();
     let scratch = TempDir::new().unwrap();
     let servers = LanguageServers::new(
         managed,
@@ -961,7 +962,7 @@ fn the_real_rust_analyzer_wrote_a_marker_with(
     let marker = scratch.path().join("ran");
     plant(&repo, &checkouts.join("acme/shop"), &marker);
     let head = Sha::new(&repo.commit("head"));
-    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let code = LocalGit::configured_clone(&crate::support::shop_on_github(), repo.path()).unwrap();
     let servers = LanguageServers::new(
         managed,
         ServerCheckouts::new(checkouts),
@@ -1087,7 +1088,7 @@ fn the_real_intelephense_finds_the_method_of_the_class_the_code_calls() {
     repo.write("app/Billing.php", BILLING);
     repo.write("app/Shipping.php", SHIPPING);
     let head = Sha::new(&repo.commit("head"));
-    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let code = LocalGit::configured_clone(&crate::support::shop_on_github(), repo.path()).unwrap();
     let scratch = TempDir::new().unwrap();
     let servers = LanguageServers::new(
         managed,
@@ -1217,7 +1218,7 @@ fn the_real_typescript_language_server_finds_the_method_of_the_class_the_code_ca
         "node_modules/typescript/lib/tsserver.js",
         "process.exit(3); // the PR's own TypeScript, never run\n",
     );
-    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let code = LocalGit::configured_clone(&crate::support::shop_on_github(), repo.path()).unwrap();
     let scratch = TempDir::new().unwrap();
     let servers = LanguageServers::new(
         managed,
@@ -1296,7 +1297,7 @@ fn the_real_typescript_language_server_loads_no_tsserver_plugin_that_the_prs_tsc
             marker.display().to_string()
         ),
     );
-    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let code = LocalGit::configured_clone(&crate::support::shop_on_github(), repo.path()).unwrap();
     let servers = LanguageServers::new(
         managed,
         ServerCheckouts::new(scratch.path().join("checkouts")),
@@ -1535,12 +1536,18 @@ fn review_of(rig: &Rig, answer: Option<ServerAnswer>) -> (Review, LocalGit) {
     }))
     .unwrap();
     let source =
-        LocalGit::configured_clone(&RepoName::new("acme", "shop"), rig.repo.path()).unwrap();
+        LocalGit::configured_clone(&crate::support::shop_on_github(), rig.repo.path()).unwrap();
     let state_file = ReviewStateFile::for_subject(
         &rig.repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
-    let mut review = Review::open(tour, &source, state_file).unwrap();
+    let mut review = Review::open(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap();
     review.use_language_server_pool(&rig.servers, shop_codebase(), answer);
     (review, source)
 }
@@ -1633,7 +1640,7 @@ fn a_server_hears_every_change_since_its_own_head_when_another_servers_review_mo
         Arc::new(IgnoredServerMessages),
     );
     let checkout = scratch.path().join("checkouts/acme/shop");
-    let code = LocalGit::configured_clone(&RepoName::new("acme", "shop"), repo.path()).unwrap();
+    let code = LocalGit::configured_clone(&crate::support::shop_on_github(), repo.path()).unwrap();
     let by_name: Arc<dyn CodeNavigator> =
         Arc::new(Lookups::new(FileSearch::changed_files(Arc::new([
             file_path("src/lib.rs"),

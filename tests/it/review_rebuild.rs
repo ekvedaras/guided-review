@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use guided_review::open_review::{OpenedReview, open_review};
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
@@ -102,6 +102,7 @@ impl Shop {
                 pr: PR.to_owned(),
                 local: None,
                 repo: None,
+                host: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(head),
                 previous_head: None,
@@ -152,9 +153,9 @@ fn a_review_updated_to_new_commits_keeps_what_the_config_and_disk_say() {
     let shop = Shop::new();
     shop.write_guided_tour_at(&shop.first);
     let opened = shop.open();
-    let github = FakeGitHub::with_pull(&shop.base, &shop.second, &SentLog::default());
+    let host = FakeHost::with_pull(&shop.base, &shop.second, &SentLog::default());
 
-    let updated = opened.repinner.run(&github).unwrap();
+    let updated = opened.repinner.run(&host).unwrap();
 
     assert_eq!(updated.review.head(), &Sha::new(&shop.second));
     assert_eq!(
@@ -199,6 +200,7 @@ fn a_review_refreshed_keeps_what_the_config_and_disk_say() {
     shop.write_guided_tour_at(&shop.second);
     let opened = shop.open();
     let refresher = TourRefresher {
+        host: crate::support::fake_ports::every_capability(),
         folders: shop.repo.folders(),
         subject: Shop::subject(),
         pick_code_source: Arc::clone(&opened.refresher.pick_code_source),

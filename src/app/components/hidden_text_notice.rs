@@ -40,7 +40,7 @@ pub fn hidden_text_list(hidden: &HiddenText) -> String {
     if parts.len() > PARTS_SHOWN {
         lines.push(format!("and {} more", parts.len() - PARTS_SHOWN));
     }
-    lines.push("GitHub does not show this text; an AI reading the comment does.".to_owned());
+    lines.push("The PR's page does not show this text; an AI reading the comment does.".to_owned());
     lines.join("\n")
 }
 

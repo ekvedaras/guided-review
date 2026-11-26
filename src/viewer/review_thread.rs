@@ -1,4 +1,4 @@
-//! A review thread as GitHub has it: its comments, place and state.
+//! A review thread as the host has it: its comments, place and state.
 
 use std::fmt;
 use std::sync::Arc;
@@ -11,15 +11,15 @@ use crate::line_number::LineNumber;
 use super::line_location::Side;
 use super::reactions::{Reaction, ReactionCount};
 
-/// GitHub's node id of a review thread.
+/// The host's id of a review thread.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ThreadId(Arc<str>);
 
-/// GitHub's node id of one comment in a review thread, which reactions are added to.
+/// The host's id of one comment in a review thread, which reactions are added to.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CommentId(Arc<str>);
 
-macro_rules! github_node_id {
+macro_rules! host_id {
     ($id:ident) => {
         impl $id {
             pub fn new(id: &str) -> Self {
@@ -51,10 +51,10 @@ macro_rules! github_node_id {
     };
 }
 
-github_node_id!(ThreadId);
-github_node_id!(CommentId);
+host_id!(ThreadId);
+host_id!(CommentId);
 
-/// A review thread as GitHub holds it.
+/// A review thread as the host holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewThread {
     pub id: ThreadId,
@@ -73,18 +73,18 @@ pub struct ReviewThread {
     pub comments: Vec<ThreadComment>,
 }
 
-/// Marks what a tour agent wrote on GitHub, where it shares the reviewer's account.
+/// Marks what a tour agent wrote on the host, where it shares the reviewer's account.
 pub const AGENT_MARK: &str = "🤖";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadComment {
     pub id: CommentId,
     pub author: String,
-    /// GitHub's address of the author's picture; `None` for a deleted account.
+    /// The host's address of the author's picture; `None` for a deleted account.
     pub avatar_url: Option<String>,
     pub is_bot: bool,
     /// Whether the change set's agent wrote it, as a local thread knows it of its own authors; `None` on
-    /// GitHub, where an agent's comment is told by the robot in front of it instead.
+    /// the host, where an agent's comment is told by the robot in front of it instead.
     pub by_agent: Option<bool>,
     /// The viewer wrote it, so the viewer may edit it.
     pub by_viewer: bool,
@@ -102,7 +102,7 @@ impl ThreadComment {
             .unwrap_or_else(|| self.body.starts_with(AGENT_MARK))
     }
 
-    /// `<login>'s agent` for an agent's comment on GitHub; a local thread names its authors itself.
+    /// `<login>'s agent` for an agent's comment on the host; a local thread names its authors itself.
     pub fn shown_author(&self) -> String {
         if self.by_agent.is_none() && self.is_by_agent() {
             format!("{}'s agent", self.author)

@@ -310,7 +310,7 @@ fn a_repo_that_is_not_owner_slash_repo_or_set_twice_blocks_the_save_and_names_it
             SettingProblem::Clone {
                 row: unreadable,
                 clone: CloneRow::new("shop", shop.path().to_path_buf()),
-                problem: CloneRowProblem::NotOwnerSlashRepo
+                problem: CloneRowProblem::NotARepoPath
             },
             SettingProblem::Clone {
                 row: twice,
@@ -665,8 +665,8 @@ fn each_problem_words_the_red_line_under_its_setting() {
         "No remote of this clone points at acme/shop"
     );
     assert_eq!(
-        clone_problem("shop", CloneRowProblem::NotOwnerSlashRepo).message(),
-        "Write the repo as owner/repo"
+        clone_problem("shop", CloneRowProblem::NotARepoPath).message(),
+        "Write the repo as its path on its code host, as owner/repo"
     );
     assert_eq!(
         clone_problem("acme/shop", CloneRowProblem::SameRepoTwice).message(),
@@ -1108,7 +1108,7 @@ fn with_no_merge_method_key_a_merge_commit_is_used_for_every_repo() {
 
     assert_eq!(settings.merge_method(), MergeMethod::Merge);
     assert_eq!(
-        config.merge_method(&RepoName::new("acme", "shop")),
+        config.merge_method(&"acme/shop".parse().unwrap()),
         MergeMethod::Merge
     );
 }
@@ -1121,15 +1121,15 @@ fn a_repo_in_merge_methods_gets_its_own_and_the_others_the_global_one() {
     .unwrap();
 
     assert_eq!(
-        config.merge_method(&RepoName::new("acme", "shop")),
+        config.merge_method(&"acme/shop".parse().unwrap()),
         MergeMethod::Squash
     );
     assert_eq!(
-        config.merge_method(&RepoName::new("acme", "other")),
+        config.merge_method(&"acme/other".parse().unwrap()),
         MergeMethod::Rebase
     );
     assert_eq!(
-        config.merge_method(&RepoName::new("acme", "bad")),
+        config.merge_method(&"acme/bad".parse().unwrap()),
         MergeMethod::Rebase
     );
 }
@@ -1289,7 +1289,10 @@ fn an_unreadable_review_instructions_is_a_problem_on_open_and_refuses_save() {
 }
 
 fn github(owner: &str, name: &str) -> Codebase {
-    Codebase::GitHub(RepoName::new(owner, name))
+    Codebase::Hosted(guided_review::pull_request::HostedRepo {
+        host: guided_review::pull_request::HostSite::GitHub,
+        repo: RepoName::new(owner, name),
+    })
 }
 
 #[test]

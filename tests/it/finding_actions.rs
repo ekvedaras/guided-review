@@ -1,8 +1,8 @@
 //! What the reviewer does with one finding: use it, use it as is, dismiss it.
 
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::GitHubFault;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::fake_ports::HostFault;
+use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
 use crate::support::{FixtureRepo, file_path, line};
 use guided_review::findings::FindingId;
 use guided_review::findings::Severity;
@@ -12,8 +12,8 @@ use guided_review::review_brief::ReviewBrief;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    CommentDraft, CommentId, CommentPlace, CommentRefusal, CommentResult, FindingRefusal, FixReply,
-    LineLocation, Page, PageRow, Review, ReviewThread, SendMode, Side, ThreadComment, ThreadId,
+    CommentDraft, CommentPlace, CommentRefusal, CommentResult, FindingRefusal, FixReply,
+    LineLocation, Page, PageRow, Review, SendMode, Side,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -119,7 +119,7 @@ fn using_a_finding_puts_its_text_in_a_comment_box_on_its_lines_and_the_finding_g
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice."), on_line_2("b", "Two.")]);
     let mut review = shop.open();
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
 
     let place = review.use_finding(&id("a")).unwrap();
 
@@ -133,7 +133,7 @@ fn using_a_finding_puts_its_text_in_a_comment_box_on_its_lines_and_the_finding_g
     assert_eq!(drafts(&shop.open())[0].body, "Say it twice.");
     assert_eq!(shown_findings(shop.open().page()), ["a", "b"]);
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert_eq!(shown_findings(review.page()), ["b"]);
@@ -144,42 +144,15 @@ fn using_a_finding_puts_its_text_in_a_comment_box_on_its_lines_and_the_finding_g
 fn a_finding_used_in_a_box_goes_when_its_comment_is_sent_after_the_review_opens_again() {
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice."), on_line_2("b", "Two.")]);
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
     let place = shop.open().use_finding(&id("a")).unwrap();
     let mut reopened = shop.open();
 
-    let result = reopened.send_comment(&place, SendMode::AddToReview, &github);
+    let result = reopened.send_comment(&place, SendMode::AddToReview, &host);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert_eq!(shown_findings(reopened.page()), ["b"]);
     assert_eq!(shown_findings(shop.open().page()), ["b"]);
-}
-
-fn thread_on_line_2(id: &str, body: &str) -> ReviewThread {
-    ReviewThread {
-        id: ThreadId::new(id),
-        is_resolved: false,
-        is_outdated: false,
-        path: file_path("README.md"),
-        line: Some(line(2)),
-        start_line: None,
-        side: Side::Head,
-        is_file_comment: false,
-        original_line: Some(line(2)),
-        original_start_line: None,
-        original_commit: None,
-        comments: vec![ThreadComment {
-            avatar_url: None,
-            id: CommentId::new(&format!("{id}-1")),
-            author: "me".into(),
-            is_bot: false,
-            by_agent: None,
-            body: body.into(),
-            url: String::new(),
-            reactions: Vec::new(),
-            by_viewer: true,
-        }],
-    }
 }
 
 /// The findings each thread of the page was made from: `["a"]` per thread.
@@ -203,8 +176,7 @@ fn the_thread_a_used_finding_became_names_the_finding_and_keeps_what_was_said_ab
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
     let mut review = shop.open();
     let sent = SentLog::default();
-    let mut github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
-    github.threads = vec![thread_on_line_2("T1", "Say it twice.")];
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
     review.fix_findings(&[id("a")]);
     review
         .fix_replied(
@@ -217,12 +189,15 @@ fn the_thread_a_used_finding_became_names_the_finding_and_keeps_what_was_said_ab
     let place = review.use_finding(&id("a")).unwrap();
 
     review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
 
     assert_eq!(findings_of_threads(review.page()), [["a"]]);
     let mut reopened = shop.open();
-    reopened.set_threads(&github.threads);
+    reopened.set_threads(
+        &guided_review::viewer::ReviewThreadsPort::review_threads(&host, &PR.parse().unwrap())
+            .unwrap(),
+    );
     let thread = reopened
         .page()
         .rows()
@@ -244,14 +219,13 @@ fn a_finding_used_as_is_whose_send_waits_in_the_queue_is_carried_by_the_queued_c
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
     let mut review = shop.open();
     let sent = SentLog::default();
-    let mut github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
-    github.threads = vec![thread_on_line_2("T1", "🤖 Say it twice.")];
-    github.inject(GitHubFault::ConnectionLost);
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
+    host.inject(HostFault::ConnectionLost);
 
     let request = review
         .use_finding_as_is(&id("a"), SendMode::AddToReview)
         .unwrap();
-    let queued = review.apply_comment(request.run(&github)).unwrap();
+    let queued = review.apply_comment(request.run(&host)).unwrap();
 
     assert!(matches!(queued, CommentResult::Queued(_)));
     let carried: Vec<String> = review.queued_comments()[0]
@@ -263,8 +237,8 @@ fn a_finding_used_as_is_whose_send_waits_in_the_queue_is_carried_by_the_queued_c
     assert_eq!(carried, ["a"]);
     assert_eq!(shown_findings(review.page()), Vec::<String>::new());
 
-    github.heal(&GitHubFault::ConnectionLost);
-    let resent = review.queued_comment_request().unwrap().run(&github);
+    host.heal(&HostFault::ConnectionLost);
+    let resent = review.queued_comment_request().unwrap().run(&host);
     review.apply_comment(resent).unwrap();
 
     assert_eq!(findings_of_threads(review.page()), [["a"]]);
@@ -275,11 +249,11 @@ fn a_finding_used_in_a_box_whose_send_is_rejected_stays_open() {
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
     let mut review = shop.open();
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
-    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
+    host.inject(HostFault::NewThreadsAnswerNull);
     let place = review.use_finding(&id("a")).unwrap();
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert!(matches!(result.unwrap(), Some(CommentResult::Rejected(_))));
     assert_eq!(shown_findings(review.page()), ["a"]);
@@ -290,13 +264,13 @@ fn using_a_finding_as_is_whose_send_is_rejected_keeps_the_finding() {
     let shop = Shop::with_findings(&[on_line_2("a", "Say it twice.")]);
     let mut review = shop.open();
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
-    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
+    host.inject(HostFault::NewThreadsAnswerNull);
 
     let request = review
         .use_finding_as_is(&id("a"), SendMode::AddToReview)
         .unwrap();
-    let result = review.apply_comment(request.run(&github)).unwrap();
+    let result = review.apply_comment(request.run(&host)).unwrap();
 
     assert!(matches!(result, CommentResult::Rejected(_)));
     assert_eq!(shown_findings(review.page()), ["a"]);
@@ -349,15 +323,15 @@ fn using_a_finding_as_is_adds_it_to_the_review_marked_as_ai_without_a_box_to_edi
         .use_finding_as_is(&id("a"), SendMode::AddToReview)
         .unwrap();
     let result = review
-        .apply_comment(request.run(&FakeGitHub::with_pull("main-tip", &shop.head, &sent)))
+        .apply_comment(request.run(&FakeHost::with_pull("main-tip", &shop.head, &sent)))
         .unwrap();
 
     assert_eq!(result, CommentResult::Sent);
     let added: Vec<String> = sent
-        .github_calls()
+        .host_calls()
         .into_iter()
         .filter_map(|call| match call {
-            GitHubCall::AddThread { body, .. } => Some(body),
+            HostCall::AddThread { body, .. } => Some(body),
             _ => None,
         })
         .collect();
@@ -481,7 +455,7 @@ fn using_a_finding_as_is_in_a_local_review_adds_it_to_the_tasks() {
         .use_finding_as_is(&id("a"), SendMode::AddToTasks)
         .unwrap();
     review
-        .apply_comment(request.run(&FakeGitHub::with_pull(
+        .apply_comment(request.run(&FakeHost::with_pull(
             "main-tip",
             "snapshot",
             &SentLog::default(),

@@ -70,7 +70,7 @@ struct ThreadUi {
     /// The comment whose reaction picker is open.
     picking_reaction: Option<CommentId>,
     is_busy: bool,
-    /// The comment whose new text is on its way to GitHub.
+    /// The comment whose new text is on its way to the host.
     saving_edit: Option<CommentId>,
     problem: Option<String>,
     focus: FocusHandle,
@@ -111,6 +111,7 @@ pub struct ThreadElement {
     view: Arc<ThreadView>,
     can_reply_now: bool,
     can_ask_agent: bool,
+    can_react: bool,
     sending: Sending,
     reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
@@ -128,7 +129,9 @@ pub struct ThreadElement {
 pub struct ThreadDrafts {
     pub can_reply_now: bool,
     pub can_ask_agent: bool,
-    /// A local review's thread: a reply is a follow-up task, and nothing of it is on GitHub.
+    /// The PR's host has reactions on comments.
+    pub can_react: bool,
+    /// A local review's thread: a reply is a follow-up task, and nothing of it is on a host.
     pub sending: Sending,
     pub reply: Option<String>,
     /// The text of each comment being edited, as typed so far.
@@ -151,6 +154,7 @@ impl ThreadElement {
         let ThreadDrafts {
             can_reply_now,
             can_ask_agent,
+            can_react,
             sending,
             reply,
             edits,
@@ -168,6 +172,7 @@ impl ThreadElement {
             view,
             can_reply_now,
             can_ask_agent,
+            can_react,
             sending,
             reply,
             edits,
@@ -329,7 +334,7 @@ fn reaction_pill(
         .child(label)
 }
 
-/// Starts an action and shows it as under way until GitHub answers.
+/// Starts an action and shows it as under way until the host answers.
 fn run_action(
     action: ThreadAction,
     ui: &Entity<ThreadUi>,
@@ -404,7 +409,7 @@ impl ThreadElement {
              }| {
                 reaction_pill(
                     colors,
-                    SharedString::from(format!("react-{}-{}", comment.id, reaction.github_name())),
+                    SharedString::from(format!("react-{}-{reaction:?}", comment.id)),
                     format!("{} {count}", reaction.emoji()),
                     count,
                     viewer_has_reacted,
@@ -465,9 +470,8 @@ impl ThreadElement {
                         reaction_pill(
                             colors,
                             SharedString::from(format!(
-                                "react-pick-{}-{}",
-                                comment.id,
-                                count.reaction.github_name()
+                                "react-pick-{}-{:?}",
+                                comment.id, count.reaction
                             )),
                             count.reaction.emoji().to_owned(),
                             0,
@@ -508,7 +512,7 @@ impl ThreadElement {
     ) -> AnyElement {
         let thread_id = thread_id.clone();
         let mut offered = vec![SendAction::AddToReview];
-        if sending.on_github() {
+        if sending.to_host() {
             if can_reply_now {
                 offered.push(SendAction::CommentNow);
             }
@@ -599,7 +603,7 @@ impl ThreadElement {
                 let action = planned.action;
                 let act = Rc::clone(&act);
                 let task = |index: usize| sending.tasks().get(index).copied().map(task_button);
-                let (name, icon, label) = match (action, sending.on_github()) {
+                let (name, icon, label) = match (action, sending.to_host()) {
                     (SendAction::AddToReview | SendAction::SuggestChange, false) => {
                         let (icon, label) = task(0).unzip();
                         ("task-0", icon, label.unwrap_or("Add"))
@@ -947,7 +951,7 @@ pub fn avatar_circle(
 const AVATAR_SIZE: f32 = 20.;
 const AGENT_PERSON_SIZE: f32 = 10.;
 
-/// A line that says the thread is waiting on GitHub, with the dot that breathes while it waits.
+/// A line that says the thread is waiting on the host, with the dot that breathes while it waits.
 fn busy_line(colors: &Colors, text: &'static str) -> gpui::Div {
     div()
         .flex()
@@ -1020,14 +1024,15 @@ impl RenderOnce for ThreadElement {
             ))
             .children(marks)
             .child(div().min_w_0().truncate().child(summary));
-        let on_github = self.sending.on_github();
+        let host = self.sending.host();
+        let on_host = host.is_some();
         let conversation_link =
             self.view
                 .thread
                 .comments
                 .first()
-                .filter(|_| on_github)
-                .map(|comment| {
+                .zip(host)
+                .map(|(comment, host)| {
                     let url = comment.url.clone();
                     icon_button(
                         &colors,
@@ -1035,7 +1040,7 @@ impl RenderOnce for ThreadElement {
                         ButtonKind::Ghost,
                         ButtonSize::Small,
                         Icon::ExternalLink,
-                        "Open on GitHub",
+                        host.open_on(),
                     )
                     .on_click(move |_, _, cx| open_link(&url, cx))
                 });
@@ -1123,13 +1128,13 @@ impl RenderOnce for ThreadElement {
                                         "Hand to agent",
                                     )
                                     .tooltip(tooltip(|_| {
-                                        "Your agent handles this comment: it makes the change or answers on the thread. Text GitHub hides is left out."
+                                        "Your agent handles this comment: it makes the change or answers on the thread. Text the PR's page hides is left out."
                                             .into()
                                     }))
                                     .on_click(move |_, _, cx| on_hand_to_agent(&comment_id, cx))
                                 }),
                             )
-                            .when(on_github, |row| {
+                            .when(on_host && self.can_react, |row| {
                                 row.child(Self::reactions(
                                     &colors,
                                     comment,

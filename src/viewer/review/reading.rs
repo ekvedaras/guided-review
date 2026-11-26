@@ -1,5 +1,5 @@
 //! Where the reviewer is and what they have read: the reading order and the moves through it, read
-//! ticks per step and file, folds, progress and the viewed marks synced with GitHub.
+//! ticks per step and file, folds, progress and the viewed marks synced with the host.
 
 use super::{
     ReadProgress, ReadUnit, ReadingPlace, ReviewCore, RouteStop, StepId, SummaryStats, TourLead,
@@ -7,9 +7,9 @@ use super::{
 };
 use crate::file_path::FilePath;
 use crate::tour::{Step, Tour};
-use crate::viewer::github_outage::Affected;
+use crate::viewer::host_outage::Affected;
 use crate::viewer::jump::JumpTarget;
-use crate::viewer::ports::GitHubError;
+use crate::viewer::ports::HostError;
 use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::screen::{NextScreen, ReadSubject, Screen};
 use crate::viewer::viewed_sync::{Coverage, SyncOutcome, SyncRequest};
@@ -262,9 +262,9 @@ impl ReviewCore {
         })
     }
 
-    /// Only a PR has viewed marks on GitHub to keep in step with the ticks.
+    /// Only a PR on a host with viewed marks has marks to keep in step with the ticks.
     fn want_viewed_synced(&mut self) {
-        if self.subject.syncs_viewed_marks() {
+        if self.subject.pull_request().is_some() && self.viewed_sync.has_host_marks() {
             self.work.want_in(WorkKind::SyncViewed, PUSH_DEBOUNCE);
         }
     }
@@ -408,13 +408,11 @@ impl ReviewCore {
         self.viewed_sync.not_synced(&self.state)
     }
 
-    /// `None` for a local review: GitHub has no viewed marks of it.
+    /// `None` for a local review, which has no PR, and on a host with no viewed marks.
     pub fn sync_request(&self) -> Option<SyncRequest> {
         let pr = self.subject.pull_request()?;
-        Some(
-            self.viewed_sync
-                .request(&self.state, &self.coverage(), pr, &self.head),
-        )
+        self.viewed_sync
+            .request(&self.state, &self.coverage(), pr, &self.head)
     }
 
     /// An error means something stays queued or unread; the next sync tries again.
@@ -438,12 +436,12 @@ impl ReviewCore {
         });
         self.clear_problem(ProblemKind::ViewedNotSynced);
         match error {
-            Some(GitHubError::NotAnswering(cause)) => {
-                self.github_not_answering(cause, Affected::ViewedMarks);
-                Err(GitHubError::NotAnswering(cause).into())
+            Some(HostError::NotAnswering(host, cause)) => {
+                self.host_not_answering(host, cause, Affected::ViewedMarks);
+                Err(HostError::NotAnswering(host, cause).into())
             }
             Some(error) => {
-                self.github_answered(Affected::ViewedMarks);
+                self.host_answered(Affected::ViewedMarks);
                 let settled = self.viewed_sync.settle(error);
                 if let Err(error) = &settled {
                     self.raise_problem(Problem::ViewedNotSynced(error.root_cause().to_string()));
@@ -451,7 +449,7 @@ impl ReviewCore {
                 settled
             }
             None => {
-                self.github_answered(Affected::ViewedMarks);
+                self.host_answered(Affected::ViewedMarks);
                 saved
             }
         }
@@ -464,7 +462,7 @@ impl ReviewCore {
         }
     }
 
-    /// Changed code no page can show, by piece id: the reviewer has to read it on GitHub.
+    /// Changed code no page can show, by piece id: the reviewer has to read it on the host.
     pub fn changes_not_shown(&self) -> Vec<String> {
         let unplaced = self
             .files

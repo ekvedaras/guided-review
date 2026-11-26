@@ -60,9 +60,9 @@ pub enum Intent {
     SendTasks,
     /// A local review's ask to its agent to open the PR of its branch.
     OpenPr,
-    OpenOnGitHub,
-    /// GitHub's checks page of the PR.
-    OpenChecksOnGitHub,
+    OpenOnHost,
+    /// The host's checks page of the PR.
+    OpenChecksOnHost,
     /// A row of the title bar's check list, by its place in the list; the row past the last is the
     /// "and more" one. Opens the check's run, else the checks page.
     OpenCheck(usize),
@@ -106,9 +106,9 @@ impl From<PaletteAction> for Intent {
             PaletteAction::MarkDone => Self::MarkDone,
             PaletteAction::SendTasks => Self::SendTasks,
             PaletteAction::OpenPr => Self::OpenPr,
-            PaletteAction::OpenOnGitHub => Self::OpenOnGitHub,
+            PaletteAction::OpenOnHost(_) => Self::OpenOnHost,
             PaletteAction::OpenIssue => Self::OpenIssue,
-            PaletteAction::OpenChecksOnGitHub => Self::OpenChecksOnGitHub,
+            PaletteAction::OpenChecksOnHost(_) => Self::OpenChecksOnHost,
             PaletteAction::ConvertToDraft | PaletteAction::MarkReadyForReview => Self::ToggleDraft,
             PaletteAction::EnableAutoMerge
             | PaletteAction::DisableAutoMerge
@@ -150,12 +150,12 @@ pub enum Effect {
     SendTasks,
     /// Asks the local review's agent to open the PR of its branch.
     OpenPr,
-    OpenOnGitHub(PullRequestUrl),
-    OpenChecksOnGitHub(PullRequestUrl),
+    OpenOnHost(PullRequestUrl),
+    OpenChecksOnHost(PullRequestUrl),
     OpenIssue(IssueLink),
     /// The review is about several issues: the window lists them to pick one.
     ListIssues,
-    /// A check's run, on the page GitHub gave.
+    /// A check's run, on the page the host gave.
     OpenCheck(String),
     /// The window asks the review to change the PR between draft and ready, and says what it answers.
     ChangeReadiness,
@@ -290,8 +290,8 @@ impl Intent {
             | Self::FinishReview
             | Self::SendTasks
             | Self::OpenPr
-            | Self::OpenOnGitHub
-            | Self::OpenChecksOnGitHub
+            | Self::OpenOnHost
+            | Self::OpenChecksOnHost
             | Self::OpenCheck(_)
             | Self::OpenIssue
             | Self::OpenIssueAt(_)
@@ -385,23 +385,24 @@ impl ReviewCore {
             | Intent::ToggleCommentsList
             | Intent::OpenPr
             | Intent::MarkDone => Effect::Nothing,
-            Intent::OpenOnGitHub => self
+            Intent::OpenOnHost => self
                 .subject()
                 .pull_request()
-                .map_or(Effect::Nothing, |pr| Effect::OpenOnGitHub(pr.clone())),
-            Intent::OpenChecksOnGitHub => self
+                .map_or(Effect::Nothing, |pr| Effect::OpenOnHost(pr.clone())),
+            Intent::OpenChecksOnHost => self
                 .subject()
                 .pull_request()
-                .map_or(Effect::Nothing, |pr| Effect::OpenChecksOnGitHub(pr.clone())),
+                .map_or(Effect::Nothing, |pr| Effect::OpenChecksOnHost(pr.clone())),
             Intent::OpenCheck(place) => {
-                let page = self
-                    .pr_status()
+                let status = self.pr_status();
+                let page = status
+                    .as_ref()
                     .and_then(|status| status.open())
                     .and_then(|status| status.check_list().shown.into_iter().nth(place))
                     .and_then(|check| check.page);
                 match (page, self.subject().pull_request()) {
                     (Some(page), _) => Effect::OpenCheck(page.to_string()),
-                    (None, Some(pr)) => Effect::OpenChecksOnGitHub(pr.clone()),
+                    (None, Some(pr)) => Effect::OpenChecksOnHost(pr.clone()),
                     (None, None) => Effect::Nothing,
                 }
             }

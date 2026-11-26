@@ -11,7 +11,7 @@ use crate::ide::{IdeChoice, IdeTemplate};
 use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use crate::local_git::{CloneProblem, LocalGit};
 use crate::navigation::ServerAnswer;
-use crate::pull_request::RepoName;
+use crate::pull_request::HostedRepo;
 
 use crate::keys::Chord;
 use crate::keys::Command;
@@ -129,10 +129,8 @@ impl CloneRow {
         }
     }
 
-    fn repo_name(&self) -> Option<RepoName> {
-        let (owner, name) = self.repo.split_once('/')?;
-        let well_formed = !owner.is_empty() && !name.is_empty() && !name.contains('/');
-        well_formed.then(|| RepoName::new(owner, name))
+    fn hosted_repo(&self) -> Option<HostedRepo> {
+        self.repo.parse().ok()
     }
 }
 
@@ -199,7 +197,7 @@ impl SettingProblem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloneRowProblem {
-    NotOwnerSlashRepo,
+    NotARepoPath,
     SameRepoTwice,
     FolderGone,
     NoRemoteOfRepo,
@@ -208,7 +206,9 @@ pub enum CloneRowProblem {
 impl CloneRowProblem {
     pub fn message(self, clone: &CloneRow) -> String {
         match self {
-            Self::NotOwnerSlashRepo => "Write the repo as owner/repo".to_owned(),
+            Self::NotARepoPath => {
+                "Write the repo as its path on its code host, as owner/repo".to_owned()
+            }
             Self::SameRepoTwice => format!("{} is set twice", clone.repo),
             Self::FolderGone => "This folder is gone".to_owned(),
             Self::NoRemoteOfRepo => {
@@ -496,8 +496,8 @@ impl Settings {
     }
 
     fn check_clone(&self, clone: &CloneRow, rows_before: &[CloneRow]) -> Option<CloneRowProblem> {
-        let Some(repo) = clone.repo_name() else {
-            return Some(CloneRowProblem::NotOwnerSlashRepo);
+        let Some(repo) = clone.hosted_repo() else {
+            return Some(CloneRowProblem::NotARepoPath);
         };
         if rows_before.iter().any(|before| before.repo == clone.repo) {
             return Some(CloneRowProblem::SameRepoTwice);

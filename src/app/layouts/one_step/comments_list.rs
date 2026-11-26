@@ -8,7 +8,7 @@ use crate::app::components::comments_sheet::CommentsEvent;
 use crate::viewer::{ThreadId, ThreadVisit};
 
 impl OneStepLayout {
-    /// The list closed itself: the page shows the thread's screen, scrolled to it, or its comment opens on GitHub.
+    /// The list closed itself: the page shows the thread's screen, scrolled to it, or its comment opens on the host.
     pub(super) fn comments_list_asked(&mut self, event: &CommentsEvent, cx: &mut Context<Self>) {
         let CommentsEvent::Open(id) = event;
         let visit = self.session.update(cx, |session, cx| {
@@ -16,12 +16,12 @@ impl OneStepLayout {
         });
         match visit {
             ThreadVisit::OnScreen => self.scroll_to_thread(id, cx),
-            ThreadVisit::OnGitHub(url) => open_link(&url, cx),
+            ThreadVisit::OnHost(url) => open_link(&url, cx),
             ThreadVisit::Nowhere => {}
         }
     }
 
-    /// An open list follows the threads as GitHub's answers change them.
+    /// An open list follows the threads as the host's answers change them.
     pub(super) fn refresh_comments_list(&mut self, cx: &mut Context<Self>) {
         if !self.comments_list.read(cx).is_open() {
             return;

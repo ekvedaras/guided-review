@@ -1,6 +1,5 @@
 use crate::support::FixtureRepo;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     Effect, Intent, Overlay, PaletteAction, Refusal, Reopening, Review, ReviewStateFile, Screen,
@@ -25,14 +24,20 @@ fn three_step_review(repo: &FixtureRepo) -> Review {
         ],
     }))
     .unwrap();
-    let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
+    let source = LocalGit::find(&crate::support::shop_on_github(), repo.path())
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(
         &repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
-    Review::open(tour, &source, state_file).unwrap()
+    Review::open(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap()
 }
 
 fn act(review: &mut Review, intent: Intent) {

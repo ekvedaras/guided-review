@@ -32,26 +32,6 @@ impl Reaction {
         Self::Eyes,
     ];
 
-    /// The `ReactionContent` value GitHub's GraphQL API uses.
-    pub fn github_name(self) -> &'static str {
-        match self {
-            Self::ThumbsUp => "THUMBS_UP",
-            Self::ThumbsDown => "THUMBS_DOWN",
-            Self::Laugh => "LAUGH",
-            Self::Hooray => "HOORAY",
-            Self::Confused => "CONFUSED",
-            Self::Heart => "HEART",
-            Self::Rocket => "ROCKET",
-            Self::Eyes => "EYES",
-        }
-    }
-
-    pub fn from_github_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|reaction| reaction.github_name() == name)
-    }
-
     pub fn emoji(self) -> &'static str {
         match self {
             Self::ThumbsUp => "👍",

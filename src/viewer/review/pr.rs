@@ -1,4 +1,4 @@
-//! What the review knows of its PR on GitHub: the other side of its branch, the route and the related
+//! What the review knows of its PR on the host: the other side of its branch, the route and the related
 //! issues, the description's notes, the reviews, the reviewing mark and the finish.
 
 use std::collections::BTreeSet;
@@ -9,15 +9,15 @@ use crate::coverage;
 use crate::issue::IssueLink;
 use crate::tour::Tour;
 use crate::viewer::branch_link::{BranchOffer, LocalReviewsOfRepo};
+use crate::viewer::finish_review::ReviewVerdict;
 use crate::viewer::finish_review::{
     ApproveWarning, FinishOutcome, FinishRefusal, FinishRequest, FinishResult,
 };
-use crate::viewer::github_outage::Affected;
-use crate::viewer::github_outage::Read;
 use crate::viewer::hidden_text::HiddenText;
+use crate::viewer::host_outage::Affected;
+use crate::viewer::host_outage::Read;
 use crate::viewer::markdown::Markdown;
-use crate::viewer::ports::ReviewVerdict;
-use crate::viewer::ports::{GitHubError, PullOfBranch};
+use crate::viewer::ports::{HostError, PullOfBranch};
 use crate::viewer::pr_notes::{Note, NoteSubject, NotesButton, ToNotes, ToNotesOutcome};
 #[cfg(feature = "snapshots")]
 use crate::viewer::pr_origin::PullRequestOrigin;
@@ -32,7 +32,7 @@ use crate::viewer::reviewing_mark::ReviewingMarkRemoval;
 use crate::viewer::work_agenda::WorkKind;
 
 impl ReviewCore {
-    /// What GitHub said of the PR opened from a local review's branch.
+    /// What the host said of the PR opened from a local review's branch.
     pub fn pull_of_branch_is(&mut self, found: Option<PullOfBranch>) {
         self.branch_link.pull_of_branch_is(found);
     }
@@ -62,7 +62,7 @@ impl ReviewCore {
         }
     }
 
-    /// What GitHub last said of the issue; `None` for a ticket and until it answers.
+    /// What the host last said of the issue; `None` for a ticket and until it answers.
     pub fn issue_details(&self, link: &IssueLink) -> Option<Arc<IssueDetails>> {
         self.related_issues.details_of(link)
     }
@@ -72,7 +72,7 @@ impl ReviewCore {
         self.related_issues.shown()
     }
 
-    /// The branch the review's change goes into and the one it comes from: a PR's as GitHub last said,
+    /// The branch the review's change goes into and the one it comes from: a PR's as the host last said,
     /// a local review's from git (its branch and the repo's default branch). `None` until either is known.
     pub fn merge_route(&self) -> Option<MergeRoute> {
         match &self.local_facts {
@@ -84,7 +84,7 @@ impl ReviewCore {
         }
     }
 
-    /// Who opened the PR; `None` for a local review, for a PR GitHub has not answered for yet, and for
+    /// Who opened the PR; `None` for a local review, for a PR the host has not answered for yet, and for
     /// one whose author's account is gone.
     pub fn pr_author(&self) -> Option<&PrAuthor> {
         self.pr_origin.as_ref()?.author.as_ref()
@@ -100,13 +100,13 @@ impl ReviewCore {
         })
     }
 
-    /// The author and branches a snapshot scene shows, as if GitHub said them of the PR.
+    /// The author and branches a snapshot scene shows, as if the host said them of the PR.
     #[cfg(feature = "snapshots")]
     pub fn stage_pr_origin(&mut self, origin: Option<PullRequestOrigin>) {
         self.pr_origin = origin;
     }
 
-    /// The issues a snapshot scene shows, as if GitHub linked them to the PR.
+    /// The issues a snapshot scene shows, as if the host linked them to the PR.
     #[cfg(feature = "snapshots")]
     pub fn stage_related_issues(&mut self, issues: Vec<(RelatedIssue, Option<IssueDetails>)>) {
         self.related_issues.staged(issues);
@@ -118,8 +118,8 @@ impl ReviewCore {
     }
 
     /// Whether the review has a PR page to open.
-    pub fn can_open_on_github(&self) -> bool {
-        self.subject.has_github_page()
+    pub fn can_open_on_host(&self) -> bool {
+        self.subject.has_host_page()
     }
 
     /// A local review whose branch has no open PR yet, so its agent can be asked to open one.
@@ -127,7 +127,7 @@ impl ReviewCore {
         self.branch_link.can_open_pr()
     }
 
-    /// The PR's body, under the summary: the one GitHub gave last, until it answers again.
+    /// The PR's body, under the summary: the one the host gave last, until it answers again.
     /// `None` for a PR with no description.
     pub fn pr_description(&self) -> Option<Markdown> {
         let body = self.state.pr_description();
@@ -139,7 +139,8 @@ impl ReviewCore {
         HiddenText::hiding(self.state.pr_description())
     }
 
-    /// `None` when the tour has no such diagram, picture or summary, or the review has no PR.
+    /// `None` when the tour has no such diagram, picture or summary, the review has no PR, or the
+    /// note shows a picture and the host stores none.
     pub fn notes_button(&self, subject: &NoteSubject) -> Option<NotesButton> {
         self.subject.pull_request()?;
         let note = self.note(subject)?;
@@ -167,6 +168,11 @@ impl ReviewCore {
     }
 
     fn note(&self, subject: &NoteSubject) -> Option<Note> {
+        self.note_of_tour(subject)
+            .filter(|note| self.pr_notes.can_add(note))
+    }
+
+    fn note_of_tour(&self, subject: &NoteSubject) -> Option<Note> {
         match subject {
             NoteSubject::StepDiagram(step) => {
                 let found = self.step(step)?;
@@ -192,13 +198,13 @@ impl ReviewCore {
 
     pub fn pending_review_is(&mut self, exists: bool) {
         self.clear_problem(ProblemKind::NotRead(Read::PendingReview));
-        self.github_answered(Affected::PendingReview);
+        self.host_answered(Affected::PendingReview);
         self.comment_desk.pending_review_is(exists);
     }
 
     pub fn reviews_are(&mut self, reviews: PullRequestReviews) {
         self.clear_problem(ProblemKind::NotRead(Read::LastReview));
-        self.github_answered(Affected::LastReview);
+        self.host_answered(Affected::LastReview);
         self.reviewing_mark
             .last_review_is(reviews.viewer_last.as_ref());
         self.last_review = reviews.viewer_last;
@@ -206,7 +212,7 @@ impl ReviewCore {
         self.want_reviewing_mark_sent();
     }
 
-    /// Where the viewer stands: by GitHub's standing, else by the last review sent. `None` when the
+    /// Where the viewer stands: by the host's standing, else by the last review sent. `None` when the
     /// viewer neither reviewed nor is asked to.
     pub fn your_review(&self) -> Option<YourReview> {
         let age = if self.last_review_is_old() {
@@ -239,7 +245,7 @@ impl ReviewCore {
     pub(super) fn reviewing_mark_landed(
         &mut self,
         change: ReactionChange,
-        result: Result<(), GitHubError>,
+        result: Result<(), HostError>,
     ) {
         match result {
             Ok(()) => {
@@ -272,7 +278,7 @@ impl ReviewCore {
             && !self.is_marked_done()
     }
 
-    /// Done with this head without a new review on GitHub: saved, and the 👀 comes off.
+    /// Done with this head without a new review on the host: saved, and the 👀 comes off.
     pub fn mark_done(&mut self) -> anyhow::Result<()> {
         let head = self.head.clone();
         let saved = self.state.change(|state| state.mark_done(&head));
@@ -285,7 +291,7 @@ impl ReviewCore {
         self.state.is_done_at(&self.head)
     }
 
-    /// The viewer's latest sent review, from this app or the GitHub web page.
+    /// The viewer's latest sent review, from this app or the host's web page.
     pub fn last_review(&self) -> Option<&SubmittedReview> {
         self.last_review.as_ref()
     }
@@ -304,7 +310,7 @@ impl ReviewCore {
 
     pub fn viewer_authorship_is(&mut self, authored: bool) {
         self.clear_problem(ProblemKind::NotRead(Read::Authorship));
-        self.github_answered(Affected::Authorship);
+        self.host_answered(Affected::Authorship);
         self.comment_desk.viewer_authorship_is(authored);
         self.reviewing_mark.viewer_authorship_is(authored);
         self.want_reviewing_mark_sent();
@@ -317,6 +323,11 @@ impl ReviewCore {
             && self.comment_desk.can_approve_or_request_changes()
     }
 
+    /// Request changes, where the PR's host has it, on a PR someone else wrote.
+    pub fn can_request_changes(&self) -> bool {
+        self.finishes_with_send_tasks().is_none() && self.comment_desk.can_request_changes()
+    }
+
     /// On the viewer's own PR there is no verdict to give, so finishing only makes sense with comments
     /// to send; a local review's finish sends its queued tasks, so it needs some.
     pub fn can_finish_review(&self) -> bool {
@@ -326,7 +337,7 @@ impl ReviewCore {
         }
     }
 
-    /// A local review finishes with Send tasks, never with a review on GitHub: how many tasks it
+    /// A local review finishes with Send tasks, never with a review on the host: how many tasks it
     /// would send. `None` for a PR.
     pub fn finishes_with_send_tasks(&self) -> Option<usize> {
         self.subject

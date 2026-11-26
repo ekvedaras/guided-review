@@ -3,16 +3,16 @@ use guided_review::review_subject::ReviewSubject;
 use std::path::PathBuf;
 
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, save_typing};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    Audience, CommentGesture, CommentId, CommentPlace, CommentRefusal, LineLocation, Markdown,
-    Problem, Reaction, ReactionChange, ReactionCount, Read, Resolution, Review, ReviewStateFile,
-    ReviewThread, SendMode, Side, TextBox, ThreadAction, ThreadActionResult, ThreadComment,
-    ThreadId,
+    Audience, Capability, CommentGesture, CommentId, CommentPlace, CommentRefusal,
+    HostCapabilities, LineLocation, Markdown, Problem, Reaction, ReactionChange, ReactionCount,
+    Read, Resolution, Review, ReviewStateFile, ReviewThread, SendMode, Side, TextBox, ThreadAction,
+    ThreadActionResult, ThreadComment, ThreadId,
 };
 use serde_json::json;
 
@@ -48,11 +48,15 @@ impl Pull {
         }
     }
 
-    fn github(&self) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent)
+    fn host(&self) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent)
     }
 
     fn open(&self) -> Review {
+        self.open_on(crate::support::fake_ports::every_capability())
+    }
+
+    fn open_on(&self, host: HostCapabilities) -> Review {
         let tour: GuidedTour = serde_json::from_value(json!({
             "pr": PR,
             "base": self.base,
@@ -62,13 +66,13 @@ impl Pull {
             "steps": [{"id": "notes", "title": "Notes", "why": "because", "pieces": [{"file": "notes.txt"}], "children": []}],
         }))
         .unwrap();
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let pr: PullRequestUrl = PR.parse().unwrap();
         let state_file =
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(pr));
-        let mut review = Review::open(tour, &source, state_file).unwrap();
+        let mut review = Review::open(tour, &source, state_file, host).unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
         review.go_forward();
@@ -107,10 +111,10 @@ fn thread_on_line_ten(comments: Vec<ThreadComment>) -> ReviewThread {
     }
 }
 
-fn github_with_thread(pull: &Pull, thread: ReviewThread) -> FakeGitHub {
-    let mut github = pull.github();
-    github.threads = vec![thread];
-    github
+fn host_with_thread(pull: &Pull, thread: ReviewThread) -> FakeHost {
+    let mut host = pull.host();
+    host.threads = vec![thread];
+    host
 }
 
 fn shown_thread(review: &Review) -> ReviewThread {
@@ -150,19 +154,19 @@ fn drag(review: &mut Review, from: &str, to: &str) -> CommentPlace {
 #[test]
 fn resolving_a_thread_tells_github_and_shows_it_resolved() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
     let result = review.act_on_thread(
         ThreadAction::Resolve {
             thread_id: ThreadId::new("T1"),
         },
-        &github,
+        &host,
     );
 
     assert_eq!(result, ThreadActionResult::Done);
-    assert!(pull.sent.github_calls().contains(&GitHubCall::SetResolved {
+    assert!(pull.sent.host_calls().contains(&HostCall::SetResolved {
         thread_id: ThreadId::new("T1"),
         resolution: Resolution::Resolved
     }));
@@ -174,18 +178,18 @@ fn unresolving_a_thread_tells_github_and_shows_it_open() {
     let pull = Pull::new();
     let mut resolved = thread_on_line_ten(vec![comment("C1", "why?")]);
     resolved.is_resolved = true;
-    let github = github_with_thread(&pull, resolved);
+    let host = host_with_thread(&pull, resolved);
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
     review.act_on_thread(
         ThreadAction::Unresolve {
             thread_id: ThreadId::new("T1"),
         },
-        &github,
+        &host,
     );
 
-    assert!(pull.sent.github_calls().contains(&GitHubCall::SetResolved {
+    assert!(pull.sent.host_calls().contains(&HostCall::SetResolved {
         thread_id: ThreadId::new("T1"),
         resolution: Resolution::Unresolved
     }));
@@ -211,9 +215,9 @@ fn a_thread_folds_once_it_is_resolved_even_when_the_reviewer_opened_it() {
         by_agent: None,
         ..comment("C1", "nit")
     };
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![by_bot]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![by_bot]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
     review.toggle_thread_fold(&ThreadId::new("T1"));
     assert!(!shown_thread_is_folded(&review));
 
@@ -221,7 +225,7 @@ fn a_thread_folds_once_it_is_resolved_even_when_the_reviewer_opened_it() {
         ThreadAction::Resolve {
             thread_id: ThreadId::new("T1"),
         },
-        &github,
+        &host,
     );
 
     assert!(shown_thread_is_folded(&review));
@@ -232,9 +236,9 @@ fn an_opened_resolved_thread_stays_open_once_it_is_unresolved() {
     let pull = Pull::new();
     let mut resolved = thread_on_line_ten(vec![comment("C1", "why?")]);
     resolved.is_resolved = true;
-    let github = github_with_thread(&pull, resolved);
+    let host = host_with_thread(&pull, resolved);
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
     review.toggle_thread_fold(&ThreadId::new("T1"));
     assert!(!shown_thread_is_folded(&review));
 
@@ -242,7 +246,7 @@ fn an_opened_resolved_thread_stays_open_once_it_is_unresolved() {
         ThreadAction::Unresolve {
             thread_id: ThreadId::new("T1"),
         },
-        &github,
+        &host,
     );
 
     assert!(!shown_thread_is_folded(&review));
@@ -251,9 +255,9 @@ fn an_opened_resolved_thread_stays_open_once_it_is_unresolved() {
 #[test]
 fn a_reaction_is_added_and_removed_on_a_click() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
     review.act_on_thread(
         ThreadAction::SetReaction {
@@ -261,7 +265,7 @@ fn a_reaction_is_added_and_removed_on_a_click() {
             reaction: Reaction::Rocket,
             change: ReactionChange::Add,
         },
-        &github,
+        &host,
     );
     let rocket = |review: &Review| {
         shown_thread(review).comments[0]
@@ -285,20 +289,52 @@ fn a_reaction_is_added_and_removed_on_a_click() {
             reaction: Reaction::Rocket,
             change: ReactionChange::Remove,
         },
-        &github,
+        &host,
     );
     assert_eq!(rocket(&review).count, 0);
     assert_eq!(
         pull.sent
-            .github_calls()
+            .host_calls()
             .into_iter()
-            .filter(|call| matches!(call, GitHubCall::SetReaction { .. }))
+            .filter(|call| matches!(call, HostCall::SetReaction { .. }))
             .collect::<Vec<_>>(),
-        [ReactionChange::Add, ReactionChange::Remove].map(|change| GitHubCall::SetReaction {
+        [ReactionChange::Add, ReactionChange::Remove].map(|change| HostCall::SetReaction {
             comment_id: CommentId::new("C1"),
             reaction: Reaction::Rocket,
             change
         })
+    );
+}
+
+#[test]
+fn a_host_with_no_reactions_on_comments_offers_none_and_is_asked_for_none() {
+    let pull = Pull::new();
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]))
+        .without(Capability::CommentReactions);
+    let mut review = pull.open_on(HostCapabilities::of(&host));
+    review.pull_threads(&host).unwrap();
+
+    let result = review.act_on_thread(
+        ThreadAction::SetReaction {
+            comment_id: CommentId::new("C1"),
+            reaction: Reaction::Rocket,
+            change: ReactionChange::Add,
+        },
+        &host,
+    );
+
+    assert!(!review.can_react_to_comments());
+    assert!(pull.open().can_react_to_comments(), "a host with them");
+    assert_eq!(
+        result,
+        ThreadActionResult::Refused(CommentRefusal::NotOffered)
+    );
+    assert!(
+        !pull
+            .sent
+            .host_calls()
+            .iter()
+            .any(|call| matches!(call, HostCall::SetReaction { .. }))
     );
 }
 
@@ -327,9 +363,9 @@ fn a_comment_always_shows_all_eight_reactions_in_githubs_order() {
 #[test]
 fn a_reply_goes_into_the_pending_review_or_posts_now() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_pending_review(&github).unwrap();
+    review.pull_pending_review(&host).unwrap();
     assert!(review.can_comment_now());
     review
         .open_box(&TextBox::Reply(ThreadId::new("T1")))
@@ -344,7 +380,7 @@ fn a_reply_goes_into_the_pending_review_or_posts_now() {
             mode: SendMode::CommentNow,
             audience: Audience::Author,
         },
-        &github,
+        &host,
     );
     assert_eq!(now, ThreadActionResult::Done);
     review
@@ -360,20 +396,20 @@ fn a_reply_goes_into_the_pending_review_or_posts_now() {
             mode: SendMode::AddToReview,
             audience: Audience::Author,
         },
-        &github,
+        &host,
     );
     assert_eq!(added, ThreadActionResult::Done);
     assert!(
         !review.can_comment_now(),
         "the reply started a pending review"
     );
-    assert!(github.has_pending_review_now());
+    assert!(host.has_pending_review_now());
 }
 
 #[test]
 fn a_reply_now_is_refused_while_a_pending_review_exists() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]))
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]))
         .with_web_pending_review();
     let mut review = pull.open();
     review
@@ -389,7 +425,7 @@ fn a_reply_now_is_refused_while_a_pending_review_exists() {
             mode: SendMode::CommentNow,
             audience: Audience::Author,
         },
-        &github,
+        &host,
     );
 
     assert_eq!(
@@ -399,9 +435,9 @@ fn a_reply_now_is_refused_while_a_pending_review_exists() {
     assert!(
         !pull
             .sent
-            .github_calls()
+            .host_calls()
             .iter()
-            .any(|call| matches!(call, GitHubCall::Reply { .. })),
+            .any(|call| matches!(call, HostCall::Reply { .. })),
         "nothing was sent"
     );
     assert!(!review.can_comment_now());
@@ -410,122 +446,133 @@ fn a_reply_now_is_refused_while_a_pending_review_exists() {
 #[test]
 fn a_failed_action_says_why_and_changes_nothing() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
-    github.inject(GitHubFault::ConnectionLost);
+    review.pull_threads(&host).unwrap();
+    host.inject(HostFault::ConnectionLost);
 
     let result = review.act_on_thread(
         ThreadAction::Resolve {
             thread_id: ThreadId::new("T1"),
         },
-        &github,
+        &host,
     );
 
-    assert_eq!(result, ThreadActionResult::Failed("network is down".into()));
+    assert_eq!(
+        result,
+        ThreadActionResult::Failed("GitHub is not answering (no connection)".into())
+    );
     assert!(!shown_thread(&review).is_resolved);
 }
 
 #[test]
 fn threads_that_could_not_be_read_again_after_an_action_are_named_until_a_read_goes_through() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
-    github.inject(GitHubFault::ThreadReadsFail);
+    review.pull_threads(&host).unwrap();
+    host.inject(HostFault::ThreadReadsAnswerAnError);
 
     let result = review.act_on_thread(
         ThreadAction::Resolve {
             thread_id: ThreadId::new("T1"),
         },
-        &github,
+        &host,
     );
 
     assert_eq!(result, ThreadActionResult::Done);
     assert_eq!(
         review.problems(),
-        [Problem::ThreadsNotRead("network is down".into())]
+        [Problem::ThreadsNotRead(
+            crate::support::fake_ports::HOST_ERROR.into()
+        )]
     );
-    github.heal(&GitHubFault::ThreadReadsFail);
-    review.pull_threads(&github).unwrap();
+    host.heal(&HostFault::ThreadReadsAnswerAnError);
+    review.pull_threads(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
 
 #[test]
 fn a_pr_head_that_could_not_be_read_is_named_until_a_read_goes_through() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    github.inject(GitHubFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
 
-    review.check_pr_head(&github).unwrap_err();
+    review.check_pr_head(&host).unwrap_err();
 
     assert_eq!(
         review.problems(),
-        [Problem::NotRead(Read::PrHead, "network is down".into())]
+        [Problem::NotRead(
+            Read::PrHead,
+            crate::support::fake_ports::HOST_ERROR.into()
+        )]
     );
-    github.heal(&GitHubFault::ReadsFail);
-    review.check_pr_head(&github).unwrap();
+    host.heal(&HostFault::ReadsAnswerAnError);
+    review.check_pr_head(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
 
 #[test]
 fn a_pr_description_that_could_not_be_read_is_named_until_a_read_goes_through() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    github.inject(GitHubFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
 
-    review.pull_pr_description(&github).unwrap_err();
+    review.pull_pr_description(&host).unwrap_err();
 
     assert_eq!(
         review.problems(),
         [Problem::NotRead(
             Read::PrDescription,
-            "network is down".into()
+            crate::support::fake_ports::HOST_ERROR.into()
         )]
     );
-    github.heal(&GitHubFault::ReadsFail);
-    review.pull_pr_description(&github).unwrap();
+    host.heal(&HostFault::ReadsAnswerAnError);
+    review.pull_pr_description(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
 
 #[test]
 fn a_pending_review_lookup_that_failed_is_named_until_a_read_goes_through() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    github.inject(GitHubFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
 
-    review.pull_pending_review(&github).unwrap_err();
+    review.pull_pending_review(&host).unwrap_err();
 
     assert_eq!(
         review.problems(),
         [Problem::NotRead(
             Read::PendingReview,
-            "network is down".into()
+            crate::support::fake_ports::HOST_ERROR.into()
         )]
     );
-    github.heal(&GitHubFault::ReadsFail);
-    review.pull_pending_review(&github).unwrap();
+    host.heal(&HostFault::ReadsAnswerAnError);
+    review.pull_pending_review(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
 
 #[test]
 fn an_authorship_lookup_that_failed_is_named_until_a_read_goes_through() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    github.inject(GitHubFault::ReadsFail);
+    host.inject(HostFault::ReadsAnswerAnError);
 
-    review.pull_viewer_authorship(&github).unwrap_err();
+    review.pull_viewer_authorship(&host).unwrap_err();
 
     assert_eq!(
         review.problems(),
-        [Problem::NotRead(Read::Authorship, "network is down".into())]
+        [Problem::NotRead(
+            Read::Authorship,
+            crate::support::fake_ports::HOST_ERROR.into()
+        )]
     );
-    github.heal(&GitHubFault::ReadsFail);
-    review.pull_viewer_authorship(&github).unwrap();
+    host.heal(&HostFault::ReadsAnswerAnError);
+    review.pull_viewer_authorship(&host).unwrap();
     assert_eq!(review.problems(), []);
 }
 
@@ -603,9 +650,9 @@ fn a_thread_knows_the_lines_a_suggestion_is_against() {
 #[test]
 fn a_reply_draft_goes_when_the_reply_is_sent() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
     review
         .open_box(&TextBox::Reply(ThreadId::new("T1")))
         .unwrap();
@@ -620,7 +667,7 @@ fn a_reply_draft_goes_when_the_reply_is_sent() {
             mode: SendMode::AddToReview,
             audience: Audience::Author,
         },
-        &github,
+        &host,
     );
     assert_eq!(
         pull.open().text_of(&TextBox::Reply(ThreadId::new("T1"))),
@@ -631,7 +678,7 @@ fn a_reply_draft_goes_when_the_reply_is_sent() {
 #[test]
 fn a_failed_reply_keeps_its_draft() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review
         .open_box(&TextBox::Reply(ThreadId::new("T1")))
@@ -640,7 +687,7 @@ fn a_failed_reply_keeps_its_draft() {
         .type_in(&TextBox::Reply(ThreadId::new("T1")), "because")
         .unwrap();
     save_typing(&mut review);
-    github.inject(GitHubFault::ConnectionLost);
+    host.inject(HostFault::ConnectionLost);
 
     review.act_on_thread(
         ThreadAction::Reply {
@@ -648,7 +695,7 @@ fn a_failed_reply_keeps_its_draft() {
             mode: SendMode::AddToReview,
             audience: Audience::Author,
         },
-        &github,
+        &host,
     );
 
     assert_eq!(
@@ -660,7 +707,7 @@ fn a_failed_reply_keeps_its_draft() {
 #[test]
 fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review.pr_head_is(Sha::new("newer-head"));
     review
@@ -677,7 +724,7 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
             mode: SendMode::AddToReview,
             audience: Audience::Author,
         },
-        &github,
+        &host,
     );
 
     assert_eq!(
@@ -687,9 +734,9 @@ fn a_reply_is_refused_while_the_tour_is_behind_the_pr_head() {
     assert!(
         !pull
             .sent
-            .github_calls()
+            .host_calls()
             .iter()
-            .any(|call| matches!(call, GitHubCall::Reply { .. })),
+            .any(|call| matches!(call, HostCall::Reply { .. })),
         "nothing was sent"
     );
     assert_eq!(
@@ -844,7 +891,7 @@ fn a_read_tick_that_could_not_be_saved_says_why_until_a_save_goes_through() {
 #[test]
 fn a_reply_sends_its_draft_as_last_typed() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review
         .open_box(&TextBox::Reply(ThreadId::new("T1")))
@@ -862,20 +909,20 @@ fn a_reply_sends_its_draft_as_last_typed() {
             mode: SendMode::AddToReview,
             audience: Audience::Author,
         },
-        &github,
+        &host,
     );
 
     assert_eq!(result, ThreadActionResult::Done);
-    assert!(pull.sent.github_calls().iter().any(|call| matches!(
+    assert!(pull.sent.host_calls().iter().any(|call| matches!(
         call,
-        GitHubCall::Reply { body, .. } if body == "because"
+        HostCall::Reply { body, .. } if body == "because"
     )));
 }
 
 #[test]
 fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
     review
         .open_box(&TextBox::Reply(ThreadId::new("T1")))
@@ -883,7 +930,7 @@ fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
     review
         .type_in(&TextBox::Reply(ThreadId::new("T1")), "  ")
         .unwrap();
-    let calls_before = pull.sent.github_calls();
+    let calls_before = pull.sent.host_calls();
 
     let result = review.act_on_thread(
         ThreadAction::Reply {
@@ -891,18 +938,14 @@ fn a_reply_with_no_text_is_refused_before_it_reaches_github() {
             mode: SendMode::CommentNow,
             audience: Audience::Author,
         },
-        &github,
+        &host,
     );
 
     assert_eq!(
         result,
         ThreadActionResult::Refused(CommentRefusal::EmptyReply)
     );
-    assert_eq!(
-        pull.sent.github_calls(),
-        calls_before,
-        "GitHub was not asked"
-    );
+    assert_eq!(pull.sent.host_calls(), calls_before, "GitHub was not asked");
 }
 
 #[test]
@@ -944,9 +987,9 @@ fn edit(id: &str) -> ThreadAction {
 #[test]
 fn editing_my_comment_opens_its_text_and_sends_the_new_text_in_its_place() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
     review
         .open_box(&TextBox::Edit(CommentId::new("C1")))
@@ -955,10 +998,10 @@ fn editing_my_comment_opens_its_text_and_sends_the_new_text_in_its_place() {
     review
         .type_in(&TextBox::Edit(CommentId::new("C1")), "why not?")
         .unwrap();
-    let result = review.act_on_thread(edit("C1"), &github);
+    let result = review.act_on_thread(edit("C1"), &host);
 
     assert_eq!(result, ThreadActionResult::Done);
-    assert!(pull.sent.github_calls().contains(&GitHubCall::EditComment {
+    assert!(pull.sent.host_calls().contains(&HostCall::EditComment {
         comment_id: CommentId::new("C1"),
         body: "why not?".into()
     }));
@@ -969,9 +1012,9 @@ fn editing_my_comment_opens_its_text_and_sends_the_new_text_in_its_place() {
 #[test]
 fn a_comment_of_someone_else_cannot_be_opened_for_editing() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
     review
         .open_box(&TextBox::Edit(CommentId::new("C1")))
@@ -983,21 +1026,21 @@ fn a_comment_of_someone_else_cannot_be_opened_for_editing() {
 #[test]
 fn an_edit_that_fails_keeps_the_new_text_and_says_why() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
     review
         .open_box(&TextBox::Edit(CommentId::new("C1")))
         .unwrap();
     review
         .type_in(&TextBox::Edit(CommentId::new("C1")), "why not?")
         .unwrap();
-    github.inject(GitHubFault::ConnectionLost);
+    host.inject(HostFault::ConnectionLost);
 
-    let result = review.act_on_thread(edit("C1"), &github);
+    let result = review.act_on_thread(edit("C1"), &host);
 
     assert!(
-        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("network is down")),
+        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("GitHub is not answering (no connection)")),
         "{result:?}"
     );
     assert_eq!(edit_box_of(&review, "C1").as_deref(), Some("why not?"));
@@ -1007,9 +1050,9 @@ fn an_edit_that_fails_keeps_the_new_text_and_says_why() {
 #[test]
 fn an_edit_emptied_of_text_is_refused_and_nothing_is_sent() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
     review
         .open_box(&TextBox::Edit(CommentId::new("C1")))
         .unwrap();
@@ -1017,7 +1060,7 @@ fn an_edit_emptied_of_text_is_refused_and_nothing_is_sent() {
         .type_in(&TextBox::Edit(CommentId::new("C1")), "  \n")
         .unwrap();
 
-    let result = review.act_on_thread(edit("C1"), &github);
+    let result = review.act_on_thread(edit("C1"), &host);
 
     assert_eq!(
         result,
@@ -1026,9 +1069,9 @@ fn an_edit_emptied_of_text_is_refused_and_nothing_is_sent() {
     assert!(
         !pull
             .sent
-            .github_calls()
+            .host_calls()
             .iter()
-            .any(|call| matches!(call, GitHubCall::EditComment { .. }))
+            .any(|call| matches!(call, HostCall::EditComment { .. }))
     );
     assert_eq!(edit_box_of(&review, "C1").as_deref(), Some("  \n"));
 }
@@ -1048,32 +1091,32 @@ fn delete_asked_of(review: &Review) -> Option<CommentId> {
         .and_then(|thread| thread.delete_asked.clone())
 }
 
-fn deleted_calls(pull: &Pull) -> Vec<GitHubCall> {
+fn deleted_calls(pull: &Pull) -> Vec<HostCall> {
     pull.sent
-        .github_calls()
+        .host_calls()
         .into_iter()
-        .filter(|call| matches!(call, GitHubCall::DeleteComment { .. }))
+        .filter(|call| matches!(call, HostCall::DeleteComment { .. }))
         .collect()
 }
 
 #[test]
 fn deleting_my_comment_asks_first_and_then_removes_it_from_the_thread() {
     let pull = Pull::new();
-    let github = github_with_thread(
+    let host = host_with_thread(
         &pull,
         thread_on_line_ten(vec![comment("C1", "why?"), mine("C2", "because")]),
     );
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
     review.ask_to_delete(&CommentId::new("C2"));
     assert_eq!(delete_asked_of(&review), Some(CommentId::new("C2")));
-    let result = review.act_on_thread(delete("C2"), &github);
+    let result = review.act_on_thread(delete("C2"), &host);
 
     assert_eq!(result, ThreadActionResult::Done);
     assert_eq!(
         deleted_calls(&pull),
-        vec![GitHubCall::DeleteComment {
+        vec![HostCall::DeleteComment {
             comment_id: CommentId::new("C2")
         }]
     );
@@ -1089,11 +1132,11 @@ fn deleting_my_comment_asks_first_and_then_removes_it_from_the_thread() {
 #[test]
 fn a_deletion_that_was_not_asked_about_is_refused_and_nothing_is_sent() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
-    let result = review.act_on_thread(delete("C1"), &github);
+    let result = review.act_on_thread(delete("C1"), &host);
 
     assert_eq!(
         result,
@@ -1106,16 +1149,16 @@ fn a_deletion_that_was_not_asked_about_is_refused_and_nothing_is_sent() {
 #[test]
 fn giving_up_the_question_takes_the_deletion_back() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
     review.ask_to_delete(&CommentId::new("C1"));
 
     review.withdraw_delete();
 
     assert_eq!(delete_asked_of(&review), None);
     assert_eq!(
-        review.act_on_thread(delete("C1"), &github),
+        review.act_on_thread(delete("C1"), &host),
         ThreadActionResult::Refused(CommentRefusal::DeleteNotConfirmed)
     );
 }
@@ -1123,12 +1166,12 @@ fn giving_up_the_question_takes_the_deletion_back() {
 #[test]
 fn a_comment_of_someone_else_cannot_be_deleted() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![comment("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
 
     review.ask_to_delete(&CommentId::new("C1"));
-    let result = review.act_on_thread(delete("C1"), &github);
+    let result = review.act_on_thread(delete("C1"), &host);
 
     assert_eq!(delete_asked_of(&review), None);
     assert_eq!(
@@ -1141,16 +1184,16 @@ fn a_comment_of_someone_else_cannot_be_deleted() {
 #[test]
 fn a_deletion_that_fails_keeps_the_comment_and_says_why() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
     review.ask_to_delete(&CommentId::new("C1"));
-    github.inject(GitHubFault::ConnectionLost);
+    host.inject(HostFault::ConnectionLost);
 
-    let result = review.act_on_thread(delete("C1"), &github);
+    let result = review.act_on_thread(delete("C1"), &host);
 
     assert!(
-        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("network is down")),
+        matches!(&result, ThreadActionResult::Failed(reason) if reason.contains("GitHub is not answering (no connection)")),
         "{result:?}"
     );
     assert_eq!(shown_thread(&review).comments.len(), 1);
@@ -1160,12 +1203,12 @@ fn a_deletion_that_fails_keeps_the_comment_and_says_why() {
 #[test]
 fn a_thread_whose_only_comment_is_deleted_goes_away() {
     let pull = Pull::new();
-    let github = github_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
+    let host = host_with_thread(&pull, thread_on_line_ten(vec![mine("C1", "why?")]));
     let mut review = pull.open();
-    review.pull_threads(&github).unwrap();
+    review.pull_threads(&host).unwrap();
     review.ask_to_delete(&CommentId::new("C1"));
 
-    review.act_on_thread(delete("C1"), &github);
+    review.act_on_thread(delete("C1"), &host);
 
     assert!(review.current_step().unwrap().threads.is_empty());
 }

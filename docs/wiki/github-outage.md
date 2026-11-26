@@ -1,10 +1,10 @@
 # GitHub outage
 
-2026-11-12. During a GitHub 503 the sidebar listed three long red problems and three failure toasts, each repeating the PR URL and "http status: 503", and none went away until the window was focused again. Code: `src/viewer/github_outage.rs`, `GitHubError::NotAnswering` in `src/viewer/ports.rs`, the classification in `src/github.rs`, `Problem::GitHubNotAnswering` in `src/viewer/problems.rs`, the retries in `Review::could_not_read`.
+2026-11-12. During a GitHub 503 the sidebar listed three long red problems and three failure toasts, each repeating the PR URL and "http status: 503", and none went away until the window was focused again. Code (names since #140): `src/viewer/host_outage.rs`, `HostError::NotAnswering` in `src/viewer/ports.rs`, the classification in `src/github.rs`, `Problem::HostNotAnswering` in `src/viewer/problems.rs`, the retries in `Review::could_not_read`.
 
 ## One problem, told once
 
-A server error (5xx), a timeout or no connection is an outage; 4xx, a refused token and a GraphQL error are not, and keep their own problem. `impl From<anyhow::Error> for GitHubError` tells them apart by downcasting to `ureq::Error`, not by matching text, so every call that passes its error through `?` is classified in one place, whatever context it added.
+A server error (5xx), a timeout or no connection is an outage; 4xx, a refused token and a GraphQL error are not, and keep their own problem. `impl From<anyhow::Error> for HostError` tells them apart by downcasting to `ureq::Error`, not by matching text, so every call that passes its error through `?` is classified in one place, whatever context it added.
 
 Every read that fails that way adds itself to the one outage problem, with a failure count per read. The headline names the cause and the wait; the line under it lists the reads that may be old. It ends when each read it holds goes through, not when any one does, so it does not flap while one read is still failing.
 

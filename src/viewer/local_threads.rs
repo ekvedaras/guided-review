@@ -47,7 +47,7 @@ struct LocalThread {
     id: ThreadId,
     place: CommentPlace,
     /// The snapshot the place's line numbers belong to. After Update the thread is outdated there and
-    /// is followed to its lines as GitHub's outdated threads are.
+    /// is followed to its lines as the host's outdated threads are.
     written_at: Sha,
     /// Set when Update followed the thread to a new snapshot: what its lines said before the move, so the
     /// thread shows as moved without the old snapshot, which Update lets git collect.

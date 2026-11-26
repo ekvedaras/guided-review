@@ -43,7 +43,7 @@ const fn icon_of(kind: StationKind) -> Icon {
         StationKind::AiReview => Icon::ListChecks,
         StationKind::Fixes => Icon::Zap,
         StationKind::YourReview => Icon::Send,
-        StationKind::GitHub => Icon::Globe,
+        StationKind::Host => Icon::Globe,
     }
 }
 
@@ -215,7 +215,7 @@ impl OneStepLayout {
             .children(stations.iter().enumerate().map(|(at, station)| {
                 let kind = station.kind;
                 let is_open = kind == open;
-                let tip = SharedString::from(format!("{}: {}", kind.name(), station.state));
+                let tip = SharedString::from(format!("{}: {}", station.name, station.state));
                 div()
                     .id(SharedString::from(format!("station-{}", kind.short_name())))
                     .flex_1()
@@ -274,7 +274,7 @@ impl OneStepLayout {
                                     .text_color(colors.text)
                             })
                             .when(!is_open, |label| label.text_color(colors.muted_text))
-                            .child(kind.short_name()),
+                            .child(station.short_name),
                     )
                     .group("station")
                     .tooltip(tooltip(move |_| tip.clone()))
@@ -516,7 +516,7 @@ impl OneStepLayout {
                     .chain(finish)
                     .collect()
             }
-            StationKind::GitHub => sidebar
+            StationKind::Host => sidebar
                 .viewed_sync_off
                 .clone()
                 .map(|reason| quiet(colors, format!("Viewed marks are not synced: {reason}")))
@@ -524,8 +524,11 @@ impl OneStepLayout {
                 .chain((station.health == StationHealth::Waiting).then(|| {
                     quiet(
                         colors,
-                        "Files you ticked show as not viewed on GitHub until the marks go through. \
-                         The app tries again on its own.",
+                        format!(
+                            "Files you ticked show as not viewed on {} until the marks go through. \
+                             The app tries again on its own.",
+                            station.name
+                        ),
                     )
                 }))
                 .map(IntoElement::into_any_element)
@@ -574,7 +577,7 @@ impl OneStepLayout {
                         div()
                             .flex_none()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(kind.name()),
+                            .child(station.name),
                     )
                     .child(div().min_w_0().child(state_text(
                         colors,

@@ -6,7 +6,7 @@ use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{BranchName, LocalChangeSet, ReviewSubject};
 
 use super::move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
-use super::ports::{GitHubError, PullOfBranch};
+use super::ports::{HostError, PullOfBranch};
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::saved_state::SavedState;
 use super::work_agenda::PULL_OF_BRANCH_RETRY;
@@ -14,7 +14,7 @@ use super::work_agenda::PULL_OF_BRANCH_RETRY;
 /// What a review knows of the other side of Move to PR, and so what it offers. Not saved but the
 /// declines, which live in the local review's state file.
 pub(super) enum BranchLink {
-    /// A local review, and the open PR GitHub last said is opened from its branch.
+    /// A local review, and the open PR the host last said is opened from its branch.
     OfLocalReview {
         change_set: LocalChangeSet,
         pull: Option<PullOfBranch>,
@@ -72,7 +72,7 @@ impl BranchLink {
     /// When to look again after a failed look; a look for a PR is a convenience, so it is silent.
     pub(super) fn pull_looked_up(
         &mut self,
-        found: Result<Option<PullOfBranch>, GitHubError>,
+        found: Result<Option<PullOfBranch>, HostError>,
     ) -> Option<Duration> {
         match found {
             Ok(found) => {
@@ -83,7 +83,7 @@ impl BranchLink {
         }
     }
 
-    /// Only a PR's review with local reviews of its repo on disk asks GitHub for its head branch.
+    /// Only a PR's review with local reviews of its repo on disk asks the host for its head branch.
     pub(super) fn head_branch_to_look_up(&self) -> Option<&PullRequestUrl> {
         match self {
             Self::OfPr {
@@ -98,7 +98,7 @@ impl BranchLink {
     /// When to look again after a failed look, silent as for a local review's look for its PR.
     pub(super) fn head_branch_looked_up(
         &mut self,
-        branch: Result<Option<BranchName>, GitHubError>,
+        branch: Result<Option<BranchName>, HostError>,
     ) -> Option<Duration> {
         let Self::OfPr {
             local_reviews,
@@ -198,7 +198,7 @@ pub struct LocalReviewsOfRepo {
 }
 
 impl LocalReviewsOfRepo {
-    /// Reads the tour and state files only: no GitHub and no git.
+    /// Reads the tour and state files only: no host and no git.
     pub fn on_disk(folders: &AppFolders, pr: &PullRequestUrl) -> Self {
         Self {
             folders: folders.clone(),
@@ -233,11 +233,11 @@ fn head_branch_retry_after(failures: u32) -> Duration {
 }
 
 /// The local reviews on disk of the PR's repo whose move to the PR was not declined: one of them may be of
-/// the branch the PR is opened from. Reads the tour and state files only: no GitHub and no git.
+/// the branch the PR is opened from. Reads the tour and state files only: no host and no git.
 pub fn local_reviews_of_repo(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<LocalChangeSet> {
     local_reviews_on_disk(folders)
         .into_iter()
-        .filter(|review| review.repo() == Some(&pr.repo))
+        .filter(|review| review.origin() == Some(&pr.hosted_repo()))
         .filter(|review| {
             let subject = ReviewSubject::from(review.clone());
             !ReviewStateFile::for_subject(folders, &subject).has_declined_move_to(pr)

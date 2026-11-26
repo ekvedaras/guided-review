@@ -1,0 +1,385 @@
+use guided_review::viewer::{
+    CodeHost, CommentId, CommentPlace, HostError, LineLocation, Reaction, ReactionChange,
+    ReactionCount, Resolution, ReviewThread, SendMode, Side, ThreadId,
+};
+
+use crate::host_contract::{HostBuilder, PullOnHost, Reach, SeedComment, SeedThread, pr};
+use crate::support::{file_path, line};
+
+fn three_threads() -> Vec<SeedThread> {
+    vec![
+        SeedThread {
+            id: "T1",
+            path: "cart.rs",
+            line: 12,
+            resolved: false,
+            comments: vec![
+                SeedComment {
+                    id: "C1",
+                    author: "alice",
+                    body: "why a Vec?",
+                },
+                SeedComment {
+                    id: "C2",
+                    author: "bob",
+                    body: "order matters",
+                },
+            ],
+        },
+        SeedThread {
+            id: "T2",
+            path: "cart.rs",
+            line: 40,
+            resolved: true,
+            comments: vec![SeedComment {
+                id: "C3",
+                author: "alice",
+                body: "typo",
+            }],
+        },
+        SeedThread {
+            id: "T3",
+            path: "price.rs",
+            line: 3,
+            resolved: false,
+            comments: vec![SeedComment {
+                id: "C4",
+                author: "carol",
+                body: "rounding?",
+            }],
+        },
+    ]
+}
+
+fn threads_of(host: &dyn CodeHost) -> Vec<ReviewThread> {
+    host.review_threads(&pr()).unwrap()
+}
+
+fn thread<'a>(threads: &'a [ReviewThread], id: &str) -> &'a ReviewThread {
+    threads
+        .iter()
+        .find(|thread| thread.id == ThreadId::new(id))
+        .unwrap_or_else(|| panic!("no thread {id} in {threads:?}"))
+}
+
+/// What a caller reads of a thread: where it is, whether it is resolved, and who said what.
+type ThreadSummary = (
+    String,
+    String,
+    Option<usize>,
+    bool,
+    Vec<(String, String, String, bool)>,
+);
+
+fn summary(thread: &ReviewThread) -> ThreadSummary {
+    (
+        thread.id.as_str().to_owned(),
+        thread.path.to_string(),
+        thread.line.map(usize::from),
+        thread.is_resolved,
+        thread
+            .comments
+            .iter()
+            .map(|comment| {
+                (
+                    comment.id.as_str().to_owned(),
+                    comment.author.clone(),
+                    comment.body.clone(),
+                    comment.by_viewer,
+                )
+            })
+            .collect(),
+    )
+}
+
+pub fn review_threads_list_each_thread_with_its_comments(host: HostBuilder) {
+    let seeds = three_threads();
+    let host = host(PullOnHost {
+        threads: seeds.clone(),
+        ..PullOnHost::default()
+    });
+
+    let read: Vec<ThreadSummary> = threads_of(host.as_ref()).iter().map(summary).collect();
+
+    let seeded: Vec<ThreadSummary> = seeds
+        .iter()
+        .map(|seed| {
+            (
+                seed.id.to_owned(),
+                seed.path.to_owned(),
+                Some(usize::from(line(seed.line))),
+                seed.resolved,
+                seed.comments
+                    .iter()
+                    .map(|comment| {
+                        (
+                            comment.id.to_owned(),
+                            comment.author.to_owned(),
+                            comment.body.to_owned(),
+                            false,
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(read, seeded);
+}
+
+pub fn a_reply_reads_back_as_the_last_comment_of_its_thread(host: HostBuilder) {
+    for mode in [SendMode::AddToReview, SendMode::CommentNow] {
+        let host = host(PullOnHost {
+            threads: three_threads(),
+            ..PullOnHost::default()
+        });
+        let before: Vec<ThreadSummary> = threads_of(host.as_ref()).iter().map(summary).collect();
+
+        let reply = host
+            .reply_to_thread(&pr(), &ThreadId::new("T1"), "a set would lose it", mode)
+            .unwrap();
+
+        let after = threads_of(host.as_ref());
+        let replied = thread(&after, "T1");
+        let last = replied.comments.last().unwrap();
+        assert_eq!(
+            (&last.id, last.body.as_str(), last.by_viewer),
+            (&reply, "a set would lose it", true),
+            "{mode:?}"
+        );
+        assert_eq!(replied.comments.len(), 3, "{mode:?}");
+        let others = |threads: &[ThreadSummary]| -> Vec<ThreadSummary> {
+            threads
+                .iter()
+                .filter(|thread| thread.0 != "T1")
+                .cloned()
+                .collect()
+        };
+        assert_eq!(
+            others(&after.iter().map(summary).collect::<Vec<_>>()),
+            others(&before),
+            "{mode:?}"
+        );
+    }
+}
+
+type NewThread = fn(&dyn CodeHost, &CommentPlace, &str) -> Result<(), HostError>;
+
+/// Where a new thread is, as a caller reads it: path, line, start line, side, on the whole file.
+type ThreadPlace = (String, Option<usize>, Option<usize>, Side, bool);
+
+/// A new thread joins the viewer's pending review or is posted now; the host lists it to its
+/// author either way.
+pub fn a_new_thread_reads_back_with_the_viewers_comment_where_it_was_put(host: HostBuilder) {
+    let at = |path: &str, side, number| LineLocation {
+        path: file_path(path),
+        side,
+        line: line(number),
+    };
+    let places: [(CommentPlace, ThreadPlace); 3] = [
+        (
+            CommentPlace::Lines {
+                start: at("cart.rs", Side::Head, 20),
+                end: at("cart.rs", Side::Head, 22),
+            },
+            ("cart.rs".to_owned(), Some(22), Some(20), Side::Head, false),
+        ),
+        (
+            CommentPlace::Lines {
+                start: at("price.rs", Side::Base, 7),
+                end: at("price.rs", Side::Base, 7),
+            },
+            ("price.rs".to_owned(), Some(7), None, Side::Base, false),
+        ),
+        (
+            CommentPlace::File(file_path("tax.rs")),
+            ("tax.rs".to_owned(), None, None, Side::Head, true),
+        ),
+    ];
+    let writes: [(&str, NewThread); 2] = [
+        ("added to the review", |host, place, body| {
+            host.add_review_thread(&pr(), place, body)
+        }),
+        ("commented now", |host, place, body| {
+            host.comment_now(&pr(), place, body)
+        }),
+    ];
+    for (how, write) in writes {
+        for (place, expected) in &places {
+            let host = host(PullOnHost {
+                threads: three_threads(),
+                ..PullOnHost::default()
+            });
+
+            write(host.as_ref(), place, "why two loops?").unwrap();
+
+            let after = threads_of(host.as_ref());
+            let new: Vec<&ReviewThread> = after
+                .iter()
+                .filter(|thread| !["T1", "T2", "T3"].contains(&thread.id.as_str()))
+                .collect();
+            let [thread] = new.as_slice() else {
+                panic!("{how}: one new thread, not {new:?}");
+            };
+            assert_eq!(
+                (
+                    thread.path.to_string(),
+                    thread.line.map(usize::from),
+                    thread.start_line.map(usize::from),
+                    thread.side,
+                    thread.is_file_comment,
+                ),
+                expected.clone(),
+                "{how}"
+            );
+            let comments: Vec<(&str, bool)> = thread
+                .comments
+                .iter()
+                .map(|comment| (comment.body.as_str(), comment.by_viewer))
+                .collect();
+            assert_eq!(comments, [("why two loops?", true)], "{how}");
+            assert!(!thread.is_resolved, "{how}");
+            assert_eq!(after.len(), 4, "{how}: the other threads stay");
+        }
+    }
+}
+
+pub fn a_reply_to_a_thread_the_pr_does_not_have_fails(host: HostBuilder) {
+    let host = host(PullOnHost {
+        threads: three_threads(),
+        ..PullOnHost::default()
+    });
+
+    let reply = host.reply_to_thread(&pr(), &ThreadId::new("T9"), "hello?", SendMode::AddToReview);
+
+    assert!(reply.is_err(), "{reply:?}");
+    assert_eq!(threads_of(host.as_ref()).len(), 3);
+}
+
+pub fn an_edited_comment_reads_back_with_its_new_body_and_a_deleted_one_is_gone(host: HostBuilder) {
+    let host = host(PullOnHost {
+        threads: three_threads(),
+        ..PullOnHost::default()
+    });
+    let reply = host
+        .reply_to_thread(&pr(), &ThreadId::new("T1"), "a set", SendMode::AddToReview)
+        .unwrap();
+
+    host.edit_comment(&reply, "a set would lose the order")
+        .unwrap();
+    let edited = thread(&threads_of(host.as_ref()), "T1")
+        .comments
+        .last()
+        .map(|comment| (comment.id.clone(), comment.body.clone()));
+    host.delete_comment(&reply).unwrap();
+    let after_delete: Vec<CommentId> = thread(&threads_of(host.as_ref()), "T1")
+        .comments
+        .iter()
+        .map(|comment| comment.id.clone())
+        .collect();
+
+    assert_eq!(
+        edited,
+        Some((reply, "a set would lose the order".to_owned()))
+    );
+    assert_eq!(after_delete, [CommentId::new("C1"), CommentId::new("C2")]);
+}
+
+pub fn a_reaction_on_a_comment_reads_back_as_the_viewers_and_a_removed_one_is_gone(
+    host: HostBuilder,
+) {
+    let host = host(PullOnHost {
+        threads: three_threads(),
+        ..PullOnHost::default()
+    });
+    let reactions = host
+        .comment_reactions()
+        .expect("the host offers reactions on comments");
+    let reactions_on_c1 = || -> Vec<ReactionCount> {
+        thread(&threads_of(host.as_ref()), "T1").comments[0]
+            .reactions
+            .clone()
+    };
+
+    reactions
+        .set_comment_reaction(&CommentId::new("C1"), Reaction::Eyes, ReactionChange::Add)
+        .unwrap();
+    let added = reactions_on_c1();
+    reactions
+        .set_comment_reaction(
+            &CommentId::new("C1"),
+            Reaction::Eyes,
+            ReactionChange::Remove,
+        )
+        .unwrap();
+    let removed = reactions_on_c1();
+
+    assert_eq!(
+        added,
+        [ReactionCount {
+            reaction: Reaction::Eyes,
+            count: 1,
+            viewer_has_reacted: true,
+        }]
+    );
+    assert_eq!(removed, []);
+}
+
+pub fn a_resolved_thread_reads_back_resolved_and_an_unresolved_one_open(host: HostBuilder) {
+    let host = host(PullOnHost {
+        threads: three_threads(),
+        ..PullOnHost::default()
+    });
+
+    host.set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
+        .unwrap();
+    host.set_thread_resolved(&ThreadId::new("T2"), Resolution::Unresolved)
+        .unwrap();
+
+    let threads = threads_of(host.as_ref());
+    assert_eq!(
+        ["T1", "T2", "T3"].map(|id| thread(&threads, id).is_resolved),
+        [true, false, false]
+    );
+}
+
+pub fn review_threads_without_a_token_are_refused(host: HostBuilder) {
+    let host = host(PullOnHost {
+        threads: three_threads(),
+        reach: Reach::NoToken,
+        ..PullOnHost::default()
+    });
+
+    let read = host.review_threads(&pr()).unwrap_err();
+    let reply = host
+        .reply_to_thread(&pr(), &ThreadId::new("T1"), "x", SendMode::AddToReview)
+        .unwrap_err();
+    let resolve = host
+        .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
+        .unwrap_err();
+
+    for error in [read, reply, resolve] {
+        assert!(matches!(error, HostError::NoAccess(_)), "{error:?}");
+    }
+}
+
+pub fn review_threads_of_a_host_not_answering_fail_as_an_outage(host: HostBuilder) {
+    let host = host(PullOnHost {
+        threads: three_threads(),
+        reach: Reach::ServerError,
+        ..PullOnHost::default()
+    });
+
+    let read = host.review_threads(&pr()).unwrap_err();
+    let reply = host.reply_to_thread(&pr(), &ThreadId::new("T1"), "x", SendMode::AddToReview);
+    let resolve = host.set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved);
+
+    assert!(matches!(read, HostError::NotAnswering(..)), "{read:?}");
+    assert!(
+        reply.is_err(),
+        "a reply to a host not answering went through"
+    );
+    assert!(
+        resolve.is_err(),
+        "a resolve on a host not answering went through"
+    );
+}

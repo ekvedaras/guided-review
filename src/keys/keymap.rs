@@ -158,7 +158,16 @@ impl KeyChanges {
 
     /// The keys the entry for this command gives it, while there is one that can be read.
     pub fn chords(&self, command: Command) -> Option<Vec<Chord>> {
-        chords_of(self.entries.get(command.config_name())?).ok()
+        chords_of(self.entry_of(command)?).ok()
+    }
+
+    /// The entry under the command's name, else under the name it had before.
+    fn entry_of(&self, command: Command) -> Option<&WrittenKeys> {
+        self.entries.get(command.config_name()).or_else(|| {
+            command
+                .former_config_name()
+                .and_then(|former| self.entries.get(former))
+        })
     }
 
     pub fn unknown_names(&self) -> impl Iterator<Item = &str> {
@@ -174,6 +183,9 @@ impl KeyChanges {
             self.reset(command);
             return;
         }
+        if let Some(former) = command.former_config_name() {
+            self.remove(former);
+        }
         self.entries.insert(
             command.config_name().to_owned(),
             WrittenKeys::Texts(chords.iter().copied().map(Chord::written).collect()),
@@ -182,6 +194,9 @@ impl KeyChanges {
 
     pub fn reset(&mut self, command: Command) {
         self.remove(command.config_name());
+        if let Some(former) = command.former_config_name() {
+            self.remove(former);
+        }
     }
 
     pub fn remove(&mut self, name: &str) {
@@ -200,6 +215,9 @@ impl KeyChanges {
                 unknown.push(KeyProblem::UnknownCommand(name.clone()));
                 continue;
             };
+            if name != command.config_name() && self.entries.contains_key(command.config_name()) {
+                continue;
+            }
             match chords_of(written) {
                 Ok(chords) => {
                     changed.insert(command, chords);

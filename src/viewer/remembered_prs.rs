@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use super::pr_origin::PrAuthor;
 use super::relevant_prs::{RelevantPullRequest, WhyListed};
 
-/// `pull-requests.json` in the state files folder: the switcher's last list from GitHub, shown at once
-/// on the next start while GitHub is read again.
+/// `pull-requests.json` in the state files folder: the switcher's last list from the hosts, shown at once
+/// on the next start while the hosts are read again.
 #[derive(Clone)]
 pub struct RememberedPullRequestsFile {
     path: PathBuf,

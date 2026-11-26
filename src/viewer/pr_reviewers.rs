@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::pull_request::Sha;
 
-/// Someone GitHub lists among a PR's reviewers: a person, or a team asked to review.
+/// Someone the host lists among a PR's reviewers: a person, or a team asked to review.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reviewer {
     name: Arc<str>,
@@ -131,7 +131,7 @@ impl Standing {
     }
 }
 
-/// One review as GitHub lists it among a PR's latest.
+/// One review as the host lists it among a PR's latest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewRecord {
     pub reviewer: Reviewer,
@@ -139,9 +139,9 @@ pub struct ReviewRecord {
     pub commit: Sha,
 }
 
-/// What GitHub says of a PR's reviewers, before it is sorted into standings.
+/// What the host says of a PR's reviewers, before it is sorted into standings.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ReviewersOnGitHub {
+pub struct ReviewersOnHost {
     pub viewer_login: String,
     /// The PR's author answers threads in reviews of their own; they are not a reviewer.
     pub author_login: Option<String>,
@@ -153,7 +153,7 @@ pub struct ReviewersOnGitHub {
     pub requested: Vec<Reviewer>,
 }
 
-impl ReviewersOnGitHub {
+impl ReviewersOnHost {
     pub fn standings(self) -> Vec<Standing> {
         let whose = |reviewer: &Reviewer| {
             if reviewer.name() == self.viewer_login {
@@ -194,7 +194,7 @@ impl ReviewersOnGitHub {
     }
 }
 
-/// The PR's reviews as one read of GitHub gives them.
+/// The PR's reviews as one read of the host gives them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullRequestReviews {
     /// The viewer's latest sent review, whatever it said.
@@ -318,7 +318,7 @@ pub struct ReviewerLine {
     pub is_viewer: bool,
 }
 
-/// How a review that is on GitHub ended.
+/// How a review that is on the host ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewOutcome {
     Approved,
@@ -336,25 +336,12 @@ impl SubmittedReview {
     }
 }
 
-impl ReviewOutcome {
-    /// From GitHub's `PullRequestReviewState`. A pending review is not sent, so it has no outcome.
-    pub fn from_github_state(state: &str) -> Option<Self> {
-        match state {
-            "APPROVED" => Some(Self::Approved),
-            "CHANGES_REQUESTED" => Some(Self::ChangesRequested),
-            "COMMENTED" => Some(Self::Commented),
-            "DISMISSED" => Some(Self::Dismissed),
-            _ => None,
-        }
-    }
-}
-
 pub const CLAMPED_BODY_LINES: usize = 4;
 
 /// About what a sidebar line holds times the clamped lines; a longer text wraps past them.
 const LONG_BODY_CHARS: usize = 200;
 
-/// The viewer's latest sent review of a PR, as GitHub holds it.
+/// The viewer's latest sent review of a PR, as the host holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubmittedReview {
     pub outcome: ReviewOutcome,

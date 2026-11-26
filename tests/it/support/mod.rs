@@ -63,6 +63,14 @@ pub fn tarball(files: &[(impl AsRef<str>, impl AsRef<str>, u32)]) -> Vec<u8> {
     tar.into_inner().unwrap().finish().unwrap()
 }
 
+/// acme/shop on GitHub, the repo the fixture clones point at.
+pub fn shop_on_github() -> guided_review::pull_request::HostedRepo {
+    guided_review::pull_request::HostedRepo {
+        host: guided_review::pull_request::HostSite::GitHub,
+        repo: guided_review::pull_request::RepoName::new("acme", "shop"),
+    }
+}
+
 pub fn line(number: usize) -> guided_review::line_number::LineNumber {
     guided_review::line_number::LineNumber::try_from(number).unwrap()
 }
@@ -388,7 +396,7 @@ pub fn save_typing(review: &mut Review) {
 /// Where `link` opens on GitHub, for a review with no IDE.
 pub fn on_github(review: &Review, link: &CodeLink) -> String {
     match review.code_opener(Err(NoIde::NoTemplate)).destination(link) {
-        Destination::GitHub { url, .. } => url,
+        Destination::OnHost { url, .. } => url,
         other => panic!("code opens on GitHub without an IDE, not {other:?}"),
     }
 }

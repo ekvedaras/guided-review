@@ -1,7 +1,7 @@
 //! The issues a review is about, and where each came from. The first source that names any wins:
-//! the issues GitHub links to the PR, then the ones its description names (`Part of`, closing
-//! keywords GitHub did not link, `Ticket:`), then the one the guided tour names, then the one the
-//! branch is named after. A rebuilt review keeps what GitHub said and reads the rest again.
+//! the issues the host links to the PR, then the ones its description names (`Part of`, closing
+//! keywords the host did not link, `Ticket:`), then the one the guided tour names, then the one the
+//! branch is named after. A rebuilt review keeps what the host said and reads the rest again.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,12 +11,13 @@ use crate::pull_request::RepoName;
 use crate::review_subject::{BranchName, ReviewSubject};
 use crate::tour::Tour;
 
+use super::capability::{Capability, HostCapabilities};
 use super::markdown::Markdown;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelatedIssue {
     pub link: IssueLink,
-    /// Known only for an issue GitHub linked.
+    /// Known only for an issue the host linked.
     pub title: Option<Arc<str>>,
 }
 
@@ -25,7 +26,7 @@ impl RelatedIssue {
         Self { link, title: None }
     }
 
-    fn of_github(url: IssueUrl) -> Self {
+    fn of_issue(url: IssueUrl) -> Self {
         Self::untitled(IssueLink::GitHub(url))
     }
 }
@@ -36,23 +37,13 @@ pub enum IssueState {
     Open,
     ClosedAsCompleted,
     ClosedAsNotPlanned,
-    /// Closed for a reason GitHub names that the card does not tell apart, as a duplicate.
+    /// Closed for a reason the host names that the card does not tell apart, as a duplicate.
     Closed,
     /// A pull request named as an issue, as `Part of #12` can, once merged.
     Merged,
 }
 
 impl IssueState {
-    pub fn of_github(state: &str, reason: Option<&str>) -> Self {
-        match (state, reason) {
-            ("OPEN", _) => Self::Open,
-            ("MERGED", _) => Self::Merged,
-            (_, Some("COMPLETED")) => Self::ClosedAsCompleted,
-            (_, Some("NOT_PLANNED")) => Self::ClosedAsNotPlanned,
-            _ => Self::Closed,
-        }
-    }
-
     pub const fn label(self) -> &'static str {
         match self {
             Self::Open => "Open",
@@ -83,7 +74,7 @@ impl IssueDetails {
     }
 }
 
-/// What GitHub says of a PR's issues: the ones it would close, and the branch it is opened from.
+/// What the host says of a PR's issues: the ones it would close, and the branch it is opened from.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PullRequestIssues {
     pub linked: Vec<RelatedIssue>,
@@ -92,36 +83,43 @@ pub struct PullRequestIssues {
 
 #[derive(Debug, Default)]
 pub(super) struct RelatedIssues {
-    /// `None` until GitHub answers, and always for a local review.
-    on_github: Option<PullRequestIssues>,
+    /// `None` until the host answers, and always for a local review.
+    on_host: Option<PullRequestIssues>,
     /// The PR's repo, where its head branch's issue is; `None` for a local review.
     pr_repo: Option<RepoName>,
     named_in_description: Vec<RelatedIssue>,
     named_by_tour: Option<RelatedIssue>,
     of_local_branch: Option<RelatedIssue>,
     shown: Arc<[RelatedIssue]>,
-    /// What GitHub last said of each shown issue; an issue no longer shown keeps its entry.
+    /// What the host last said of each shown issue; an issue no longer shown keeps its entry.
     details: HashMap<IssueUrl, Arc<IssueDetails>>,
+    /// A host with no issue tracker has no details to read: the issues show with no hover card.
+    has_tracker: bool,
 }
 
 impl RelatedIssues {
-    pub(super) fn of(subject: &ReviewSubject, tour: &Tour, description: &str) -> Self {
+    pub(super) fn of(
+        subject: &ReviewSubject,
+        tour: &Tour,
+        description: &str,
+        host: HostCapabilities,
+    ) -> Self {
         let of_local_branch = subject.local().and_then(|change_set| {
-            IssueUrl::of_branch(change_set.repo()?, change_set.branch())
-                .map(RelatedIssue::of_github)
+            IssueUrl::of_branch(change_set.repo()?, change_set.branch()).map(RelatedIssue::of_issue)
         });
         let named_by_tour = tour
             .guided()
             .and_then(|guided| guided.issue.clone())
             .map(RelatedIssue::untitled);
         let mut issues = Self {
-            on_github: None,
+            on_host: None,
             pr_repo: subject.pull_request().map(|pr| pr.repo.clone()),
             named_in_description: Vec::new(),
             named_by_tour,
             of_local_branch,
             shown: Arc::default(),
             details: HashMap::new(),
+            has_tracker: host.has(Capability::IssueTracker),
         };
         issues.description_is(description);
         issues
@@ -139,7 +137,7 @@ impl RelatedIssues {
     }
 
     pub(super) fn carry_on_from(&mut self, replaced: Self) {
-        self.on_github = replaced.on_github;
+        self.on_host = replaced.on_host;
         self.details = replaced.details;
         self.choose_shown();
     }
@@ -151,7 +149,7 @@ impl RelatedIssues {
         );
     }
 
-    /// `None` for a ticket, which GitHub knows nothing of, and for an issue not read yet.
+    /// `None` for a ticket, which the host knows nothing of, and for an issue not read yet.
     pub(super) fn details_of(&self, link: &IssueLink) -> Option<Arc<IssueDetails>> {
         match link {
             IssueLink::GitHub(url) => self.details.get(url).cloned(),
@@ -159,8 +157,11 @@ impl RelatedIssues {
         }
     }
 
-    /// The shown issues GitHub has details of.
-    pub(super) fn shown_on_github(&self) -> Vec<IssueUrl> {
+    /// The shown issues whose details the host's tracker has; none when it has no tracker.
+    pub(super) fn details_to_read(&self) -> Vec<IssueUrl> {
+        if !self.has_tracker {
+            return Vec::new();
+        }
         self.shown
             .iter()
             .filter_map(|issue| match &issue.link {
@@ -170,7 +171,7 @@ impl RelatedIssues {
             .collect()
     }
 
-    /// The issues a snapshot scene shows, with what GitHub would say of each; `unstaged` takes them off.
+    /// The issues a snapshot scene shows, with what the host would say of each; `unstaged` takes them off.
     #[cfg(feature = "snapshots")]
     pub(super) fn staged(&mut self, issues: Vec<(RelatedIssue, Option<IssueDetails>)>) {
         let read = issues
@@ -181,7 +182,7 @@ impl RelatedIssues {
             })
             .collect();
         self.details_say(read);
-        self.github_says(PullRequestIssues {
+        self.host_says(PullRequestIssues {
             linked: issues.into_iter().map(|(issue, _)| issue).collect(),
             head_branch: None,
         });
@@ -189,12 +190,12 @@ impl RelatedIssues {
 
     #[cfg(feature = "snapshots")]
     pub(super) fn unstaged(&mut self) {
-        self.on_github = None;
+        self.on_host = None;
         self.choose_shown();
     }
 
-    pub(super) fn github_says(&mut self, issues: PullRequestIssues) {
-        self.on_github = Some(issues);
+    pub(super) fn host_says(&mut self, issues: PullRequestIssues) {
+        self.on_host = Some(issues);
         self.choose_shown();
     }
 
@@ -204,14 +205,14 @@ impl RelatedIssues {
 
     fn choose_shown(&mut self) {
         let linked = self
-            .on_github
+            .on_host
             .as_ref()
-            .map(|on_github| on_github.linked.clone())
+            .map(|on_host| on_host.linked.clone())
             .filter(|linked| !linked.is_empty());
         let of_pr_branch = || {
             let repo = self.pr_repo.as_ref()?;
-            let branch = self.on_github.as_ref()?.head_branch.as_ref()?;
-            IssueUrl::of_branch(repo, branch).map(RelatedIssue::of_github)
+            let branch = self.on_host.as_ref()?.head_branch.as_ref()?;
+            IssueUrl::of_branch(repo, branch).map(RelatedIssue::of_issue)
         };
         let in_description =
             Some(self.named_in_description.clone()).filter(|issues| !issues.is_empty());

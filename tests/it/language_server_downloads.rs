@@ -14,7 +14,7 @@ use guided_review::navigation::{
     ServerFolders, ServerName, ServerPins, Timeouts, Waiting, Word,
 };
 use guided_review::platform::Os;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::update::{Cpu, ReleasesPort, Target};
 use serde_json::json;
 use sha2::{Digest, Sha256, Sha512};
@@ -288,7 +288,7 @@ impl Rig {
     }
 
     fn clone_source(&self) -> LocalGit {
-        LocalGit::configured_clone(&RepoName::new("acme", "shop"), self.repo.path()).unwrap()
+        LocalGit::configured_clone(&crate::support::shop_on_github(), self.repo.path()).unwrap()
     }
 
     fn hover_read_from(
@@ -306,7 +306,7 @@ impl Rig {
         let waits = Mutex::new(Vec::new());
         let answer = self
             .servers
-            .navigator(Codebase::GitHub(RepoName::new("acme", "shop")), by_name)
+            .navigator(Codebase::Hosted(crate::support::shop_on_github()), by_name)
             .navigate(
                 code,
                 &NavigationRequest {
@@ -425,7 +425,7 @@ fn a_review_without_a_local_clone_downloads_nothing_and_is_answered_by_name_with
         answer.answered_by,
         AnsweredBy::ByName {
             because: Some(FallbackReason::new(
-                "rust-analyzer needs a local clone, and the code is read from GitHub"
+                "rust-analyzer needs a local clone, and the code is read from the PR's host"
             ))
         }
     );

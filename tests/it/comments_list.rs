@@ -5,7 +5,6 @@ use crate::support::file_path;
 use crate::support::line;
 use guided_review::build::Build;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
 use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, TourPin};
@@ -41,7 +40,7 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }
@@ -64,7 +63,13 @@ impl Shop {
                 .parse::<ReviewSubject>()
                 .unwrap(),
         );
-        let mut review = Review::open(tour, &source, state_file).unwrap();
+        let mut review = Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         review.set_threads(threads);
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
@@ -78,6 +83,7 @@ impl Shop {
                 pr: "https://github.com/acme/shop/pull/7".to_owned(),
                 local: None,
                 repo: None,
+                host: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,
@@ -90,7 +96,13 @@ impl Shop {
                 .parse::<ReviewSubject>()
                 .unwrap(),
         );
-        let mut review = Review::open_basic(tour, &self.source(), state_file).unwrap();
+        let mut review = Review::open_basic(
+            tour,
+            &self.source(),
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         review.set_threads(threads);
         review
     }
@@ -667,7 +679,7 @@ fn a_thread_no_screen_shows_opens_on_github_and_the_screen_stays() {
 
     assert_eq!(
         visit,
-        ThreadVisit::OnGitHub("https://github.com/acme/shop/pull/7#discussion_bob".to_owned())
+        ThreadVisit::OnHost("https://github.com/acme/shop/pull/7#discussion_bob".to_owned())
     );
     assert_eq!(review.screen(), &before);
 }

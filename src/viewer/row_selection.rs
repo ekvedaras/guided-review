@@ -106,7 +106,7 @@ impl SelectedLines {
         self.lines.iter().any(|row| &row.location == location)
     }
 
-    /// Why the selection takes no comment: the first row GitHub takes none on says so.
+    /// Why the selection takes no comment: the first row the host takes none on says so.
     pub fn comment_refusal(&self) -> Option<CommentRefusal> {
         self.lines.iter().find_map(DiffLine::comment_refusal)
     }

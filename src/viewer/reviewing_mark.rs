@@ -1,4 +1,5 @@
-use super::ports::{GitHubError, PullRequestReactionsPort};
+use super::capability::{Capability, HostCapabilities};
+use super::ports::{CodeHost, HostError};
 use super::pr_reviewers::SubmittedReview;
 use super::reactions::{Reaction, ReactionChange};
 use crate::pull_request::{PullRequestUrl, Sha};
@@ -17,11 +18,11 @@ impl ReviewingMarkRemoval {
         Self { pr }
     }
 
-    pub fn run(
-        &self,
-        github: &(impl PullRequestReactionsPort + ?Sized),
-    ) -> Result<(), GitHubError> {
-        github.set_pull_request_reaction(&self.pr, REVIEWING_MARK, ReactionChange::Remove)
+    /// A host with no reactions never had the mark put on, so there is nothing to take off.
+    pub fn run(&self, host: &dyn CodeHost) -> Result<(), HostError> {
+        host.pull_request_reactions().map_or(Ok(()), |reactions| {
+            reactions.set_pull_request_reaction(&self.pr, REVIEWING_MARK, ReactionChange::Remove)
+        })
     }
 }
 
@@ -36,7 +37,7 @@ pub(super) struct ReviewingMark {
     /// The latest sent review as first read after the review opened: a later one is sent since.
     earlier_review: EarlierReview,
     is_finished: bool,
-    /// The 👀 was asked for, so it is on GitHub or on its way there.
+    /// The 👀 was asked for, so it is on the host or on its way there.
     is_asked_for: bool,
     to_send: Option<ReactionChange>,
 }
@@ -56,12 +57,13 @@ enum EarlierReview {
 }
 
 impl ReviewingMark {
-    pub(super) fn new(tour_head: Sha) -> Self {
+    /// A host with no reactions on a PR has nowhere to show the mark, so nothing puts it on.
+    pub(super) fn new(tour_head: Sha, host: HostCapabilities) -> Self {
         Self {
             tour_head,
             authorship: Authorship::Unknown,
             earlier_review: EarlierReview::NotReadYet,
-            is_finished: false,
+            is_finished: !host.has(Capability::PullRequestReactions),
             is_asked_for: false,
             to_send: None,
         }
@@ -113,7 +115,7 @@ impl ReviewingMark {
         }
     }
 
-    /// The review closes: true when the mark may be on GitHub, so it has to come off now. Nothing
+    /// The review closes: true when the mark may be on the host, so it has to come off now. Nothing
     /// puts it on again after.
     pub(super) fn close(&mut self) -> bool {
         let is_off = self.is_finished && self.to_send.is_none();
@@ -124,7 +126,7 @@ impl ReviewingMark {
         may_be_on
     }
 
-    /// What GitHub must be told next; `None` when it shows the mark as it should be.
+    /// What the host must be told next; `None` when it shows the mark as it should be.
     pub(super) fn change_to_send(&self) -> Option<ReactionChange> {
         self.to_send
     }

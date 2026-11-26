@@ -1,12 +1,14 @@
-//! A GitHub outage: GitHub does not answer reads that are fine, so what the screen shows may be
-//! old. The reviewer is told once, whatever number of reads failed, and the reads are tried again
-//! by themselves, further apart the longer the outage lasts.
+//! A host outage: the code host does not answer reads that are fine, so what the screen
+//! shows may be old. The reviewer is told once, whatever number of reads failed, and the reads are
+//! tried again by themselves, further apart the longer the outage lasts.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
-/// Why GitHub is not answering. A refused token or a missing page is not one: those say something
+use crate::pull_request::HostSite;
+
+/// Why the host is not answering. A refused token or a missing page is not one: those say something
 /// the reviewer can put right, and trying again changes nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutageCause {
@@ -25,7 +27,7 @@ impl fmt::Display for OutageCause {
     }
 }
 
-/// What the screen may show old while GitHub does not answer.
+/// What the screen may show old while the host does not answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Affected {
     NewCommits,
@@ -79,16 +81,23 @@ pub fn backoff(failures: u32) -> Duration {
 /// many times in a row that read failed. It is over when none is left.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outage {
+    host: HostSite,
     cause: OutageCause,
     failures: BTreeMap<Affected, u32>,
 }
 
 impl Outage {
-    pub(super) fn new(cause: OutageCause) -> Self {
+    pub(super) fn new(host: HostSite, cause: OutageCause) -> Self {
         Self {
+            host,
             cause,
             failures: BTreeMap::new(),
         }
+    }
+
+    /// The host that does not answer, which the reviewer is told by name.
+    pub fn host(&self) -> HostSite {
+        self.host
     }
 
     /// Returns the wait before the read is tried again.
@@ -133,7 +142,7 @@ pub(super) fn waiting(duration: Duration) -> String {
     }
 }
 
-/// What the app reads from GitHub that has no problem of its own.
+/// What the app reads from the host that has no problem of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Read {
     PrHead,

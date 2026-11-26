@@ -62,17 +62,29 @@ pub enum Finishing {
     /// The viewer's own PR with no pending comments: there is nothing to send and no verdict to give.
     NothingToFinish,
     CommentOnly,
+    /// Someone else's PR on a host that has no requests for changes.
+    CommentOrApprove,
     AnyVerdict,
 }
 
 impl Finishing {
     pub fn of(review: &crate::viewer::Review) -> Self {
-        if review.can_approve_or_request_changes() {
+        if review.can_request_changes() {
             Self::AnyVerdict
+        } else if review.can_approve_or_request_changes() {
+            Self::CommentOrApprove
         } else if review.can_finish_review() {
             Self::CommentOnly
         } else {
             Self::NothingToFinish
+        }
+    }
+
+    fn offers(self, verdict: ReviewVerdict) -> bool {
+        match verdict {
+            ReviewVerdict::Comment => self != Self::NothingToFinish,
+            ReviewVerdict::Approve => matches!(self, Self::CommentOrApprove | Self::AnyVerdict),
+            ReviewVerdict::RequestChanges => self == Self::AnyVerdict,
         }
     }
 }
@@ -252,7 +264,7 @@ impl RenderOnce for FinishReviewDialog {
 
         let finish = self.finish;
         let can_approve_again = (finish.can_mark_done || finish.is_marked_done)
-            && self.finishing == Finishing::AnyVerdict;
+            && self.finishing.offers(ReviewVerdict::Approve);
         let is_finish_the_way_on =
             self.is_everything_read && !finish.can_mark_done && !finish.is_marked_done;
         let open_button = {
@@ -380,9 +392,7 @@ impl RenderOnce for FinishReviewDialog {
             ReviewVerdict::RequestChanges,
         ]
         .into_iter()
-        .filter(|verdict| {
-            self.finishing == Finishing::AnyVerdict || *verdict == ReviewVerdict::Comment
-        })
+        .filter(|verdict| self.finishing.offers(*verdict))
         .collect();
         let picked = shown_verdicts.iter().position(|shown| *shown == verdict);
         let segments = shown_verdicts
@@ -390,7 +400,7 @@ impl RenderOnce for FinishReviewDialog {
             .map(|&choice| {
                 let ui = ui.clone();
                 Segment::new(
-                    SharedString::from(format!("verdict-{}", choice.github_name())),
+                    SharedString::from(format!("verdict-{choice:?}")),
                     label(choice),
                     move |_, _, cx| {
                         update(&ui, cx, |ui| {

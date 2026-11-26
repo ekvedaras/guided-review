@@ -103,10 +103,10 @@ fn two_commands_can_swap_their_keys() {
 
 #[test]
 fn an_empty_list_leaves_a_command_with_no_key() {
-    let keymap = keymap_of("[keys]\nopen_on_github = []").unwrap();
+    let keymap = keymap_of("[keys]\nopen_on_host = []").unwrap();
 
-    assert_eq!(keymap.chords(Command::OpenOnGitHub).len(), 0);
-    assert_eq!(keymap.first_chord(Command::OpenOnGitHub), None);
+    assert_eq!(keymap.chords(Command::OpenOnHost).len(), 0);
+    assert_eq!(keymap.first_chord(Command::OpenOnHost), None);
 }
 
 #[test]
@@ -184,7 +184,39 @@ fn every_command_has_a_config_name_that_reads_back_as_itself() {
         );
     }
     assert_eq!(Command::WrapLines.config_name(), "wrap_lines");
-    assert_eq!(Command::OpenOnGitHub.config_name(), "open_on_github");
+    assert_eq!(Command::OpenOnHost.config_name(), "open_on_host");
+}
+
+#[test]
+fn open_on_host_written_under_its_name_from_before_hosts_were_named_still_binds_it() {
+    let keymap = keymap_of("[keys]\nopen_on_github = \"alt-shift-x\"").unwrap();
+
+    assert_eq!(keys(&keymap, Command::OpenOnHost), ["alt-shift-x"]);
+    assert_eq!(
+        Command::of_config_name("open_on_github"),
+        Some(Command::OpenOnHost)
+    );
+}
+
+#[test]
+fn open_on_host_written_under_both_names_takes_the_new_one() {
+    let keymap =
+        keymap_of("[keys]\nopen_on_github = \"alt-shift-x\"\nopen_on_host = \"alt-shift-y\"")
+            .unwrap();
+
+    assert_eq!(keys(&keymap, Command::OpenOnHost), ["alt-shift-y"]);
+}
+
+#[test]
+fn a_key_set_for_open_on_host_drops_the_entry_under_its_old_name() {
+    let mut changes = Config::from_text("[keys]\nopen_on_github = \"o\"")
+        .unwrap()
+        .key_changes();
+
+    changes.set(Command::OpenOnHost, &[chord("p")]);
+
+    assert_eq!(changes.written("open_on_github"), None);
+    assert!(changes.written("open_on_host").is_some());
 }
 
 fn resolved(config: &str) -> (Keymap, Vec<KeyProblem>) {

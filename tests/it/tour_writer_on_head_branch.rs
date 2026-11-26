@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
@@ -16,18 +16,18 @@ fn pr(url: &str) -> ReviewSubject {
     url.parse().unwrap()
 }
 
-fn any_github() -> FakeGitHub {
-    FakeGitHub::with_pull("base", "head", &SentLog::default())
+fn any_host() -> FakeHost {
+    FakeHost::with_pull("base", "head", &SentLog::default())
 }
 
 /// Agents that know from GitHub which branch the PR is opened from.
 fn agents(fake: &Arc<FakeTourAgent>) -> TourAgents {
-    agents_knowing(fake, any_github().with_head_branch(PR_9, HEAD))
+    agents_knowing(fake, any_host().with_head_branch(PR_9, HEAD))
 }
 
-fn agents_knowing(fake: &Arc<FakeTourAgent>, github: FakeGitHub) -> TourAgents {
+fn agents_knowing(fake: &Arc<FakeTourAgent>, host: FakeHost) -> TourAgents {
     TourAgents::new(Arc::clone(fake) as Arc<dyn TourAgentPort>)
-        .finding_head_branches_with(Arc::new(github))
+        .finding_head_branches_with(Arc::new(host))
         .starting_in("/clones/shop".into())
 }
 
@@ -148,7 +148,7 @@ fn with_no_head_branch_known_no_claude_is_looked_for() {
     let repo = clone_on("acme/shop", HEAD);
     let fake = Arc::new(reviewers_claude_in(&repo, "t5", AgentStatus::Idle));
 
-    let handed = agents_knowing(&fake, any_github())
+    let handed = agents_knowing(&fake, any_host())
         .write_tour(&pr(PR_9), &pr(SHOWN))
         .unwrap();
 

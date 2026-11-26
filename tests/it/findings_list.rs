@@ -1,7 +1,7 @@
 //! The findings list: rows, ticking, keys, and what a batch does.
 
 use crate::support::FixtureRepo;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
 use guided_review::build::Build;
 use guided_review::findings::{Finding, FindingId};
 use guided_review::open_review::open_review;
@@ -276,18 +276,18 @@ fn a_batch_comment_adds_each_finding_as_is_marked_as_ai_and_leaves_open_those_wi
         [(id("c"), FindingRefusal::Comment(CommentRefusal::NoLines))]
     );
     assert_eq!(batch.done.len(), 2);
-    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
     for request in batch.done {
         assert_eq!(
-            review.apply_comment(request.run(&github)).unwrap(),
+            review.apply_comment(request.run(&host)).unwrap(),
             CommentResult::Sent
         );
     }
     let added: Vec<String> = sent
-        .github_calls()
+        .host_calls()
         .into_iter()
         .filter_map(|call| match call {
-            GitHubCall::AddThread { body, .. } => Some(body),
+            HostCall::AddThread { body, .. } => Some(body),
             _ => None,
         })
         .collect();
@@ -306,18 +306,18 @@ fn a_batch_comment_of_findings_on_the_same_lines_sends_them_all_as_one_comment()
     assert_eq!(batch.refused, []);
     assert_eq!(batch.done.len(), 1);
     assert_eq!(shown_ids(&review), ["a", "b"]);
-    let github = FakeGitHub::with_pull("main-tip", &shop.head, &sent);
+    let host = FakeHost::with_pull("main-tip", &shop.head, &sent);
     for request in batch.done {
         assert_eq!(
-            review.apply_comment(request.run(&github)).unwrap(),
+            review.apply_comment(request.run(&host)).unwrap(),
             CommentResult::Sent
         );
     }
     let added: Vec<String> = sent
-        .github_calls()
+        .host_calls()
         .into_iter()
         .filter_map(|call| match call {
-            GitHubCall::AddThread { body, .. } => Some(body),
+            HostCall::AddThread { body, .. } => Some(body),
             _ => None,
         })
         .collect();

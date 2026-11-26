@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use gpui::{App, Global, Image, ImageFormat};
 
-use crate::github::GitHubAvatars;
 use crate::viewer::{AvatarOutcome, AvatarPort, Avatars};
 
 /// The comment authors' pictures for the whole app, so every PR window shares one download each.
@@ -20,7 +19,7 @@ impl AvatarPictures {
         cx.set_global(Self {
             avatars: Avatars::default(),
             images: HashMap::new(),
-            port: Arc::new(GitHubAvatars),
+            port: Arc::new(PublicAvatars),
         });
     }
 
@@ -67,5 +66,28 @@ fn gpui_format(bytes: &[u8]) -> Option<ImageFormat> {
         image::ImageFormat::Gif => Some(ImageFormat::Gif),
         image::ImageFormat::WebP => Some(ImageFormat::Webp),
         _ => None,
+    }
+}
+
+/// An avatar is a public picture at the address its comment gives, whatever host the comment is
+/// on, so no token goes along.
+struct PublicAvatars;
+
+/// Far above a 64 px picture; a bigger answer is not an avatar.
+const AVATAR_LIMIT: u64 = 1024 * 1024;
+
+impl AvatarPort for PublicAvatars {
+    fn avatar(&self, url: &str) -> anyhow::Result<Vec<u8>> {
+        use anyhow::Context;
+        let mut response = ureq::get(url)
+            .header("User-Agent", "guided-review")
+            .call()
+            .with_context(|| format!("could not download {url}"))?;
+        response
+            .body_mut()
+            .with_config()
+            .limit(AVATAR_LIMIT)
+            .read_to_vec()
+            .with_context(|| format!("could not download {url}"))
     }
 }

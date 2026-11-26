@@ -3,7 +3,7 @@ use guided_review::code_source::CodeSource;
 use guided_review::config::Config;
 use guided_review::ide::{Ide, IdeLaunch, NoIde};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::{HostSite, RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -44,7 +44,7 @@ impl Shop {
             ]}],
         }))
         .unwrap();
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_subject(
@@ -53,7 +53,13 @@ impl Shop {
                 .parse::<ReviewSubject>()
                 .unwrap(),
         );
-        let mut review = Review::open(tour, &source, state_file).unwrap();
+        let mut review = Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         review.working_copy_is(WorkingCopy::of(
             source.working_tree_is_at(&Sha::new(&self.head)),
         ));
@@ -77,7 +83,8 @@ impl Shop {
     }
 
     fn on_github(&self, sha: &str, rest: &str, because: NotInIde) -> Destination {
-        Destination::GitHub {
+        Destination::OnHost {
+            site: HostSite::GitHub,
             url: format!("https://github.com/acme/shop/blob/{sha}/{rest}"),
             because,
         }
@@ -267,7 +274,8 @@ fn a_github_link_to_code_of_this_repo_in_markdown_opens_in_the_ide() {
     );
     assert_eq!(
         opener.destination_of_url("https://github.com/acme/shop/blob/main/missing.php#L1"),
-        Destination::GitHub {
+        Destination::OnHost {
+            site: HostSite::GitHub,
             url: "https://github.com/acme/shop/blob/main/missing.php#L1".into(),
             because: NotInIde::NotInWorkingCopy,
         }

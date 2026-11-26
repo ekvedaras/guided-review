@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use anyhow::{Context, bail};
 
+use crate::github_web;
 use crate::pull_request::RepoName;
 use crate::review_subject::BranchName;
 
@@ -69,22 +70,15 @@ impl FromStr for IssueUrl {
     type Err = anyhow::Error;
 
     fn from_str(url: &str) -> anyhow::Result<Self> {
-        let not_an_issue = || format!("not a GitHub issue link: {url}");
-        let path = url
-            .strip_prefix("https://github.com/")
-            .with_context(not_an_issue)?;
-        let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
-        let [owner, name, "issues", number] = segments.as_slice() else {
-            bail!(not_an_issue());
-        };
-        let number = number.parse().with_context(not_an_issue)?;
-        Ok(Self::new(RepoName::new(owner, name), number))
+        let (repo, number) = github_web::issue_of_link(url)
+            .with_context(|| format!("not a GitHub issue link: {url}"))?;
+        Ok(Self::new(repo, number))
     }
 }
 
 impl fmt::Display for IssueUrl {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "https://github.com/{}/issues/{}", self.repo, self.number)
+        f.write_str(&github_web::issue_page(&self.repo, self.number))
     }
 }
 
@@ -195,7 +189,7 @@ impl IssueLink {
         let repo = if named_repo.is_empty() {
             repo.clone()
         } else {
-            named_repo.parse().ok()?
+            github_web::repo_named(named_repo)?
         };
         (number > 0).then(|| Self::GitHub(IssueUrl::new(repo, number)))
     }

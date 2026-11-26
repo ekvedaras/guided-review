@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 
-use crate::pull_request::{PullRequestUrl, RepoName};
+use crate::pull_request::{HostSite, HostedRepo, PullRequestUrl, RepoName};
 
 /// What a review reads: a PR, or a local change set.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -14,13 +14,13 @@ pub enum ReviewSubject {
     Local(LocalChangeSet),
 }
 
-/// One branch of one working tree. Its identity is the folder and the branch; `repo` is only for
-/// display and for finding a PR opened from the branch.
+/// One branch of one working tree. Its identity is the folder and the branch; `origin` is only for
+/// display and for finding a PR opened from the branch, on the host the origin is on.
 #[derive(Debug, Clone)]
 pub struct LocalChangeSet {
     folder: WorkTreeRoot,
     branch: BranchName,
-    repo: Option<RepoName>,
+    origin: Option<HostedRepo>,
 }
 
 /// The root of a working tree, absolute and canonical, so `/tmp/x` and `/private/tmp/x` are one review. A
@@ -56,23 +56,31 @@ impl ReviewSubject {
         }
     }
 
-    /// Whether the review has a PR page on GitHub to open.
-    pub const fn has_github_page(&self) -> bool {
+    /// The host of its PR, or of its folder's origin for a local change set.
+    pub fn host(&self) -> Option<HostSite> {
+        match self {
+            Self::PullRequest(pr) => Some(pr.host),
+            Self::Local(change_set) => change_set.origin().map(|origin| origin.host),
+        }
+    }
+
+    /// What a prompt calls the host: its name, else "the code host".
+    pub fn host_name(&self) -> &'static str {
+        self.host().map_or("the code host", HostSite::name)
+    }
+
+    /// Whether the review has a PR page on the host to open.
+    pub const fn has_host_page(&self) -> bool {
         matches!(self, Self::PullRequest(_))
     }
 
-    /// Whether the review's threads live on GitHub, rather than in the review's state file.
-    pub const fn has_github_threads(&self) -> bool {
+    /// Whether the review's threads live on the host, rather than in the review's state file.
+    pub const fn has_host_threads(&self) -> bool {
         matches!(self, Self::PullRequest(_))
     }
 
-    /// Whether a comment can join a pending review on GitHub, and be sent with a reviewer's note.
+    /// Whether a comment can join a pending review on the host, and be sent with a reviewer's note.
     pub const fn has_pending_review(&self) -> bool {
-        matches!(self, Self::PullRequest(_))
-    }
-
-    /// Whether ticks are kept in step with the viewed marks GitHub keeps of a PR's files.
-    pub const fn syncs_viewed_marks(&self) -> bool {
         matches!(self, Self::PullRequest(_))
     }
 
@@ -87,8 +95,8 @@ impl ReviewSubject {
         matches!(self, Self::Local(_))
     }
 
-    /// The repo whose GitHub holds the review; a local change set holds none.
-    pub const fn github_repo(&self) -> Option<&RepoName> {
+    /// The repo whose code host holds the review; a local change set holds none.
+    pub const fn host_repo(&self) -> Option<&RepoName> {
         match self {
             Self::PullRequest(pr) => Some(&pr.repo),
             Self::Local(_) => None,
@@ -191,7 +199,7 @@ impl ReviewSubject {
 impl ReviewSubject {
     pub fn files_folder(&self) -> PathBuf {
         match self {
-            Self::PullRequest(pr) => PathBuf::from(pr.repo.to_string()),
+            Self::PullRequest(pr) => pr.hosted_repo().files_folder(),
             Self::Local(change_set) => change_set.files_folder(),
         }
     }
@@ -226,9 +234,15 @@ impl FromStr for ReviewSubject {
             Some(local) => LocalChangeSet::from_key(local)
                 .map(Self::Local)
                 .with_context(|| format!("not a local change set key: {key}")),
-            None => key.parse().map(Self::PullRequest).with_context(|| {
-                format!("{key} is neither a GitHub PR link nor a local change set key")
-            }),
+            None => key
+                .parse()
+                .map(Self::PullRequest)
+                .with_context(|| {
+                    format!(
+                        "{key} is neither a PR link of a code host guided-review reads ({}) nor a local change set key",
+                        HostSite::all_named()
+                    )
+                }),
         }
     }
 }
@@ -283,18 +297,18 @@ fn unescape(text: &str) -> anyhow::Result<String> {
 }
 
 impl LocalChangeSet {
-    pub const fn new(folder: WorkTreeRoot, branch: BranchName, repo: Option<RepoName>) -> Self {
+    pub const fn new(folder: WorkTreeRoot, branch: BranchName, origin: Option<HostedRepo>) -> Self {
         Self {
             folder,
             branch,
-            repo,
+            origin,
         }
     }
 
     /// The same change set with the repo its folder's clone belongs to; a key names no repo.
     #[must_use]
-    pub fn in_repo(self, repo: Option<RepoName>) -> Self {
-        Self { repo, ..self }
+    pub fn with_origin(self, origin: Option<HostedRepo>) -> Self {
+        Self { origin, ..self }
     }
 
     /// `<folder>@<branch>`: the folder's `@` is escaped, so the first `@` ends it.
@@ -305,7 +319,7 @@ impl LocalChangeSet {
         Ok(Self {
             folder: WorkTreeRoot::new(PathBuf::from(unescape(folder)?))?,
             branch: BranchName::new(branch)?,
-            repo: None,
+            origin: None,
         })
     }
 
@@ -321,8 +335,13 @@ impl LocalChangeSet {
         &self.branch
     }
 
-    pub const fn repo(&self) -> Option<&RepoName> {
-        self.repo.as_ref()
+    /// The repo its folder's `origin` points at, and the host it is on.
+    pub const fn origin(&self) -> Option<&HostedRepo> {
+        self.origin.as_ref()
+    }
+
+    pub fn repo(&self) -> Option<&RepoName> {
+        self.origin.as_ref().map(|origin| &origin.repo)
     }
 }
 

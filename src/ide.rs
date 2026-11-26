@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use crate::file_path::FilePath;
@@ -24,7 +23,7 @@ impl IdeTemplate {
 
     fn launch(&self, absolute: &str, line: LineNumber) -> IdeLaunch {
         if self.is_url() {
-            IdeLaunch::Url(self.fill(&percent_encode_path(absolute), line))
+            IdeLaunch::Url(self.fill(&crate::url_path::encode(absolute), line))
         } else {
             IdeLaunch::Shell(self.fill(&shell_quote(absolute), line))
         }
@@ -128,7 +127,7 @@ pub enum NoIde {
     NoClone,
 }
 
-/// Code opens in the IDE only with a local clone and a template; without one it opens on GitHub.
+/// Code opens in the IDE only with a local clone and a template; without one it opens on the host.
 #[derive(Debug, Clone)]
 pub struct Ide {
     template: IdeTemplate,
@@ -161,18 +160,6 @@ impl Ide {
         let absolute = path.under(&self.clone_root).to_string_lossy().into_owned();
         self.template.launch(&absolute, line)
     }
-}
-
-fn percent_encode_path(path: &str) -> String {
-    let mut encoded = String::new();
-    for byte in path.bytes() {
-        if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
-            encoded.push(byte as char);
-        } else {
-            write!(encoded, "%{byte:02X}").ok();
-        }
-    }
-    encoded
 }
 
 fn shell_quote(text: &str) -> String {

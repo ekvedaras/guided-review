@@ -1,5 +1,5 @@
 //! The open review on the GPUI side: it owns the `Review`, the rows built from it, and every round trip
-//! to GitHub, the code source and the tour tools. Layouts draw from it and forward the reader's input to it.
+//! to the host, the code source and the tour tools. Layouts draw from it and forward the reader's input to it.
 
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
@@ -30,12 +30,11 @@ use crate::app::sidebar_rows::SidebarRows;
 use crate::app::updater::release_install_in_the_way;
 use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
-use crate::github::{GhCloner, GitHub};
 use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
-    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CommentId,
-    CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal, FinishResult,
-    GitHubPort, HandOffButton, HandOffId, HoveredName, ImageCache, JobOutcome, JobProgress,
+    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CodeHost,
+    CommentId, CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal,
+    FinishResult, HandOffButton, HandOffId, HoveredName, ImageCache, JobOutcome, JobProgress,
     LineLocation, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour,
     ReplacingJob, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId,
     TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
@@ -101,19 +100,20 @@ pub struct ReviewSession {
     /// The code source of the PR a snapshot scene put aside to show a local review.
     #[cfg(feature = "snapshots")]
     source_before_staging: Option<Arc<dyn CodeSource>>,
-    /// What GitHub said of the PR before a snapshot scene staged another title bar.
+    /// What the host said of the PR, and of how it would merge, before a snapshot scene staged
+    /// another title bar.
     #[cfg(feature = "snapshots")]
-    pr_status_before_staging: Option<crate::viewer::PrStatus>,
-    /// The status a title bar scene shows, held over a GitHub read that lands while it is on screen.
+    pr_status_before_staging: Option<(crate::viewer::PrStatus, Option<crate::viewer::Merging>)>,
+    /// The status a title bar scene shows, held over a host read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
-    staged_pr_status: Option<crate::viewer::PrStatus>,
-    /// The issues a title bar scene shows, held over a GitHub read that lands while it is on screen.
+    staged_pr_status: Option<(crate::viewer::PrStatus, crate::viewer::Merging)>,
+    /// The issues a title bar scene shows, held over a host read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
     staged_related_issues: Vec<(
         crate::viewer::RelatedIssue,
         Option<crate::viewer::IssueDetails>,
     )>,
-    /// The author and branches a title bar scene shows, held over a GitHub read that lands while it is on screen.
+    /// The author and branches a title bar scene shows, held over a host read that lands while it is on screen.
     #[cfg(feature = "snapshots")]
     staged_pr_origin: Option<crate::viewer::PullRequestOrigin>,
     /// The Refresh a banner scene shows under way.
@@ -141,7 +141,7 @@ pub struct ReviewSession {
     old_head: Option<OldHead>,
     refresh_brief: RefreshBrief,
     screen_list: ListState,
-    github: Arc<dyn GitHubPort>,
+    host: Arc<dyn CodeHost>,
     source: Arc<dyn CodeSource>,
     tour_work: TourWork,
     image_cache: ImageCache,
@@ -175,7 +175,7 @@ impl BoxHeight {
 /// What a session works with and reports to, all owned by whoever opens the review.
 pub struct SessionWiring {
     pub source: Arc<dyn CodeSource>,
-    pub github: Arc<dyn GitHubPort>,
+    pub host: Arc<dyn CodeHost>,
     pub tour_work: TourWork,
     pub frame_stats: FrameStatsHook,
 }
@@ -200,13 +200,13 @@ impl ReviewSession {
         }
         let SessionWiring {
             source,
-            github,
+            host,
             tour_work,
             frame_stats,
         } = wiring;
         let focus_subscription = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
-                this.review.pull_from_github();
+                this.review.pull_from_host();
                 this.run_due_work(cx);
             }
         });
@@ -223,7 +223,7 @@ impl ReviewSession {
         let clone_offer = review
             .subject()
             .pull_request()
-            .and_then(|pr| CloneOffer::for_source(pr.repo.clone(), source.as_ref(), &folders));
+            .and_then(|pr| CloneOffer::for_source(pr.hosted_repo(), source.as_ref(), &folders));
         let mut session = Self {
             sidebar: SidebarRows::of(&review, &TourAgentState::Unknown),
             tour_agent: TourAgentState::Unknown,
@@ -264,7 +264,7 @@ impl ReviewSession {
                 .measure_all(),
             rows,
             review,
-            github,
+            host,
             source,
             tour_work,
             image_cache: ImageCache::in_folders(&folders),
@@ -359,8 +359,8 @@ impl ReviewSession {
     /// outcome back in the review, which may make more due; then sleeps until the next is due.
     fn run_due_work(&mut self, cx: &mut Context<Self>) {
         for work in self.review.due_work(Instant::now()) {
-            let (github, source, agents) = (
-                Arc::clone(&self.github),
+            let (host, source, agents) = (
+                Arc::clone(&self.host),
                 Arc::clone(&self.source),
                 self.tour_work.tour_agents.clone(),
             );
@@ -368,7 +368,7 @@ impl ReviewSession {
                 cx,
                 move || {
                     work.run(&WorkPorts {
-                        github: github.as_ref(),
+                        host: host.as_ref(),
                         source: source.as_ref(),
                         agents: &agents,
                     })
@@ -610,13 +610,13 @@ impl ReviewSession {
         (mode, audience): (SendMode, Audience),
         cx: &mut Context<Self>,
     ) {
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         let state_file = self.review.state_file();
         let place = place.clone();
         cx.spawn(async move |this, cx| {
             let outcome = cx
                 .background_executor()
-                .spawn(async move { request.run(github.as_ref()) })
+                .spawn(async move { request.run(host.as_ref()) })
                 .await;
             let mut outcome = Some(outcome);
             let applied = this.update(cx, |this, cx| {
@@ -652,7 +652,7 @@ impl ReviewSession {
         }
     }
 
-    /// Runs a thread action in the background, then shows the threads as GitHub has them.
+    /// Runs a thread action in the background, then shows the threads as the host has them.
     pub fn act_on_thread(
         &mut self,
         action: ThreadAction,
@@ -661,10 +661,10 @@ impl ReviewSession {
     ) {
         let note = thread_action_note(&action);
         let request = self.review.thread_action_request(action);
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         self.run_off_thread(
             cx,
-            move || request.run(github.as_ref()),
+            move || request.run(host.as_ref()),
             move |this, outcome, cx| {
                 let result = this.change(cx, |review| review.apply_thread_action(outcome));
                 if let (ThreadActionResult::Done, Some(note)) = (&result, note) {
@@ -724,10 +724,10 @@ impl ReviewSession {
             Ok(request) => request,
             Err(refusal) => return on_done(&FinishResult::Refused(refusal), cx),
         };
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         self.run_off_thread(
             cx,
-            move || request.run(github.as_ref()),
+            move || request.run(host.as_ref()),
             move |this, outcome, cx| {
                 let result = this.change(cx, |review| review.apply_finish(outcome));
                 if result == FinishResult::Sent {
@@ -787,9 +787,10 @@ impl ReviewSession {
             return;
         };
         cx.notify();
+        let host = Arc::clone(&self.host);
         self.run_off_thread(
             cx,
-            move || job.run(&GhCloner),
+            move || job.run(host.as_ref()),
             |this, cloned, cx| match cloned {
                 Ok(()) => {
                     this.clone_offer = None;
@@ -830,11 +831,9 @@ impl ReviewSession {
         let folders = self.tour_work.repinner.folders.clone();
         let run: Box<dyn FnOnce() -> JobOutcome + Send> = match started {
             StartedJob::Repin => {
-                let (repinner, github) = (
-                    Arc::clone(&self.tour_work.repinner),
-                    Arc::clone(&self.github),
-                );
-                Box::new(move || JobOutcome::Repin(repinner.run(github.as_ref())))
+                let (repinner, host) =
+                    (Arc::clone(&self.tour_work.repinner), Arc::clone(&self.host));
+                Box::new(move || JobOutcome::Repin(repinner.run(host.as_ref())))
             }
             StartedJob::Refresh => self.refresh_reporting_activity(cx),
             StartedJob::Reload => {
@@ -847,9 +846,8 @@ impl ReviewSession {
             }
             StartedJob::MoveToPr(started) => {
                 let mover = crate::open_review::mover_of(&folders, &started.change_set);
-                Box::new(move || {
-                    JobOutcome::MoveToPr(mover.run(&started.offer, &GitHub::from_env()))
-                })
+                let host = crate::opened_subject::adapter_of(started.offer.pr.host);
+                Box::new(move || JobOutcome::MoveToPr(mover.run(&started.offer, host.as_ref())))
             }
             StartedJob::DropReview(change_set) => Box::new(move || {
                 JobOutcome::DropReview(OpenedChangeSet::new(&change_set, &folders).drop_review())
@@ -1064,7 +1062,7 @@ impl ReviewSession {
     }
 
     /// Shows the open screen and the sidebar as if every step were read, without ticking anything,
-    /// so no viewed mark goes to GitHub. The next rebuild of the rows undoes it.
+    /// so no viewed mark goes to the host. The next rebuild of the rows undoes it.
     #[cfg(feature = "snapshots")]
     pub fn stage_all_read(&mut self, cx: &mut Context<Self>) {
         use crate::viewer::{Station, StationHealth, StationKind};
@@ -1091,8 +1089,8 @@ impl ReviewSession {
         cx.notify();
     }
 
-    /// The GitHub station as it stands while viewed marks wait to go through, drawn only: nothing is
-    /// ticked, so no mark goes to GitHub.
+    /// The host station as it stands while viewed marks wait to go through, drawn only: nothing is
+    /// ticked, so no mark goes to the host.
     #[cfg(feature = "snapshots")]
     pub fn stage_viewed_wait(&mut self, is_staged: bool, cx: &mut Context<Self>) {
         self.is_viewed_wait_staged = is_staged;
@@ -1101,7 +1099,7 @@ impl ReviewSession {
     }
 
     /// The sidebar of a re-review of someone else's PR that others reviewed too, drawn only: nothing
-    /// is asked of GitHub, so no 👀 goes on or off. The next rebuild of the rows undoes it.
+    /// is asked of the host, so no 👀 goes on or off. The next rebuild of the rows undoes it.
     #[cfg(feature = "snapshots")]
     pub fn stage_re_review(&mut self, stage: StagedReReview, cx: &mut Context<Self>) {
         self.staged_re_review = Some(stage);
@@ -1192,7 +1190,7 @@ impl ReviewSession {
     }
 
     /// The last screen as it ends when steps were passed unread, without ticking anything, so no
-    /// viewed mark goes to GitHub. The next rebuild of the rows undoes it.
+    /// viewed mark goes to the host. The next rebuild of the rows undoes it.
     #[cfg(feature = "snapshots")]
     pub fn stage_unread_end(&mut self, cx: &mut Context<Self>) {
         self.is_unread_end_staged = true;
@@ -1211,18 +1209,27 @@ impl ReviewSession {
         );
     }
 
-    /// The title bar as GitHub would have it say `status`; `unstage_pr_status` puts back what was read.
+    /// The title bar as the host would have it say `status`; `unstage_pr_status` puts back what was read.
     #[cfg(feature = "snapshots")]
-    pub fn stage_pr_status(&mut self, status: crate::viewer::PrStatus, cx: &mut Context<Self>) {
+    pub fn stage_pr_status(
+        &mut self,
+        status: crate::viewer::PrStatus,
+        merging: crate::viewer::Merging,
+        cx: &mut Context<Self>,
+    ) {
         if self.pr_status_before_staging.is_none() {
-            self.pr_status_before_staging = self.review.pr_status().cloned();
+            self.pr_status_before_staging = self
+                .review
+                .pr_status()
+                .map(|before| (before, self.review.merging()));
         }
         self.review.pr_status_is(status.clone());
-        self.staged_pr_status = Some(status);
+        self.review.pr_merging_is(merging);
+        self.staged_pr_status = Some((status, merging));
         cx.notify();
     }
 
-    /// The title bar as GitHub would have it name `issues`; `unstage_related_issues` takes them off.
+    /// The title bar as the host would have it name `issues`; `unstage_related_issues` takes them off.
     #[cfg(feature = "snapshots")]
     pub fn stage_related_issues(
         &mut self,
@@ -1237,7 +1244,7 @@ impl ReviewSession {
         cx.notify();
     }
 
-    /// The title bar as GitHub would have it name `origin`; `unstage_pr_origin` takes it off.
+    /// The title bar as the host would have it name `origin`; `unstage_pr_origin` takes it off.
     #[cfg(feature = "snapshots")]
     pub fn stage_pr_origin(
         &mut self,
@@ -1280,8 +1287,9 @@ impl ReviewSession {
 
     #[cfg(feature = "snapshots")]
     fn keep_staged_pr_status(&mut self) {
-        if let Some(status) = self.staged_pr_status.clone() {
+        if let Some((status, merging)) = self.staged_pr_status.clone() {
             self.review.pr_status_is(status);
+            self.review.pr_merging_is(merging);
         }
     }
 
@@ -1289,8 +1297,11 @@ impl ReviewSession {
     #[cfg(feature = "snapshots")]
     pub fn unstage_pr_status(&mut self, cx: &mut Context<Self>) {
         self.staged_pr_status = None;
-        if let Some(before) = self.pr_status_before_staging.take() {
-            self.review.pr_status_is(before);
+        if let Some((status, merging)) = self.pr_status_before_staging.take() {
+            self.review.pr_status_is(status);
+            if let Some(merging) = merging {
+                self.review.pr_merging_is(merging);
+            }
         }
         cx.notify();
     }
@@ -1302,6 +1313,7 @@ impl ReviewSession {
             self.review.basic_tour_of_same_pin(),
             self.source.as_ref(),
             self.review.state_file(),
+            crate::viewer::HostCapabilities::of(self.host.as_ref()),
         ) else {
             return;
         };
@@ -1311,13 +1323,14 @@ impl ReviewSession {
     }
 
     /// The PR in Basic mode with its first two files read. The ticks go into the state file before
-    /// the review opens on it, so no viewed mark is wished for and nothing reaches GitHub.
+    /// the review opens on it, so no viewed mark is wished for and nothing reaches the host.
     #[cfg(feature = "snapshots")]
     pub fn stage_basic_read(&mut self, cx: &mut Context<Self>) {
         let Ok(probe) = Review::open_basic(
             self.review.basic_tour_of_same_pin(),
             self.source.as_ref(),
             self.review.state_file(),
+            crate::viewer::HostCapabilities::of(self.host.as_ref()),
         ) else {
             return;
         };
@@ -1474,7 +1487,7 @@ impl ReviewSession {
     }
 
     /// The local review whose branch has an open PR, so its sidebar offers Move to the PR. Looking for
-    /// the PR on GitHub would answer nothing for the sample repo, so the answer is given here.
+    /// the PR on the host would answer nothing for the sample repo, so the answer is given here.
     #[cfg(feature = "snapshots")]
     pub fn stage_local_move_offer(&mut self, cx: &mut Context<Self>) {
         self.stage_local(cx);
@@ -1563,12 +1576,15 @@ impl ReviewSession {
         self.start_background_work(cx);
     }
 
-    /// Three reads that fail the way a GitHub outage fails them, through the review's own path.
+    /// Three reads that fail the way a host outage fails them, through the review's own path.
     #[cfg(feature = "snapshots")]
     pub fn stage_outage(&mut self, cx: &mut Context<Self>) {
-        use crate::viewer::{GitHubError, OutageCause, Read};
+        use crate::viewer::{HostError, OutageCause, Read};
 
-        let outage = GitHubError::NotAnswering(OutageCause::ServerError(503));
+        let outage = HostError::NotAnswering(
+            crate::pull_request::HostSite::GitHub,
+            OutageCause::ServerError(503),
+        );
         self.review.could_not_read(Read::PrHead, &outage);
         self.review.could_not_read(Read::PrDescription, &outage);
         self.review.threads_not_read(&outage);
@@ -1578,7 +1594,7 @@ impl ReviewSession {
     #[cfg(feature = "snapshots")]
     pub fn unstage_outage(&mut self, cx: &mut Context<Self>) {
         self.review
-            .clear_problem(crate::viewer::ProblemKind::GitHubNotAnswering);
+            .clear_problem(crate::viewer::ProblemKind::HostNotAnswering);
         self.show_problems(cx);
     }
 
@@ -1713,7 +1729,7 @@ impl ReviewSession {
         .detach();
         self.follow_tour_agent(cx);
         self.resume_ai_review(cx);
-        self.review.pull_from_github();
+        self.review.pull_from_host();
         self.run_due_work(cx);
     }
 
@@ -1973,12 +1989,14 @@ impl ReviewSession {
         }
         #[cfg(feature = "snapshots")]
         if self.is_viewed_wait_staged {
-            use crate::viewer::{Station, StationHealth, StationKind};
-            rows.stations.stage(Station::new(
-                StationKind::GitHub,
-                StationHealth::Waiting,
-                "3 viewed marks waiting · 4 min",
-            ));
+            use crate::viewer::{Station, StationHealth};
+            if let Some(pr) = self.review.subject().pull_request() {
+                rows.stations.stage(Station::of_host(
+                    pr.host,
+                    StationHealth::Waiting,
+                    "3 viewed marks waiting · 4 min",
+                ));
+            }
         }
         #[cfg(feature = "snapshots")]
         if let Some(station) = &self.staged_station {
@@ -1991,10 +2009,10 @@ impl ReviewSession {
         let Some(request) = self.change(cx, |review| review.start_adding_to_notes(subject)) else {
             return;
         };
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         self.run_off_thread(
             cx,
-            move || request.run(github.as_ref()),
+            move || request.run(host.as_ref()),
             |this, outcome, cx| {
                 // A save that is refused or fails is named by the review's problems.
                 this.change(cx, |review| review.apply_to_notes(outcome))
@@ -2139,10 +2157,10 @@ impl ReviewSession {
         let Some(removal) = self.review.close() else {
             return;
         };
-        let github = Arc::clone(&self.github);
+        let host = Arc::clone(&self.host);
         let (landed, has_landed) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            if let Err(error) = removal.run(github.as_ref()) {
+            if let Err(error) = removal.run(host.as_ref()) {
                 eprintln!("could not take the reviewing mark off: {error:#}");
             }
             // The quit stopped waiting once the wait ran out, so nobody may be listening.
@@ -2169,7 +2187,7 @@ impl ReviewSession {
 fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
     let done = match mode {
         SendMode::AddToReview => "added to your review",
-        SendMode::CommentNow => "posted on GitHub",
+        SendMode::CommentNow => "posted",
         SendMode::SendNow => "kept as a task",
         SendMode::AddToTasks => return format!("{what} queued for Send tasks"),
     };

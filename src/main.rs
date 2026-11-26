@@ -16,9 +16,8 @@ use guided_review::findings_check;
 use guided_review::findings_done::findings_done;
 use guided_review::fix_reply::fix_reply;
 use guided_review::git_checkout::GitCheckouts;
-use guided_review::github::GitHub;
 use guided_review::instructions::SummaryInstructions;
-use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject};
+use guided_review::opened_subject::{OpenedChangeSet, OpenedSubject, host_of};
 use guided_review::outline::Outline;
 use guided_review::platform::{EntryPlaced, IN_LOGIN_SHELL, write_desktop_entry_templates};
 use guided_review::pull_request::PullRequestUrl;
@@ -101,8 +100,8 @@ enum Command {
     /// Write the files the release archives' Desktop entries are made of, for every OS
     #[command(hide = true)]
     DesktopEntryTemplate { out: std::path::PathBuf },
-    /// Answer a reviewer's hand-off on its GitHub thread, the reply starting with the robot mark, or a
-    /// question on a finding on its thread
+    /// Answer a reviewer's hand-off on its thread on the host, the reply starting with the robot mark,
+    /// or a question on a finding on its thread
     AgentReply {
         subject: ReviewSubject,
         /// The hand-off id from the message, like `h0`, or the finding's id
@@ -210,9 +209,13 @@ fn main() -> anyhow::Result<()> {
             let folders = AppFolders::running()?;
             let said = match ReplyTo::of(&folders, &subject, &id)? {
                 ReplyTo::Finding(finding) => why_reply(&folders, &subject, &finding, &reply)?,
-                ReplyTo::HandOff(hand_off) => {
-                    agent_reply(&GitHub::from_env(), &folders, &subject, hand_off, &reply)?
-                }
+                ReplyTo::HandOff(hand_off) => agent_reply(
+                    host_of(&subject).as_ref(),
+                    &folders,
+                    &subject,
+                    hand_off,
+                    &reply,
+                )?,
             };
             println!("{said}");
             Ok(())
@@ -275,11 +278,13 @@ impl std::str::FromStr for OpenTarget {
         if std::path::Path::new(text).exists() {
             return Ok(Self::Folder(text.into()));
         }
-        text.parse().map(Self::Subject).map_err(|error: anyhow::Error| {
-            anyhow::anyhow!(
-                "{text} is neither a GitHub PR link, a local change set key nor a folder ({error:#})"
-            )
-        })
+        text.parse()
+            .map(Self::Subject)
+            .map_err(|error: anyhow::Error| {
+                anyhow::anyhow!(
+                    "{text} is neither a PR link, a local change set key nor a folder ({error:#})"
+                )
+            })
     }
 }
 

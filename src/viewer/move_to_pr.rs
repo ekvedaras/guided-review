@@ -38,18 +38,18 @@ pub struct PrMover {
 }
 
 impl PrMover {
-    /// Blocks on git and on GitHub; the app runs it off the main thread. Nothing is posted: the open
+    /// Blocks on git and on the host; the app runs it off the main thread. Nothing is posted: the open
     /// comments become drafts the reviewer sends or drops.
-    pub fn run(&self, offer: &MoveOffer, github: &dyn ChangeTipsPort) -> anyhow::Result<()> {
-        self.carry(offer, github)?;
+    pub fn run(&self, offer: &MoveOffer, host: &dyn ChangeTipsPort) -> anyhow::Result<()> {
+        self.carry(offer, host)?;
         self.forget_local()
     }
 
     /// Everything of the local review that the PR's review takes, saved in the PR's state file. The
     /// local review is not touched, so a crash after this and before `forget_local` carries again.
-    pub fn carry(&self, offer: &MoveOffer, github: &dyn ChangeTipsPort) -> anyhow::Result<()> {
+    pub fn carry(&self, offer: &MoveOffer, host: &dyn ChangeTipsPort) -> anyhow::Result<()> {
         let pr = ReviewSubject::from(offer.pr.clone());
-        self.have_a_tour_of(offer, &pr, github)?;
+        self.have_a_tour_of(offer, &pr, host)?;
         let pr_tour = Tour::load_of(&Tour::shown_path_for(&self.folders, &pr), &pr)?;
         let source = (self.pick_code_source)(&offer.pr, &pr_tour.pin().pinned_tips())?;
         let moved = self.worked_out(&pr_tour, source.as_ref())?;
@@ -76,12 +76,12 @@ impl PrMover {
         &self,
         offer: &MoveOffer,
         pr: &ReviewSubject,
-        github: &dyn ChangeTipsPort,
+        host: &dyn ChangeTipsPort,
     ) -> anyhow::Result<()> {
         if ToursOnDisk::of(&self.folders, pr) != ToursOnDisk::None {
             return Ok(());
         }
-        let tips = github.pull_request_tips(&offer.pr)?;
+        let tips = host.pull_request_tips(&offer.pr)?;
         let source = (self.pick_code_source)(&offer.pr, &tips)?;
         make_basic_tour(&self.folders, pr, source.as_ref(), &tips, &offer.title)?;
         Ok(())

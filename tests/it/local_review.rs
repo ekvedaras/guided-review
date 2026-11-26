@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::code_source::CodeSource;
@@ -11,7 +11,7 @@ use guided_review::local_git::LocalGit;
 use guided_review::local_work_tree::LocalWorkTree;
 use guided_review::open_review::open_review;
 use guided_review::opened_subject::OpenedChangeSet;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::{HostSite, HostedRepo, RepoName, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::review_subject::{BranchName, WorkTreeRoot};
 use guided_review::tour::{BasicTour, Tour, TourPin};
@@ -72,7 +72,13 @@ impl Feature {
         let facts = work_tree
             .facts(&change_set, &tour.pin.pinned_tips())
             .unwrap();
-        let mut review = Review::open_basic(tour, &source, self.state_file()).unwrap();
+        let mut review = Review::open_basic(
+            tour,
+            &source,
+            self.state_file(),
+            guided_review::viewer::HostCapabilities::of(&guided_review::viewer::NoHost::default()),
+        )
+        .unwrap();
         review.local_facts_are(facts);
         review.working_copy_is(WorkingCopy::of(source.working_tree_is_at(&head)));
         review
@@ -120,20 +126,27 @@ impl PullRequest {
                 pr: PR.to_owned(),
                 local: None,
                 repo: None,
+                host: None,
                 base: Sha::new(&self.base),
                 head: Sha::new(&self.head),
                 previous_head: None,
             },
             "Orders cost two".to_owned(),
         );
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_subject(
             &self.repo.folders(),
             &PR.parse::<ReviewSubject>().unwrap(),
         );
-        Review::open_basic(tour, &source, state_file).unwrap()
+        Review::open_basic(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 }
 
@@ -173,7 +186,13 @@ fn the_overview_names_the_repo_folder_branch_default_branch_commits_and_uncommit
     assert_eq!(page.description, None);
     assert_eq!(page.title, "feature");
     let local = page.local.unwrap();
-    assert_eq!(local.repo, Some(RepoName::new("acme", "shop")));
+    assert_eq!(
+        local.origin,
+        Some(HostedRepo {
+            host: HostSite::GitHub,
+            repo: RepoName::new("acme", "shop")
+        })
+    );
     assert_eq!(
         local.folder,
         WorkTreeRoot::new(feature.repo.path().canonicalize().unwrap()).unwrap()
@@ -378,29 +397,29 @@ fn only_a_pr_can_be_opened_on_github() {
     let local = feature.open();
     let pr = PullRequest::changing_a_file().open();
 
-    assert!(!local.can_open_on_github());
+    assert!(!local.can_open_on_host());
     assert_eq!(
-        local.decide(Intent::OpenOnGitHub, WindowMoment::default()),
+        local.decide(Intent::OpenOnHost, WindowMoment::default()),
         Effect::Nothing
     );
-    assert!(pr.can_open_on_github());
+    assert!(pr.can_open_on_host());
 }
 
 #[test]
 fn a_local_review_reads_and_sends_nothing_on_github_whatever_the_reviewer_does() {
     let feature = Feature::with_work_in_progress();
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", "snapshot", &sent);
+    let host = FakeHost::with_pull("main-tip", "snapshot", &sent);
     let source = feature.source();
     let mut review = feature.open();
 
-    review.pull_from_github();
-    let ran = drive_without_agents(&mut review, &github, &source, Instant::now());
+    review.pull_from_host();
+    let ran = drive_without_agents(&mut review, &host, &source, Instant::now());
     review.tick_file(&file_path("README.md")).unwrap();
     review.untick_file(&file_path("README.md")).unwrap();
     review.tick_file(&file_path("notes.txt")).unwrap();
-    review.pull_from_github();
-    let ran_after = drive_without_agents(&mut review, &github, &source, Instant::now());
+    review.pull_from_host();
+    let ran_after = drive_without_agents(&mut review, &host, &source, Instant::now());
     let finishing = review.finish_review_request(ReviewVerdict::Comment, "");
 
     assert_eq!(
@@ -422,7 +441,7 @@ fn a_local_review_reads_and_sends_nothing_on_github_whatever_the_reviewer_does()
     assert!(!review.not_synced());
     assert_eq!(review.sync_banner(), None);
     assert!(finishing.is_err());
-    assert_eq!(sent.github_calls(), []);
+    assert_eq!(sent.host_calls(), []);
     assert_eq!(review.problems(), []);
 }
 
@@ -550,9 +569,13 @@ fn a_rebuilt_local_review_reads_the_clone_again() {
         &feature.subject(),
     ))
     .unwrap();
-    let mut reloaded = ReviewBuilder::new(&feature.repo.folders(), &feature.subject())
-        .build(Tour::Basic(tour), &feature.source())
-        .unwrap();
+    let mut reloaded = ReviewBuilder::new(
+        &feature.repo.folders(),
+        &feature.subject(),
+        guided_review::viewer::HostCapabilities::of(&guided_review::viewer::NoHost::default()),
+    )
+    .build(Tour::Basic(tour), &feature.source())
+    .unwrap();
 
     reloaded.carry_on_from(shown);
 
@@ -638,7 +661,7 @@ fn a_local_reviews_github_port_refuses_every_call() {
     let opened = opened_by_the_app(&feature);
 
     let tips = opened
-        .github
+        .host
         .pull_request_tips(&"https://github.com/acme/shop/pull/7".parse().unwrap());
 
     assert!(tips.is_err());

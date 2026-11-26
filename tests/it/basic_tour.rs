@@ -1,6 +1,6 @@
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{RepoName, Sha};
+use guided_review::pull_request::Sha;
 use guided_review::tour::{BasicTour, TourPin};
 use guided_review::viewer::{
     FolderPath, JumpPlace, NextScreen, OverviewStats, PageRow, ReadingPlace, Review, ReviewChange,
@@ -21,20 +21,27 @@ fn open_basic(repo: &FixtureRepo, files: &[&str]) -> Review {
             pr: "https://github.com/acme/shop/pull/7".to_owned(),
             local: None,
             repo: None,
+            host: None,
             base: Sha::new(&base),
             head: Sha::new(&head),
             previous_head: None,
         },
         "Orders cost two".to_owned(),
     );
-    let source = LocalGit::find(&RepoName::new("acme", "shop"), repo.path())
+    let source = LocalGit::find(&crate::support::shop_on_github(), repo.path())
         .unwrap()
         .unwrap();
     let state_file = ReviewStateFile::for_subject(
         &repo.folders(),
         &"https://github.com/acme/shop/pull/7".parse().unwrap(),
     );
-    Review::open_basic(tour, &source, state_file).unwrap()
+    Review::open_basic(
+        tour,
+        &source,
+        state_file,
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap()
 }
 
 const TREE_FILES: [&str; 5] = [

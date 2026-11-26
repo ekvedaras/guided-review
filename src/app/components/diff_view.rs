@@ -83,7 +83,7 @@ pub struct CodeSelectionHooks {
 // grouped in hunks like on GitHub, the bands between hunks, and the box's bottom edge. Each row is one
 // item of the screen's list, so only the rows on screen are drawn.
 
-/// One line of a piece: a gutter that opens the line in the IDE or on GitHub, the "+" that starts a comment, and the
+/// One line of a piece: a gutter that opens the line in the IDE or on the host, the "+" that starts a comment, and the
 /// code as one styled text.
 #[derive(IntoElement)]
 pub struct DiffRow {

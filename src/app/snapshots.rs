@@ -18,7 +18,7 @@ use crate::open_review::AskSetup;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
-    AgentLaunch, AgentLauncher, AgentLinkOff, AgentPort, AgentStatus, AppAgent, GitHubError,
+    AgentLaunch, AgentLauncher, AgentLinkOff, AgentPort, AgentStatus, AppAgent, HostError,
     LiveTerminal, PrAuthor, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort,
     ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort, TourAgentStart, TurnStopper,
     WhyListed,
@@ -176,7 +176,7 @@ impl Global for StagedGallery {}
 pub struct SamplePullRequests;
 
 impl RelevantPullRequestsPort for SamplePullRequests {
-    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, GitHubError> {
+    fn relevant_pull_requests(&self) -> Result<RelevantPullRequests, HostError> {
         const OURS: &str = "ekvedaras/guided-review";
         const STOREFRONT: &str = "acme/storefront-checkout-and-payments-gateway";
         let sample = [

@@ -194,7 +194,8 @@ fn thread(sample: ThreadSample) -> impl IntoElement {
         ThreadDrafts {
             can_reply_now: true,
             can_ask_agent: true,
-            sending: Sending::GitHub,
+            can_react: true,
+            sending: Sending::Host(crate::pull_request::HostSite::GitHub),
             reply: is_open.then(|| "Agreed, and the test names it.".to_owned()),
             edits: BTreeMap::new(),
         },

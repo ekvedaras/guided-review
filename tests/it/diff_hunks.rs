@@ -1,6 +1,5 @@
 use crate::support::FixtureRepo;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::RepoName;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     DiffHunk, FileBlock, LineKind, LineLocation, Review, ReviewStateFile, Side, hidden_lines_after,
@@ -46,14 +45,20 @@ impl Pull {
             "steps": [{"id": "notes", "title": "Notes", "why": "because", "pieces": pieces, "children": []}],
         }))
         .unwrap();
-        let source = LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        let source = LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap();
         let state_file = ReviewStateFile::for_subject(
             &self.repo.folders(),
             &"https://github.com/acme/shop/pull/7".parse().unwrap(),
         );
-        let mut review = Review::open(tour, &source, state_file).unwrap();
+        let mut review = Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
         review.go_forward();

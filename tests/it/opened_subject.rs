@@ -3,7 +3,7 @@ use guided_review::opened_subject::OpenedSubject;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 
-use crate::support::FixtureRepo;
+use crate::support::{FixtureRepo, file_path};
 
 /// `feature` one commit ahead of `main`, with a file changed on disk.
 fn feature_with_work_in_progress() -> FixtureRepo {
@@ -107,4 +107,14 @@ fn repin_moves_a_local_tour_and_then_its_snapshot_ref_to_a_new_snapshot_of_the_f
         opened(&repo).code_to_read().unwrap().tips.head.as_str(),
         after
     );
+}
+
+#[test]
+fn a_local_review_opened_as_the_app_opens_it_offers_no_host_viewed_marks() {
+    let repo = feature_with_work_in_progress();
+    let (mut review, _source) = opened(&repo).open_review().unwrap();
+
+    review.tick_file(&file_path("src/cart.rs")).unwrap();
+
+    assert!(!review.not_synced());
 }

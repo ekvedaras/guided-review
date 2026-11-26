@@ -2,17 +2,18 @@ use super::thread_actions::TourFreshness;
 use crate::pull_request::{PullRequestUrl, Sha};
 
 use super::ask::Ask;
+use super::capability::{Capability, HostCapabilities};
 use super::comment_send::{CommentOutcome, CommentRequest, Origin, Outcome};
 use super::comments::Audience;
 use super::comments::{
     CommentDraft, CommentPlace, CommentProblem, CommentRefusal, CommentResult, SendMode,
 };
 use super::diff_line::DiffLine;
+use super::finish_review::ReviewVerdict;
 use super::finish_review::{FinishOutcome, FinishRefusal, FinishRequest, FinishResult};
 use super::hand_offs::{SentComment, SentFrom};
 use super::line_location::{LineLocation, Side};
 use super::local_thread_store::ThreadHome;
-use super::ports::ReviewVerdict;
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -26,23 +27,25 @@ use crate::file_path::FilePath;
 use crate::findings::Finding;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Everything the reviewer writes to GitHub: the drag that opens a comment box, every text box
-/// from its opening to its send, and what GitHub said about the pending review and the PR's author.
+/// Everything the reviewer writes to the host: the drag that opens a comment box, every text box
+/// from its opening to its send, and what the host said about the pending review and the PR's author.
 /// The saved texts live in the review state and change only through its gate, `SavedState`.
 #[derive(Default)]
 pub(super) struct CommentDesk {
     selection: Option<RowSelection>,
-    /// "Comment now" is only offered when GitHub is known to have none.
+    /// "Comment now" is only offered when the host is known to have none.
     pending_review: PendingReview,
     /// Approve and Request changes are only offered when the PR is known to be someone else's.
     authorship: PullRequestAuthorship,
     /// The text of each of the viewer's comments being edited. Not saved: an edit not sent is
-    /// given up with the app, as the comment on GitHub is still whole.
+    /// given up with the app, as the comment on the host is still whole.
     comment_edits: BTreeMap<CommentId, String>,
     /// The comment the reviewer was asked to confirm the deletion of. Not saved: a question
     /// left open is given up with the app.
     delete_asked: Option<CommentId>,
     boxes: BoxActivity,
+    /// What the PR's host offers, so a verdict it lacks is refused before anything is sent.
+    host: HostCapabilities,
 }
 
 /// What the comment boxes are doing. Not saved, but kept when a re-pin reopens the review.
@@ -50,7 +53,7 @@ pub(super) struct CommentDesk {
 struct BoxActivity {
     /// The comment box that takes the keys.
     composing: Option<CommentPlace>,
-    /// Comment boxes whose text is on its way to GitHub.
+    /// Comment boxes whose text is on its way to the host.
     sending: HashSet<CommentPlace>,
     /// Sending comment boxes whose keys another box took meanwhile; one that does not go leaves
     /// them there.
@@ -91,7 +94,7 @@ enum PullRequestAuthorship {
     OwnedBySomeoneElse,
 }
 
-/// One box the reviewer writes text in, named by what its text becomes on GitHub.
+/// One box the reviewer writes text in, named by what its text becomes on the host.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TextBox {
     /// A new comment on lines or on a file.
@@ -130,11 +133,18 @@ pub enum BoxState {
     Idle,
     /// Takes the keys.
     Composing,
-    /// On its way to GitHub.
+    /// On its way to the host.
     Sending,
 }
 
 impl CommentDesk {
+    pub(super) fn for_host(host: HostCapabilities) -> Self {
+        Self {
+            host,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn pending_review_is(&mut self, exists: bool) {
         self.pending_review = PendingReview::exists(exists);
     }
@@ -153,6 +163,14 @@ impl CommentDesk {
 
     pub(super) fn can_approve_or_request_changes(&self) -> bool {
         self.authorship == PullRequestAuthorship::OwnedBySomeoneElse
+    }
+
+    pub(super) fn can_request_changes(&self) -> bool {
+        self.host.has(Capability::ChangeRequests) && self.can_approve_or_request_changes()
+    }
+
+    pub(super) fn can_react(&self) -> bool {
+        self.host.has(Capability::CommentReactions)
     }
 
     pub(super) fn can_finish_review(&self) -> bool {
@@ -471,6 +489,9 @@ impl CommentDesk {
             ThreadAction::DeleteComment { comment_id } => {
                 self.deletion_refusal(threads, comment_id)
             }
+            ThreadAction::SetReaction { .. } if !self.can_react() => {
+                Some(CommentRefusal::NotOffered)
+            }
             _ => None,
         };
         ThreadActionRequest {
@@ -668,7 +689,7 @@ impl CommentDesk {
                     }
                     state.drop_reply(thread_id);
                 });
-                // The reply is on GitHub; a draft that fails to clear is saved again with the next typing.
+                // The reply is on the host; a draft that fails to clear is saved again with the next typing.
                 if sent.is_err() {
                     state.save_with_next_typing();
                 }
@@ -709,6 +730,9 @@ impl CommentDesk {
         if judges && !self.can_approve_or_request_changes() {
             return Err(FinishRefusal::OwnPullRequest);
         }
+        if verdict == ReviewVerdict::RequestChanges && !self.host.has(Capability::ChangeRequests) {
+            return Err(FinishRefusal::NotOffered(Capability::ChangeRequests));
+        }
         let has_text = !body.trim().is_empty();
         let needs_text = match verdict {
             ReviewVerdict::Approve => false,
@@ -732,7 +756,7 @@ impl CommentDesk {
     ) -> FinishResult {
         if outcome.result == FinishResult::Sent {
             self.pending_review = PendingReview::Absent;
-            // The review is on GitHub; a body that fails to clear is saved again with the next typing.
+            // The review is on the host; a body that fails to clear is saved again with the next typing.
             if state.record(|state| state.write_finish_body("")).is_err() {
                 state.save_with_next_typing();
             }
@@ -742,7 +766,7 @@ impl CommentDesk {
 }
 
 /// For a send that ended after its review was dropped, as when the window switched to another PR:
-/// the comment reached GitHub, or failed, and its PR's state file must say so all the same.
+/// the comment reached the host, or failed, and its PR's state file must say so all the same.
 pub fn land_elsewhere(outcome: CommentOutcome, file: &ReviewStateFile) -> anyhow::Result<()> {
     file.update(|state| {
         CommentDesk::default().settle(state, outcome, (SentFrom::Elsewhere, None));

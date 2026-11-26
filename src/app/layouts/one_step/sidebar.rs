@@ -157,7 +157,7 @@ impl OneStepLayout {
             )
     }
 
-    /// The offer to clone the repo whose code comes from GitHub, with its folder picker.
+    /// The offer to clone the repo whose code comes from the host, with its folder picker.
     fn clone_offer_block(
         colors: &Colors,
         offer: &CloneOffer,

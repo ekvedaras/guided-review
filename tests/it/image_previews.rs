@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
 use crate::support::{FixtureRepo, file_path, png_of, svg_of};
 use guided_review::code_source::{BlobInfo, CodeSource, FileDiff};
 use guided_review::file_path::FilePath;
@@ -82,7 +82,7 @@ impl Pull {
 
     fn source(&self) -> CountingSource {
         CountingSource {
-            inner: LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+            inner: LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
                 .unwrap()
                 .unwrap(),
             blob_reads: AtomicUsize::new(0),
@@ -105,7 +105,13 @@ impl Pull {
         }))
         .unwrap();
         let state_file = ReviewStateFile::for_subject(&self.repo.folders(), &PR.parse().unwrap());
-        let mut review = Review::open(tour, source, state_file).unwrap();
+        let mut review = Review::open(
+            tour,
+            source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         review.go_forward();
         review
     }
@@ -324,7 +330,7 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
     let source = pull.source();
     let mut review = pull.open(&source);
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", &pull.head, &sent);
+    let host = FakeHost::with_pull("main-tip", &pull.head, &sent);
 
     let place = review
         .open_comment_box(CommentGesture::OnFile(&file_path("logo.png")))
@@ -334,12 +340,12 @@ fn a_file_comment_on_the_image_goes_through_the_comment_rules_as_a_file_thread()
         .type_in(&TextBox::Draft(place.clone()), "is the red intended?")
         .unwrap();
     let result = review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
 
     assert_eq!(result, Some(CommentResult::Sent));
     assert!(place.is_file_comment());
-    assert!(sent.github_calls().contains(&GitHubCall::AddThread {
+    assert!(sent.host_calls().contains(&HostCall::AddThread {
         pr: PR.parse().unwrap(),
         place,
         body: "is the red intended?".into()
@@ -374,10 +380,13 @@ fn github_names_a_blob_and_its_size_without_sending_the_bytes() {
         request
     });
 
-    let info = guided_review::github::GitHub::at(&url)
-        .code_source(&RepoName::new("acme", "shop"))
-        .blob_info_at(&Sha::new("abc123"), &file_path("assets/my logo.png"))
-        .unwrap();
+    let info = guided_review::viewer::HostedCodePort::code_of(
+        &guided_review::github::GitHub::at(&url),
+        &RepoName::new("acme", "shop"),
+    )
+    .unwrap()
+    .blob_info_at(&Sha::new("abc123"), &file_path("assets/my logo.png"))
+    .unwrap();
 
     assert_eq!((info.id.as_str(), info.size), ("980a0d5f", 4096));
     let request = asked.join().unwrap();

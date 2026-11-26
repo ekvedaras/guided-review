@@ -1,6 +1,6 @@
 use crate::support::graphql::serve_graphql;
 use guided_review::github::GitHub;
-use guided_review::viewer::{GitHubError, RelevantPullRequestsPort, WhyListed};
+use guided_review::viewer::{HostError, RelevantPullRequestsPort, WhyListed};
 
 const TEAMS: &str = include_str!("../fixtures/github/viewer_teams.json");
 const RELEVANT: &str = include_str!("../fixtures/github/relevant_pull_requests.json");
@@ -130,5 +130,103 @@ fn without_a_token_the_list_is_refused_with_the_reason() {
         .relevant_pull_requests()
         .unwrap_err();
 
-    assert!(matches!(error, GitHubError::NoAccess(_)), "{error:?}");
+    assert!(matches!(error, HostError::NoAccess(_)), "{error:?}");
+}
+
+mod merged_from_every_host {
+    use guided_review::viewer::{PrAuthor, RelevantPullRequest, RelevantPullRequests, WhyListed};
+
+    fn listed(url: &str, updated_at: &str) -> RelevantPullRequest {
+        RelevantPullRequest {
+            url: url.parse().unwrap(),
+            title: "Add the cart".to_owned(),
+            author: PrAuthor {
+                login: "ana".into(),
+                avatar_url: None,
+            },
+            is_draft: false,
+            updated_at: updated_at.to_owned(),
+            why_listed: WhyListed::Mine,
+        }
+    }
+
+    fn list(prs: Vec<RelevantPullRequest>, teams_left_out: &[&str]) -> RelevantPullRequests {
+        RelevantPullRequests {
+            pull_requests: prs,
+            teams_left_out: teams_left_out
+                .iter()
+                .map(|team| (*team).to_owned())
+                .collect(),
+        }
+    }
+
+    fn urls(merged: &RelevantPullRequests) -> Vec<String> {
+        merged
+            .pull_requests
+            .iter()
+            .map(|pr| pr.url.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn the_lists_of_every_host_are_one_list_newest_update_first() {
+        let first = list(
+            vec![
+                listed(
+                    "https://github.com/acme/shop/pull/3",
+                    "2026-11-05T10:00:00Z",
+                ),
+                listed(
+                    "https://github.com/acme/shop/pull/1",
+                    "2026-11-01T10:00:00Z",
+                ),
+            ],
+            &["acme/design"],
+        );
+        let second = list(
+            vec![listed(
+                "https://github.com/acme/api/pull/2",
+                "2026-11-03T10:00:00Z",
+            )],
+            &["acme/ops"],
+        );
+
+        let merged = RelevantPullRequests::merged([Ok::<_, String>(first), Ok(second)]).unwrap();
+
+        assert_eq!(
+            urls(&merged),
+            [
+                "https://github.com/acme/shop/pull/3",
+                "https://github.com/acme/api/pull/2",
+                "https://github.com/acme/shop/pull/1",
+            ]
+        );
+        assert_eq!(merged.teams_left_out, ["acme/design", "acme/ops"]);
+    }
+
+    #[test]
+    fn a_host_that_fails_leaves_the_others_listed() {
+        let answered = list(
+            vec![listed(
+                "https://github.com/acme/shop/pull/3",
+                "2026-11-05T10:00:00Z",
+            )],
+            &[],
+        );
+
+        let merged =
+            RelevantPullRequests::merged([Err("no token".to_owned()), Ok(answered)]).unwrap();
+
+        assert_eq!(urls(&merged), ["https://github.com/acme/shop/pull/3"]);
+    }
+
+    #[test]
+    fn the_list_fails_when_every_host_fails() {
+        let merged = RelevantPullRequests::merged([
+            Err::<RelevantPullRequests, _>("no token".to_owned()),
+            Err("network is down".to_owned()),
+        ]);
+
+        assert_eq!(merged, Err("no token".to_owned()));
+    }
 }

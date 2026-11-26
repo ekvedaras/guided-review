@@ -1,16 +1,14 @@
 //! The PR status the title bar shows: merged or closed, or while open, draft or ready and the checks
 //! rolled up into one word. What the reviewer may do about it is read alongside, so a button is
-//! offered only where GitHub would take the change.
+//! offered only where the host would take the change.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::merging::Merging;
-
 /// How often the checks are read again while one is running.
 pub const CHECKS_RECHECK: Duration = Duration::from_secs(30);
 
-/// Whether the PR is a draft, which GitHub does not let anyone merge.
+/// Whether the PR is a draft, which the host does not let anyone merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Readiness {
     Draft,
@@ -26,7 +24,7 @@ impl Readiness {
     }
 }
 
-/// The checks on the PR's head commit as GitHub rolls them up. Which check ran is on GitHub's page.
+/// The checks on the PR's head commit as the host rolls them up. Which check ran is on the host's page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Checks {
     /// The PR's repo runs none.
@@ -36,23 +34,11 @@ pub enum Checks {
     Failing,
 }
 
-impl Checks {
-    /// From the `state` of a commit's `statusCheckRollup`; `None` when the commit has none.
-    pub fn from_github_state(state: Option<&str>) -> Self {
-        match state {
-            None => Self::NoneRun,
-            Some("SUCCESS") => Self::Passing,
-            Some("FAILURE" | "ERROR") => Self::Failing,
-            Some(_) => Self::Running,
-        }
-    }
-}
-
 /// How many checks the title bar's list shows before it says how many more there are.
 pub const CHECKS_SHOWN: usize = 20;
 
-/// Where one check stands, in GitHub's words. In the order a list shows them: what needs the
-/// reviewer first. Whether the PR as a whole passes is GitHub's roll-up, `Checks`.
+/// Where one check stands, in the host's words. In the order a list shows them: what needs the
+/// reviewer first. Whether the PR as a whole passes is the host's roll-up, `Checks`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CheckState {
     Failing,
@@ -62,37 +48,12 @@ pub enum CheckState {
     Skipped,
 }
 
-impl CheckState {
-    /// From a check run's `status` and, once it completed, its `conclusion`. A cancelled or timed
-    /// out run did not pass, so it fails.
-    pub fn of_check_run(status: &str, conclusion: Option<&str>) -> Self {
-        if status != "COMPLETED" {
-            return Self::Running;
-        }
-        match conclusion {
-            Some("SUCCESS") => Self::Passing,
-            Some("NEUTRAL") => Self::Neutral,
-            Some("SKIPPED") => Self::Skipped,
-            _ => Self::Failing,
-        }
-    }
-
-    /// From the `state` of a commit status, which an external service posts.
-    pub fn of_status_context(state: &str) -> Self {
-        match state {
-            "SUCCESS" => Self::Passing,
-            "FAILURE" | "ERROR" => Self::Failing,
-            _ => Self::Running,
-        }
-    }
-}
-
 /// One check of the PR's head commit: a check run or a commit status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckRun {
     pub name: Arc<str>,
     pub state: CheckState,
-    /// Where its run is on GitHub (`detailsUrl` or `targetUrl`), when GitHub says.
+    /// Where its run is on the host (GitHub: `detailsUrl` or `targetUrl`), when the host says.
     pub page: Option<Arc<str>>,
 }
 
@@ -104,8 +65,9 @@ pub struct CheckList {
     pub hidden: usize,
 }
 
-/// What GitHub says of the PR right now. Draft or ready, the checks and merging mean something only
-/// while the PR is open; a merged or closed PR is only that.
+/// What the host says of the PR right now. Draft or ready and the checks mean something only while
+/// the PR is open; a merged or closed PR is only that. How it would merge is the merging port's
+/// (`MergingPort::pull_request_merging`), read only on a host that merges from the app.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrStatus {
     Open(OpenPrStatus),
@@ -154,7 +116,6 @@ pub struct OpenPrStatus {
     pub check_runs: Arc<[CheckRun]>,
     /// GitHub lets only the author and those with write access change it.
     pub viewer_may_change_readiness: bool,
-    pub merging: Merging,
 }
 
 impl OpenPrStatus {
@@ -177,7 +138,7 @@ impl OpenPrStatus {
         format!("{} · checks {checks}", self.label())
     }
 
-    /// Sorted by state and no further, so the order within a state is GitHub's.
+    /// Sorted by state and no further, so the order within a state is the host's.
     pub fn check_list(&self) -> CheckList {
         let mut sorted = self.check_runs.to_vec();
         sorted.sort_by_key(|check| check.state);

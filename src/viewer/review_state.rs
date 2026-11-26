@@ -9,7 +9,7 @@ use crate::app_folders::{AppFolders, remove_if_there};
 use crate::file_path::FilePath;
 use crate::findings::{Finding, FindingId};
 use crate::pieces::PieceId;
-use crate::pull_request::{PullRequestUrl, RepoName, Sha};
+use crate::pull_request::{HostedRepo, PullRequestUrl, Sha};
 use crate::repin::{Repin, RepinStatus};
 use crate::review_subject::{LOCAL_FILES_FOLDER, ReviewSubject};
 use crate::timestamp::UtcTimestamp;
@@ -124,13 +124,13 @@ pub struct ReviewState {
 struct ViewerSections {
     #[serde(default)]
     read_ticks: KeptSection<BTreeMap<StepId, ReadTick>>,
-    /// Per file, whether GitHub said viewed at the last sync. A pull reacts to changes against it.
-    #[serde(default)]
-    viewed_on_github: KeptSection<BTreeMap<FilePath, Viewed>>,
-    /// Viewed changes GitHub has not taken yet, newest wish per file.
+    /// Per file, whether the host said viewed at the last sync. A pull reacts to changes against it.
+    #[serde(default, rename = "viewed_on_github")]
+    viewed_on_host: KeptSection<BTreeMap<FilePath, Viewed>>,
+    /// Viewed changes the host has not taken yet, newest wish per file.
     #[serde(default)]
     unsent_viewed: KeptSection<BTreeMap<FilePath, Viewed>>,
-    /// When viewed marks started to wait for GitHub, in seconds since the epoch, so a restart keeps it.
+    /// When viewed marks started to wait for the host, in seconds since the epoch, so a restart keeps it.
     #[serde(default)]
     viewed_waiting_since: KeptSection<Option<u64>>,
     /// Ticks a re-pin took away; the step was read at that head, so it can show what changed since.
@@ -142,10 +142,10 @@ struct ViewerSections {
     /// What a re-pin took from the file ticks, as `read_before` does for steps.
     #[serde(default)]
     file_read_before: KeptSection<BTreeMap<FilePath, ReadTick>>,
-    /// After a re-pin GitHub's viewed state is taken as it is, so its "not viewed" for files
+    /// After a re-pin the host's viewed state is taken as it is, so its "not viewed" for files
     /// the new commits touched is not read as the reviewer unticking.
-    #[serde(default)]
-    github_baseline_due: KeptSection<bool>,
+    #[serde(default, rename = "github_baseline_due")]
+    host_baseline_due: KeptSection<bool>,
     /// A review agent was started and has not said findings-done since, so an idle one found
     /// again later has stopped without its findings, whatever an earlier run left in the file.
     #[serde(default)]
@@ -159,10 +159,10 @@ struct ViewerSections {
     /// Ask why: the threads under findings, with the review agent's answers.
     #[serde(default, skip_serializing_if = "no_finding_threads")]
     finding_threads: KeptSection<FindingThreads>,
-    /// Comments GitHub did not take, oldest first.
+    /// Comments the host did not take, oldest first.
     #[serde(default)]
     comment_queue: KeptSection<KeptEntries<QueuedComment>>,
-    /// The PR's body at the last pull, so the summary shows it before GitHub answers.
+    /// The PR's body at the last pull, so the summary shows it before the host answers.
     #[serde(default)]
     pr_description: KeptSection<String>,
     /// The comments sent with Ask agent and where each is with the tour agent.
@@ -347,15 +347,12 @@ impl ReviewState {
         let typed = &self.typed;
         let sections = [
             ("read_ticks", viewer.read_ticks.is_unread()),
-            ("viewed_on_github", viewer.viewed_on_github.is_unread()),
+            ("viewed_on_github", viewer.viewed_on_host.is_unread()),
             ("unsent_viewed", viewer.unsent_viewed.is_unread()),
             ("read_before", viewer.read_before.is_unread()),
             ("file_read_ticks", viewer.file_read_ticks.is_unread()),
             ("file_read_before", viewer.file_read_before.is_unread()),
-            (
-                "github_baseline_due",
-                viewer.github_baseline_due.is_unread(),
-            ),
+            ("github_baseline_due", viewer.host_baseline_due.is_unread()),
             ("ai_run_open", viewer.ai_run_open.is_unread()),
             ("finding_decisions", viewer.finding_decisions.is_unread()),
             ("fix_requests", viewer.fix_requests.is_unread()),
@@ -426,7 +423,7 @@ impl ReviewState {
             Some(earlier) if earlier.to_head == record.from_head => record.following(&earlier),
             _ => record,
         });
-        *self.viewer.github_baseline_due = true;
+        *self.viewer.host_baseline_due = true;
     }
 
     /// The head each file of a basic tour was last read at: its tick, or the tick a re-pin took away.
@@ -465,7 +462,7 @@ impl ReviewState {
         self.viewer.file_read_ticks.clear();
         self.viewer.file_read_before.clear();
         *self.last_repin = None;
-        *self.viewer.github_baseline_due = true;
+        *self.viewer.host_baseline_due = true;
     }
 
     /// A Refresh answered what the re-pin left open, so its marks go.
@@ -481,23 +478,23 @@ impl ReviewState {
         self.viewer.read_before.get(step)
     }
 
-    pub fn github_baseline_due(&self) -> bool {
-        *self.viewer.github_baseline_due
+    pub fn host_baseline_due(&self) -> bool {
+        *self.viewer.host_baseline_due
     }
 
-    /// GitHub's state replaces what was seen before; only wishes it does not match yet stay queued.
-    pub(super) fn take_github_baseline(
+    /// The host's state replaces what was seen before; only wishes it does not match yet stay queued.
+    pub(super) fn take_host_baseline(
         &mut self,
-        on_github: &BTreeMap<FilePath, Viewed>,
+        on_host: &BTreeMap<FilePath, Viewed>,
         wishes: &BTreeMap<FilePath, Viewed>,
     ) {
-        *self.viewer.viewed_on_github = on_github.clone();
+        *self.viewer.viewed_on_host = on_host.clone();
         *self.viewer.unsent_viewed = wishes
             .iter()
-            .filter(|(path, viewed)| self.was_viewed_on_github(path) != **viewed)
+            .filter(|(path, viewed)| self.was_viewed_on_host(path) != **viewed)
             .map(|(path, viewed)| (path.clone(), *viewed))
             .collect();
-        *self.viewer.github_baseline_due = false;
+        *self.viewer.host_baseline_due = false;
     }
 
     pub fn tick(&mut self, step: &StepId, head: &Sha) {
@@ -562,21 +559,21 @@ impl ReviewState {
         }
     }
 
-    pub(super) fn was_viewed_on_github(&self, path: &FilePath) -> Viewed {
+    pub(super) fn was_viewed_on_host(&self, path: &FilePath) -> Viewed {
         self.viewer
-            .viewed_on_github
+            .viewed_on_host
             .get(path)
             .copied()
             .unwrap_or(Viewed::No)
     }
 
-    pub(super) fn saw_on_github(&mut self, path: &FilePath, viewed: Viewed) {
-        self.viewer.viewed_on_github.insert(path.clone(), viewed);
+    pub(super) fn saw_on_host(&mut self, path: &FilePath, viewed: Viewed) {
+        self.viewer.viewed_on_host.insert(path.clone(), viewed);
     }
 
-    /// A wish that equals what GitHub already says needs no push, so it cancels the queued one.
+    /// A wish that equals what the host already says needs no push, so it cancels the queued one.
     pub(super) fn want_viewed(&mut self, path: &FilePath, viewed: Viewed) {
-        if self.was_viewed_on_github(path) == viewed {
+        if self.was_viewed_on_host(path) == viewed {
             self.viewer.unsent_viewed.remove(path);
         } else {
             self.viewer.unsent_viewed.insert(path.clone(), viewed);
@@ -596,7 +593,7 @@ impl ReviewState {
     }
 
     pub(super) fn sent_viewed(&mut self, path: &FilePath, viewed: Viewed) {
-        self.saw_on_github(path, viewed);
+        self.saw_on_host(path, viewed);
         if self.viewer.unsent_viewed.get(path) == Some(&viewed) {
             self.viewer.unsent_viewed.remove(path);
         }
@@ -1075,7 +1072,7 @@ impl ReviewStateFile {
     /// The folders any PR of the repo was last opened from, for the PRs the app knows. Unreadable files
     /// and folders count for nothing: this only looks for a clone to work in.
     pub fn folders_opened_from_in(folders: &AppFolders, pr: &PullRequestUrl) -> Vec<PathBuf> {
-        Self::folders_opened_from_repo(folders, &pr.repo)
+        Self::folders_opened_from_repo(folders, &pr.hosted_repo())
     }
 
     /// The folders any PR of any repo was last opened from, as far as the state files tell. Unreadable
@@ -1083,30 +1080,33 @@ impl ReviewStateFile {
     /// missed here is still found through the configured clone folders and the reviews on disk, and a
     /// state file that cannot be read is raised by the review that owns it when it is opened.
     pub fn folders_opened_from_any_repo(folders: &AppFolders) -> Vec<PathBuf> {
-        let subfolders = |parent: &Path| -> Vec<String> {
-            let mut names: Vec<String> = std::fs::read_dir(parent)
-                .into_iter()
-                .flatten()
-                .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-                .collect();
-            names.sort_unstable();
-            names
-        };
         let state_files = folders.state_files();
-        subfolders(&state_files)
+        let mut repos = Vec::new();
+        let mut unread: Vec<PathBuf> = subfolders(&state_files)
             .into_iter()
-            .filter(|owner| owner != LOCAL_FILES_FOLDER)
-            .flat_map(|owner| {
-                subfolders(&state_files.join(&owner))
-                    .into_iter()
-                    .map(move |name| RepoName::new(&owner, &name))
-            })
-            .flat_map(|repo| Self::folders_opened_from_repo(folders, &repo))
+            .filter(|folder| folder.as_os_str() != LOCAL_FILES_FOLDER)
+            .collect();
+        while let Some(folder) = unread.pop() {
+            match HostedRepo::of_files_folder(&folder) {
+                Some(repo) => repos.push(repo),
+                None => unread.extend(
+                    subfolders(&state_files.join(&folder))
+                        .into_iter()
+                        .map(|name| folder.join(name)),
+                ),
+            }
+        }
+        repos.sort_by(|a, b| {
+            (a.repo.namespace(), a.repo.name()).cmp(&(b.repo.namespace(), b.repo.name()))
+        });
+        repos
+            .iter()
+            .flat_map(|repo| Self::folders_opened_from_repo(folders, repo))
             .collect()
     }
 
-    fn folders_opened_from_repo(folders: &AppFolders, repo: &RepoName) -> Vec<PathBuf> {
-        let Ok(files) = std::fs::read_dir(folders.state_files().join(repo.to_string())) else {
+    fn folders_opened_from_repo(folders: &AppFolders, repo: &HostedRepo) -> Vec<PathBuf> {
+        let Ok(files) = std::fs::read_dir(folders.state_files().join(repo.files_folder())) else {
             return Vec::new();
         };
         let mut numbers: Vec<u64> = files
@@ -1117,7 +1117,8 @@ impl ReviewStateFile {
             .into_iter()
             .filter_map(|number| {
                 let other = PullRequestUrl {
-                    repo: repo.clone(),
+                    host: repo.host,
+                    repo: repo.repo.clone(),
                     number,
                 };
                 Self::for_subject(folders, &ReviewSubject::from(other))
@@ -1341,6 +1342,24 @@ impl AskStore for ReviewStateFile {
 
 /// What a move marks as read before its change, but not where the PR's review has a tick or a mark of
 /// its own.
+/// The folders in `parent` by name, sorted; none when it cannot be read.
+fn subfolders(parent: &Path) -> Vec<PathBuf> {
+    let mut names: Vec<PathBuf> = std::fs::read_dir(parent)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            entry
+                .file_type()
+                .ok()?
+                .is_dir()
+                .then(|| PathBuf::from(entry.file_name()))
+        })
+        .collect();
+    names.sort_unstable();
+    names
+}
+
 fn keep_read_before<'a, K: Ord + Clone + 'a>(
     marks: &mut BTreeMap<K, ReadTick>,
     ticks: &BTreeMap<K, ReadTick>,

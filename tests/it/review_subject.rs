@@ -192,6 +192,27 @@ mod on_disk {
     }
 
     #[test]
+    fn a_folder_a_pull_request_was_opened_from_reads_back_from_its_state_kept_where_it_always_was()
+    {
+        let home = tempfile::tempdir().unwrap();
+        let folders = folders_in(home.path());
+        let pr = subject("https://github.com/acme/shop/pull/7");
+        with_its_tour(&folders, &pr);
+        let opened_from = home.path().join("Code/shop");
+        std::fs::create_dir_all(&opened_from).unwrap();
+
+        ReviewStateFile::for_subject(&folders, &pr)
+            .remember_folder(&opened_from)
+            .unwrap();
+
+        assert!(folders.state_files().join("acme/shop/7.json").is_file());
+        assert_eq!(
+            ReviewStateFile::folders_opened_from_any_repo(&folders),
+            [opened_from]
+        );
+    }
+
+    #[test]
     fn a_local_reviews_state_is_saved_at_the_matching_path_under_the_state_folder() {
         let home = tempfile::tempdir().unwrap();
         let folders = folders_in(home.path());

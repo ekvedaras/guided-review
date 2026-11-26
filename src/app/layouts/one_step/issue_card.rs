@@ -1,4 +1,4 @@
-//! The card a hover of the title bar's issue button shows: what GitHub says of the issue, or for a
+//! The card a hover of the title bar's issue button shows: what the host says of the issue, or for a
 //! ticket, its link.
 
 use std::rc::Rc;
@@ -58,7 +58,7 @@ fn pill(colors: &Colors, text: &str) -> Div {
         .child(SharedString::from(text.to_owned()))
 }
 
-/// `details` and `body` are `None` for a ticket, and for an issue GitHub has not been read for yet.
+/// `details` and `body` are `None` for a ticket, and for an issue the host has not been read for yet.
 pub fn issue_card(
     colors: &Colors,
     link: &IssueLink,

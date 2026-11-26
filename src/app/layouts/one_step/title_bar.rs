@@ -47,9 +47,14 @@ impl OneStepLayout {
         let title = review.title().to_owned();
         let local_heading = review.local_heading().map(SharedString::from);
         let is_local = local_heading.is_some();
-        let can_open_on_github = review.can_open_on_github();
-        let status = review.pr_status().cloned();
+        let host = review
+            .subject()
+            .pull_request()
+            .map(|pr| pr.host)
+            .filter(|_| review.can_open_on_host());
+        let status = review.pr_status();
         let merge_in_flight = review.merge_in_flight();
+        let merging = review.merging();
         let jump = button(
             &colors,
             "title-bar-jump",
@@ -65,10 +70,10 @@ impl OneStepLayout {
         .child("Jump")
         .child(button_keys(&colors, ButtonKind::Ghost, Command::Jump, cx))
         .on_click(cx.listener(|this, _, window, cx| this.act(Intent::ToggleJump, window, cx)));
-        let github = can_open_on_github.then(|| {
+        let open_on_host = host.map(|host| {
             button(
                 &colors,
-                "title-bar-github",
+                "title-bar-open-on-host",
                 ButtonKind::Ghost,
                 ButtonSize::Small,
             )
@@ -78,14 +83,14 @@ impl OneStepLayout {
                 ButtonSize::Small,
                 Icon::ExternalLink,
             ))
-            .child("GitHub")
+            .child(host.name())
             .child(button_keys(
                 &colors,
                 ButtonKind::Ghost,
-                Command::OpenOnGitHub,
+                Command::OpenOnHost,
                 cx,
             ))
-            .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnGitHub, window, cx)))
+            .on_click(cx.listener(|this, _, window, cx| this.act(Intent::OpenOnHost, window, cx)))
         });
         let open_pr = review.can_open_pr().then(|| {
             button(
@@ -213,14 +218,16 @@ impl OneStepLayout {
                             }
                         }
                     }))
-                    .children(status.as_ref().and_then(PrStatus::open).and_then(|status| {
-                        merge_button(&colors, status.merging, merge_in_flight, cx)
-                    }))
+                    .children(
+                        merging.and_then(|merging| {
+                            merge_button(&colors, merging, merge_in_flight, cx)
+                        }),
+                    )
                     .child(div().flex_1())
                     .child(jump)
                     .children(self.issue_button(&colors, cx))
                     .children(open_pr)
-                    .children(github),
+                    .children(open_on_host),
             )
             .when(!is_writing_tour, |bar| {
                 bar.child(page_hairline(&colors, page_share))
@@ -647,7 +654,7 @@ impl OneStepLayout {
                         this.act(Intent::OpenCheck(past_the_list), window, cx);
                     })
                 })
-                .child(format!("and {} more on GitHub", list.hidden))
+                .child(format!("and {} more on the checks page", list.hidden))
         });
         popover(
             div()
@@ -727,8 +734,8 @@ fn closed_pr_chip(colors: &Colors, tone: Tone, mark: Icon, label: &'static str) 
 }
 
 /// Beside the PR status: Auto-merge, Auto-merge on or Merge now, as `Shift+M` would act; hidden
-/// where GitHub would refuse. A click is the key, so it too needs a second click within 10 s.
-/// From the confirming click until GitHub answers it is a chip saying what is under way, so there
+/// where the host would refuse. A click is the key, so it too needs a second click within 10 s.
+/// From the confirming click until the host answers it is a chip saying what is under way, so there
 /// is nothing to click twice.
 fn merge_button(
     colors: &Colors,

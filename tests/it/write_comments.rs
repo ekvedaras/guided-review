@@ -1,10 +1,10 @@
 use crate::support::FixtureRepo;
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeGitHub, GitHubCall, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostCall, HostFault, SentLog};
 use crate::support::work::drive_without_agents;
 use crate::support::{drafts, file_path, line, save_typing};
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName};
+use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
@@ -14,10 +14,6 @@ use guided_review::viewer::{
 };
 use serde_json::json;
 use std::time::Instant;
-
-fn thread_on_line_ten(body: &str) -> ReviewThread {
-    thread_on_line(10, body)
-}
 
 fn thread_on_line(number: usize, body: &str) -> ReviewThread {
     ReviewThread {
@@ -96,12 +92,12 @@ impl Pull {
         }
     }
 
-    fn github(&self) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", &self.head, &self.sent)
+    fn host(&self) -> FakeHost {
+        FakeHost::with_pull("main-tip", &self.head, &self.sent)
     }
 
-    fn github_at(&self, head: &str) -> FakeGitHub {
-        FakeGitHub::with_pull("main-tip", head, &self.sent)
+    fn host_at(&self, head: &str) -> FakeHost {
+        FakeHost::with_pull("main-tip", head, &self.sent)
     }
 
     fn pr(&self) -> PullRequestUrl {
@@ -113,15 +109,15 @@ impl Pull {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }
 
     /// What the window coming to the front does: GitHub is read again and the queue is sent.
-    fn come_back(&self, review: &mut Review, github: &FakeGitHub) -> Vec<WorkKind> {
-        review.pull_from_github();
-        drive_without_agents(review, github, &self.source(), Instant::now())
+    fn come_back(&self, review: &mut Review, host: &FakeHost) -> Vec<WorkKind> {
+        review.pull_from_host();
+        drive_without_agents(review, host, &self.source(), Instant::now())
     }
 
     fn open_at(&self, head: &str) -> Review {
@@ -151,7 +147,13 @@ impl Pull {
         let source = self.source();
         let state_file =
             ReviewStateFile::for_subject(&self.repo.folders(), &ReviewSubject::from(self.pr()));
-        let mut review = Review::open(tour, &source, state_file).unwrap();
+        let mut review = Review::open(
+            tour,
+            &source,
+            state_file,
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap();
         let files_at_head = review.files_at_head_request().read(&source);
         review.set_files_at_head(files_at_head);
         review.go_forward();
@@ -259,41 +261,41 @@ fn a_selection_on_expanded_context_takes_no_comment() {
 #[test]
 fn a_comment_goes_into_the_pending_review_by_default() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     let place = drag(&mut review, "line ten", "line 12").unwrap().unwrap();
     typed(&mut review, &place, "why?");
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert_eq!(
-        pull.sent.github_calls().iter().rev().nth(1).unwrap(),
-        &GitHubCall::AddThread {
+        pull.sent.host_calls().iter().rev().nth(1).unwrap(),
+        &HostCall::AddThread {
             pr: PR.parse().unwrap(),
             place,
             body: "why?".into()
         }
     );
     assert!(drafts(&review).is_empty(), "a sent draft is gone");
-    assert!(github.has_pending_review_now());
+    assert!(host.has_pending_review_now());
 }
 
 #[test]
 fn a_range_from_a_removed_line_to_an_added_one_goes_left_to_right() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     let place = drag(&mut review, "line 10", "line ten").unwrap().unwrap();
     typed(&mut review, &place, "renamed");
 
     review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
 
     assert_eq!(
-        pull.sent.github_calls().iter().rev().nth(1).unwrap(),
-        &GitHubCall::AddThread {
+        pull.sent.host_calls().iter().rev().nth(1).unwrap(),
+        &HostCall::AddThread {
             pr: PR.parse().unwrap(),
             place: place.clone(),
             body: "renamed".into()
@@ -311,14 +313,14 @@ fn a_range_from_a_removed_line_to_an_added_one_goes_left_to_right() {
 #[test]
 fn a_pending_review_made_on_the_web_takes_the_comment_and_hides_comment_now() {
     let pull = Pull::new();
-    let github = pull.github().with_web_pending_review();
+    let host = pull.host().with_web_pending_review();
     let mut review = pull.open();
-    review.pull_pending_review(&github).unwrap();
+    review.pull_pending_review(&host).unwrap();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "hm");
 
     assert!(!review.can_comment_now());
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
 }
@@ -326,11 +328,11 @@ fn a_pending_review_made_on_the_web_takes_the_comment_and_hides_comment_now() {
 #[test]
 fn comment_now_shows_only_when_surely_no_pending_review_exists() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     assert!(!review.can_comment_now(), "unknown yet");
 
-    review.pull_pending_review(&github).unwrap();
+    review.pull_pending_review(&host).unwrap();
 
     assert!(review.can_comment_now());
 }
@@ -338,16 +340,16 @@ fn comment_now_shows_only_when_surely_no_pending_review_exists() {
 #[test]
 fn comment_now_posts_at_once_and_leaves_no_pending_review() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    review.pull_pending_review(&github).unwrap();
+    review.pull_pending_review(&host).unwrap();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "now");
 
-    let result = review.send_comment(&place, SendMode::CommentNow, &github);
+    let result = review.send_comment(&place, SendMode::CommentNow, &host);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
-    assert!(pull.sent.github_calls().contains(&GitHubCall::CommentNow {
+    assert!(pull.sent.host_calls().contains(&HostCall::CommentNow {
         pr: PR.parse().unwrap(),
         place,
         body: "now".into()
@@ -358,13 +360,12 @@ fn comment_now_posts_at_once_and_leaves_no_pending_review() {
 #[test]
 fn a_sent_comment_is_replaced_by_its_thread_in_the_same_step_so_the_block_never_vanishes() {
     let pull = Pull::new();
-    let mut github = pull.github();
-    github.threads = vec![thread_on_line_ten("what I sent")];
+    let host = pull.host();
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "what I sent");
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert_eq!(drafts(&review), []);
@@ -376,15 +377,14 @@ fn a_sent_comment_is_replaced_by_its_thread_in_the_same_step_so_the_block_never_
 #[test]
 fn a_comment_sent_on_a_row_two_steps_show_stays_on_the_step_it_was_written_on() {
     let pull = Pull::close_together();
-    let mut github = pull.github();
-    github.threads = vec![thread_on_line(12, "what I sent")];
+    let host = pull.host();
     let mut review = pull.open_in_two_steps();
     review.go_to(&"second".into());
     let place = comment_on(&mut review, "line 12");
     typed(&mut review, &place, "what I sent");
 
     review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
 
     review.go_to(&"second".into());
@@ -396,19 +396,21 @@ fn a_comment_sent_on_a_row_two_steps_show_stays_on_the_step_it_was_written_on() 
 #[test]
 fn a_thread_stays_on_the_step_it_was_written_on_after_the_review_is_opened_again() {
     let pull = Pull::close_together();
-    let mut github = pull.github();
-    github.threads = vec![thread_on_line(12, "what I sent")];
+    let host = pull.host();
     let mut review = pull.open_in_two_steps();
     review.go_to(&"second".into());
     let place = comment_on(&mut review, "line 12");
     typed(&mut review, &place, "what I sent");
     review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
     drop(review);
 
     let mut reopened = pull.open_in_two_steps();
-    reopened.set_threads(&github.threads);
+    reopened.set_threads(
+        &guided_review::viewer::ReviewThreadsPort::review_threads(&host, &PR.parse().unwrap())
+            .unwrap(),
+    );
 
     reopened.go_to(&"second".into());
     assert_eq!(reopened.current_step().unwrap().threads.len(), 1);
@@ -432,33 +434,35 @@ fn a_thread_by_someone_else_on_a_row_two_steps_show_goes_to_the_first_of_them() 
 #[test]
 fn a_sent_comment_whose_thread_cannot_be_read_back_is_still_sent_and_the_read_is_named() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "what I sent");
-    github.inject(GitHubFault::ThreadReadsFail);
+    host.inject(HostFault::ThreadReadsAnswerAnError);
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert_eq!(result.unwrap(), Some(CommentResult::Sent));
     assert_eq!(drafts(&review), []);
     assert_eq!(
         review.problems(),
-        [Problem::ThreadsNotRead("network is down".into())]
+        [Problem::ThreadsNotRead(
+            crate::support::fake_ports::HOST_ERROR.into()
+        )]
     );
 }
 
 #[test]
 fn comment_now_is_refused_when_a_pending_review_appeared_meanwhile_and_the_text_stays() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    review.pull_pending_review(&github).unwrap();
+    review.pull_pending_review(&host).unwrap();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "now");
-    github.inject(GitHubFault::PendingReviewAppearsOnCommentNow);
+    host.inject(HostFault::PendingReviewAppearsOnCommentNow);
 
-    let result = review.send_comment(&place, SendMode::CommentNow, &github);
+    let result = review.send_comment(&place, SendMode::CommentNow, &host);
 
     assert_eq!(
         result.unwrap(),
@@ -472,13 +476,13 @@ fn comment_now_is_refused_when_a_pending_review_appeared_meanwhile_and_the_text_
 #[test]
 fn thread_null_is_a_failure_that_keeps_the_text_and_is_not_retried() {
     let pull = Pull::new();
-    let github = pull.github();
-    github.inject(GitHubFault::NewThreadsAnswerNull);
+    let host = pull.host();
+    host.inject(HostFault::NewThreadsAnswerNull);
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "lost?");
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert!(matches!(result.unwrap(), Some(CommentResult::Rejected(_))));
     assert_eq!(drafts(&review)[0].body, "lost?");
@@ -492,13 +496,13 @@ fn thread_null_is_a_failure_that_keeps_the_text_and_is_not_retried() {
 #[test]
 fn a_comment_that_cannot_reach_github_waits_in_the_queue_and_goes_later() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "later");
-    github.inject(GitHubFault::ConnectionLost);
+    host.inject(HostFault::ConnectionLost);
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert!(matches!(result.unwrap(), Some(CommentResult::Queued(_))));
     assert_eq!(drafts(&review), []);
@@ -509,31 +513,31 @@ fn a_comment_that_cannot_reach_github_waits_in_the_queue_and_goes_later() {
         "it is in the state file"
     );
 
-    github.heal(&GitHubFault::ConnectionLost);
-    pull.come_back(&mut review, &github);
+    host.heal(&HostFault::ConnectionLost);
+    pull.come_back(&mut review, &host);
 
     assert_eq!(review.queued_comments(), []);
-    assert!(github.has_pending_review_now());
+    assert!(host.has_pending_review_now());
 }
 
 #[test]
 fn queued_comments_go_oldest_first_one_after_another_until_the_queue_is_empty() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
-    github.inject(GitHubFault::ConnectionLost);
+    host.inject(HostFault::ConnectionLost);
     for (line, body) in [("line ten", "first"), ("line thirty", "second")] {
         let place = comment_on(&mut review, line);
         typed(&mut review, &place, body);
         review
-            .send_comment(&place, SendMode::AddToReview, &github)
+            .send_comment(&place, SendMode::AddToReview, &host)
             .unwrap();
     }
     assert_eq!(review.queued_comments().len(), 2);
-    github.heal(&GitHubFault::ConnectionLost);
-    let before = pull.sent.github_calls().len();
+    host.heal(&HostFault::ConnectionLost);
+    let before = pull.sent.host_calls().len();
 
-    let ran = pull.come_back(&mut review, &github);
+    let ran = pull.come_back(&mut review, &host);
 
     assert_eq!(
         ran.iter()
@@ -542,11 +546,11 @@ fn queued_comments_go_oldest_first_one_after_another_until_the_queue_is_empty() 
         2
     );
     assert_eq!(review.queued_comments(), []);
-    let sent: Vec<String> = pull.sent.github_calls()[before..]
+    let sent: Vec<String> = pull.sent.host_calls()[before..]
         .iter()
         .cloned()
         .filter_map(|call| match call {
-            GitHubCall::AddThread { body, .. } => Some(body),
+            HostCall::AddThread { body, .. } => Some(body),
             _ => None,
         })
         .collect();
@@ -556,16 +560,16 @@ fn queued_comments_go_oldest_first_one_after_another_until_the_queue_is_empty() 
 #[test]
 fn a_queued_comment_keeps_waiting_while_github_is_unreachable() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "later");
-    github.inject(GitHubFault::ConnectionLost);
+    host.inject(HostFault::ConnectionLost);
     review
-        .send_comment(&place, SendMode::AddToReview, &github)
+        .send_comment(&place, SendMode::AddToReview, &host)
         .unwrap();
 
-    pull.come_back(&mut review, &github);
+    pull.come_back(&mut review, &host);
 
     assert_eq!(review.queued_comments().len(), 1);
 }
@@ -573,12 +577,12 @@ fn a_queued_comment_keeps_waiting_while_github_is_unreachable() {
 #[test]
 fn nothing_is_written_while_the_tour_is_behind_the_pr_head() {
     let pull = Pull::new();
-    let github = pull.github_at("newer-head");
+    let host = pull.host_at("newer-head");
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "stale");
 
-    let result = review.send_comment(&place, SendMode::AddToReview, &github);
+    let result = review.send_comment(&place, SendMode::AddToReview, &host);
 
     assert_eq!(
         result.unwrap(),
@@ -590,11 +594,11 @@ fn nothing_is_written_while_the_tour_is_behind_the_pr_head() {
     );
     assert!(
         pull.sent
-            .github_calls()
+            .host_calls()
             .iter()
-            .all(|call| !matches!(call, GitHubCall::AddThread { .. })),
+            .all(|call| !matches!(call, HostCall::AddThread { .. })),
         "{:?}",
-        pull.sent.github_calls()
+        pull.sent.host_calls()
     );
     assert_eq!(drafts(&review)[0].body, "stale");
 }
@@ -609,7 +613,7 @@ fn a_draft_written_before_a_repin_keeps_its_text_but_is_not_sent_to_the_old_line
     let later = pull.repo.commit("later");
     let mut repinned = pull.open_at(&later);
 
-    let result = repinned.send_comment(&place, SendMode::AddToReview, &pull.github_at(&later));
+    let result = repinned.send_comment(&place, SendMode::AddToReview, &pull.host_at(&later));
 
     assert_eq!(
         result.unwrap(),
@@ -622,9 +626,9 @@ fn a_draft_written_before_a_repin_keeps_its_text_but_is_not_sent_to_the_old_line
     assert_eq!(drafts(&repinned)[0].body, "why ten?");
     assert!(
         pull.sent
-            .github_calls()
+            .host_calls()
             .iter()
-            .all(|call| !matches!(call, GitHubCall::AddThread { .. }))
+            .all(|call| !matches!(call, HostCall::AddThread { .. }))
     );
 }
 
@@ -634,8 +638,8 @@ fn a_queued_comment_from_before_a_repin_is_not_sent_to_the_old_lines() {
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "later please");
-    let offline = pull.github();
-    offline.inject(GitHubFault::ConnectionLost);
+    let offline = pull.host();
+    offline.inject(HostFault::ConnectionLost);
     review
         .send_comment(&place, SendMode::AddToReview, &offline)
         .unwrap();
@@ -644,20 +648,20 @@ fn a_queued_comment_from_before_a_repin_is_not_sent_to_the_old_lines() {
     let later = pull.repo.commit("later");
     let mut repinned = pull.open_at(&later);
 
-    let before = pull.sent.github_calls().len();
-    pull.come_back(&mut repinned, &pull.github_at(&later));
+    let before = pull.sent.host_calls().len();
+    pull.come_back(&mut repinned, &pull.host_at(&later));
 
     assert_eq!(repinned.queued_comments().len(), 1);
     assert_eq!(repinned.queued_comments()[0].draft.body, "later please");
     assert!(
-        pull.sent.github_calls()[before..]
+        pull.sent.host_calls()[before..]
             .iter()
             .all(|call| !matches!(
                 call,
-                GitHubCall::AddThread { .. } | GitHubCall::CommentNow { .. }
+                HostCall::AddThread { .. } | HostCall::CommentNow { .. }
             )),
         "{:?}",
-        pull.sent.github_calls()
+        pull.sent.host_calls()
     );
 }
 
@@ -762,14 +766,14 @@ fn a_comment_place_says_where_the_comment_goes() {
 #[test]
 fn a_comment_sent_while_the_window_switched_away_still_leaves_the_draft_in_its_own_state_file() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "on its way");
     let request = review
         .start_sending(&place, SendMode::AddToReview, Audience::Author)
         .unwrap();
-    let outcome = request.run(&github);
+    let outcome = request.run(&host);
     drop(review);
 
     land_elsewhere(
@@ -784,15 +788,15 @@ fn a_comment_sent_while_the_window_switched_away_still_leaves_the_draft_in_its_o
 #[test]
 fn a_comment_that_failed_while_the_window_switched_away_waits_in_the_queue_of_its_pr() {
     let pull = Pull::new();
-    let github = pull.github();
+    let host = pull.host();
     let mut review = pull.open();
     let place = comment_on(&mut review, "line ten");
     typed(&mut review, &place, "later");
-    github.inject(GitHubFault::ConnectionLost);
+    host.inject(HostFault::ConnectionLost);
     let request = review
         .start_sending(&place, SendMode::AddToReview, Audience::Author)
         .unwrap();
-    let outcome = request.run(&github);
+    let outcome = request.run(&host);
     drop(review);
 
     land_elsewhere(

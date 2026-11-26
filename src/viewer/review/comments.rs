@@ -13,12 +13,12 @@ use crate::viewer::comments::{
     CommentPlace, CommentProblem, CommentRefusal, CommentResult, QueuedComment, SendMode,
 };
 use crate::viewer::comments_list::{CommentsList, ListedThread, ThreadVisit};
-use crate::viewer::github_outage::Affected;
 use crate::viewer::hand_offs::{HandOff, HandOffState, HandOffs, HandToAgentRefused, SentFrom};
+use crate::viewer::host_outage::Affected;
 use crate::viewer::line_location::LineLocation;
 use crate::viewer::outdated_lines::FollowedLines;
 use crate::viewer::page::Page;
-use crate::viewer::ports::GitHubError;
+use crate::viewer::ports::HostError;
 use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::review_thread::{CommentId, ReviewThread, ThreadId};
 use crate::viewer::row_selection::RowSelection;
@@ -33,7 +33,7 @@ use crate::viewer::work_agenda::WorkKind;
 impl ReviewCore {
     pub fn set_threads(&mut self, threads: &[ReviewThread]) {
         self.clear_problem(ProblemKind::ThreadsNotRead);
-        self.github_answered(Affected::Comments);
+        self.host_answered(Affected::Comments);
         self.pulled_threads = threads.to_vec();
         #[cfg(feature = "snapshots")]
         self.pulled_threads
@@ -48,12 +48,12 @@ impl ReviewCore {
     }
 
     /// The threads shown stay as they were, named as possibly old until a read goes through.
-    pub fn threads_not_read(&mut self, error: &GitHubError) {
-        if let GitHubError::NotAnswering(cause) = error {
+    pub fn threads_not_read(&mut self, error: &HostError) {
+        if let HostError::NotAnswering(host, cause) = error {
             self.clear_problem(ProblemKind::ThreadsNotRead);
-            self.github_not_answering(*cause, Affected::Comments);
+            self.host_not_answering(*host, *cause, Affected::Comments);
         } else {
-            self.github_answered(Affected::Comments);
+            self.host_answered(Affected::Comments);
             self.raise_problem(Problem::ThreadsNotRead(error.short_reason()));
         }
     }
@@ -114,7 +114,7 @@ impl ReviewCore {
                 .any(|placed| placed.id == *id)
         });
         let Some(screen) = shown_on else {
-            return link.map_or(ThreadVisit::Nowhere, ThreadVisit::OnGitHub);
+            return link.map_or(ThreadVisit::Nowhere, ThreadVisit::OnHost);
         };
         self.go_to_screen(screen);
         if let Screen::Step(step) = self.screen.clone()
@@ -154,6 +154,11 @@ impl ReviewCore {
 
     pub fn can_comment_now(&self) -> bool {
         self.comment_desk.can_comment_now()
+    }
+
+    /// Whether a comment shows the reactions to add, as the PR's host has them.
+    pub fn can_react_to_comments(&self) -> bool {
+        self.comment_desk.can_react()
     }
 
     /// A reply in a local thread is a follow-up task, so it always reaches the agent too.
@@ -398,7 +403,7 @@ impl ReviewCore {
         Ok(())
     }
 
-    /// What the tour agent, GitHub or the reviewer did to the hand-offs. It is made even while a
+    /// What the tour agent, the host or the reviewer did to the hand-offs. It is made even while a
     /// re-pin runs, so a hand-off is not delivered twice; only its save is refused then.
     pub(super) fn record_hand_offs<T>(
         &mut self,
@@ -450,7 +455,7 @@ impl ReviewCore {
         result
     }
 
-    /// The thread GitHub sends back shows under the same row on every step that shows it, so the step it
+    /// The thread the host sends back shows under the same row on every step that shows it, so the step it
     /// was written on is kept; the first step showing the row would take it otherwise.
     fn keep_thread_on_this_screen(&mut self, thread: &ThreadId) -> anyhow::Result<()> {
         let Screen::Step(step) = &self.screen else {

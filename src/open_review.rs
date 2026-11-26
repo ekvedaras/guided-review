@@ -5,16 +5,15 @@ use crate::app_folders::AppFolders;
 use crate::claude_cli::{ClaudeCli, ClaudeRefreshWriter};
 use crate::code_source::CodeSource;
 use crate::config::{AskSettings, Config};
-use crate::github::GitHub;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::instructions::TourWriter;
-use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner};
+use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner, adapter_of};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::Tour;
 use crate::viewer::{
-    AgentLauncher, GitHubPort, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher,
-    TourReloader, TourSwitcher,
+    AgentLauncher, CodeHost, HostCapabilities, PrMover, PullsOfBranchPort, Review, TourAgents,
+    TourRefresher, TourReloader, TourSwitcher,
 };
 
 /// Everything the Ask panel needs to start the AI, built once at startup.
@@ -30,7 +29,7 @@ pub struct OpenedReview {
     pub source: Arc<dyn CodeSource>,
     pub ask: AskSetup,
     pub ide: Result<Ide, NoIde>,
-    pub github: Arc<dyn GitHubPort>,
+    pub host: Arc<dyn CodeHost>,
     pub repinner: TourRepinner,
     pub refresher: TourRefresher,
     pub reloader: TourReloader,
@@ -50,7 +49,8 @@ pub fn open_review(
     let subject = &opened.subject();
     let (review, source) = opened.open_review()?;
     let pick_code_source = opened.code_source_picker();
-    let github = opened.github();
+    let host = opened.host();
+    let capabilities = HostCapabilities::of(host.as_ref());
     let clone = source.local_clone().map(Path::to_path_buf);
     let config = Config::load_from(folders)?;
     let agent_folder = clone
@@ -64,6 +64,7 @@ pub fn open_review(
         folders: folders.clone(),
         subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
+        host: capabilities,
         writer: Arc::new(ClaudeRefreshWriter::new(
             clone
                 .clone()
@@ -75,19 +76,22 @@ pub fn open_review(
         folders: folders.clone(),
         subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
+        host: capabilities,
     };
     let switcher = TourSwitcher {
         folders: folders.clone(),
         subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
+        host: capabilities,
     };
     let repinner = TourRepinner {
         folders: folders.clone(),
         subject: subject.clone(),
         pick_code_source,
+        host: capabilities,
     };
     let tour_agents = TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
-        .finding_head_branches_with(Arc::clone(&github) as Arc<dyn PullsOfBranchPort>)
+        .finding_head_branches_with(Arc::clone(&host) as Arc<dyn PullsOfBranchPort>)
         .starting_in(agent_folder)
         .with_summary_skill(Config::skill_for_launch::<TourWriter>(folders));
     Ok(OpenedReview {
@@ -95,7 +99,7 @@ pub fn open_review(
         source: source.into(),
         ask,
         ide: Ide::for_clone(clone, config.ide_template()),
-        github,
+        host,
         repinner,
         refresher,
         reloader,
@@ -111,7 +115,12 @@ pub fn mover_of(folders: &AppFolders, change_set: &LocalChangeSet) -> PrMover {
         folders: folders.clone(),
         change_set: change_set.clone(),
         pick_code_source: Arc::new(move |pr, tips| {
-            crate::pick_code_source::pick_code_source(&GitHub::from_env(), pr, tips, &folder)
+            crate::pick_code_source::pick_code_source(
+                adapter_of(pr.host).as_ref(),
+                pr,
+                tips,
+                &folder,
+            )
         }),
         drop_local_review: Arc::new(|change_set, folders| {
             OpenedChangeSet::new(change_set, folders).drop_review()

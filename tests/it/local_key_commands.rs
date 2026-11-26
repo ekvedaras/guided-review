@@ -10,7 +10,7 @@ fn a_command_given_neither_a_pr_link_nor_a_local_key_names_what_it_takes() {
     assert!(!run.success);
     assert!(
         run.stderr
-            .contains("neither a GitHub PR link nor a local change set key"),
+            .contains("neither a PR link of a code host guided-review reads (GitHub) nor a local change set key"),
         "{}",
         run.stderr
     );

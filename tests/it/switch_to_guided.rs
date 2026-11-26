@@ -1,9 +1,9 @@
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeAskProcesses, FakeGitHub, GitHubFault, SentLog};
+use crate::support::fake_ports::{FakeAskProcesses, FakeHost, HostFault, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, line, save_typing};
 use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
-use guided_review::pull_request::{PullRequestUrl, RepoName, Sha};
+use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, Tour, TourPin};
 use guided_review::viewer::{
@@ -49,6 +49,7 @@ impl Shop {
                 pr: PR.to_owned(),
                 local: None,
                 repo: None,
+                host: None,
                 base: Sha::new(&shop.base),
                 head: Sha::new(&shop.second),
                 previous_head: None,
@@ -75,14 +76,20 @@ impl Shop {
     }
 
     fn source(&self) -> LocalGit {
-        LocalGit::find(&RepoName::new("acme", "shop"), self.repo.path())
+        LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
             .unwrap()
     }
 
     fn basic_review(&self) -> Review {
         let tour = BasicTour::load(&self.basic_path()).unwrap();
-        Review::open_basic(tour, &self.source(), self.state_file()).unwrap()
+        Review::open_basic(
+            tour,
+            &self.source(),
+            self.state_file(),
+            crate::support::fake_ports::every_capability(),
+        )
+        .unwrap()
     }
 
     /// The guided tour the writer wrote at `head`, beside the basic file.
@@ -130,11 +137,12 @@ impl Shop {
     fn switcher(&self) -> TourSwitcher {
         let clone = self.repo.path().to_path_buf();
         TourSwitcher {
+            host: crate::support::fake_ports::every_capability(),
             folders: self.repo.folders(),
             subject: self.pr().into(),
             pick_code_source: Arc::new(move |_| {
                 Ok(Box::new(
-                    LocalGit::find(&RepoName::new("acme", "shop"), &clone)?.unwrap(),
+                    LocalGit::find(&crate::support::shop_on_github(), &clone)?.unwrap(),
                 ))
             }),
         }
@@ -473,7 +481,13 @@ fn reopened_guided(shop: &Shop) -> Review {
         &ReviewSubject::from(shop.pr()),
     ))
     .unwrap();
-    Review::open(tour, &shop.source(), shop.state_file()).unwrap()
+    Review::open(
+        tour,
+        &shop.source(),
+        shop.state_file(),
+        crate::support::fake_ports::every_capability(),
+    )
+    .unwrap()
 }
 
 fn comment_box_on_first(review: &mut Review) -> CommentPlace {
@@ -581,15 +595,15 @@ fn a_reply_typed_while_the_guided_review_is_being_built_is_kept() {
 #[test]
 fn a_comment_queued_while_the_guided_review_is_being_built_is_kept() {
     let shop = Shop::new();
-    let github = FakeGitHub::with_pull("main-tip", &shop.second, &SentLog::default());
-    github.inject(GitHubFault::ConnectionLost);
+    let host = FakeHost::with_pull("main-tip", &shop.second, &SentLog::default());
+    host.inject(HostFault::ConnectionLost);
 
     let guided = switched_while(&shop, |basic| {
         let place = comment_box_on_first(basic);
         basic
             .type_in(&TextBox::Draft(place.clone()), "later")
             .unwrap();
-        let result = basic.send_comment(&place, SendMode::AddToReview, &github);
+        let result = basic.send_comment(&place, SendMode::AddToReview, &host);
         assert!(matches!(result.unwrap(), Some(CommentResult::Queued(_))));
     });
 
@@ -600,8 +614,7 @@ fn a_comment_queued_while_the_guided_review_is_being_built_is_kept() {
 #[test]
 fn a_hand_off_made_while_the_guided_review_is_being_built_is_kept() {
     let shop = Shop::new();
-    let mut github = FakeGitHub::with_pull("main-tip", &shop.second, &SentLog::default());
-    github.threads = vec![thread_on_first(vec![mine("why first?")])];
+    let host = FakeHost::with_pull("main-tip", &shop.second, &SentLog::default());
 
     let guided = switched_while(&shop, |basic| {
         let place = comment_box_on_first(basic);
@@ -612,7 +625,7 @@ fn a_hand_off_made_while_the_guided_review_is_being_built_is_kept() {
             .start_sending(&place, SendMode::AddToReview, Audience::Agent)
             .unwrap();
         assert_eq!(
-            basic.apply_comment(request.run(&github)).unwrap(),
+            basic.apply_comment(request.run(&host)).unwrap(),
             CommentResult::Sent
         );
     });

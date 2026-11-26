@@ -63,11 +63,11 @@ use crate::open_review::AskSetup;
 use crate::tour::ToursOnDisk;
 use crate::update::running_build;
 use crate::viewer::{
-    AgentReplied, AiReviewAction, AskAt, CodeLink, Command, CommentGesture, Departure, Effect,
-    FileToggle, FileView, GitHubPort, HandOffId, InFlight, Intent, LabelSwitch, LineLocation,
-    Overlay, PieceLabels, Place, PressStep, Refusal, Reopen, ReopenAfterSave, Reopening,
-    RestartArgs, RestartGuard, RestartStep, Review, Screen, ScreenTravel, SettingsSheet, ToastTone,
-    Travel, ViewSwitch, WindowMoment,
+    AgentReplied, AiReviewAction, AskAt, CodeHost, CodeLink, Command, CommentGesture, Departure,
+    Effect, FileToggle, FileView, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, Overlay,
+    PieceLabels, Place, PressStep, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs,
+    RestartGuard, RestartStep, Review, Screen, ScreenTravel, SettingsSheet, ToastTone, Travel,
+    ViewSwitch, WindowMoment,
 };
 use crate::viewer::{FixReply, IssueDetails, NameHover, StationKind, WhyReply};
 use issue_card::IssueHover;
@@ -115,7 +115,7 @@ actions!(
         ToggleShortcuts,
         ToggleFindingsList,
         ToggleCommentsList,
-        OpenPrOnGitHub,
+        OpenPrOnHost,
         OpenIssue,
         AskToOpenPr,
         TogglePrSwitcher,
@@ -129,8 +129,8 @@ type OnTextSpot = Rc<dyn Fn(CodeGesture, TextSpot, &mut Window, &mut App)>;
 
 /// What the layout talks to outside the window.
 pub struct Collaborators {
-    pub github: Arc<dyn GitHubPort>,
-    /// `None` opens all code on GitHub.
+    pub host: Arc<dyn CodeHost>,
+    /// `None` opens all code on the host.
     pub ide: Result<Ide, NoIde>,
     pub tour_work: TourWork,
 }
@@ -199,7 +199,7 @@ pub struct OneStepLayout {
     /// switch to another PR) ends a wait for it, so no state has to be carried across the root swap.
     reopen_after_save: ReopenAfterSave,
     restart_guard: RestartGuard,
-    /// `None` opens all code on GitHub.
+    /// `None` opens all code on the host.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
     _use_as_comment_subscription: Subscription,
@@ -219,7 +219,7 @@ impl OneStepLayout {
         cx: &mut Context<Self>,
     ) -> Self {
         let Collaborators {
-            github,
+            host,
             ide,
             tour_work,
         } = collaborators;
@@ -232,7 +232,7 @@ impl OneStepLayout {
                 review,
                 SessionWiring {
                     source,
-                    github,
+                    host,
                     tour_work,
                     frame_stats: frame_stats.clone(),
                 },
@@ -1104,8 +1104,8 @@ impl OneStepLayout {
             Effect::OpenFinishForm => self.open_finish_form(cx),
             Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
             Effect::OpenPr => self.session.update(cx, ReviewSession::open_pr),
-            Effect::OpenOnGitHub(pr) => open_link(&pr.to_string(), cx),
-            Effect::OpenChecksOnGitHub(pr) => open_link(&format!("{pr}/checks"), cx),
+            Effect::OpenOnHost(pr) => open_link(&pr.to_string(), cx),
+            Effect::OpenChecksOnHost(pr) => open_link(&pr.checks_page(), cx),
             Effect::OpenCheck(url) => open_link(&url, cx),
             Effect::OpenIssue(link) => {
                 self.issue_list_open = false;
@@ -1207,7 +1207,7 @@ impl ChecksHover {
     }
 }
 
-/// A key that changes the PR on GitHub says why it does nothing, or what its next press does.
+/// A key that changes the PR on the host says why it does nothing, or what its next press does.
 fn tell_press(step: PressStep, cx: &mut App) {
     match step {
         PressStep::Nothing | PressStep::Sent => {}
@@ -1489,8 +1489,8 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &ToggleShortcuts, window, cx| {
                 this.act(Intent::ToggleShortcuts, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &OpenPrOnGitHub, window, cx| {
-                this.act(Intent::OpenOnGitHub, window, cx);
+            .on_action(cx.listener(|this, _: &OpenPrOnHost, window, cx| {
+                this.act(Intent::OpenOnHost, window, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenIssue, window, cx| {
                 this.act(Intent::OpenIssue, window, cx);

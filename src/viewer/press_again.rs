@@ -1,4 +1,4 @@
-//! A key that changes the PR on GitHub acts only on the same press again soon after: the first press
+//! A key that changes the PR on the host acts only on the same press again soon after: the first press
 //! says what the second one does, so a stray key cannot merge or un-draft a PR.
 
 use std::time::{Duration, Instant};
@@ -13,11 +13,11 @@ pub const CONFIRM_WITHIN: Duration = Duration::from_secs(10);
 pub enum PressStep {
     /// The PR's status is not known, so there is nothing to change.
     Nothing,
-    /// GitHub would refuse; why, for a toast.
+    /// The host would refuse; why, for a toast.
     Refused(String),
     /// The first press: what the same press again does.
     Ask(String),
-    /// The second press: the change is on its way to GitHub.
+    /// The second press: the change is on its way to the host.
     Sent,
 }
 
@@ -36,7 +36,7 @@ impl PressStep {
 }
 
 /// One change a key asks of the PR: the first press and what it asked for, waiting for the same
-/// press again, then the confirmed change until GitHub answers.
+/// press again, then the confirmed change until the host answers.
 #[derive(Debug)]
 pub(super) struct PressAgain<T> {
     asked: Option<(T, Instant)>,
@@ -53,7 +53,7 @@ impl<T> Default for PressAgain<T> {
 }
 
 impl<T: Copy + PartialEq> PressAgain<T> {
-    /// A press of `command`, which offers the change GitHub would take or says why it would not.
+    /// A press of `command`, which offers the change the host would take or says why it would not.
     /// It sends the change when it is the same press as the first, soon enough; otherwise it
     /// becomes the first press and says what the same press again `does`.
     pub(super) fn press(
@@ -78,7 +78,7 @@ impl<T: Copy + PartialEq> PressAgain<T> {
         PressStep::ask(command, &does(wanted))
     }
 
-    /// What the confirmed press wants GitHub to be told.
+    /// What the confirmed press wants the host to be told.
     pub(super) fn to_send(&self) -> Option<T> {
         self.to_send
     }
@@ -89,7 +89,7 @@ impl<T: Copy + PartialEq> PressAgain<T> {
         self.to_send = change;
     }
 
-    /// GitHub answered `change`, so it is no longer to send.
+    /// The host answered `change`, so it is no longer to send.
     pub(super) fn landed(&mut self, change: T) {
         if self.to_send == Some(change) {
             self.to_send = None;

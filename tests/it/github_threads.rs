@@ -6,9 +6,9 @@ use crate::support::line;
 use guided_review::github::GitHub;
 use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::viewer::{
-    CommentId, CommentPlace, GitHubError, LineLocation, Reaction, ReactionChange, ReactionCount,
-    Resolution, ReviewOutcome, ReviewThreadsPort, ReviewVerdict, ReviewWritesPort, ReviewerKind,
-    SendMode, Side, Stance, ThreadId,
+    ChangeRequestsPort, CommentId, CommentPlace, CommentReactionsPort, HostError, LineLocation,
+    Reaction, ReactionChange, ReactionCount, Resolution, ReviewOutcome, ReviewThreadsPort,
+    ReviewWritesPort, ReviewerKind, SendMode, Side, Stance, ThreadId,
 };
 
 fn page(has_next: bool, cursor: &str, nodes: &str) -> String {
@@ -302,7 +302,7 @@ fn a_null_thread_without_errors_is_a_failure() {
         .add_review_thread(&pr(), &place, "x")
         .unwrap_err();
 
-    assert!(matches!(error, GitHubError::ThreadNotCreated(_)));
+    assert!(matches!(error, HostError::ThreadNotCreated(_)));
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn github_saying_one_pending_review_per_user_is_told_apart() {
         .add_review_thread(&pr(), &place, "x")
         .unwrap_err();
 
-    assert!(matches!(error, GitHubError::PendingReviewExists));
+    assert!(matches!(error, HostError::PendingReviewExists));
 }
 
 #[test]
@@ -329,7 +329,7 @@ fn no_token_is_no_github_access() {
         .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
         .unwrap_err();
 
-    assert!(matches!(error, GitHubError::NoAccess(_)));
+    assert!(matches!(error, HostError::NoAccess(_)));
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn a_token_github_refuses_is_no_github_access() {
         .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
         .unwrap_err();
 
-    assert!(matches!(error, GitHubError::NoAccess(_)));
+    assert!(matches!(error, HostError::NoAccess(_)));
 }
 
 #[test]
@@ -355,7 +355,7 @@ fn a_forbidden_answer_says_github_s_own_reason_and_no_missing_scope() {
         .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
         .unwrap_err();
 
-    let GitHubError::NoAccess(no_access) = error else {
+    let HostError::NoAccess(no_access) = error else {
         panic!("expected no access, got {error:?}");
     };
     assert_eq!(
@@ -374,7 +374,7 @@ fn an_insufficient_scopes_answer_names_the_repo_scope() {
         .set_thread_resolved(&ThreadId::new("T1"), Resolution::Resolved)
         .unwrap_err();
 
-    let GitHubError::NoAccess(no_access) = error else {
+    let HostError::NoAccess(no_access) = error else {
         panic!("expected no access, got {error:?}");
     };
     assert_eq!(
@@ -386,6 +386,7 @@ fn an_insufficient_scopes_answer_names_the_repo_scope() {
 #[test]
 fn comment_now_submits_the_review_the_thread_went_into() {
     let (url, asked) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED.into(),
         r#"{"data":{"submitPullRequestReview":{"clientMutationId":null}}}"#.into(),
@@ -397,7 +398,7 @@ fn comment_now_submits_the_review_the_thread_went_into() {
 
     GitHub::at(&url).comment_now(&pr(), &place, "x").unwrap();
 
-    let input = &asked_as_json(&asked)[2]["variables"]["input"];
+    let input = &asked_as_json(&asked)[3]["variables"]["input"];
     assert_eq!(
         *input,
         serde_json::json!({"pullRequestReviewId": "REVIEW_1", "event": "COMMENT"})
@@ -409,6 +410,7 @@ const THREAD_ADDED_WITHOUT_REVIEW: &str = r#"{"data":{"addPullRequestReviewThrea
 #[test]
 fn comment_now_without_a_review_id_from_github_sends_the_viewers_pending_review() {
     let (url, asked) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED_WITHOUT_REVIEW.into(),
         PENDING.into(),
@@ -422,7 +424,7 @@ fn comment_now_without_a_review_id_from_github_sends_the_viewers_pending_review(
     GitHub::at(&url).comment_now(&pr(), &place, "x").unwrap();
 
     assert_eq!(
-        asked_as_json(&asked)[3]["variables"]["input"],
+        asked_as_json(&asked)[4]["variables"]["input"],
         serde_json::json!({"pullRequestReviewId": "REVIEW_7", "event": "COMMENT"})
     );
 }
@@ -430,6 +432,7 @@ fn comment_now_without_a_review_id_from_github_sends_the_viewers_pending_review(
 #[test]
 fn comment_now_whose_review_cannot_be_found_says_where_the_comment_is_and_sends_nothing_more() {
     let (url, asked) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED_WITHOUT_REVIEW.into(),
         NO_PENDING.into(),
@@ -447,13 +450,14 @@ fn comment_now_whose_review_cannot_be_found_says_where_the_comment_is_and_sends_
         format!("{error:#}").contains("look for it on GitHub"),
         "{error:#}"
     );
-    assert_eq!(asked_as_json(&asked).len(), 3);
+    assert_eq!(asked_as_json(&asked).len(), 4);
 }
 
 #[test]
 fn a_comment_now_that_could_not_be_posted_or_taken_back_says_it_waits_in_the_pending_review() {
     let failed = r#"{"errors":[{"message":"something broke"}],"data":null}"#;
     let (url, _) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED.into(),
         failed.into(),
@@ -590,14 +594,14 @@ fn a_reaction_is_added_and_removed_with_githubs_content_name() {
     let github = GitHub::at(&url);
 
     github
-        .set_reaction(
+        .set_comment_reaction(
             &CommentId::new("C1"),
             Reaction::ThumbsUp,
             ReactionChange::Add,
         )
         .unwrap();
     github
-        .set_reaction(
+        .set_comment_reaction(
             &CommentId::new("C1"),
             Reaction::ThumbsUp,
             ReactionChange::Remove,
@@ -627,9 +631,7 @@ fn a_reaction_is_added_and_removed_with_githubs_content_name() {
 fn the_pending_review_is_sent_with_the_verdict_and_body() {
     let (url, asked) = serve_graphql(vec![PENDING.into(), OK.into()]);
 
-    GitHub::at(&url)
-        .submit_review(&pr(), ReviewVerdict::RequestChanges, "fix it")
-        .unwrap();
+    GitHub::at(&url).request_changes(&pr(), "fix it").unwrap();
 
     let asked = asked_as_json(&asked);
     assert!(
@@ -648,9 +650,7 @@ fn the_pending_review_is_sent_with_the_verdict_and_body() {
 fn without_a_pending_review_a_new_review_carries_the_verdict() {
     let (url, asked) = serve_graphql(vec![NO_PENDING.into(), PULL_ID.into(), OK.into()]);
 
-    GitHub::at(&url)
-        .submit_review(&pr(), ReviewVerdict::Approve, "")
-        .unwrap();
+    GitHub::at(&url).approve(&pr(), "").unwrap();
 
     let asked = asked_as_json(&asked);
     assert!(
@@ -743,7 +743,7 @@ fn review_threads_without_github_access_say_which_pr_they_were_read_for() {
         .review_threads(&pr())
         .unwrap_err();
 
-    assert!(matches!(error, GitHubError::NoAccess(_)));
+    assert!(matches!(error, HostError::NoAccess(_)));
     assert!(
         format!("{error:#}")
             .starts_with("could not read the review threads of https://github.com/"),
@@ -765,13 +765,14 @@ fn a_reply_github_answers_with_one_pending_review_per_user_is_told_apart() {
         .reply_to_thread(&pr(), &ThreadId::new("T1"), "x", SendMode::AddToReview)
         .unwrap_err();
 
-    assert!(matches!(error, GitHubError::PendingReviewExists));
+    assert!(matches!(error, HostError::PendingReviewExists));
 }
 
 #[test]
 fn a_comment_now_whose_send_meets_one_pending_review_says_it_waits_in_the_pending_review() {
     let failed = r#"{"errors":[{"message":"something broke"}],"data":null}"#;
     let (url, _) = serve_graphql(vec![
+        NO_PENDING.into(),
         PULL_ID.into(),
         THREAD_ADDED.into(),
         ONE_PENDING_REVIEW.into(),
@@ -786,7 +787,7 @@ fn a_comment_now_whose_send_meets_one_pending_review_says_it_waits_in_the_pendin
         .comment_now(&pr(), &place, "x")
         .unwrap_err();
 
-    assert!(matches!(error, GitHubError::Other(_)), "{error:?}");
+    assert!(matches!(error, HostError::Other(_)), "{error:?}");
     let text = format!("{error:#}");
     assert!(text.contains("could not post the comment"), "{text}");
     assert!(text.contains("pending review on GitHub"), "{text}");
@@ -800,11 +801,9 @@ fn a_new_review_github_answers_with_one_pending_review_is_a_failure_to_send() {
         ONE_PENDING_REVIEW.into(),
     ]);
 
-    let error = GitHub::at(&url)
-        .submit_review(&pr(), ReviewVerdict::Approve, "")
-        .unwrap_err();
+    let error = GitHub::at(&url).approve(&pr(), "").unwrap_err();
 
-    assert!(matches!(error, GitHubError::Other(_)), "{error:?}");
+    assert!(matches!(error, HostError::Other(_)), "{error:?}");
     assert!(
         format!("{error:#}").starts_with("could not send the review"),
         "{error:#}"

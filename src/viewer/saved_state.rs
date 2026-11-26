@@ -71,7 +71,7 @@ impl SavedState {
         Ok(changed)
     }
 
-    /// Made even while a re-pin runs, for what already happened elsewhere (on GitHub, in the tour
+    /// Made even while a re-pin runs, for what already happened elsewhere (on the host, in the tour
     /// agent) and must not happen twice; only the save is refused then.
     pub(super) fn record<T>(
         &mut self,

@@ -27,6 +27,16 @@ impl std::error::Error for InvalidLineNumber {}
 impl LineNumber {
     pub const FIRST: Self = Self(NonZeroU32::MIN);
 
+    /// The line a link's `#` part names: `L12` or `L12-L20` is line 12; anything else the first line.
+    pub fn of_fragment(fragment: &str) -> Self {
+        fragment
+            .strip_prefix('L')
+            .map(|lines| lines.split('-').next().unwrap_or_default())
+            .and_then(|line| line.parse::<usize>().ok())
+            .and_then(|line| Self::try_from(line).ok())
+            .unwrap_or(Self::FIRST)
+    }
+
     pub fn get(self) -> u32 {
         self.0.get()
     }

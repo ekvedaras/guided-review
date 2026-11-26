@@ -12,21 +12,6 @@ impl MergeMethod {
     /// In GitHub's order, which is the order a repo's first allowed one is taken in.
     pub const ALL: [Self; 3] = [Self::Merge, Self::Squash, Self::Rebase];
 
-    /// GraphQL's `PullRequestMergeMethod`.
-    pub fn github_name(self) -> &'static str {
-        match self {
-            Self::Merge => "MERGE",
-            Self::Squash => "SQUASH",
-            Self::Rebase => "REBASE",
-        }
-    }
-
-    pub fn of_github_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|method| method.github_name() == name)
-    }
-
     /// Its value of `merge_method` in `config.toml`.
     pub fn config_text(self) -> &'static str {
         match self {

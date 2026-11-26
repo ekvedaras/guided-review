@@ -239,7 +239,7 @@ impl PlacesOfReview for ReviewPlaces<'_> {
             Some(target) => NameTarget::Tour(target),
             None => NameTarget::Code(
                 CodeLinks {
-                    host: &self.core.code_host,
+                    on_web: &self.core.code_on_web,
                     base: &self.core.base,
                     head: &self.core.head,
                 }

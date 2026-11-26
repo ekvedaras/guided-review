@@ -5,12 +5,12 @@ use std::sync::Mutex;
 use crate::support::FixtureRepo;
 use crate::support::folders_in;
 use guided_review::config::Config;
-use guided_review::pull_request::RepoName;
-use guided_review::viewer::{CloneOffer, CloneOfferState, RepoCloner};
+use guided_review::pull_request::{HostedRepo, RepoName};
+use guided_review::viewer::{CloneOffer, CloneOfferState, ClonePort};
 use tempfile::TempDir;
 
-fn shop() -> RepoName {
-    RepoName::new("acme", "shop")
+fn shop() -> HostedRepo {
+    crate::support::shop_on_github()
 }
 
 fn write_config(home: &Path, text: &str) {
@@ -47,7 +47,7 @@ struct FakeCloner {
     refusal: Option<String>,
 }
 
-impl RepoCloner for FakeCloner {
+impl ClonePort for FakeCloner {
     fn clone_repo(&self, repo: &RepoName, folder: &Path) -> anyhow::Result<()> {
         if let Some(reason) = &self.refusal {
             anyhow::bail!("{reason}");
@@ -56,6 +56,42 @@ impl RepoCloner for FakeCloner {
         self.cloned.lock().unwrap().push(folder.to_path_buf());
         Ok(())
     }
+}
+
+#[test]
+fn a_clone_entry_written_before_hosts_were_named_is_the_repos_clone_on_github() {
+    let home = TempDir::new().unwrap();
+    write_config(home.path(), "[clones]\n\"acme/shop\" = \"/code/shop\"\n");
+
+    let config = Config::load_from(&folders_in(home.path())).unwrap();
+
+    assert_eq!(config.clone_of(&shop()), Some(PathBuf::from("/code/shop")));
+}
+
+#[test]
+fn a_clone_entry_that_names_its_host_is_the_repos_clone_on_that_host() {
+    let home = TempDir::new().unwrap();
+    write_config(
+        home.path(),
+        "[clones]\n\"github:acme/shop\" = \"/code/shop\"\n",
+    );
+
+    let config = Config::load_from(&folders_in(home.path())).unwrap();
+
+    assert_eq!(config.clone_of(&shop()), Some(PathBuf::from("/code/shop")));
+}
+
+#[test]
+fn a_clone_of_a_github_repo_is_saved_under_its_owner_and_name_as_before_hosts_were_named() {
+    let home = TempDir::new().unwrap();
+    let folders = folders_in(home.path());
+    let mut offer = CloneOffer::new(shop(), &folders);
+
+    offer.start().unwrap().run(&FakeCloner::default()).unwrap();
+
+    let written =
+        std::fs::read_to_string(home.path().join(".config/guided-review/config.toml")).unwrap();
+    assert!(written.contains("\"acme/shop\" = "), "{written}");
 }
 
 #[test]

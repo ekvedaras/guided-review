@@ -87,7 +87,7 @@ enum ClonePart {
 impl ClonePart {
     fn of(problem: CloneRowProblem) -> Self {
         match problem {
-            CloneRowProblem::NotOwnerSlashRepo | CloneRowProblem::SameRepoTwice => Self::Repo,
+            CloneRowProblem::NotARepoPath | CloneRowProblem::SameRepoTwice => Self::Repo,
             CloneRowProblem::FolderGone | CloneRowProblem::NoRemoteOfRepo => Self::Folder,
         }
     }
@@ -768,7 +768,7 @@ impl SettingsPanel {
                 Self::section(
                     colors,
                     "Open code in",
-                    "The editor a code link opens. With none, code opens on GitHub.",
+                    "The editor a code link opens. With none, code opens on its code host.",
                     self.ide(editing, colors, cx),
                 )
                 .into_any_element(),

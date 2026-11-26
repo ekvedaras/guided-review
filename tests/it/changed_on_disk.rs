@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crate::support::fake_ports::{FakeGitHub, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::work::drive_without_agents;
 use crate::support::{FixtureRepo, GuidedReview, file_path};
 use guided_review::app_folders::AppFolders;
@@ -52,10 +52,10 @@ impl Feature {
 /// Runs the window's focus pull, as the app does when the window comes to the front.
 fn check_on_focus(opened: &mut OpenedReview, now: Instant) -> Vec<WorkKind> {
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", "snapshot", &sent);
-    opened.review.pull_from_github();
-    let ran = drive_without_agents(&mut opened.review, &github, opened.source.as_ref(), now);
-    assert_eq!(sent.github_calls(), []);
+    let host = FakeHost::with_pull("main-tip", "snapshot", &sent);
+    opened.review.pull_from_host();
+    let ran = drive_without_agents(&mut opened.review, &host, opened.source.as_ref(), now);
+    assert_eq!(sent.host_calls(), []);
     ran
 }
 
@@ -258,17 +258,17 @@ fn the_folder_is_checked_again_every_thirty_seconds() {
     check_on_focus(&mut opened, now);
     feature.repo.write("notes.txt", "a new file\n");
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", "snapshot", &sent);
+    let host = FakeHost::with_pull("main-tip", "snapshot", &sent);
 
     let before = drive_without_agents(
         &mut opened.review,
-        &github,
+        &host,
         opened.source.as_ref(),
         now + Duration::from_secs(29),
     );
     let after = drive_without_agents(
         &mut opened.review,
-        &github,
+        &host,
         opened.source.as_ref(),
         now + Duration::from_secs(30),
     );
@@ -281,12 +281,12 @@ fn the_folder_is_checked_again_every_thirty_seconds() {
 /// Update, as the sidebar's button runs it: the re-pinned review, with the old one carried into it.
 fn update(opened: &mut OpenedReview) {
     let sent = SentLog::default();
-    let github = FakeGitHub::with_pull("main-tip", "snapshot", &sent);
-    let updated = opened.repinner.run(&github).unwrap();
+    let host = FakeHost::with_pull("main-tip", "snapshot", &sent);
+    let updated = opened.repinner.run(&host).unwrap();
     let replaced = std::mem::replace(&mut opened.review, updated.review);
     opened.review.carry_on_from(replaced);
     opened.source = updated.source;
-    assert_eq!(sent.github_calls(), []);
+    assert_eq!(sent.host_calls(), []);
 }
 
 fn snapshot_ref_target(feature: &Feature) -> Sha {
@@ -522,7 +522,7 @@ fn update_refuses_while_the_folder_is_on_another_branch_and_moves_nothing() {
 
     let refused = opened
         .repinner
-        .run(&FakeGitHub::with_pull("main-tip", "snapshot", &sent));
+        .run(&FakeHost::with_pull("main-tip", "snapshot", &sent));
 
     assert!(refused.is_err());
     assert_eq!(snapshot_ref_target(&feature), head);
@@ -860,13 +860,13 @@ fn an_update_keeps_the_more_lines_setting_the_repo_and_the_problem_of_an_unreada
         &feature.repo.folders(),
     )
     .unwrap();
-    let repo = opened.review.local_facts().unwrap().repo.clone();
+    let repo = opened.review.local_facts().unwrap().origin.clone();
     assert!(repo.is_some());
     feature.repo.write("README.md", "hello\nworld\nagain\n");
 
     update(&mut opened);
 
-    assert_eq!(opened.review.local_facts().unwrap().repo, repo);
+    assert_eq!(opened.review.local_facts().unwrap().origin, repo);
     assert_eq!(opened.review.display_options().more_lines().get(), 5);
     assert!(
         opened
