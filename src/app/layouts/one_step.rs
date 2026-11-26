@@ -27,6 +27,7 @@ use crate::app::components::diagram::{DiagramSet, Diagrams};
 use crate::app::components::diff_view::{
     CodeGesture, OnImageComment, OnNamePointer, OnRowGesture, RowGesture,
 };
+use crate::app::components::files_sheet::FilesSheet;
 use crate::app::components::finding_view::FindingQuestions;
 use crate::app::components::findings_sheet::FindingsSheet;
 use crate::app::components::guided_tour_banner::GuidedTourReadyBanner;
@@ -75,6 +76,7 @@ use name_card_hover::NameCardPlace;
 
 mod comments;
 mod comments_list;
+mod files_list;
 mod findings;
 #[cfg(feature = "snapshots")]
 mod gallery;
@@ -115,6 +117,7 @@ actions!(
         ToggleShortcuts,
         ToggleFindingsList,
         ToggleCommentsList,
+        ToggleFilesList,
         OpenPrOnHost,
         OpenIssue,
         AskToOpenPr,
@@ -192,6 +195,7 @@ pub struct OneStepLayout {
     shortcuts: Entity<ShortcutsSheet>,
     findings: Entity<FindingsSheet>,
     comments_list: Entity<CommentsSheet>,
+    files_list: Entity<FilesSheet>,
     picture_zoom: Entity<PictureZoom>,
     settings: Entity<SettingsPanel>,
     loading: Entity<LoadingScreen>,
@@ -247,6 +251,7 @@ impl OneStepLayout {
                 this.use_code_opener_of_review(cx);
                 this.reopen_if_work_ended(cx);
                 this.refresh_comments_list(cx);
+                this.refresh_files_list(cx);
                 cx.notify();
             }),
             cx.subscribe_in(&session, window, |this, _, event, window, cx| match event {
@@ -301,6 +306,11 @@ impl OneStepLayout {
         let comments_list = cx.new(|cx| CommentsSheet::new(focus.clone(), cx));
         cx.subscribe_in(&comments_list, window, |this, _, event, _, cx| {
             this.comments_list_asked(event, cx);
+        })
+        .detach();
+        let files_list = cx.new(|cx| FilesSheet::new(focus.clone(), cx));
+        cx.subscribe_in(&files_list, window, |this, _, event, _, cx| {
+            this.files_list_asked(event, cx);
         })
         .detach();
         let picture_zoom = cx.new(|cx| PictureZoom::new(focus.clone(), cx));
@@ -428,6 +438,7 @@ impl OneStepLayout {
             shortcuts,
             findings,
             comments_list,
+            files_list,
             picture_zoom,
             settings,
             loading,
@@ -1093,6 +1104,11 @@ impl OneStepLayout {
                 self.comments_list
                     .update(cx, |sheet, cx| sheet.toggle(list, window, cx));
             }
+            Effect::Toggle(Overlay::Files) => {
+                let list = self.session.read(cx).review().files_list();
+                self.files_list
+                    .update(cx, |sheet, cx| sheet.toggle(list, window, cx));
+            }
             Effect::OpenSettings => self
                 .settings
                 .update(cx, |settings, cx| settings.open(window, cx)),
@@ -1483,6 +1499,9 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &ToggleCommentsList, window, cx| {
                 this.act(Intent::ToggleCommentsList, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleFilesList, window, cx| {
+                this.act(Intent::ToggleFilesList, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &ToggleFindingsList, window, cx| {
                 this.act(Intent::ToggleFindingsList, window, cx);
             }))
@@ -1597,6 +1616,7 @@ impl Render for OneStepLayout {
             .child(self.shortcuts.clone())
             .child(self.findings.clone())
             .child(self.comments_list.clone())
+            .child(self.files_list.clone())
             .child(self.picture_zoom.clone())
             .children(name_card)
             .children(cx.try_global::<Toaster>().map(|toaster| toaster.0.clone()))

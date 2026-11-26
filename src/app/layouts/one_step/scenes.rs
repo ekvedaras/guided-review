@@ -120,10 +120,11 @@ enum Scene {
     TitleBarMerging,
     FoldedMarkdownParts,
     StationsBusy,
+    FilesList,
 }
 
 impl Scene {
-    const ALL: [Self; 74] = [
+    const ALL: [Self; 75] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -198,6 +199,7 @@ impl Scene {
         Self::TitleBarMerging,
         Self::FoldedMarkdownParts,
         Self::StationsBusy,
+        Self::FilesList,
     ];
 
     fn file_name(self) -> &'static str {
@@ -276,6 +278,7 @@ impl Scene {
             Self::TitleBarMerging => "92-title-bar-merging",
             Self::FoldedMarkdownParts => "93-folded-markdown-parts",
             Self::StationsBusy => "95-sidebar-stations-busy",
+            Self::FilesList => "97-files-list",
         }
     }
 
@@ -1004,6 +1007,16 @@ impl OneStepLayout {
                     sheet.stage_dismissed_shown(cx);
                 });
             }
+            Scene::FilesList => {
+                self.change_review(cx, |review| {
+                    review.go_to_summary();
+                    review.go_forward();
+                    review.go_forward();
+                });
+                let list = self.session.read(cx).review().files_list();
+                self.files_list
+                    .update(cx, |sheet, cx| sheet.toggle(list, window, cx));
+            }
             Scene::CommentsList => {
                 self.change_review(cx, |review| {
                     review.go_forward();
@@ -1372,6 +1385,11 @@ impl OneStepLayout {
                 self.findings
                     .update(cx, |sheet, cx| sheet.close(window, cx));
                 self.change_review(cx, |review| review.ai_review_is(AiReview::NotRun));
+            }
+            Scene::FilesList => {
+                self.files_list
+                    .update(cx, |sheet, cx| sheet.close(window, cx));
+                self.change_review(cx, |review| review.go_to_summary());
             }
             Scene::CommentsList => {
                 self.comments_list

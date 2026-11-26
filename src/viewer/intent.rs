@@ -29,6 +29,8 @@ pub enum Intent {
     ToggleFindingsList,
     /// Its key and the palette: the list of the review's threads, or closes it.
     ToggleCommentsList,
+    /// Its key and the palette: the changed files as a tree, or closes it.
+    ToggleFilesList,
     /// Ticks or unticks the step on screen.
     ToggleRead,
     ToggleWrapLines,
@@ -87,6 +89,7 @@ impl From<PaletteAction> for Intent {
             PaletteAction::NextFinding => Self::NextFinding,
             PaletteAction::FindingsList => Self::ToggleFindingsList,
             PaletteAction::CommentsList => Self::ToggleCommentsList,
+            PaletteAction::FilesList => Self::ToggleFilesList,
             PaletteAction::MarkStepRead
             | PaletteAction::MarkStepUnread
             | PaletteAction::MarkFileRead
@@ -201,6 +204,8 @@ pub enum Overlay {
     Findings,
     /// The review's threads, to find one and go to it.
     Comments,
+    /// The changed files as a tree, to see the shape of the change and go to a file.
+    Files,
 }
 
 /// Why an intent does nothing now.
@@ -276,6 +281,7 @@ impl Intent {
             | Self::ToggleJump
             | Self::ToggleFindingsList
             | Self::ToggleCommentsList
+            | Self::ToggleFilesList
             | Self::ToggleSettings
             | Self::ShowSettings
             | Self::ToggleShortcuts => true,
@@ -303,6 +309,7 @@ impl Intent {
             Self::ToggleJump
                 | Self::ToggleFindingsList
                 | Self::ToggleCommentsList
+                | Self::ToggleFilesList
                 | Self::TogglePrSwitcher
                 | Self::ShowPrSwitcher
         );
@@ -337,6 +344,7 @@ impl ReviewCore {
                 Effect::Toggle(Overlay::Findings)
             }
             Intent::ToggleCommentsList if self.has_threads() => Effect::Toggle(Overlay::Comments),
+            Intent::ToggleFilesList => Effect::Toggle(Overlay::Files),
             Intent::ToggleRead => match self.screen() {
                 Screen::Step(id) => {
                     Effect::Change(ReviewChange::ToggleTick(ReadSubject::Step(id.clone())))

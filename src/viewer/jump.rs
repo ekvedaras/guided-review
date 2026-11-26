@@ -34,6 +34,15 @@ pub struct JumpTarget {
 }
 
 impl JumpTarget {
+    /// A file's box on a screen that shows it, `screen_title` naming that screen.
+    pub(super) fn file_on(screen: Screen, path: FilePath, screen_title: String) -> Self {
+        Self {
+            screen,
+            place: JumpPlace::File(path),
+            screen_title,
+        }
+    }
+
     /// What the query is matched against: the step's title, the file's path or the piece's id.
     pub fn label(&self) -> Cow<'_, str> {
         match &self.place {
@@ -201,6 +210,8 @@ pub enum PaletteAction {
     FindingsList,
     /// Opens the list of the review's threads.
     CommentsList,
+    /// Opens the changed files as a tree.
+    FilesList,
     MarkStepRead,
     MarkStepUnread,
     /// A basic tour's read tick is per file.
@@ -263,6 +274,7 @@ impl PaletteAction {
             Self::NextFinding => "Next finding",
             Self::FindingsList => "Findings list",
             Self::CommentsList => "Comments list",
+            Self::FilesList => "Files list",
             Self::MarkStepRead => "Mark step as read",
             Self::MarkStepUnread => "Mark step as unread",
             Self::MarkFileRead => "Mark file as read",
@@ -307,6 +319,7 @@ impl PaletteAction {
             Self::NextUnreadStep => Some(Command::NextUnreadStep),
             Self::FindingsList => Some(Command::FindingsList),
             Self::CommentsList => Some(Command::CommentsList),
+            Self::FilesList => Some(Command::FilesList),
             Self::MarkStepRead
             | Self::MarkStepUnread
             | Self::MarkFileRead

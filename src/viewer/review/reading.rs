@@ -1,14 +1,20 @@
 //! Where the reviewer is and what they have read: the reading order and the moves through it, read
-//! ticks per step and file, folds, progress and the viewed marks synced with the host.
+//! ticks per step and file, folds, progress, the viewed marks synced with the host, and the files list,
+//! which shows each file with its read tick and the screens that show it.
+
+use std::collections::BTreeMap;
 
 use super::{
     ReadProgress, ReadUnit, ReadingPlace, ReviewCore, RouteStop, StepId, SummaryStats, TourLead,
     UnreadFile, UnreadStep,
 };
+use crate::coverage;
 use crate::file_path::FilePath;
 use crate::tour::{Step, Tour};
+use crate::viewer::files_list::{FilePlace, FilesList, ListedFile};
 use crate::viewer::host_outage::Affected;
 use crate::viewer::jump::JumpTarget;
+use crate::viewer::piece_diff::pieces_of;
 use crate::viewer::ports::HostError;
 use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::screen::{NextScreen, ReadSubject, Screen};
@@ -539,5 +545,97 @@ impl ReviewCore {
             }
             None => false,
         }
+    }
+}
+
+impl ReviewCore {
+    /// Every changed file in tree order, each with the screens that show it in reading order.
+    pub fn files_list(&self) -> FilesList {
+        let mut places: BTreeMap<&FilePath, Vec<FilePlace>> = BTreeMap::new();
+        let mut steps_before = 0;
+        for screen in self.reading_order() {
+            if matches!(screen, Screen::Step(_)) {
+                steps_before += 1;
+            }
+            let place = FilePlace {
+                heading: self.screen_heading(&screen, steps_before),
+                is_read: match &screen {
+                    Screen::Step(id) => self.is_ticked(id),
+                    Screen::File(path) => self.is_file_ticked(path),
+                    Screen::SafetyNet | Screen::Summary | Screen::Overview => false,
+                },
+                is_current: *self.screen() == screen,
+                screen,
+            };
+            for path in self.files_shown_on(&place.screen) {
+                places.entry(path).or_default().push(place.clone());
+            }
+        }
+        FilesList::of(
+            self.files
+                .iter()
+                .map(|file| {
+                    let places = places.remove(&file.path).unwrap_or_default();
+                    let ticked: Vec<&FilePlace> = places
+                        .iter()
+                        .filter(|place| matches!(place.screen, Screen::Step(_) | Screen::File(_)))
+                        .collect();
+                    ListedFile {
+                        path: file.path.clone(),
+                        added: file.added,
+                        removed: file.removed,
+                        is_read: !ticked.is_empty() && ticked.iter().all(|place| place.is_read),
+                        places,
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    /// "Step 3 · Title" with the number the page's "Step 3 of 8" gives, which counts steps in reading order.
+    pub(super) fn screen_heading(&self, screen: &Screen, step_number: usize) -> String {
+        match screen {
+            Screen::Step(id) => {
+                let title = self
+                    .tour
+                    .guided()
+                    .and_then(|guided| guided.steps().into_iter().find(|step| step.id == *id))
+                    .map_or_default(|step| step.title.clone());
+                format!("Step {step_number} · {title}")
+            }
+            Screen::File(path) => path.to_string(),
+            Screen::SafetyNet => "Safety net".to_owned(),
+            Screen::Summary => "Summary".to_owned(),
+            Screen::Overview => "Overview".to_owned(),
+        }
+    }
+
+    /// The files a screen shows a piece of, each once.
+    fn files_shown_on(&self, screen: &Screen) -> Vec<&FilePath> {
+        let mut paths: Vec<&FilePath> = match (screen, self.tour.guided()) {
+            (Screen::Step(id), Some(guided)) => guided
+                .steps()
+                .into_iter()
+                .find(|step| step.id == *id)
+                .map_or_default(|step| {
+                    pieces_of(step, guided, &self.files)
+                        .into_iter()
+                        .map(|piece| piece.id.path())
+                        .collect()
+                }),
+            (Screen::SafetyNet, Some(guided)) => coverage::safety_net(guided, &self.files)
+                .iter()
+                .map(|part| part.piece.id.path())
+                .collect(),
+            (Screen::File(path), _) => self
+                .files
+                .iter()
+                .filter(|file| file.path == *path)
+                .map(|file| &file.path)
+                .collect(),
+            _ => Vec::new(),
+        };
+        paths.dedup();
+        paths
     }
 }

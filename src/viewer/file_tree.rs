@@ -56,12 +56,12 @@ pub enum TreeRowKind {
     },
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FileTree {
     root: Folder,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Folder {
     folders: BTreeMap<Name, Self>,
     files: BTreeMap<Name, FilePath>,

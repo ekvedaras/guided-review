@@ -131,6 +131,7 @@ fn action_icon(action: PaletteAction) -> Icon {
         PaletteAction::SwitchToGuidedTour => Icon::ArrowRight,
         PaletteAction::FinishReview | PaletteAction::FindingsList => Icon::ListChecks,
         PaletteAction::CommentsList => Icon::MessageSquare,
+        PaletteAction::FilesList => Icon::FolderOpen,
         PaletteAction::MarkDone => Icon::CircleCheck,
         PaletteAction::SendTasks => Icon::Send,
         PaletteAction::OpenOnHost(_) | PaletteAction::OpenChecksOnHost(_) => Icon::ExternalLink,
