@@ -612,6 +612,39 @@ impl OneStepLayout {
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::ToggleShortcuts, window, cx);
         }));
+        let list_button = |id: &'static str, icon: Icon, label: &'static str, command, intent| {
+            button(colors, id, ButtonKind::Ghost, ButtonSize::Regular)
+                .px_2()
+                .child(button_icon(
+                    colors,
+                    ButtonKind::Ghost,
+                    ButtonSize::Regular,
+                    icon,
+                ))
+                .child(label)
+                .child(button_keys(colors, ButtonKind::Ghost, command, cx))
+                .aria_label(label)
+                .on_click(cx.listener(move |this, _, window, cx| this.act(intent, window, cx)))
+        };
+        let lists = div()
+            .px_2()
+            .flex()
+            .items_center()
+            .gap_1()
+            .child(list_button(
+                "sidebar-files",
+                Icon::FileText,
+                "Files",
+                Command::FilesList,
+                Intent::ToggleFilesList,
+            ))
+            .child(list_button(
+                "sidebar-comments",
+                Icon::MessageSquare,
+                "Comments",
+                Command::CommentsList,
+                Intent::ToggleCommentsList,
+            ));
         let row = div()
             .px_2()
             .pb_2()
@@ -651,7 +684,7 @@ impl OneStepLayout {
                 .text_xs()
                 .line_height(px(12.)),
         );
-        div().flex_none().child(version).child(row)
+        div().flex_none().child(lists).child(version).child(row)
     }
 }
 

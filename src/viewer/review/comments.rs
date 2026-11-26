@@ -58,10 +58,6 @@ impl ReviewCore {
         }
     }
 
-    pub fn has_threads(&self) -> bool {
-        !self.pulled_threads.is_empty()
-    }
-
     /// Every thread of the review, in reading order, each with the screen that shows it.
     pub fn comments_list(&self) -> CommentsList {
         let mut listed: Vec<ListedThread> = Vec::new();

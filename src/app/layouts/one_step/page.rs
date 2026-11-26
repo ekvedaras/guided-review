@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, Context, Div, ElementId, Entity, FontWeight, InteractiveElement, IntoElement,
-    ListOffset, ParentElement, Pixels, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    div, px,
+    AnyElement, App, ClickEvent, Context, Div, ElementId, Entity, FontWeight, InteractiveElement,
+    IntoElement, ListOffset, ParentElement, Pixels, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use super::{OneStepLayout, ai_review_icon};
@@ -88,7 +88,9 @@ impl OneStepLayout {
                         .child(InlineMarkdown::new("summary-title", &title).selectable()),
                 )
                 .into_any_element(),
-            PageRow::SummaryStats(stats) => summary_stats(&colors, &stats).into_any_element(),
+            PageRow::SummaryStats(stats) => {
+                summary_stats(&colors, &stats, Self::stat_clicks(cx)).into_any_element()
+            }
             PageRow::RouteHeading => note_label("THE TOUR")
                 .pt_6()
                 .pb_2()
@@ -524,7 +526,11 @@ impl OneStepLayout {
                         InlineMarkdown::new("overview-title", &overview.title).selectable(),
                     )),
             )
-            .child(overview_stats(&colors, overview.stats))
+            .child(overview_stats(
+                &colors,
+                overview.stats,
+                Self::stat_clicks(cx),
+            ))
             .children(description)
             .children(local)
             .child(
@@ -1102,8 +1108,55 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
         .into_any_element()
 }
 
+/// A number of the PR's size that opens its list: the files list, or the comments list.
+fn stat_opening(
+    colors: &Colors,
+    id: &'static str,
+    icon_name: Icon,
+    text: SharedString,
+    opens: OnStatClick,
+) -> impl IntoElement + use<> {
+    let hover_text = colors.text;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .rounded(px(CONTROL_RADIUS))
+        .cursor_pointer()
+        .hover(move |stat| stat.text_color(hover_text))
+        .role(gpui::Role::Button)
+        .aria_label(text.clone())
+        .child(sized_icon(icon_name, colors.muted_text, px(14.)))
+        .child(text)
+        .on_click(move |event, window, cx| opens(event, window, cx))
+}
+
+/// What a click on a stat does: the window's caller opens the list the stat counts.
+type OnStatClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+/// The files list and the comments list, opened by a click on the stat that counts them.
+struct StatClicks {
+    files: OnStatClick,
+    threads: OnStatClick,
+}
+
+impl OneStepLayout {
+    fn stat_clicks(cx: &Context<Self>) -> StatClicks {
+        let opening = |intent: Intent| -> OnStatClick {
+            Rc::new(
+                cx.listener(move |this, _: &ClickEvent, window, cx| this.act(intent, window, cx)),
+            )
+        };
+        StatClicks {
+            files: opening(Intent::ToggleFilesList),
+            threads: opening(Intent::ToggleCommentsList),
+        }
+    }
+}
+
 /// How big the PR is, in the numbers the review truly has.
-fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
+fn summary_stats(colors: &Colors, stats: &SummaryStatsRow, clicks: StatClicks) -> impl IntoElement {
     let item = |icon_name: Icon, text: SharedString| {
         div()
             .flex()
@@ -1123,7 +1176,13 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
         .text_color(colors.muted_text)
         .child(item(Icon::Milestone, SharedString::from(&stats.steps)))
         .child(dot())
-        .child(item(Icon::FileText, SharedString::from(&stats.files)))
+        .child(stat_opening(
+            colors,
+            "summary-files",
+            Icon::FileText,
+            SharedString::from(&stats.files),
+            clicks.files,
+        ))
         .child(dot())
         .child(
             div()
@@ -1147,7 +1206,13 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
                 .items_center()
                 .gap_3()
                 .child(dot())
-                .child(item(Icon::MessageSquare, SharedString::from(threads)))
+                .child(stat_opening(
+                    colors,
+                    "summary-threads",
+                    Icon::MessageSquare,
+                    SharedString::from(threads),
+                    Rc::clone(&clicks.threads),
+                ))
         }))
         .children(stats.started_read.clone().map(|started_read| {
             div()
@@ -1264,15 +1329,7 @@ fn local_overview_card(colors: &Colors, local: &LocalFacts) -> impl IntoElement 
 }
 
 /// How big a basic review's PR is, in the numbers the review truly has.
-fn overview_stats(colors: &Colors, stats: OverviewStats) -> impl IntoElement {
-    let item = |icon_name: Icon, text: String| {
-        div()
-            .flex()
-            .items_center()
-            .gap_1p5()
-            .child(sized_icon(icon_name, colors.muted_text, px(14.)))
-            .child(text)
-    };
+fn overview_stats(colors: &Colors, stats: OverviewStats, clicks: StatClicks) -> impl IntoElement {
     let dot = || div().size(px(3.)).rounded_full().bg(colors.border);
     div()
         .pb_5()
@@ -1282,17 +1339,28 @@ fn overview_stats(colors: &Colors, stats: OverviewStats) -> impl IntoElement {
         .gap_3()
         .text_sm()
         .text_color(colors.muted_text)
-        .child(item(
+        .child(stat_opening(
+            colors,
+            "overview-files",
             Icon::FileText,
-            pluralised(stats.files, "file changed", "files changed"),
+            pluralised(stats.files, "file changed", "files changed").into(),
+            clicks.files,
         ))
         .child(dot())
         .child(line_counts(colors, stats.added_lines, stats.removed_lines))
         .children((stats.open_threads > 0).then(|| {
-            div().flex().items_center().gap_3().child(dot()).child(item(
-                Icon::MessageSquare,
-                pluralised(stats.open_threads, "open thread", "open threads"),
-            ))
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(dot())
+                .child(stat_opening(
+                    colors,
+                    "overview-threads",
+                    Icon::MessageSquare,
+                    pluralised(stats.open_threads, "open thread", "open threads").into(),
+                    clicks.threads,
+                ))
         }))
 }
 

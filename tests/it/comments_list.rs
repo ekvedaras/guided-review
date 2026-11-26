@@ -685,7 +685,7 @@ fn a_thread_no_screen_shows_opens_on_github_and_the_screen_stays() {
 }
 
 #[test]
-fn c_and_the_palette_open_the_comments_list_only_when_the_review_has_threads() {
+fn c_and_the_palette_open_the_comments_list_with_threads_or_with_none_yet() {
     let shop = Shop::with_pull();
     let with = shop.open_with(
         two_steps(),
@@ -707,13 +707,13 @@ fn c_and_the_palette_open_the_comments_list_only_when_the_review_has_threads() {
         Effect::Toggle(Overlay::Comments)
     );
     assert!(
-        !without
+        without
             .palette_actions(Build::Local)
             .contains(&PaletteAction::CommentsList)
     );
     assert_eq!(
         without.decide(Intent::ToggleCommentsList, WindowMoment::default()),
-        Effect::Nothing
+        Effect::Toggle(Overlay::Comments)
     );
     assert_eq!(
         Intent::from(PaletteAction::CommentsList),

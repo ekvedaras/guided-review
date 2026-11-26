@@ -484,13 +484,13 @@ impl Render for CommentsSheet {
             .flex_col()
             .track_scroll(&self.scroll)
             .when(children.is_empty(), |rows| {
-                rows.child(
-                    div()
-                        .px_4()
-                        .py_3()
-                        .text_color(colors.muted_text)
-                        .child("No thread holds every word."),
-                )
+                rows.child(div().px_4().py_3().text_color(colors.muted_text).child(
+                    if self.list.thread_count() == 0 && self.query.is_empty() {
+                        "No comments yet. A comment you add, or one on the PR, shows here."
+                    } else {
+                        "No thread holds every word."
+                    },
+                ))
             })
             .children(children);
         modal_layer_for(&colors, "comments-scrim", &self.presence)
