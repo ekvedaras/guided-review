@@ -569,3 +569,49 @@ fn ending_the_review_ends_its_agent() {
     assert!(desk.fake.calls().contains(&TourAgentCall::Kill(terminal)));
     assert_eq!(desk.fake.review_agents_of(PR), Vec::<String>::new());
 }
+
+#[test]
+fn picking_a_review_agent_moves_the_review_label_to_it_and_ends_no_agent() {
+    let desk = Desk::with(
+        FakeTourAgent::new()
+            .review_agent("t1", PR, AgentStatus::Working, 0)
+            .claude("t2", "herdr"),
+    );
+
+    desk.review_agents()
+        .claim(&pr(), &TerminalId::new("t2"))
+        .unwrap();
+
+    assert_eq!(desk.fake.review_agents_of(PR), ["t2"]);
+    assert_eq!(
+        desk.fake.calls(),
+        [
+            TourAgentCall::ReleaseReview(TerminalId::new("t1")),
+            TourAgentCall::ClaimReview {
+                terminal: TerminalId::new("t2"),
+                subject: pr()
+            }
+        ]
+    );
+}
+
+#[test]
+fn a_new_review_run_takes_the_label_off_a_review_agent_the_reviewer_picked_and_never_ends_it() {
+    let desk = Desk::with(
+        FakeTourAgent::new()
+            .claude("t2", "herdr")
+            .labelled_review("t2", PR),
+    );
+
+    desk.start(&pr()).unwrap();
+
+    let calls = desk.fake.calls();
+    assert!(
+        calls.contains(&TourAgentCall::ReleaseReview(TerminalId::new("t2"))),
+        "{calls:?}"
+    );
+    assert!(
+        !calls.contains(&TourAgentCall::Kill(TerminalId::new("t2"))),
+        "{calls:?}"
+    );
+}

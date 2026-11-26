@@ -32,6 +32,7 @@ pub mod refresh_banner;
 pub mod reviews_block;
 pub mod safety_net_view;
 pub mod scrollbar;
+pub mod search_row;
 pub mod segmented;
 pub mod selectable_text;
 pub mod settings_panel;

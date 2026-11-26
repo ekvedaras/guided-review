@@ -1856,6 +1856,26 @@ impl ReviewSession {
         ));
     }
 
+    /// Makes the terminal the review agent, then follows it as a run found alive; a failure says why
+    /// in a toast.
+    pub fn use_review_agent(&mut self, terminal: TerminalId, cx: &mut Context<Self>) {
+        let agents = review_agent::agents_of(cx.global::<PrSwitching>());
+        let subject = self.review.subject().clone();
+        self.run_off_thread(
+            cx,
+            move || agents.claim(&subject, &terminal),
+            |this, claimed, cx| match claimed {
+                Ok(()) => this.resume_ai_review(cx),
+                Err(error) => post_toast(
+                    cx,
+                    ToastTone::Danger,
+                    format!("Could not use that agent: {error:#}"),
+                ),
+            },
+        )
+        .detach();
+    }
+
     pub fn show_review_agent(&mut self, cx: &mut Context<Self>) {
         let agents = review_agent::agents_of(cx.global::<PrSwitching>());
         let subject = self.review.subject().clone();

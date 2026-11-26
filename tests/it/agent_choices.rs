@@ -5,7 +5,8 @@ use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use guided_review::review_subject::{BranchName, ReviewSubject};
 use guided_review::viewer::{
-    AgentChoice, AgentLinkOff, AgentStatus, TerminalId, TourAgentPort, TourAgentState, TourAgents,
+    AgentChoice, AgentLinkOff, AgentRole, AgentStatus, TerminalId, TourAgentPort, TourAgentState,
+    TourAgents,
 };
 
 const PR_9: &str = "https://github.com/acme/shop/pull/9";
@@ -50,7 +51,7 @@ fn every_claude_terminal_is_offered_with_where_it_works_the_labelled_one_first_t
             .shell_in("t4", path(&head)),
     );
 
-    let choices = agents(&fake).agent_choices(&pr()).unwrap();
+    let choices = agents(&fake).agent_choices(&pr(), AgentRole::Tour).unwrap();
 
     let order: Vec<&str> = choices
         .iter()
@@ -66,17 +67,18 @@ fn every_claude_terminal_is_offered_with_where_it_works_the_labelled_one_first_t
             repo: Some("acme/shop".parse().unwrap()),
             branch: Some(BranchName::new(HEAD).unwrap()),
             status: AgentStatus::Idle,
-            is_the_agent: false,
+            is_tour_agent: false,
+            is_review_agent: false,
             works_on_the_code: true,
             started_by_app: false,
         }
     );
-    assert!(choices[0].is_the_agent && !choices[0].works_on_the_code);
+    assert!(choices[0].is_tour_agent && !choices[0].works_on_the_code);
     assert_eq!(fake.agents_of(PR_9), ["t3"], "looking changes no label");
 }
 
 #[test]
-fn a_review_agent_the_app_started_is_not_offered_and_its_tour_agent_says_the_app_started_it() {
+fn for_the_review_agent_its_review_agent_comes_first_and_each_choice_says_which_agent_it_is() {
     let head = clone_on("acme/shop", HEAD);
     let fake = Arc::new(
         FakeTourAgent::new()
@@ -86,13 +88,48 @@ fn a_review_agent_the_app_started_is_not_offered_and_its_tour_agent_says_the_app
             .review_agent("t2", PR_9, AgentStatus::Working, 0),
     );
 
-    let choices = agents(&fake).agent_choices(&pr()).unwrap();
+    let choices = agents(&fake)
+        .agent_choices(&pr(), AgentRole::Review)
+        .unwrap();
 
-    let offered: Vec<(&str, bool)> = choices
+    let marks: Vec<(&str, bool, bool, bool)> = choices
         .iter()
-        .map(|choice| (choice.terminal.as_str(), choice.started_by_app))
+        .map(|choice| {
+            (
+                choice.terminal.as_str(),
+                choice.is_tour_agent,
+                choice.is_review_agent,
+                choice.started_by_app,
+            )
+        })
         .collect();
-    assert_eq!(offered, [("t1", true)]);
+    assert_eq!(
+        marks,
+        [("t2", false, true, true), ("t1", true, false, true)]
+    );
+}
+
+#[test]
+fn a_choice_matches_a_search_when_every_word_is_in_its_space_folder_repo_or_branch() {
+    let choice = AgentChoice {
+        terminal: TerminalId::new("t6k"),
+        space: "claude-a".to_owned(),
+        folder: "/Users/you/Code/claude-a".into(),
+        repo: Some("saltzapp/saltz.app".parse().unwrap()),
+        branch: Some(BranchName::new("fix/18798-short-expiry").unwrap()),
+        status: AgentStatus::Idle,
+        is_tour_agent: false,
+        is_review_agent: false,
+        works_on_the_code: false,
+        started_by_app: false,
+    };
+
+    assert!(choice.matches(""));
+    assert!(choice.matches("CLAUDE-a"));
+    assert!(choice.matches("saltz expiry"));
+    assert!(choice.matches("t6k"));
+    assert!(!choice.matches("claude-b"));
+    assert!(!choice.matches("saltz dotfiles"));
 }
 
 #[test]

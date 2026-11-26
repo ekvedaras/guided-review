@@ -21,6 +21,7 @@ use super::overlay::{
     touching_places,
 };
 use super::palette::Colors;
+use super::search_row::search_row;
 use super::sidebar_row::RowPlace;
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -437,19 +438,7 @@ impl Render for JumpPalette {
                     .mt(px(80.))
                     .w(px(720.))
                     .h_auto()
-                    .child(
-                        div()
-                            .px_4()
-                            .py_3()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .text_base()
-                            .border_b_1()
-                            .border_color(colors.subtle_border)
-                            .child(sized_icon(Icon::Search, colors.muted_text, px(16.)))
-                            .child(div().flex_1().min_w_0().child(self.query_box(cx))),
-                    )
+                    .child(search_row(&colors, self.query_box(cx), "", false, None))
                     .child(div().py_2().flex().flex_col().children(rows).when(
                         self.entry_count == 0,
                         |list| {

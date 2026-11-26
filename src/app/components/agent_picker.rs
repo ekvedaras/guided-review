@@ -1,15 +1,16 @@
-//! Picking the tour agent by hand, for when the one the app found is not the right one: every
-//! Claude terminal with where it works, a button that shows it and one that makes it the agent.
+//! Picking an agent by hand, for when the one the app found is not the right one: every Claude
+//! terminal with where it works and which agent it is now, a button that shows it and one that makes
+//! it the tour agent or the review agent.
 
 use std::time::Instant;
 
 use gpui::{
-    Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, px,
+    AnyElement, Context, EventEmitter, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, ParentElement, Render, Rgba, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use crate::viewer::{AgentChoice, Presence, TerminalId};
+use crate::viewer::{AgentChoice, AgentRole, AgentStatus, Presence, TerminalId};
 
 use super::button::{ButtonKind, ButtonSize, icon_button, icon_label_button};
 use super::chip::chip;
@@ -18,14 +19,20 @@ use super::key_cap::{KeyLabel, key_hint};
 use super::motion::OVERLAY;
 use super::overlay::{close_presence, modal_layer_for, overlay_panel, picker_footer, rise_for};
 use super::palette::{CODE_FONT, Colors, Tone};
+use super::search_row::search_row;
 use super::selectable_text::SelectableText;
+use super::text_box::TextBox;
+use super::text_input::Lines;
 
 pub enum AgentPickerEvent {
-    Use(TerminalId),
+    Use {
+        terminal: TerminalId,
+        role: AgentRole,
+    },
     Show(TerminalId),
 }
 
-/// The terminals as herdr listed them when the picker opened; `None` while it looks.
+/// The terminals as herdr listed them when the picker opened.
 enum Listed {
     Looking,
     Found(Vec<AgentChoice>),
@@ -37,8 +44,11 @@ pub struct AgentPicker {
     focus: FocusHandle,
     owner_focus: FocusHandle,
     listed: Listed,
-    /// Says what the agent is for: "this PR's tour agent", "this folder's agent".
+    /// The agent the picked terminal becomes.
+    role: AgentRole,
+    /// Says what that agent is for: "this PR's tour agent", "this review's AI review agent".
     of_what: SharedString,
+    query: String,
 }
 
 impl EventEmitter<AgentPickerEvent> for AgentPicker {}
@@ -52,7 +62,9 @@ impl AgentPicker {
             focus: cx.focus_handle(),
             owner_focus,
             listed: Listed::Looking,
+            role: AgentRole::Tour,
             of_what: SharedString::default(),
+            query: String::new(),
         }
     }
 
@@ -60,10 +72,19 @@ impl AgentPicker {
         self.presence.is_open()
     }
 
-    /// Opens on "looking"; `listed` gives the terminals once herdr answers.
-    pub fn open(&mut self, of_what: SharedString, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens on "looking", with the search box taking the keys; `listed` gives the terminals once
+    /// herdr answers.
+    pub fn open(
+        &mut self,
+        role: AgentRole,
+        of_what: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.role = role;
         self.of_what = of_what;
         self.listed = Listed::Looking;
+        self.query.clear();
         self.presence.open(Instant::now());
         window.focus(&self.focus, cx);
         cx.notify();
@@ -90,45 +111,44 @@ impl AgentPicker {
     #[cfg(feature = "snapshots")]
     pub fn stage_sample(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::review_subject::BranchName;
-        use crate::viewer::AgentStatus;
         let choice =
-            |terminal: &str, folder: &str, branch: &str, status, is_the_agent, works| AgentChoice {
-                terminal: TerminalId::new(terminal),
-                space: "work".to_owned(),
-                folder: folder.into(),
-                repo: "ekvedaras/guided-review".parse().ok(),
-                branch: BranchName::new(branch).ok(),
-                status,
-                is_the_agent,
-                works_on_the_code: works,
-                started_by_app: false,
+            |terminal: &str, space: &str, branch: &str, status, marks: (bool, bool, bool)| {
+                AgentChoice {
+                    terminal: TerminalId::new(terminal),
+                    space: space.to_owned(),
+                    folder: format!("/Users/you/Code/{space}").into(),
+                    repo: "ekvedaras/guided-review".parse().ok(),
+                    branch: BranchName::new(branch).ok(),
+                    status,
+                    is_tour_agent: marks.0,
+                    is_review_agent: marks.1,
+                    works_on_the_code: marks.2,
+                    started_by_app: false,
+                }
             };
-        self.open("this PR's tour agent".into(), window, cx);
+        self.open(AgentRole::Tour, "this PR's tour agent".into(), window, cx);
         self.listed(
             Ok(vec![
                 choice(
                     "t3",
-                    "/Users/you/Code/guided-review",
+                    "guided-review",
                     "main",
                     AgentStatus::Working,
-                    true,
-                    false,
+                    (true, false, false),
                 ),
                 choice(
                     "t7",
-                    "/Users/you/Code/claude-a",
+                    "claude-a",
                     "files-list",
                     AgentStatus::Idle,
-                    false,
-                    true,
+                    (false, true, true),
                 ),
                 choice(
                     "t9",
-                    "/Users/you/Code/claude-b",
+                    "claude-b",
                     "settings-pages",
                     AgentStatus::WaitingForYou,
-                    false,
-                    false,
+                    (false, false, false),
                 ),
             ]),
             cx,
@@ -142,22 +162,50 @@ impl AgentPicker {
         }
     }
 
+    fn query_box(&self, cx: &mut Context<Self>) -> TextBox {
+        let (on_edit, on_cancel) = (cx.entity(), cx.entity());
+        TextBox::new(
+            "agent-picker-query",
+            &self.focus,
+            &self.query,
+            Lines::Single,
+        )
+        .label("Search the agents")
+        .on_edit(move |query, _, cx| {
+            on_edit.update(cx, |this, cx| {
+                this.query = query;
+                cx.notify();
+            });
+        })
+        .on_cancel(move |window, cx| on_cancel.update(cx, |this, cx| this.close(window, cx)))
+    }
+
     fn choice_row(
         &self,
         colors: &Colors,
         choice: &AgentChoice,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> impl IntoElement + use<> {
         let terminal = choice.terminal.clone();
         let where_it_works = match (&choice.repo, &choice.branch) {
             (Some(repo), Some(branch)) => format!("{} · {}", repo.repo, branch.as_str()),
             (None, Some(branch)) => format!("no origin · {}", branch.as_str()),
             _ => "not a git checkout".to_owned(),
         };
+        let picked_role_tone = |role: AgentRole| {
+            if role == self.role {
+                Tone::Accent
+            } else {
+                Tone::Neutral
+            }
+        };
         let tags = [
             choice
-                .is_the_agent
-                .then_some(("the agent now", Tone::Accent)),
+                .is_tour_agent
+                .then(|| ("tour agent", picked_role_tone(AgentRole::Tour))),
+            choice
+                .is_review_agent
+                .then(|| ("review agent", picked_role_tone(AgentRole::Review))),
             choice
                 .works_on_the_code
                 .then_some(("on its code", Tone::Success)),
@@ -182,7 +230,8 @@ impl AgentPicker {
                 cx.emit(AgentPickerEvent::Show(terminal.clone()));
             }))
         };
-        let pick = (!choice.is_the_agent).then(|| {
+        let role = self.role;
+        let pick = (!choice.is_agent_as(role)).then(|| {
             let terminal = terminal.clone();
             icon_label_button(
                 colors,
@@ -190,10 +239,13 @@ impl AgentPicker {
                 ButtonKind::Secondary,
                 ButtonSize::Small,
                 Icon::Check,
-                format!("Use {terminal}"),
+                format!("Use {}", choice.space),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
-                cx.emit(AgentPickerEvent::Use(terminal.clone()));
+                cx.emit(AgentPickerEvent::Use {
+                    terminal: terminal.clone(),
+                    role,
+                });
                 this.close(window, cx);
             }))
         });
@@ -216,17 +268,25 @@ impl AgentPicker {
                         div()
                             .flex()
                             .flex_wrap()
-                            .items_center()
+                            .items_baseline()
                             .gap_2()
                             .child(
                                 div()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(format!("{} in {}", terminal, choice.space)),
+                                    .text_sm()
+                                    .text_color(colors.muted_text)
+                                    .child(format!("{terminal} in")),
                             )
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(colors.muted_text)
+                                    .text_lg()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(colors.text)
+                                    .child(choice.space.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(status_color(colors, choice.status))
                                     .child(choice.status.to_string()),
                             )
                             .children(tags),
@@ -235,6 +295,7 @@ impl AgentPicker {
                         div()
                             .text_sm()
                             .font_family(*CODE_FONT)
+                            .text_color(colors.muted_text)
                             .child(SelectableText::new(
                                 format!("agent-picker-folder-{terminal}"),
                                 choice.folder.display().to_string(),
@@ -251,12 +312,28 @@ impl AgentPicker {
     }
 }
 
+/// Working is the accent, idle a success, waiting on the reviewer a warning, failed red; a terminal
+/// with no status is quiet.
+fn status_color(colors: &Colors, status: AgentStatus) -> Rgba {
+    match status {
+        AgentStatus::Working => colors.accent,
+        AgentStatus::Idle => colors.success,
+        AgentStatus::WaitingForYou => colors.warning,
+        AgentStatus::Failed => colors.danger,
+        AgentStatus::Unreported => colors.muted_text,
+    }
+}
+
 impl Render for AgentPicker {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.presence.shown().is_none() {
             return div().into_any_element();
         }
         let colors = Colors::active(cx);
+        let title = match self.role {
+            AgentRole::Tour => "Pick the tour agent",
+            AgentRole::Review => "Pick the review agent",
+        };
         let header = div()
             .px_5()
             .pt_4()
@@ -276,7 +353,7 @@ impl Render for AgentPicker {
                         div()
                             .text_base()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("Pick the agent"),
+                            .child(title),
                     )
                     .child(div().text_xs().text_color(colors.muted_text).child(format!(
                         "Every Claude terminal in herdr. The one you use becomes {}.",
@@ -303,7 +380,7 @@ impl Render for AgentPicker {
                 .child(SelectableText::new("agent-picker-note", text))
                 .into_any_element()
         };
-        let body: Vec<gpui::AnyElement> = match &self.listed {
+        let body: Vec<AnyElement> = match &self.listed {
             Listed::Looking => vec![quiet("Looking at herdr's terminals...".to_owned())],
             Listed::Failed(reason) => {
                 vec![quiet(format!("Could not list the terminals: {reason}"))]
@@ -312,11 +389,21 @@ impl Render for AgentPicker {
                 vec![quiet("No terminal in herdr runs Claude.".to_owned())]
             }
             Listed::Found(choices) => {
-                let choices = choices.clone();
-                choices
+                let shown: Vec<AgentChoice> = choices
                     .iter()
-                    .map(|choice| self.choice_row(&colors, choice, cx).into_any_element())
-                    .collect()
+                    .filter(|choice| choice.matches(&self.query))
+                    .cloned()
+                    .collect();
+                if shown.is_empty() {
+                    vec![quiet(
+                        "No agent's space, folder or branch holds every word.".to_owned(),
+                    )]
+                } else {
+                    shown
+                        .iter()
+                        .map(|choice| self.choice_row(&colors, choice, cx).into_any_element())
+                        .collect()
+                }
             }
         };
         modal_layer_for(&colors, "agent-picker-scrim", &self.presence)
@@ -328,15 +415,21 @@ impl Render for AgentPicker {
                 overlay_panel(&colors)
                     .id("agent-picker")
                     .key_context(Self::KEY_CONTEXT)
-                    .track_focus(&self.focus)
                     .on_key_down(cx.listener(Self::on_key_down))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .mt(px(80.))
-                    .w(px(760.))
-                    .max_h(px(560.))
+                    .w(px(820.))
+                    .max_h(px(600.))
                     .flex()
                     .flex_col()
                     .child(header)
+                    .child(search_row(
+                        &colors,
+                        self.query_box(cx),
+                        "Search by space, folder, repo or branch",
+                        self.query.is_empty(),
+                        None,
+                    ))
                     .child(
                         div()
                             .id("agent-picker-rows")

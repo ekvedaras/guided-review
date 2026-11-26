@@ -313,6 +313,14 @@ impl TourAgentPort for NoReviewerTerminals {
         self.0.release(terminal, subject)
     }
 
+    fn claim_review(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
+        self.0.claim_review(terminal, subject)
+    }
+
+    fn release_review(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
+        self.0.release_review(terminal, subject)
+    }
+
     fn status(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus> {
         self.0.status(terminal)
     }

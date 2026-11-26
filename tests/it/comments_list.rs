@@ -797,3 +797,39 @@ fn a_list_open_while_threads_change_keeps_the_cursor_on_the_resolved_heading() {
 
     assert!(list.is_on_resolved_header());
 }
+
+#[test]
+fn a_search_keeps_the_threads_whose_place_author_or_words_hold_every_word_resolved_ones_too() {
+    let shop = Shop::with_pull();
+    let review = shop.open_with(
+        two_steps(),
+        &[
+            thread(
+                "on-config",
+                "config.yml",
+                3,
+                vec![comment("bob", "Why three?")],
+            ),
+            resolved(thread(
+                "on-order",
+                "app/Order.php",
+                7,
+                vec![
+                    comment("alice", "Why two?"),
+                    comment("carol", "Prices went up."),
+                ],
+            )),
+        ],
+    );
+    let mut list = review.comments_list();
+
+    list.set_query("PRICES");
+    assert_eq!(ids(&list), ["on-order"]);
+    list.set_query("why bob");
+    assert_eq!(ids(&list), ["on-config"]);
+    list.set_query("order.php alice");
+    assert_eq!(ids(&list), ["on-order"]);
+    list.set_query("");
+    assert_eq!(ids(&list), ["on-config"]);
+    assert_eq!(list.thread_count(), 2);
+}

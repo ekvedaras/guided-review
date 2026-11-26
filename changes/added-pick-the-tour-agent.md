@@ -1,1 +1,1 @@
-Pick the tour agent yourself: the Tour card lists every Claude terminal with its folder and branch, Show and Use.
+Pick the tour or review agent yourself: a searchable list of every Claude terminal with its space, folder and branch.

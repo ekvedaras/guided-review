@@ -17,13 +17,14 @@ use crate::viewer::{
 
 use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::icon::{Icon, sized_icon};
-use super::key_cap::{KeyLabel, key_cap, key_hint};
+use super::key_cap::{KeyLabel, key_hint};
 use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
     touching_places,
 };
 use super::palette::{CODE_FONT, Colors};
+use super::search_row::search_row;
 use super::text_box::TextBox;
 use super::text_input::Lines;
 
@@ -170,77 +171,43 @@ impl FilesSheet {
         cx.notify();
     }
 
-    fn search_box(
-        &self,
-        colors: &Colors,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
+    fn search_box(&self, colors: &Colors, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
         let (on_edit, on_submit, on_cancel) = (cx.entity(), cx.entity(), cx.entity());
         let is_searching = self.search_focus.is_focused(window);
-        div()
-            .flex_1()
-            .min_w_0()
-            .px_2()
-            .py_1()
-            .flex()
-            .items_center()
-            .gap_2()
-            .rounded(px(6.))
-            .border_1()
-            .border_color(if is_searching {
-                colors.accent
-            } else {
-                colors.border
-            })
-            .bg(colors.inset)
-            .child(sized_icon(Icon::Search, colors.muted_text, px(14.)))
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_w_0()
-                    .child(
-                        TextBox::new(
-                            "files-search",
-                            &self.search_focus,
-                            &self.query,
-                            Lines::Single,
-                        )
-                        .label("Search changed files")
-                        .on_edit(move |query, _, cx| {
-                            on_edit.update(cx, |this, cx| {
-                                this.list.set_query(&query);
-                                this.query = query;
-                                this.cursor_moved = true;
-                                cx.notify();
-                            });
-                        })
-                        .on_submit(move |window, cx| {
-                            on_submit.update(cx, |this, cx| this.go(0, window, cx));
-                        })
-                        .on_cancel(move |window, cx| {
-                            on_cancel.update(cx, |this, cx| {
-                                this.query.clear();
-                                this.list.set_query("");
-                                this.cursor_moved = true;
-                                window.focus(&this.focus, cx);
-                                cx.notify();
-                            });
-                        }),
-                    )
-                    .when(self.query.is_empty() && !is_searching, |field| {
-                        field.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .text_color(colors.muted_text)
-                                .child("Search files"),
-                        )
-                    }),
-            )
-            .children((!is_searching).then(|| key_cap(colors, KeyLabel::Text("?"))))
+        let query_box = TextBox::new(
+            "files-search",
+            &self.search_focus,
+            &self.query,
+            Lines::Single,
+        )
+        .label("Search changed files")
+        .on_edit(move |query, _, cx| {
+            on_edit.update(cx, |this, cx| {
+                this.list.set_query(&query);
+                this.query = query;
+                this.cursor_moved = true;
+                cx.notify();
+            });
+        })
+        .on_submit(move |window, cx| {
+            on_submit.update(cx, |this, cx| this.go(0, window, cx));
+        })
+        .on_cancel(move |window, cx| {
+            on_cancel.update(cx, |this, cx| {
+                this.query.clear();
+                this.list.set_query("");
+                this.cursor_moved = true;
+                window.focus(&this.focus, cx);
+                cx.notify();
+            });
+        });
+        search_row(
+            colors,
+            query_box,
+            "Search files",
+            self.query.is_empty() && !is_searching,
+            (!is_searching).then_some(KeyLabel::Text("?")),
+        )
     }
 
     fn row(
@@ -492,12 +459,11 @@ impl Render for FilesSheet {
                     .child(sized_icon(Icon::FolderOpen, colors.accent, px(18.)))
                     .child(
                         div()
-                            .flex_none()
+                            .flex_1()
                             .text_base()
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(format!("Files ({})", self.list.file_count())),
-                    )
-                    .child(self.search_box(&colors, window, cx)),
+                    ),
             )
             .child(
                 div()
@@ -584,6 +550,7 @@ impl Render for FilesSheet {
                     .mt(px(80.))
                     .w(px(1000.))
                     .child(header)
+                    .child(self.search_box(&colors, window, cx))
                     .child(body)
                     .child(
                         picker_footer(&colors)

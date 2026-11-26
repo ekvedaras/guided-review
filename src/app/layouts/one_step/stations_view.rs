@@ -25,7 +25,7 @@ use crate::app::sidebar_rows::{
     SidebarAiReview, SidebarGuidedTour, SidebarProblem, SidebarRows, SidebarTourAgent, WriteOffer,
 };
 use crate::viewer::{
-    AiReviewAction, Command, Intent, Station, StationHealth, StationKind, ToastTone,
+    AgentRole, AiReviewAction, Command, Intent, Station, StationHealth, StationKind, ToastTone,
 };
 
 /// The round icon of a station in the stepper.
@@ -418,18 +418,27 @@ impl OneStepLayout {
             }))
             .into_any_element()
         });
-        let pick_agent = (kind == StationKind::Tour && sidebar.tour_agent.can_pick).then(|| {
-            icon_button(
-                colors,
-                "pick-tour-agent",
-                ButtonKind::Ghost,
-                ButtonSize::Small,
-                Icon::ChevronsUpDown,
-                "Pick the agent",
-            )
-            .on_click(cx.listener(|this, _, window, cx| this.open_agent_picker(window, cx)))
-            .into_any_element()
-        });
+        let picked_role = match kind {
+            StationKind::Tour => Some((AgentRole::Tour, "pick-tour-agent")),
+            StationKind::AiReview => Some((AgentRole::Review, "pick-review-agent")),
+            _ => None,
+        };
+        let pick_agent = picked_role
+            .filter(|_| sidebar.tour_agent.can_pick)
+            .map(|(role, id)| {
+                icon_button(
+                    colors,
+                    id,
+                    ButtonKind::Ghost,
+                    ButtonSize::Small,
+                    Icon::ChevronsUpDown,
+                    "Pick the agent",
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_agent_picker(role, window, cx);
+                }))
+                .into_any_element()
+            });
         run_again
             .into_iter()
             .chain(pick_agent)
@@ -793,7 +802,9 @@ impl OneStepLayout {
                 Icon::Terminal,
                 "Pick an agent",
             )
-            .on_click(cx.listener(|this, _, window, cx| this.open_agent_picker(window, cx)))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.open_agent_picker(AgentRole::Tour, window, cx);
+            }))
         });
         Some(
             div()
