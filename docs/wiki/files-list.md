@@ -16,3 +16,5 @@
 
 - The prototype pictures came from a PR where almost every file is in one step, so the many-steps case was picked without being seen.
 - Folds are not kept between openings of the list.
+
+- 2026-11-26, #198 (maintainer's asks): Left on a folded folder moves the cursor to the folder it is in and folds that one (`FilesList::fold_under_cursor`), as Left on a file already did, so Left walks up the tree. A file row takes the room of a folder's chevron as well (`CHEVRON_ROOM`, 20 px), so its icon sits under its sibling folders' icons and a step in from its own folder, not at the folder's chevron where it read as the folder's sibling.

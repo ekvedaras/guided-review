@@ -52,6 +52,9 @@ impl EventEmitter<FilesEvent> for FilesSheet {}
 
 /// Indent per level: a file's read mark then sits under its folder's icon, past the chevron and the gap.
 const INDENT: f32 = 20.;
+/// A folder's chevron and the gap after it: a file takes this room too, so its icon sits under
+/// the folder icons of its sibling folders, a step in from the folder it is in.
+const CHEVRON_ROOM: f32 = 20.;
 const DETAIL_WIDTH: f32 = 380.;
 const COUNTS_WIDTH: f32 = 96.;
 
@@ -226,7 +229,12 @@ impl FilesSheet {
             .flex_none()
             .py_1()
             .gap_2()
-            .pl(px(8. + INDENT * row.depth as f32))
+            .pl(px(8.
+                + INDENT * row.depth as f32
+                + match row.kind {
+                    FilesListRowKind::Folder { .. } => 0.,
+                    FilesListRowKind::File { .. } => CHEVRON_ROOM,
+                }))
             .aria_label(match &row.kind {
                 FilesListRowKind::Folder { label, .. } | FilesListRowKind::File { label, .. } => {
                     label.clone()

@@ -39,6 +39,20 @@ impl Shop {
         Self { repo, base, head }
     }
 
+    /// `app/Http/Order.php` and `app/Models/Tax.php` change, and `config.yml`: folders in a folder.
+    fn nested() -> Self {
+        let repo = FixtureRepo::cloned_from("acme/shop");
+        repo.write("app/Http/Order.php", "<?php\n// 1\n");
+        repo.write("app/Models/Tax.php", "<?php\n// 1\n");
+        repo.write("config.yml", "a: 1\n");
+        let base = repo.commit("base");
+        repo.write("app/Http/Order.php", "<?php\n// 2\n");
+        repo.write("app/Models/Tax.php", "<?php\n// 2\n");
+        repo.write("config.yml", "a: 2\n");
+        let head = repo.commit("head");
+        Self { repo, base, head }
+    }
+
     fn source(&self) -> LocalGit {
         LocalGit::find(&crate::support::shop_on_github(), self.repo.path())
             .unwrap()
@@ -254,6 +268,21 @@ fn left_on_a_file_folds_its_folder_and_puts_the_cursor_on_it() {
     assert_eq!(folded, vec!["0app/> +2 -2", "0config.yml +1 -1"]);
     assert_eq!(on_folder.as_deref(), Some("app"));
     assert_eq!(cursor_label(&list).as_deref(), Some("config.yml"));
+}
+
+#[test]
+fn left_on_a_folded_folder_folds_the_folder_it_is_in_and_puts_the_cursor_on_it() {
+    let shop = Shop::nested();
+    let mut list = shop.basic().files_list();
+    while cursor_label(&list).as_deref() != Some("Http") {
+        list.cursor_down();
+    }
+
+    list.fold_under_cursor();
+    list.fold_under_cursor();
+
+    assert_eq!(cursor_label(&list).as_deref(), Some("app"));
+    assert_eq!(shape(&list), vec!["0app/> +2 -2", "0config.yml +1 -1"]);
 }
 
 #[test]

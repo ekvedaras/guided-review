@@ -142,7 +142,9 @@ impl FilesList {
 
     /// Folds the folder under the cursor, or the folder of the file under it, which the cursor moves to.
     pub fn fold_under_cursor(&mut self) {
-        if let Some(RowKey::File(_)) = &self.cursor
+        let is_on_folded_folder =
+            matches!(&self.cursor, Some(RowKey::Folder(folder)) if self.folded.contains(folder));
+        if (is_on_folded_folder || matches!(self.cursor, Some(RowKey::File(_))))
             && let Some(folder) = self.folder_of_cursor()
         {
             self.cursor = Some(RowKey::Folder(folder));
