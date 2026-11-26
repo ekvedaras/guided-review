@@ -89,6 +89,11 @@ impl<T: Copy + PartialEq> PressAgain<T> {
         self.to_send = change;
     }
 
+    /// The host refused what was sent and `instead` goes in its place, with no press asked.
+    pub(super) fn send_instead(&mut self, instead: T) {
+        self.to_send = Some(instead);
+    }
+
     /// The host answered `change`, so it is no longer to send.
     pub(super) fn landed(&mut self, change: T) {
         if self.to_send == Some(change) {

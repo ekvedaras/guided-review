@@ -220,6 +220,21 @@ impl TourAgentPort for HcTourAgents {
         self.hc(&["label", terminal.as_str(), &emptied]).map(drop)
     }
 
+    fn claim_review(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
+        self.hc(&[
+            "label",
+            terminal.as_str(),
+            APP_LABEL,
+            &label_of(AgentRole::Review, subject),
+        ])
+        .map(drop)
+    }
+
+    fn release_review(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
+        let emptied = format!("{}=", AgentRole::Review.label_key(subject));
+        self.hc(&["label", terminal.as_str(), &emptied]).map(drop)
+    }
+
     fn status(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus> {
         let got = self.hc(&["get", terminal.as_str(), "--json"])?;
         Ok(state_of(&got))

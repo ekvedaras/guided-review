@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use super::capability::{Capability, HostCapabilities};
 use super::jump::PaletteAction;
-use super::merging::{AutoMerge, MergeChange, MergeOffer, Merging};
+use super::merging::{AutoMerge, MergeChange, MergeOffer, Mergeability, Merging};
 use super::ports::HostError;
 use super::pr_status::{CHECKS_RECHECK, Checks, PrStatus, Readiness};
 use super::press_again::{PressAgain, PressStep};
@@ -192,6 +192,11 @@ impl PrControls {
         if let Some(merging) = &mut self.merging {
             merging.landed(change);
         }
+        if let (MergeChange::MergeNow(method), Err(HostError::Refused(_))) = (change, &result)
+            && self.turn_auto_merge_on_instead(method)
+        {
+            return Ok(());
+        }
         result.map_err(|error| Problem::MergingNotChanged(change, error.short_reason()))?;
         let auto_merge = match change {
             MergeChange::EnableAutoMerge(method) => AutoMerge::On(method),
@@ -205,6 +210,24 @@ impl PrControls {
             state.auto_merge = auto_merge;
         }
         Ok(())
+    }
+}
+
+impl PrControls {
+    /// GitHub may say nothing blocks a PR while a rule still waits for a required check, as just
+    /// after it is marked ready, and then refuses the merge. Auto-merge merges it once the check
+    /// passes, which is what the press asked for. Sent where the repo allows auto-merge, whatever
+    /// the earlier read said of the viewer, as that read is the one that was wrong.
+    fn turn_auto_merge_on_instead(&mut self, method: MergeMethod) -> bool {
+        let (Some(state), Some(merging)) = (&mut self.merging_state, &mut self.merging) else {
+            return false;
+        };
+        if !state.repo_allows_auto_merge {
+            return false;
+        }
+        state.mergeability = Mergeability::Blocked;
+        merging.send_instead(MergeChange::EnableAutoMerge(method));
+        true
     }
 }
 

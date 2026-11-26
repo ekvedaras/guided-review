@@ -23,7 +23,10 @@ use super::overlay::{
     touching_places,
 };
 use super::palette::{CODE_FONT, Colors, Tone};
+use super::search_row::search_row;
 use super::sidebar_row::RowPlace;
+use super::text_box::TextBox;
+use super::text_input::Lines;
 use super::thread_view::author_avatar;
 
 /// What the reviewer asked of the list.
@@ -41,6 +44,9 @@ pub struct CommentsSheet {
     scroll: ScrollHandle,
     /// The keys moved the cursor: the next draw scrolls its row into view.
     cursor_moved: bool,
+    /// What the search box holds; `?` gives it the keys.
+    query: String,
+    search_focus: FocusHandle,
 }
 
 impl EventEmitter<CommentsEvent> for CommentsSheet {}
@@ -56,6 +62,8 @@ impl CommentsSheet {
             list: CommentsList::default(),
             scroll: ScrollHandle::new(),
             cursor_moved: false,
+            query: String::new(),
+            search_focus: cx.focus_handle(),
         }
     }
 
@@ -64,6 +72,7 @@ impl CommentsSheet {
             self.close(window, cx);
         } else {
             self.list = list;
+            self.query.clear();
             self.cursor_moved = true;
             self.presence.open(Instant::now());
             window.focus(&self.focus, cx);
@@ -81,6 +90,7 @@ impl CommentsSheet {
             return;
         }
         self.list = self.list.refreshed_to(list);
+        self.list.set_query(&self.query);
         cx.notify();
     }
 
@@ -98,7 +108,25 @@ impl CommentsSheet {
         cx.emit(CommentsEvent::Open(id));
     }
 
+    /// While the search box has the keys, only Up and Down are the list's; the box takes the rest.
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_focus.is_focused(window) {
+            match event.keystroke.key.as_str() {
+                "down" => self.list.cursor_down(),
+                "up" => self.list.cursor_up(),
+                _ => return,
+            }
+            self.cursor_moved = true;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
+        if event.keystroke.key_char.as_deref() == Some("?") || event.keystroke.key == "?" {
+            cx.stop_propagation();
+            window.focus(&self.search_focus, cx);
+            cx.notify();
+            return;
+        }
         let opens_the_sheet = chord_of(&event.keystroke)
             .is_some_and(|chord| keymap(cx).chords(Command::CommentsList).contains(&chord));
         cx.stop_propagation();
@@ -125,6 +153,51 @@ impl CommentsSheet {
             _ => {}
         }
         cx.notify();
+    }
+
+    fn open_under_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.list.thread_under_cursor().cloned() {
+            self.open_thread(id, window, cx);
+        }
+    }
+
+    fn search_box(&self, colors: &Colors, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
+        let (on_edit, on_submit, on_cancel) = (cx.entity(), cx.entity(), cx.entity());
+        let is_searching = self.search_focus.is_focused(window);
+        let query_box = TextBox::new(
+            "comments-search",
+            &self.search_focus,
+            &self.query,
+            Lines::Single,
+        )
+        .label("Search comments")
+        .on_edit(move |query, _, cx| {
+            on_edit.update(cx, |this, cx| {
+                this.list.set_query(&query);
+                this.query = query;
+                this.cursor_moved = true;
+                cx.notify();
+            });
+        })
+        .on_submit(move |window, cx| {
+            on_submit.update(cx, |this, cx| this.open_under_cursor(window, cx));
+        })
+        .on_cancel(move |window, cx| {
+            on_cancel.update(cx, |this, cx| {
+                this.query.clear();
+                this.list.set_query("");
+                this.cursor_moved = true;
+                window.focus(&this.focus, cx);
+                cx.notify();
+            });
+        });
+        search_row(
+            colors,
+            query_box,
+            "Search comments by file, author or words",
+            self.query.is_empty() && !is_searching,
+            (!is_searching).then_some(KeyLabel::Text("?")),
+        )
     }
 
     /// Puts the section's heading, its screen headings and its rows into `children` one after another,
@@ -208,6 +281,7 @@ impl CommentsSheet {
             .mt_2()
             .py_2()
             .gap_2()
+            .aria_label("Show or hide resolved comments")
             .on_click(cx.listener(|this, _, _, cx| {
                 this.list.toggle_resolved_shown();
                 cx.notify();
@@ -262,6 +336,7 @@ impl CommentsSheet {
         )
         .flex_none()
         .py_2()
+        .aria_label(row.first_line.clone())
         .on_click(cx.listener(move |this, _, window, cx| {
             this.open_thread(id.clone(), window, cx);
         }))
@@ -335,7 +410,7 @@ const REPLIES_WIDTH: f32 = 48.;
 const OUTDATED_WIDTH: f32 = 76.;
 
 impl Render for CommentsSheet {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.presence.shown().is_none() {
             return div().into_any_element();
         }
@@ -408,6 +483,15 @@ impl Render for CommentsSheet {
             .flex()
             .flex_col()
             .track_scroll(&self.scroll)
+            .when(children.is_empty(), |rows| {
+                rows.child(div().px_4().py_3().text_color(colors.muted_text).child(
+                    if self.list.thread_count() == 0 && self.query.is_empty() {
+                        "No comments yet. A comment you add, or one on the PR, shows here."
+                    } else {
+                        "No thread holds every word."
+                    },
+                ))
+            })
             .children(children);
         modal_layer_for(&colors, "comments-scrim", &self.presence)
             .on_mouse_down(
@@ -424,6 +508,7 @@ impl Render for CommentsSheet {
                     .mt(px(80.))
                     .w(px(1000.))
                     .child(header)
+                    .child(self.search_box(&colors, window, cx))
                     .child(body)
                     .child(
                         picker_footer(&colors)
@@ -446,7 +531,8 @@ impl Render for CommentsSheet {
                                     "fold resolved",
                                 ))
                             })
-                            .child(key_hint(&colors, &[KeyLabel::Text("return")], "show")),
+                            .child(key_hint(&colors, &[KeyLabel::Text("return")], "show"))
+                            .child(key_hint(&colors, &[KeyLabel::Text("?")], "search")),
                     ),
                 "comments-sheet-rise",
                 &self.presence,

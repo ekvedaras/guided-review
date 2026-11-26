@@ -108,6 +108,24 @@ impl ReviewAgents {
         }
     }
 
+    /// Makes the terminal the subject's review agent, the reviewer's pick: the review label moves to
+    /// it from any other terminal, which keeps running.
+    pub fn claim(&self, subject: &ReviewSubject, terminal: &TerminalId) -> anyhow::Result<()> {
+        if let Err(reason) = self.port.link() {
+            bail!("agents are off: {reason}");
+        }
+        for other in self.port.review_terminals_of(subject)? {
+            if &other != terminal {
+                self.port
+                    .release_review(&other, subject)
+                    .with_context(|| format!("could not take the review label off {other}"))?;
+            }
+        }
+        self.port
+            .claim_review(terminal, subject)
+            .with_context(|| format!("could not make {terminal} the review agent of {subject}"))
+    }
+
     /// Ends the subject's review agent. A worktree it made is its own to remove (it leaves with
     /// `ExitWorktree` when done).
     pub fn end(&self, subject: &ReviewSubject) -> anyhow::Result<()> {
@@ -133,11 +151,25 @@ impl ReviewAgents {
         Ok(TourAgentState::Agent { terminal, status })
     }
 
+    /// Ends the review agents the app started; one the reviewer picked is their own session, so it
+    /// only loses the label.
     fn kill_agents_of(&self, subject: &ReviewSubject) -> anyhow::Result<()> {
+        let app_started: Vec<TerminalId> = self
+            .port
+            .app_started()?
+            .into_iter()
+            .map(|agent| agent.terminal)
+            .collect();
         for old in self.port.review_terminals_of(subject)? {
-            self.port
-                .kill(&old)
-                .with_context(|| format!("could not end the review agent {old} of {subject}"))?;
+            if app_started.contains(&old) {
+                self.port.kill(&old).with_context(|| {
+                    format!("could not end the review agent {old} of {subject}")
+                })?;
+            } else {
+                self.port
+                    .release_review(&old, subject)
+                    .with_context(|| format!("could not take the review label off {old}"))?;
+            }
         }
         Ok(())
     }

@@ -17,6 +17,7 @@ use crate::app::components::markdown_view::InlineMarkdown;
 use crate::app::components::motion::{glide_to_share, turn_to};
 use crate::app::components::palette::{Colors, SIDEBAR_WIDTH, Tone, TrailStage};
 use crate::app::components::safety_net_view::SafetyNetIntro;
+use crate::app::components::selectable_text::SelectableText;
 use crate::app::components::sidebar_row::{
     RowMark, RowPlace, check_flag, count_badge, finding_badge, row_label, row_note, row_places,
     sidebar_row, skim_chip,
@@ -74,12 +75,9 @@ impl OneStepLayout {
             })),
         });
         let failure = match repin_progress {
-            JobProgress::Failed(reason) => Some(
-                div()
-                    .text_xs()
-                    .text_color(colors.danger)
-                    .child(SharedString::from(reason.to_string())),
-            ),
+            JobProgress::Failed(reason) => Some(div().text_xs().text_color(colors.danger).child(
+                SelectableText::new("sidebar-repin-failure", reason.to_string()),
+            )),
             JobProgress::Idle | JobProgress::Running { .. } => None,
         };
         div()
@@ -169,7 +167,10 @@ impl OneStepLayout {
                 div()
                     .text_xs()
                     .text_color(colors.danger)
-                    .child(format!("Not cloned: {reason}")),
+                    .child(SelectableText::new(
+                        "sidebar-clone-failure",
+                        format!("Not cloned: {reason}"),
+                    )),
             ),
             CloneOfferState::Offered | CloneOfferState::Cloning => None,
         };
@@ -334,6 +335,7 @@ impl OneStepLayout {
                 summary_place,
                 cx,
             )
+            .aria_label("Summary")
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| {
                     if is_basic {
@@ -376,6 +378,7 @@ impl OneStepLayout {
                                 cx,
                             )
                             .text_color(colors.muted_text)
+                            .aria_label(format!("Fold or unfold folder {path}"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.change_review(cx, |review| review.toggle_folder(&folder));
                             }))
@@ -419,6 +422,7 @@ impl OneStepLayout {
                                 place,
                                 cx,
                             )
+                            .aria_label(format!("Open file {path}"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.change_review(cx, |review| review.go_to_file(&file));
                             }))
@@ -471,6 +475,7 @@ impl OneStepLayout {
                 .when(step.is_skim && !step.is_current, |row| {
                     row.text_color(colors.muted_text)
                 })
+                .aria_label(format!("Go to step {id}"))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.change_review(cx, |review| review.go_to(&id));
                 }))
@@ -497,6 +502,7 @@ impl OneStepLayout {
                 safety_net_place,
                 cx,
             )
+            .aria_label("Safety net")
             .on_click(cx.listener(|this, _, _, cx| {
                 this.change_review(cx, |review| review.go_to_safety_net());
             }))
@@ -578,72 +584,64 @@ impl OneStepLayout {
             .child(self.settings_row(&colors, cx))
     }
 
-    /// Settings and the shortcuts sheet at the foot of the sidebar, under a quiet line with the version
-    /// this app runs, so the Settings row stays at the very bottom.
+    /// The foot of the sidebar: the files list, the comments list, Settings and the shortcuts sheet
+    /// on one row, each an icon with its keys and its name in a tooltip, over a quiet line with the
+    /// version this app runs.
     fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
-        let shortcuts = button(
-            colors,
-            "sidebar-shortcuts",
-            ButtonKind::Ghost,
-            ButtonSize::Regular,
-        )
-        .px_2()
-        .gap_1p5()
-        .tooltip(tooltip(|_| "Keyboard shortcuts".into()))
-        .child(button_icon(
-            colors,
-            ButtonKind::Ghost,
-            ButtonSize::Regular,
-            Icon::Keyboard,
-        ))
-        .child(button_keys(
-            colors,
-            ButtonKind::Ghost,
-            Command::Shortcuts,
-            cx,
-        ))
-        .on_click(cx.listener(|this, _, window, cx| {
-            this.act(Intent::ToggleShortcuts, window, cx);
-        }));
-        let row = div()
-            .px_2()
-            .pb_2()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(
-                button(
-                    colors,
-                    "sidebar-settings",
-                    ButtonKind::Ghost,
-                    ButtonSize::Regular,
-                )
+        let foot_button = |id: &'static str, icon: Icon, name: &'static str, command, intent| {
+            button(colors, id, ButtonKind::Ghost, ButtonSize::Regular)
                 .px_2()
+                .gap_1p5()
                 .child(button_icon(
                     colors,
                     ButtonKind::Ghost,
                     ButtonSize::Regular,
-                    Icon::Settings,
+                    icon,
                 ))
-                .child("Settings")
-                .child(button_keys(
-                    colors,
-                    ButtonKind::Ghost,
-                    Command::Settings,
-                    cx,
-                ))
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.act(Intent::ToggleSettings, window, cx);
-                })),
-            )
-            .child(div().flex_1())
-            .child(shortcuts);
-        let version = div().px_4().pt_2().pb_1().flex().child(
+                .child(button_keys(colors, ButtonKind::Ghost, command, cx))
+                .tooltip(tooltip(move |_| name.into()))
+                .aria_label(name)
+                .on_click(cx.listener(move |this, _, window, cx| this.act(intent, window, cx)))
+        };
+        let row = div()
+            .px_2()
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(foot_button(
+                "sidebar-files",
+                Icon::FileText,
+                "Changed files",
+                Command::FilesList,
+                Intent::ToggleFilesList,
+            ))
+            .child(foot_button(
+                "sidebar-comments",
+                Icon::MessageSquare,
+                "Comment threads",
+                Command::CommentsList,
+                Intent::ToggleCommentsList,
+            ))
+            .child(foot_button(
+                "sidebar-settings",
+                Icon::Settings,
+                "Settings",
+                Command::Settings,
+                Intent::ToggleSettings,
+            ))
+            .child(foot_button(
+                "sidebar-shortcuts",
+                Icon::Keyboard,
+                "Keyboard shortcuts",
+                Command::Shortcuts,
+                Intent::ToggleShortcuts,
+            ));
+        let version = div().px_4().pt_1().pb_2().flex().child(
             version_link(colors, "sidebar-version", colors.faint_text())
                 .text_xs()
                 .line_height(px(12.)),
         );
-        div().flex_none().child(version).child(row)
+        div().flex_none().child(row).child(version)
     }
 }
 

@@ -1,12 +1,14 @@
 use crate::app_folders::AppFolders;
 
 use gpui::{
-    AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    Render, Styled, Subscription, Window, div,
+    AppContext, ClipboardItem, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
+    MouseButton, MouseDownEvent, ParentElement, Render, Styled, Subscription, Window, div,
 };
 
 use super::components::palette::{Appearance, Colors};
 use super::components::settings_panel::{Placement, SettingsEvent, SettingsPanel};
+use super::layouts::one_step::CopySelection;
+use super::prose_selection::ProseSelections;
 
 /// The root of the app's one window while no PR is open: Settings and nothing else. Settings closing,
 /// by Save or Close, closes the window, as there is nothing behind it to go back to; whether the app
@@ -55,7 +57,18 @@ impl SettingsWindow {
 impl Render for SettingsWindow {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .key_context(ProseSelections::KEY_CONTEXT)
             .track_focus(&self.focus)
+            .on_action(|_: &CopySelection, _, cx| {
+                if let Some(text) = ProseSelections::text(cx) {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                }
+            })
+            .capture_any_mouse_down(|event: &MouseDownEvent, window, cx| {
+                if event.button == MouseButton::Left && ProseSelections::clear_unless_dragging(cx) {
+                    window.refresh();
+                }
+            })
             .size_full()
             .bg(Colors::active(cx).background)
             .child(self.panel.clone())

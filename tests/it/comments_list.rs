@@ -685,7 +685,7 @@ fn a_thread_no_screen_shows_opens_on_github_and_the_screen_stays() {
 }
 
 #[test]
-fn c_and_the_palette_open_the_comments_list_only_when_the_review_has_threads() {
+fn c_and_the_palette_open_the_comments_list_with_threads_or_with_none_yet() {
     let shop = Shop::with_pull();
     let with = shop.open_with(
         two_steps(),
@@ -707,13 +707,13 @@ fn c_and_the_palette_open_the_comments_list_only_when_the_review_has_threads() {
         Effect::Toggle(Overlay::Comments)
     );
     assert!(
-        !without
+        without
             .palette_actions(Build::Local)
             .contains(&PaletteAction::CommentsList)
     );
     assert_eq!(
         without.decide(Intent::ToggleCommentsList, WindowMoment::default()),
-        Effect::Nothing
+        Effect::Toggle(Overlay::Comments)
     );
     assert_eq!(
         Intent::from(PaletteAction::CommentsList),
@@ -796,4 +796,40 @@ fn a_list_open_while_threads_change_keeps_the_cursor_on_the_resolved_heading() {
     let list = list.refreshed_to(&after.comments_list());
 
     assert!(list.is_on_resolved_header());
+}
+
+#[test]
+fn a_search_keeps_the_threads_whose_place_author_or_words_hold_every_word_resolved_ones_too() {
+    let shop = Shop::with_pull();
+    let review = shop.open_with(
+        two_steps(),
+        &[
+            thread(
+                "on-config",
+                "config.yml",
+                3,
+                vec![comment("bob", "Why three?")],
+            ),
+            resolved(thread(
+                "on-order",
+                "app/Order.php",
+                7,
+                vec![
+                    comment("alice", "Why two?"),
+                    comment("carol", "Prices went up."),
+                ],
+            )),
+        ],
+    );
+    let mut list = review.comments_list();
+
+    list.set_query("PRICES");
+    assert_eq!(ids(&list), ["on-order"]);
+    list.set_query("why bob");
+    assert_eq!(ids(&list), ["on-config"]);
+    list.set_query("order.php alice");
+    assert_eq!(ids(&list), ["on-order"]);
+    list.set_query("");
+    assert_eq!(ids(&list), ["on-config"]);
+    assert_eq!(list.thread_count(), 2);
 }

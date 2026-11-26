@@ -101,6 +101,7 @@ fn question_band(colors: &Colors, question: &ServerQuestion, on_answer: &OnServe
     let answer_button = |id: &'static str, label: &'static str, answer: ServerAnswer| {
         let on_answer = Rc::clone(on_answer);
         button(colors, id, ButtonKind::Secondary, ButtonSize::Small)
+            .aria_label(label)
             .on_click(move |_, window, cx| on_answer(answer, window, cx))
             .child(label)
     };
@@ -239,6 +240,7 @@ fn definition_row(
         .flex_col()
         .items_stretch()
         .gap_0p5()
+        .aria_label(format!("Open definition in {}", row.place))
         .on_click(move |_, window, cx| on_open(&target, window, cx))
         .child(
             div()
@@ -290,6 +292,7 @@ fn usage_file(colors: &Colors, index: usize, file: &UsageFile, on_open: &OnNameT
                 .gap_2()
                 .font_family(*CODE_FONT)
                 .text_xs()
+                .aria_label(format!("Open {}", file.name))
                 .on_click(move |_, window, cx| open_file(&target, window, cx))
                 .child(
                     div()
@@ -342,6 +345,7 @@ fn usage_line(
     .gap_3()
     .font_family(*CODE_FONT)
     .text_xs()
+    .aria_label(format!("Open line {}", row.number))
     .on_click(move |_, window, cx| on_open(&target, window, cx))
     .child(
         div()

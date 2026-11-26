@@ -29,6 +29,7 @@ use super::markdown_view::{MarkdownView, parsed_markdown};
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, shimmer_text, slide_in, turn_to};
 use super::outdated_lines::before_block;
 use super::palette::{CARD_RADIUS, Colors, Tone};
+use super::selectable_text::SelectableText;
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 use super::tooltip::tooltip;
@@ -287,7 +288,9 @@ fn plain_button(
     kind: ButtonKind,
     label: &'static str,
 ) -> gpui::Stateful<gpui::Div> {
-    button(colors, id, kind, ButtonSize::Small).child(label)
+    button(colors, id, kind, ButtonSize::Small)
+        .aria_label(label)
+        .child(label)
 }
 
 /// A reaction: just the emoji until someone reacts, then a pill with the count, on `current`
@@ -301,6 +304,13 @@ fn reaction_pill(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
+        .role(gpui::Role::Button)
+        .aria_label(label.clone())
+        .aria_toggled(if viewer_has_reacted {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
         .flex()
         .flex_none()
         .items_center()
@@ -567,6 +577,7 @@ impl ThreadElement {
                 reply,
                 Lines::Multi,
             )
+            .label("Reply")
             .on_edit(move |text, _, cx| on_edit(ReplyDraftChange::Edit(text), cx))
             .on_submit(move |window, cx| {
                 if submits {
@@ -808,6 +819,7 @@ impl ThreadElement {
                 text,
                 Lines::Multi,
             )
+            .label("Edit comment")
             .on_edit(move |text, _, cx| on_edit(&edited_id, ReplyDraftChange::Edit(text), cx))
             .on_submit(move |_, cx| submit(cx))
             .on_cancel(move |_, cx| on_cancel(&cancelled_id, ReplyDraftChange::Discard, cx))
@@ -828,6 +840,7 @@ impl ThreadElement {
                         ButtonSize::Small,
                     )
                     .child("Save")
+                    .aria_label("Save")
                     .on_click(move |_, _, cx| save(cx)),
                 )
                 .child(
@@ -838,6 +851,7 @@ impl ThreadElement {
                         ButtonSize::Small,
                     )
                     .child("Cancel")
+                    .aria_label("Cancel")
                     .on_click(move |_, _, cx| {
                         on_comment_edit(&cancelled_id, ReplyDraftChange::Discard, cx);
                     }),
@@ -1015,6 +1029,8 @@ impl RenderOnce for ThreadElement {
             .text_sm()
             .text_color(colors.muted_text)
             .hover(|toggle| toggle.text_color(colors.text))
+            .role(gpui::Role::Button)
+            .aria_label("Show or hide this thread")
             .on_click(self.on_toggle)
             .child(turn_to(
                 sized_icon(Icon::ChevronRight, colors.muted_text, px(12.)),
@@ -1269,9 +1285,15 @@ impl RenderOnce for ThreadElement {
                 }))
                 .children(reply_button.map(|button| div().flex().child(button)))
                 .children(is_busy.then(|| busy_line(&colors, "Working...")))
-                .children(
-                    problem.map(|problem| div().text_sm().text_color(colors.danger).child(problem)),
-                )
+                .children(problem.map(|problem| {
+                    div()
+                        .text_sm()
+                        .text_color(colors.danger)
+                        .child(SelectableText::new(
+                            format!("thread-problem-{problem}"),
+                            problem,
+                        ))
+                }))
         });
         card(&colors)
             .flex()

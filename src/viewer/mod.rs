@@ -303,9 +303,9 @@ pub use threads::ThreadView;
 pub use toasts::{Toast, ToastId, ToastTone, Toasts};
 pub use tour_agent::OpenOrigin;
 pub use tour_agent::{
-    AgentLinkOff, AgentRole, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, OwnAgentHandOff,
-    ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort, TourAgentStart, TourAgentState,
-    TourAgents, TourKind, WriterHandOver,
+    AgentChoice, AgentLinkOff, AgentRole, AgentStatus, AppAgent, HerdrRefused, LiveTerminal,
+    OwnAgentHandOff, ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
+    TourAgentState, TourAgents, TourKind, WriterHandOver,
 };
 pub use tour_writing::{TourWriting, WritingPhase, WritingStage};
 pub use typing_save::TypingSave;

@@ -129,6 +129,7 @@ impl SettingsPanel {
                                 ButtonSize::Small,
                             )
                             .child("Remove")
+                            .aria_label("Remove shortcut")
                             .on_click(cx.listener(
                                 move |this, _, _, cx| {
                                     this.edit(cx, |editing| {
@@ -192,6 +193,7 @@ impl SettingsPanel {
                 ButtonSize::Small,
             )
             .child("Cancel")
+            .aria_label("Cancel changing the shortcut")
             .on_click(cx.listener(|this, _, _, cx| this.stop_recording(cx)))
         } else {
             button(
@@ -201,6 +203,7 @@ impl SettingsPanel {
                 ButtonSize::Small,
             )
             .child("Change")
+            .aria_label("Change shortcut")
             .on_click(cx.listener(move |this, _, _, cx| this.start_recording(command, cx)))
         };
         let reset = is_changed.then(|| {
@@ -211,6 +214,7 @@ impl SettingsPanel {
                 ButtonSize::Small,
             )
             .child("Reset")
+            .aria_label("Reset shortcut")
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.stop_recording(cx);
                 this.edit(cx, |editing| editing.settings.reset_key(command));

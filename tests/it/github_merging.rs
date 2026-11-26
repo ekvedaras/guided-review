@@ -2,8 +2,8 @@ use crate::support::graphql::serve_graphql;
 use guided_review::github::GitHub;
 use guided_review::pull_request::PullRequestUrl;
 use guided_review::viewer::{
-    AutoMerge, MergeMethod, MergeMethods, Mergeability, Merging, MergingPort, PrStatus,
-    PullRequestStatusPort,
+    AutoMerge, HostError, MergeChange, MergeMethod, MergeMethods, Mergeability, Merging,
+    MergingPort, PrStatus, PullRequestStatusPort,
 };
 
 fn pr() -> PullRequestUrl {
@@ -34,6 +34,25 @@ fn how_a_pr_would_merge_is_read_in_a_query_of_its_own() {
         }
     );
     assert_eq!(asked.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_merge_github_will_not_make_as_the_pr_stands_is_a_refusal_in_its_own_words() {
+    let id = r#"{"data":{"repository":{"pullRequest":{"id":"PR_7"}}}}"#;
+    let refused = r#"{"data":{"mergePullRequest":null},"errors":[{"type":"UNPROCESSABLE",
+        "path":["mergePullRequest"],"locations":[{"line":1,"column":44}],
+        "message":"Repository rule violations found\n\nRequired status check \"All Tests Passed\" is expected.\n\n"}]}"#;
+    let (url, _) = serve_graphql(vec![id.into(), refused.into()]);
+
+    let error = GitHub::at(&url)
+        .change_merging(&pr(), MergeChange::MergeNow(MergeMethod::Squash))
+        .unwrap_err();
+
+    assert!(matches!(error, HostError::Refused(_)), "{error:?}");
+    assert_eq!(
+        error.short_reason(),
+        "Repository rule violations found. Required status check \"All Tests Passed\" is expected."
+    );
 }
 
 #[test]

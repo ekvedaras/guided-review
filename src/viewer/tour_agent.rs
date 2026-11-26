@@ -85,6 +85,53 @@ pub struct LiveTerminal {
     pub cwd: PathBuf,
 }
 
+/// A Claude terminal the reviewer may make the subject's tour agent, with what tells it apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentChoice {
+    pub terminal: TerminalId,
+    pub space: String,
+    pub folder: PathBuf,
+    /// Where its folder's clone comes from; `None` outside a git checkout or with no origin.
+    pub repo: Option<HostedRepo>,
+    /// The branch checked out in its folder; `None` outside a git checkout.
+    pub branch: Option<BranchName>,
+    pub status: AgentStatus,
+    /// It carries the subject's tour label: the app takes it for the tour agent.
+    pub is_tour_agent: bool,
+    /// It carries the subject's review label: the app takes it for the review agent.
+    pub is_review_agent: bool,
+    /// It works on the subject's code: a PR's head branch in a clone of its repo, or a local change
+    /// set's folder.
+    pub works_on_the_code: bool,
+    pub started_by_app: bool,
+}
+
+impl AgentChoice {
+    /// Whether every word of `query` is in its space, terminal, folder, repo or branch, ignoring case.
+    pub fn matches(&self, query: &str) -> bool {
+        let haystack = format!(
+            "{} {} {} {} {}",
+            self.space,
+            self.terminal,
+            self.folder.display(),
+            self.repo.as_ref().map_or_default(ToString::to_string),
+            self.branch.as_ref().map_or_default(BranchName::as_str),
+        )
+        .to_lowercase();
+        query
+            .split_whitespace()
+            .all(|word| haystack.contains(&word.to_lowercase()))
+    }
+
+    /// Whether it carries the subject's label of `role`.
+    pub const fn is_agent_as(&self, role: AgentRole) -> bool {
+        match role {
+            AgentRole::Tour => self.is_tour_agent,
+            AgentRole::Review => self.is_review_agent,
+        }
+    }
+}
+
 /// What herdr did with text sent only if the agent is idle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SendOutcome {
@@ -256,6 +303,12 @@ pub trait TourAgentPort: Send + Sync {
     /// Takes the subject's label off the terminal.
     fn release(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()>;
 
+    /// Labels the terminal as the subject's review agent.
+    fn claim_review(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()>;
+
+    /// Takes the subject's review label off the terminal.
+    fn release_review(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()>;
+
     fn status(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus>;
 
     /// Blocks, passing every status the terminal reports from now on, until herdr's stream ends or
@@ -314,6 +367,11 @@ impl TourAgentState {
         matches!(self, Self::Agent { .. })
     }
 
+    /// The sidebar offers the agent picker while herdr answers.
+    pub fn can_pick(&self) -> bool {
+        matches!(self, Self::Agent { .. } | Self::None | Self::Choose(_))
+    }
+
     /// The sidebar offers Retry beside the reason tour agents are off.
     pub fn can_retry(&self) -> bool {
         matches!(self, Self::LinkOff(_))
@@ -327,7 +385,7 @@ impl TourAgentState {
         )
     }
 
-    /// The terminals the sidebar offers "Use this agent" for.
+    /// The terminals that fit equally well, so the sidebar offers the agent picker.
     pub fn choices(&self) -> &[TerminalId] {
         match self {
             Self::Choose(terminals) => terminals,
@@ -421,7 +479,7 @@ impl OwnAgentHandOff {
             Self::NotSent(reason) => not_asked(&format!("{reason}. Try again when it is free")),
             Self::NoAgent => not_asked(&format!("there is no tour agent. {MAKE_YOURS}")),
             Self::PickAnAgent => not_asked(
-                "several agents work in this review's folder. Pick one with Use this agent in the sidebar",
+                "several agents work in this review's folder. Pick one with Pick an agent in the sidebar",
             ),
             Self::Unreported(terminal) => not_asked(&format!(
                 "your agent {terminal} does not report its state. Look at it first, it may be waiting on a question"
@@ -441,7 +499,7 @@ impl OwnAgentHandOff {
             Self::Started(terminal) => {
                 format!("Started an agent {terminal} in this review's folder with your Ask")
             }
-            Self::PickAnAgent => "Not handed: several agents work in this review's folder. Pick one with Use this agent in the sidebar".to_owned(),
+            Self::PickAnAgent => "Not handed: several agents work in this review's folder. Pick one with Pick an agent in the sidebar".to_owned(),
             Self::Unreported(terminal) => format!(
                 "Not handed: your agent {terminal} does not report its state. Look at it first, it may be waiting on a question"
             ),
@@ -861,6 +919,81 @@ impl TourAgents {
         }
     }
 
+    /// Every Claude terminal the reviewer could pick as the subject's agent of `role`: the one with
+    /// that label first, then those on its code, then the rest by folder. Each says whether it is the
+    /// subject's tour agent or review agent now. Looking changes no label.
+    pub fn agent_choices(
+        &self,
+        subject: &ReviewSubject,
+        role: AgentRole,
+    ) -> anyhow::Result<Vec<AgentChoice>> {
+        if let Err(reason) = self.port.link() {
+            bail!("agents are off: {reason}");
+        }
+        let tour_agents = self.port.terminals_of(subject)?;
+        let review_agents = self.port.review_terminals_of(subject)?;
+        let app_started = self.port.app_started()?;
+        let head_branch = match subject {
+            ReviewSubject::PullRequest(pr) => self.head_branch_of(pr),
+            ReviewSubject::Local(_) => None,
+        };
+        let mut choices: Vec<AgentChoice> = self
+            .port
+            .live_terminals()?
+            .into_iter()
+            .filter(|live| live.runs_claude)
+            .map(|live| {
+                let started_by_app = app_started
+                    .iter()
+                    .any(|agent| agent.terminal == live.terminal);
+                let checkout = LocalWorkTree::containing(&live.cwd)
+                    .and_then(|tree| tree.change_set())
+                    .ok();
+                let works_on_the_code = match subject {
+                    ReviewSubject::Local(change_set) => {
+                        works_in(&live.cwd, change_set.folder().as_path())
+                    }
+                    ReviewSubject::PullRequest(pr) => head_branch.as_ref().is_some_and(|branch| {
+                        has_checked_out(&live.cwd, &pr.hosted_repo(), branch)
+                    }),
+                };
+                AgentChoice {
+                    status: self
+                        .port
+                        .status(&live.terminal)
+                        .unwrap_or(AgentStatus::Unreported),
+                    is_tour_agent: tour_agents.contains(&live.terminal),
+                    is_review_agent: review_agents.contains(&live.terminal),
+                    works_on_the_code,
+                    started_by_app,
+                    repo: checkout
+                        .as_ref()
+                        .and_then(|change_set| change_set.origin().cloned()),
+                    branch: checkout.map(|change_set| change_set.branch().clone()),
+                    terminal: live.terminal,
+                    space: live.space,
+                    folder: live.cwd,
+                }
+            })
+            .collect();
+        choices.sort_by(|a, b| {
+            b.is_agent_as(role)
+                .cmp(&a.is_agent_as(role))
+                .then(b.works_on_the_code.cmp(&a.works_on_the_code))
+                .then_with(|| a.folder.cmp(&b.folder))
+                .then_with(|| a.terminal.as_str().cmp(b.terminal.as_str()))
+        });
+        Ok(choices)
+    }
+
+    /// Brings the terminal to the front, so the reviewer sees what runs in it before picking it.
+    pub fn show_terminal(&self, terminal: &TerminalId) -> anyhow::Result<()> {
+        if let Err(reason) = self.port.link() {
+            bail!("tour agents are off: {reason}");
+        }
+        self.port.show(terminal)
+    }
+
     /// The folder the subject's tour agent works in: a local change set's own, else the folder of the
     /// terminal `find` gives a PR. `None` when it has no agent or herdr cannot say.
     pub fn working_folder_of(&self, subject: &ReviewSubject) -> Option<PathBuf> {
@@ -884,12 +1017,44 @@ impl TourAgents {
         let Some(terminal) = self.port.terminals_of(subject)?.into_iter().next() else {
             return self.find_unclaimed(subject);
         };
+        if !self.still_works_on(subject, &terminal)? {
+            self.port.release(&terminal, subject)?;
+            return self.find_unclaimed(subject);
+        }
         let status = self.port.status(&terminal)?;
         Ok(TourAgentState::Agent { terminal, status })
     }
 }
 
-const SEVERAL_AGENTS: &str = "several agents work in this folder: pick one with Use this agent";
+impl TourAgents {
+    /// Herdr keeps a label on the terminal after the Claude session that earned it ends, and the
+    /// terminal may then run a shell, or another Claude on other code. A labelled terminal stays the
+    /// agent while it runs Claude in the subject's folder or a clone of the PR's repo, on any branch,
+    /// as the agent may switch branch after opening the PR. One the app started works where the
+    /// app put it, and one herdr does not list cannot be told apart, so both stay.
+    fn still_works_on(
+        &self,
+        subject: &ReviewSubject,
+        terminal: &TerminalId,
+    ) -> anyhow::Result<bool> {
+        let live = self.port.live_terminals()?;
+        let Some(live) = live.iter().find(|live| &live.terminal == terminal) else {
+            return Ok(true);
+        };
+        if self.app_started_terminals()?.contains(terminal) {
+            return Ok(true);
+        }
+        Ok(live.runs_claude
+            && match subject {
+                ReviewSubject::Local(change_set) => {
+                    works_in(&live.cwd, change_set.folder().as_path())
+                }
+                ReviewSubject::PullRequest(pr) => is_in_clone_of(&live.cwd, &pr.hosted_repo()),
+            })
+    }
+}
+
+const SEVERAL_AGENTS: &str = "several agents work in this folder: pick one with Pick an agent";
 
 impl TourAgents {
     /// A subject nobody claimed an agent for: the only Claude terminal of the reviewer's that works on its
@@ -1088,6 +1253,12 @@ fn has_checked_out(cwd: &Path, repo: &HostedRepo, branch: &BranchName) -> bool {
     LocalWorkTree::containing(cwd)
         .and_then(|tree| tree.change_set())
         .is_ok_and(|change_set| change_set.branch() == branch && change_set.origin() == Some(repo))
+}
+
+fn is_in_clone_of(cwd: &Path, repo: &HostedRepo) -> bool {
+    LocalWorkTree::containing(cwd)
+        .and_then(|tree| tree.change_set())
+        .is_ok_and(|change_set| change_set.origin() == Some(repo))
 }
 
 /// `write_tour` replaces the subject's agent, which for a local change set is the reviewer's own agent

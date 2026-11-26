@@ -127,10 +127,10 @@ pub fn issue_card(
                     .flex_1()
                     .min_w_0()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(InlineMarkdown::new(
-                        format!("issue-card-title-{link}"),
-                        &details.title,
-                    )),
+                    .child(
+                        InlineMarkdown::new(format!("issue-card-title-{link}"), &details.title)
+                            .selectable(),
+                    ),
             ),
     )
     .child(

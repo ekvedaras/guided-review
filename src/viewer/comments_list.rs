@@ -68,9 +68,14 @@ const PLACE_CHARS: usize = 34;
 
 #[derive(Debug, Default, Clone)]
 pub struct CommentsList {
+    /// Every thread, open ones first.
+    all: Vec<ListedThread>,
+    /// The threads the search keeps: all of them with no search.
     threads: Vec<ListedThread>,
     cursor: usize,
     resolved_are_shown: bool,
+    /// The search's words, lowercased.
+    query: Vec<String>,
 }
 
 impl CommentsList {
@@ -79,10 +84,13 @@ impl CommentsList {
         let (resolved, open): (Vec<_>, Vec<_>) = threads
             .into_iter()
             .partition(|listed| listed.thread.is_resolved);
+        let all: Vec<ListedThread> = open.into_iter().chain(resolved).collect();
         Self {
-            threads: open.into_iter().chain(resolved).collect(),
+            threads: all.clone(),
+            all,
             cursor: 0,
             resolved_are_shown: false,
+            query: Vec::new(),
         }
         .unfolded_without_open_threads()
     }
@@ -108,7 +116,7 @@ impl CommentsList {
     fn stop_count(&self) -> usize {
         match self.resolved_count() {
             0 => self.open_count(),
-            resolved if self.resolved_are_shown => self.open_count() + 1 + resolved,
+            resolved if self.resolved_shown_now() => self.open_count() + 1 + resolved,
             _ => self.open_count() + 1,
         }
     }
@@ -117,7 +125,7 @@ impl CommentsList {
     fn stop_of(&self, position: usize) -> Option<usize> {
         match position.checked_sub(self.open_count()) {
             None => Some(position),
-            Some(_) if self.resolved_are_shown => Some(position + 1),
+            Some(_) if self.resolved_shown_now() => Some(position + 1),
             Some(_) => None,
         }
     }
@@ -135,10 +143,13 @@ impl CommentsList {
     #[must_use]
     pub fn refreshed_to(&self, newer: &Self) -> Self {
         let mut list = Self {
-            threads: newer.threads.clone(),
+            all: newer.all.clone(),
+            threads: Vec::new(),
             cursor: 0,
             resolved_are_shown: self.resolved_are_shown || newer.resolved_are_shown,
+            query: self.query.clone(),
         };
+        list.threads = list.searched();
         let thread_stop = self.thread_under_cursor().and_then(|id| {
             let position = list
                 .threads
@@ -153,6 +164,37 @@ impl CommentsList {
             .unwrap_or(self.cursor)
             .min(list.stop_count().saturating_sub(1));
         list
+    }
+
+    /// Keeps the threads whose place, authors or words hold every word of `query`, ignoring case.
+    /// A search shows the resolved threads it keeps too; the fold is back when it is cleared. The
+    /// cursor goes to the first row.
+    pub fn set_query(&mut self, query: &str) {
+        self.query = query.split_whitespace().map(str::to_lowercase).collect();
+        self.threads = self.searched();
+        self.cursor = 0;
+    }
+
+    fn searched(&self) -> Vec<ListedThread> {
+        self.all
+            .iter()
+            .filter(|listed| {
+                let thread = &listed.thread;
+                let words = std::iter::once(thread.path.to_string())
+                    .chain(thread.comments.iter().flat_map(|comment| {
+                        [comment.shown_author(), comment.shown_body().to_owned()]
+                    }))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .to_lowercase();
+                self.query.iter().all(|word| words.contains(word.as_str()))
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn resolved_shown_now(&self) -> bool {
+        self.resolved_are_shown || !self.query.is_empty()
     }
 
     pub fn has_resolved(&self) -> bool {
@@ -226,7 +268,7 @@ impl CommentsList {
         (count > 0).then(|| CommentsSection {
             title: format!("{name} · {count}"),
             is_resolved,
-            is_shown: !is_resolved || self.resolved_are_shown,
+            is_shown: !is_resolved || self.resolved_shown_now(),
             is_header_under_cursor: is_resolved && self.is_on_resolved_header(),
             groups: groups.into_iter().map(|(_, group)| group).collect(),
         })

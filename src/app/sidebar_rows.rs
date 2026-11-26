@@ -105,7 +105,9 @@ pub struct SidebarTourAgent {
     pub line: SharedString,
     pub can_show: bool,
     pub can_retry: bool,
-    /// Several agents work in a local review's folder: Use this agent for each.
+    /// The agent picker is offered: herdr answers.
+    pub can_pick: bool,
+    /// Several agents work in a local review's folder, so the card offers Pick an agent.
     pub choices: Vec<TerminalId>,
 }
 
@@ -250,6 +252,7 @@ impl SidebarRows {
                 line: tour_agent.detail_for(review.subject()).into(),
                 can_show: tour_agent.can_show(),
                 can_retry: tour_agent.can_retry(),
+                can_pick: tour_agent.can_pick(),
                 choices: tour_agent.choices().to_vec(),
             },
             guided_tour: review.basic_mode_label().map(|_| SidebarGuidedTour {

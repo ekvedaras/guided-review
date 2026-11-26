@@ -16,6 +16,7 @@ use super::icon::Icon;
 use super::motion::{BOX_RISE, Edge, STATE, busy_dot, slide_in};
 use super::palette::{Colors, Tone};
 use super::segmented::{Segment, SegmentLayout, Segmented};
+use super::selectable_text::SelectableText;
 use super::text_box::{Field, TextBox};
 use super::text_input::Lines;
 
@@ -208,6 +209,7 @@ fn body_box(
 ) -> TextBox {
     let (on_cancel, on_body_edit) = (ui.clone(), Rc::clone(on_body_edit));
     TextBox::new("finish-review-body-text", focus, body, Lines::Multi)
+        .label("Review summary")
         .on_edit(move |body, _, cx| on_body_edit(body, cx))
         .on_cancel(move |_, cx| update(&on_cancel, cx, |ui| ui.is_open = false))
 }
@@ -291,6 +293,11 @@ impl RenderOnce for FinishReviewDialog {
                 } else {
                     "Finish review"
                 })
+                .aria_label(if finish.has_last_review {
+                    "Update review"
+                } else {
+                    "Finish review"
+                })
                 .on_click(move |_, window, cx| {
                     update(&ui, cx, |ui| ui.is_open = !ui.is_open);
                     window.focus(&focus, cx);
@@ -309,6 +316,11 @@ impl RenderOnce for FinishReviewDialog {
             )
             .flex_grow(1.)
             .child(if is_confirming_approve_again {
+                "Approve anyway"
+            } else {
+                "Approve again"
+            })
+            .aria_label(if is_confirming_approve_again {
                 "Approve anyway"
             } else {
                 "Approve again"
@@ -338,6 +350,7 @@ impl RenderOnce for FinishReviewDialog {
                     .w_full()
                     .child(button_icon(&colors, kind, ButtonSize::Regular, Icon::Check))
                     .child("Mark done")
+                    .aria_label("Mark done")
                     .on_click(move |_, window, cx| on_mark_done(window, cx))
             });
         let quick_note = (!is_open)
@@ -356,7 +369,10 @@ impl RenderOnce for FinishReviewDialog {
                 } else {
                     colors.danger
                 };
-                div().text_sm().text_color(color).child(note)
+                div()
+                    .text_sm()
+                    .text_color(color)
+                    .child(SelectableText::new(format!("finish-note-{note}"), note))
             });
         let actions = if can_approve_again && can_finish {
             div()
@@ -439,6 +455,11 @@ impl RenderOnce for FinishReviewDialog {
             } else {
                 "Submit review"
             })
+            .aria_label(if must_confirm {
+                "Approve..."
+            } else {
+                "Submit review"
+            })
             .on_click(move |_: &ClickEvent, _, cx| {
                 if must_confirm {
                     update(&ui, cx, |ui| ui.is_confirming_approval = true);
@@ -467,9 +488,15 @@ impl RenderOnce for FinishReviewDialog {
                     .child(body),
             )
             .children(warning_text)
-            .children(
-                problem.map(|problem| div().text_sm().text_color(colors.danger).child(problem)),
-            )
+            .children(problem.map(|problem| {
+                div()
+                    .text_sm()
+                    .text_color(colors.danger)
+                    .child(SelectableText::new(
+                        format!("finish-problem-{problem}"),
+                        problem,
+                    ))
+            }))
             .child(if is_busy {
                 div()
                     .flex()

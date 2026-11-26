@@ -271,6 +271,68 @@ fn from_the_confirming_press_until_github_answers_the_merge_is_in_flight_and_mor
 }
 
 #[test]
+fn a_merge_now_github_refuses_as_still_blocked_turns_auto_merge_on_instead() {
+    let pull = Pull::new();
+    let (mut review, host, now) = read_merging(
+        &pull,
+        Merging {
+            mergeability: Mergeability::Now,
+            viewer_may_enable_auto_merge: false,
+            ..blocked_merging()
+        },
+    );
+    host.inject(HostFault::MergeNowRefused);
+
+    review.ask_to_change_merging(now);
+    review.ask_to_change_merging(now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
+
+    assert_eq!(
+        merging_calls(&pull),
+        [
+            MergeChange::MergeNow(MergeMethod::Merge),
+            MergeChange::EnableAutoMerge(MergeMethod::Merge)
+        ]
+    );
+    assert_eq!(
+        review.merging().map(|merging| merging.auto_merge),
+        Some(AutoMerge::On(MergeMethod::Merge))
+    );
+    assert_eq!(review.problems(), []);
+}
+
+#[test]
+fn a_merge_now_github_refuses_in_a_repo_without_auto_merge_is_a_problem_in_githubs_words() {
+    let pull = Pull::new();
+    let (mut review, host, now) = read_merging(
+        &pull,
+        Merging {
+            mergeability: Mergeability::Now,
+            repo_allows_auto_merge: false,
+            viewer_may_enable_auto_merge: false,
+            ..blocked_merging()
+        },
+    );
+    host.inject(HostFault::MergeNowRefused);
+
+    review.ask_to_change_merging(now);
+    review.ask_to_change_merging(now);
+    drive_without_agents(&mut review, &host, &pull.source(), now);
+
+    assert_eq!(
+        merging_calls(&pull),
+        [MergeChange::MergeNow(MergeMethod::Merge)]
+    );
+    assert_eq!(
+        review.problems(),
+        [Problem::MergingNotChanged(
+            MergeChange::MergeNow(MergeMethod::Merge),
+            crate::support::fake_ports::RULE_VIOLATION.to_owned()
+        )]
+    );
+}
+
+#[test]
 fn a_merged_or_closed_pr_says_so_and_neither_key_nor_the_palette_offers_a_change() {
     let pull = Pull::new();
     for (status, label) in [(PrStatus::Merged, "Merged"), (PrStatus::Closed, "Closed")] {

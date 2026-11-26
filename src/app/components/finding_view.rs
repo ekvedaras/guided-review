@@ -234,6 +234,7 @@ impl FindingQuestions {
             &open.text,
             Lines::Single,
         )
+        .label("Ask about this finding")
         .on_edit(move |text, _, cx| {
             let (layout, id) = &typed;
             layout.update(cx, |this, cx| {

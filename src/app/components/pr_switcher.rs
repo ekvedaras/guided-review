@@ -557,6 +557,7 @@ impl PrSwitcherView {
     fn query_box(&self, cx: &mut Context<Self>) -> TextBox {
         let (on_edit, on_submit, on_cancel) = (cx.entity(), cx.entity(), cx.entity());
         TextBox::new("pr-switcher-query", &self.focus, &self.query, Lines::Single)
+            .label("Search reviews")
             .on_edit(move |query, _, cx| {
                 on_edit.update(cx, |this, cx| {
                     this.switching
@@ -652,6 +653,7 @@ impl PrSwitcherView {
                 }
             });
         }))
+        .aria_label(shown.words.title.to_string())
         .on_click(cx.listener(move |this, _, window, cx| {
             this.switching.list.update(cx, |list, _| list.select(index));
             this.pick(window, cx);

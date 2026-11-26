@@ -263,6 +263,10 @@ impl GitHub {
                     "GitHub refused the token: it needs the `repo` scope",
                 )));
             }
+            if let Some(refused) = error_of_type("UNPROCESSABLE") {
+                let message = refused["message"].as_str().unwrap_or("no reason given");
+                return Err(HostError::Refused(sentences_of(message)));
+            }
             if let Some(forbidden) = error_of_type("FORBIDDEN") {
                 let message = forbidden["message"].as_str().unwrap_or("no reason given");
                 return Err(HostError::NoAccess(NoAccess::new(format!(
@@ -1602,6 +1606,24 @@ struct ReplyInput<'a> {
 }
 
 /// GitHub counts lines from 1 and answers `null` for none; a 0 is taken as none too, so the thread still shows.
+/// GitHub's message on one line: "Rules found\n\nA check is expected." reads "Rules found. A check
+/// is expected."
+fn sentences_of(message: &str) -> String {
+    message
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            if line.ends_with(['.', '!', '?', ':']) {
+                line.to_owned()
+            } else {
+                format!("{line}.")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn thread_line(line: Option<usize>) -> Option<LineNumber> {
     line.and_then(|line| LineNumber::try_from(line).ok())
 }

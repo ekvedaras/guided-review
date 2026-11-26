@@ -148,6 +148,9 @@ fn your_review(
             .cursor_pointer()
             .text_color(colors.muted_text)
             .hover(|toggle| toggle.text_color(colors.text))
+            .role(gpui::Role::Button)
+            .aria_label("Show or hide your review text")
+            .aria_expanded(is_open)
             .on_click(move |_, _, cx| {
                 is_body_open.update(cx, |open, cx| {
                     *open = !*open;

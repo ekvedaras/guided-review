@@ -19,6 +19,11 @@ pub enum TourAgentCall {
         subject: ReviewSubject,
     },
     Release(TerminalId),
+    ClaimReview {
+        terminal: TerminalId,
+        subject: ReviewSubject,
+    },
+    ReleaseReview(TerminalId),
     Show(TerminalId),
     Start {
         name: String,
@@ -113,6 +118,15 @@ impl FakeTourAgent {
             .unwrap()
             .insert(TerminalId::new(terminal), since_ms);
         self.with_terminal(terminal, Some(pr), status)
+    }
+
+    /// A terminal the reviewer picked as the subject's review agent: labelled, not started by the app.
+    pub fn labelled_review(self, terminal: &str, subject: &str) -> Self {
+        self.reviewing
+            .lock()
+            .unwrap()
+            .insert(TerminalId::new(terminal), subject.parse().unwrap());
+        self
     }
 
     /// A review agent the app started, last changed `since_ms` after the epoch.
@@ -303,6 +317,28 @@ impl TourAgentPort for FakeTourAgent {
         if let Some((labelled, _)) = self.terminals.lock().unwrap().get_mut(terminal) {
             *labelled = None;
         }
+        Ok(())
+    }
+
+    fn claim_review(&self, terminal: &TerminalId, subject: &ReviewSubject) -> anyhow::Result<()> {
+        self.record(TourAgentCall::ClaimReview {
+            terminal: terminal.clone(),
+            subject: subject.clone(),
+        });
+        self.reviewing
+            .lock()
+            .unwrap()
+            .insert(terminal.clone(), subject.clone());
+        Ok(())
+    }
+
+    fn release_review(
+        &self,
+        terminal: &TerminalId,
+        _subject: &ReviewSubject,
+    ) -> anyhow::Result<()> {
+        self.record(TourAgentCall::ReleaseReview(terminal.clone()));
+        self.reviewing.lock().unwrap().remove(terminal);
         Ok(())
     }
 

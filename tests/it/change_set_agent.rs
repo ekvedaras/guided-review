@@ -340,6 +340,6 @@ fn the_ask_panel_line_for_a_local_review_says_what_to_do_about_the_agent() {
     assert!(
         OwnAgentHandOff::PickAnAgent
             .line()
-            .contains("Use this agent")
+            .contains("Pick an agent")
     );
 }

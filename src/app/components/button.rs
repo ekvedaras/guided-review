@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Rgba,
-    Stateful, StatefulInteractiveElement, Styled, Svg, div, px,
+    App, Div, ElementId, FontWeight, InteractiveElement, ParentElement, Pixels, Rgba, Role,
+    SharedString, Stateful, StatefulInteractiveElement, Styled, Svg, Toggled, div, px,
 };
 
 use super::icon::{Icon, sized_icon};
@@ -111,6 +111,7 @@ pub fn button(
     };
     let base = div()
         .id(id)
+        .role(Role::Button)
         .group(BUTTON_GROUP)
         .flex()
         .flex_none()
@@ -225,9 +226,11 @@ pub fn icon_label_button(
     kind: ButtonKind,
     size: ButtonSize,
     icon: Icon,
-    label: impl IntoElement,
+    label: impl Into<SharedString>,
 ) -> Stateful<Div> {
+    let label = label.into();
     button(colors, id, kind, size)
+        .aria_label(label.clone())
         .child(button_icon(colors, kind, size, icon))
         .child(label)
 }
@@ -242,6 +245,7 @@ pub fn icon_button(
     name: &'static str,
 ) -> Stateful<Div> {
     button(colors, id, kind, size)
+        .aria_label(name)
         .w(size.height())
         .px_0()
         .child(button_icon(colors, kind, size, icon))
@@ -284,7 +288,7 @@ pub fn toggle_button(
     } else {
         ButtonKind::Secondary
     };
-    button(colors, id, kind, size)
+    button(colors, id, kind, size).aria_toggled(if is_on { Toggled::True } else { Toggled::False })
 }
 
 /// The keys that do what the button does, at its trailing end, on the button's own ground.

@@ -460,6 +460,13 @@ fn ide_tile(
         });
     div()
         .id(id)
+        .role(gpui::Role::Button)
+        .aria_label(name)
+        .aria_toggled(if is_on {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
         .relative()
         .flex_1()
         .min_w(px(120.))

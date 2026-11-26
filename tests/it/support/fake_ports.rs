@@ -180,7 +180,14 @@ pub enum HostFault {
     RelevantListAnswersAnError,
     /// A reply is refused as GitHub does for a thread that was deleted.
     ThreadIsGone,
+    /// Merging now is refused, as GitHub refuses it while a rule still waits for a required check,
+    /// though it said nothing blocks the PR. Turning auto-merge on is taken.
+    MergeNowRefused,
 }
+
+/// GitHub's words when a ruleset's required check has not reported yet.
+pub const RULE_VIOLATION: &str =
+    "Repository rule violations found\n\nRequired status check \"All Tests Passed\" is expected.";
 
 /// What GitHub answers a GraphQL call it could not run, with HTTP 200: an error, not an outage.
 pub const HOST_ERROR: &str =
@@ -738,6 +745,9 @@ impl MergingPort for FakeHost {
         let auto_merge = match change {
             MergeChange::EnableAutoMerge(method) => AutoMerge::On(method),
             MergeChange::DisableAutoMerge => AutoMerge::Off,
+            MergeChange::MergeNow(_) if self.is_faulty(&HostFault::MergeNowRefused) => {
+                return Err(HostError::Refused(RULE_VIOLATION.to_owned()));
+            }
             MergeChange::MergeNow(_) => {
                 *self.status.lock().unwrap() = PrStatus::Merged;
                 return Ok(());

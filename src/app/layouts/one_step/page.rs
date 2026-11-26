@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyElement, App, Context, Div, ElementId, Entity, FontWeight, InteractiveElement, IntoElement,
-    ListOffset, ParentElement, Pixels, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    div, px,
+    AnyElement, App, ClickEvent, Context, Div, ElementId, Entity, FontWeight, InteractiveElement,
+    IntoElement, ListOffset, ParentElement, Pixels, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use super::{OneStepLayout, ai_review_icon};
@@ -85,10 +85,12 @@ impl OneStepLayout {
                     div()
                         .text_2xl()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(InlineMarkdown::new("summary-title", &title)),
+                        .child(InlineMarkdown::new("summary-title", &title).selectable()),
                 )
                 .into_any_element(),
-            PageRow::SummaryStats(stats) => summary_stats(&colors, &stats).into_any_element(),
+            PageRow::SummaryStats(stats) => {
+                summary_stats(&colors, &stats, Self::stat_clicks(cx)).into_any_element()
+            }
             PageRow::RouteHeading => note_label("THE TOUR")
                 .pt_6()
                 .pb_2()
@@ -133,10 +135,12 @@ impl OneStepLayout {
                 .gap_3()
                 .max_w(READING_WIDTH)
                 .child(bullet(&colors, SUMMARY_LINE))
-                .child(div().flex_1().child(InlineMarkdown::new(
-                    format!("summary-bullet-{index}"),
-                    &summary_bullet,
-                )))
+                .child(
+                    div().flex_1().child(
+                        InlineMarkdown::new(format!("summary-bullet-{index}"), &summary_bullet)
+                            .selectable(),
+                    ),
+                )
                 .into_any_element(),
             PageRow::StepHeading(heading) => step_heading(&heading, cx).into_any_element(),
             PageRow::StepIntro(intro) => self.step_intro(&intro, index, cx).into_any_element(),
@@ -436,6 +440,8 @@ impl OneStepLayout {
                 .gap_3()
                 .cursor_pointer()
                 .hover(|row| row.bg(colors.hover))
+                .role(gpui::Role::Button)
+                .aria_label(format!("Open file {}", file.path))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.change_review(cx, |review| review.go_to_file(&path));
                 }))
@@ -516,14 +522,15 @@ impl OneStepLayout {
                     .items_start()
                     .gap_2()
                     .child(tour_place(&colors, "OVERVIEW", TourStop::On))
-                    .child(
-                        div()
-                            .text_2xl()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(InlineMarkdown::new("overview-title", &overview.title)),
-                    ),
+                    .child(div().text_2xl().font_weight(FontWeight::SEMIBOLD).child(
+                        InlineMarkdown::new("overview-title", &overview.title).selectable(),
+                    )),
             )
-            .child(overview_stats(&colors, overview.stats))
+            .child(overview_stats(
+                &colors,
+                overview.stats,
+                Self::stat_clicks(cx),
+            ))
             .children(description)
             .children(local)
             .child(
@@ -604,6 +611,7 @@ impl OneStepLayout {
                 control.is_showing_full_diff,
                 ButtonSize::Small,
             )
+            .aria_label("Full diff, not only the change since your read")
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| review.toggle_full_diff_of(&subject));
             }))
@@ -803,6 +811,9 @@ impl OneStepLayout {
                 !fold.is_folded,
                 1.,
             ))
+            .role(gpui::Role::Button)
+            .aria_label(format!("Fold {}", fold.path))
+            .aria_expanded(!fold.is_folded)
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| {
                     review.toggle_box_fold(&fold.screen, &fold.path);
@@ -831,11 +842,16 @@ fn step_heading(heading: &StepHeading, cx: &mut Context<OneStepLayout>) -> impl 
         .id("step-title")
         .text_2xl()
         .font_weight(FontWeight::SEMIBOLD)
-        .child(InlineMarkdown::new("step-title", &heading.title));
+        .child(
+            InlineMarkdown::new("step-title", &heading.title)
+                .when_selectable(!heading.folds_on_title_click),
+        );
     let title = if heading.folds_on_title_click {
         let id = heading.id.clone();
         title
             .cursor_pointer()
+            .role(gpui::Role::Button)
+            .aria_label("Fold or unfold this step")
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.change_review(cx, |review| review.toggle_fold(&id));
             }))
@@ -955,6 +971,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             ButtonKind::Ghost,
             ButtonSize::Regular,
         )
+        .aria_label("Previous")
         .on_click(cx.listener(|this, _, _, cx| {
             this.change_review(cx, |review| review.go_back());
         }))
@@ -1015,6 +1032,7 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
             ButtonKind::Primary,
             ButtonSize::Large,
         )
+        .aria_label(label)
         .on_click(cx.listener(|this, _, window, cx| {
             this.act(Intent::MarkReadAndGoOn, window, cx);
         }))
@@ -1090,8 +1108,55 @@ fn screen_footer(footer: &ScreenFooter, cx: &mut Context<OneStepLayout>) -> AnyE
         .into_any_element()
 }
 
+/// A number of the PR's size that opens its list: the files list, or the comments list.
+fn stat_opening(
+    colors: &Colors,
+    id: &'static str,
+    icon_name: Icon,
+    text: SharedString,
+    opens: OnStatClick,
+) -> impl IntoElement + use<> {
+    let hover_text = colors.text;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap_1p5()
+        .rounded(px(CONTROL_RADIUS))
+        .cursor_pointer()
+        .hover(move |stat| stat.text_color(hover_text))
+        .role(gpui::Role::Button)
+        .aria_label(text.clone())
+        .child(sized_icon(icon_name, colors.muted_text, px(14.)))
+        .child(text)
+        .on_click(move |event, window, cx| opens(event, window, cx))
+}
+
+/// What a click on a stat does: the window's caller opens the list the stat counts.
+type OnStatClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+/// The files list and the comments list, opened by a click on the stat that counts them.
+struct StatClicks {
+    files: OnStatClick,
+    threads: OnStatClick,
+}
+
+impl OneStepLayout {
+    fn stat_clicks(cx: &Context<Self>) -> StatClicks {
+        let opening = |intent: Intent| -> OnStatClick {
+            Rc::new(
+                cx.listener(move |this, _: &ClickEvent, window, cx| this.act(intent, window, cx)),
+            )
+        };
+        StatClicks {
+            files: opening(Intent::ToggleFilesList),
+            threads: opening(Intent::ToggleCommentsList),
+        }
+    }
+}
+
 /// How big the PR is, in the numbers the review truly has.
-fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
+fn summary_stats(colors: &Colors, stats: &SummaryStatsRow, clicks: StatClicks) -> impl IntoElement {
     let item = |icon_name: Icon, text: SharedString| {
         div()
             .flex()
@@ -1111,7 +1176,13 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
         .text_color(colors.muted_text)
         .child(item(Icon::Milestone, SharedString::from(&stats.steps)))
         .child(dot())
-        .child(item(Icon::FileText, SharedString::from(&stats.files)))
+        .child(stat_opening(
+            colors,
+            "summary-files",
+            Icon::FileText,
+            SharedString::from(&stats.files),
+            clicks.files,
+        ))
         .child(dot())
         .child(
             div()
@@ -1135,7 +1206,13 @@ fn summary_stats(colors: &Colors, stats: &SummaryStatsRow) -> impl IntoElement {
                 .items_center()
                 .gap_3()
                 .child(dot())
-                .child(item(Icon::MessageSquare, SharedString::from(threads)))
+                .child(stat_opening(
+                    colors,
+                    "summary-threads",
+                    Icon::MessageSquare,
+                    SharedString::from(threads),
+                    Rc::clone(&clicks.threads),
+                ))
         }))
         .children(stats.started_read.clone().map(|started_read| {
             div()
@@ -1252,15 +1329,7 @@ fn local_overview_card(colors: &Colors, local: &LocalFacts) -> impl IntoElement 
 }
 
 /// How big a basic review's PR is, in the numbers the review truly has.
-fn overview_stats(colors: &Colors, stats: OverviewStats) -> impl IntoElement {
-    let item = |icon_name: Icon, text: String| {
-        div()
-            .flex()
-            .items_center()
-            .gap_1p5()
-            .child(sized_icon(icon_name, colors.muted_text, px(14.)))
-            .child(text)
-    };
+fn overview_stats(colors: &Colors, stats: OverviewStats, clicks: StatClicks) -> impl IntoElement {
     let dot = || div().size(px(3.)).rounded_full().bg(colors.border);
     div()
         .pb_5()
@@ -1270,17 +1339,28 @@ fn overview_stats(colors: &Colors, stats: OverviewStats) -> impl IntoElement {
         .gap_3()
         .text_sm()
         .text_color(colors.muted_text)
-        .child(item(
+        .child(stat_opening(
+            colors,
+            "overview-files",
             Icon::FileText,
-            pluralised(stats.files, "file changed", "files changed"),
+            pluralised(stats.files, "file changed", "files changed").into(),
+            clicks.files,
         ))
         .child(dot())
         .child(line_counts(colors, stats.added_lines, stats.removed_lines))
         .children((stats.open_threads > 0).then(|| {
-            div().flex().items_center().gap_3().child(dot()).child(item(
-                Icon::MessageSquare,
-                pluralised(stats.open_threads, "open thread", "open threads"),
-            ))
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(dot())
+                .child(stat_opening(
+                    colors,
+                    "overview-threads",
+                    Icon::MessageSquare,
+                    pluralised(stats.open_threads, "open thread", "open threads").into(),
+                    clicks.threads,
+                ))
         }))
 }
 
@@ -1342,6 +1422,8 @@ fn route_stop(stop: &RouteStopRow, cx: &mut Context<OneStepLayout>) -> impl Into
         .cursor_pointer()
         .hover(|row| row.bg(colors.hover))
         .active(|row| row.bg(colors.pressed))
+        .role(gpui::Role::Button)
+        .aria_label(format!("Go to step {}: {}", stop.number, stop.title))
         .on_click(cx.listener(move |this, _, _, cx| {
             let id = id.clone();
             this.change_review(cx, move |review| review.go_to(&id));
@@ -1496,6 +1578,7 @@ fn lead_button(
             .flex_shrink(1.)
             .min_w_0()
             .max_w(px(460.))
+            .aria_label("Continue at the next unread step")
             .on_click(cx.listener(move |this, _, _, cx| {
                 let place = place.clone();
                 this.change_review(cx, move |review| match &place {
@@ -1647,6 +1730,11 @@ fn toolbar_toggle(
         ButtonKind::Joined
     };
     icon_label_button(colors, id, kind, ButtonSize::Small, icon, label)
+        .aria_toggled(if is_on {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
         .child(button_keys(colors, kind, command, cx))
         .when(is_on, |toggle| {
             toggle.child(sized_icon(Icon::Check, colors.accent, px(12.)))
@@ -1667,6 +1755,13 @@ pub(super) fn tick_button(
     };
     button(&colors, "tick", kind, size)
         .gap_0()
+        .role(gpui::Role::CheckBox)
+        .aria_label("Mark as read")
+        .aria_toggled(if is_ticked {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
         .on_click(cx.listener(move |this, _, _, cx| this.toggle_tick(&id, cx)))
         .child(grow_when_shown(
             sized_icon(Icon::Check, colors.success, px(14.)),
@@ -1727,6 +1822,7 @@ fn notes_button(
         ))
     };
     let add = small(ButtonKind::Ghost, Icon::FilePlus)
+        .aria_label(labels.tooltip)
         .tooltip(tooltip(move |_| labels.tooltip.into()))
         .on_click(move |_, _, cx| {
             session.update(cx, |session, cx| session.add_to_notes(&subject, cx));

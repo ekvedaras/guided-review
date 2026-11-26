@@ -21,6 +21,7 @@ use super::overlay::{
     touching_places,
 };
 use super::palette::Colors;
+use super::search_row::search_row;
 use super::sidebar_row::RowPlace;
 use super::text_box::TextBox;
 use super::text_input::Lines;
@@ -245,6 +246,7 @@ impl JumpPalette {
     fn query_box(&self, cx: &mut Context<Self>) -> TextBox {
         let (on_edit, on_submit, on_cancel) = (cx.entity(), cx.entity(), cx.entity());
         TextBox::new("jump-query", &self.focus, &self.query, Lines::Single)
+            .label("Jump to a step or action")
             .on_edit(move |query, _, cx| {
                 on_edit.update(cx, |this, cx| {
                     this.query.clone_from(&query);
@@ -306,6 +308,10 @@ impl JumpPalette {
             }
             cx.notify();
         }))
+        .aria_label(match &shown.label {
+            ShownLabel::Action(name) => (*name).to_owned(),
+            ShownLabel::Step(_) | ShownLabel::Piece(_) => format!("Jump to result {}", index + 1),
+        })
         .on_click(cx.listener(move |this, _, window, cx| {
             this.selected = index;
             this.pick(window, cx);
@@ -432,19 +438,7 @@ impl Render for JumpPalette {
                     .mt(px(80.))
                     .w(px(720.))
                     .h_auto()
-                    .child(
-                        div()
-                            .px_4()
-                            .py_3()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .text_base()
-                            .border_b_1()
-                            .border_color(colors.subtle_border)
-                            .child(sized_icon(Icon::Search, colors.muted_text, px(16.)))
-                            .child(div().flex_1().min_w_0().child(self.query_box(cx))),
-                    )
+                    .child(search_row(&colors, self.query_box(cx), "", false, None))
                     .child(div().py_2().flex().flex_col().children(rows).when(
                         self.entry_count == 0,
                         |list| {

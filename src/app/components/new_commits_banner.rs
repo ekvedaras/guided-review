@@ -1,6 +1,6 @@
 use gpui::{
-    App, ClickEvent, IntoElement, ParentElement, RenderOnce, SharedString,
-    StatefulInteractiveElement, Styled, Window, div,
+    App, ClickEvent, IntoElement, ParentElement, RenderOnce, StatefulInteractiveElement, Styled,
+    Window, div,
 };
 
 use crate::pull_request::Sha;
@@ -10,6 +10,7 @@ use super::button::{ButtonKind, ButtonSize, icon_label_button};
 use super::chip::{dropping_in, notice_band};
 use super::icon::Icon;
 use super::palette::{Colors, Tone};
+use super::selectable_text::SelectableText;
 
 type OnRepin = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -65,7 +66,7 @@ impl RenderOnce for NewCommitsBanner {
             JobProgress::Failed(error) => Some(
                 div()
                     .text_color(colors.danger)
-                    .child(SharedString::from(error.to_string())),
+                    .child(SelectableText::new("repin-error", error.to_string())),
             ),
             JobProgress::Idle | JobProgress::Running { .. } => None,
         };

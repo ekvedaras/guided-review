@@ -256,6 +256,8 @@ impl RenderOnce for DiffRow {
                 let link = link.clone();
                 move |cx| open_code_hint(&link, cx)
             }))
+            .role(gpui::Role::Button)
+            .aria_label("Open this line in your editor")
             .on_click(move |_, _, cx| open_code(&link, cx))
             .whitespace_nowrap()
             .when(edges.opens, |gutter| {
@@ -273,7 +275,18 @@ impl RenderOnce for DiffRow {
         {
             Some(on_gesture) => {
                 let at = location.clone();
+                let at_for_a11y = location.clone();
+                let on_gesture_for_a11y = Rc::clone(&on_gesture);
                 comment_button
+                    .id(SharedString::from(format!(
+                        "comment-{}-{:?}-{}",
+                        location.path, location.side, location.line
+                    )))
+                    .role(gpui::Role::Button)
+                    .aria_label("Comment on this line")
+                    .on_a11y_action(gpui::AccessibleAction::Click, move |_, window, cx| {
+                        on_gesture_for_a11y(RowGesture::Press, &at_for_a11y, window, cx);
+                    })
                     .self_stretch()
                     .flex()
                     .justify_center()
@@ -730,6 +743,8 @@ pub fn binary_file_row(
                 let link = link.clone();
                 move |cx| open_code_hint(&link, cx)
             }))
+            .role(gpui::Role::Button)
+            .aria_label(label.clone())
             .on_click(move |_, _, cx| open_code(&link, cx))
             .child(label),
     )

@@ -343,7 +343,7 @@ impl ReviewCore {
             Intent::ToggleFindingsList if self.can_list_findings() => {
                 Effect::Toggle(Overlay::Findings)
             }
-            Intent::ToggleCommentsList if self.has_threads() => Effect::Toggle(Overlay::Comments),
+            Intent::ToggleCommentsList => Effect::Toggle(Overlay::Comments),
             Intent::ToggleFilesList => Effect::Toggle(Overlay::Files),
             Intent::ToggleRead => match self.screen() {
                 Screen::Step(id) => {
@@ -390,7 +390,6 @@ impl ReviewCore {
             Intent::OpenPr if self.can_open_pr() => Effect::OpenPr,
             Intent::NextFinding
             | Intent::ToggleFindingsList
-            | Intent::ToggleCommentsList
             | Intent::OpenPr
             | Intent::MarkDone => Effect::Nothing,
             Intent::OpenOnHost => self

@@ -22,6 +22,8 @@ pub fn version_link(
         .cursor_pointer()
         .text_color(at_rest)
         .hover(move |link| link.text_color(accent))
+        .role(gpui::Role::Link)
+        .aria_label(format!("Release page of version {}", version.as_str()))
         .on_click(move |_, _, cx| open_app_page(&version.page(), cx))
         .child(version.as_str())
 }

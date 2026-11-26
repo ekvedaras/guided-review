@@ -122,10 +122,11 @@ enum Scene {
     StationsBusy,
     FilesList,
     FilesListSearch,
+    AgentPicker,
 }
 
 impl Scene {
-    const ALL: [Self; 76] = [
+    const ALL: [Self; 77] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -202,6 +203,7 @@ impl Scene {
         Self::StationsBusy,
         Self::FilesList,
         Self::FilesListSearch,
+        Self::AgentPicker,
     ];
 
     fn file_name(self) -> &'static str {
@@ -282,6 +284,7 @@ impl Scene {
             Self::StationsBusy => "95-sidebar-stations-busy",
             Self::FilesList => "97-files-list",
             Self::FilesListSearch => "98-files-list-search",
+            Self::AgentPicker => "99-agent-picker",
         }
     }
 
@@ -1010,6 +1013,10 @@ impl OneStepLayout {
                     sheet.stage_dismissed_shown(cx);
                 });
             }
+            Scene::AgentPicker => {
+                self.agent_picker
+                    .update(cx, |picker, cx| picker.stage_sample(window, cx));
+            }
             Scene::FilesList | Scene::FilesListSearch => {
                 self.change_review(cx, |review| {
                     review.go_to_summary();
@@ -1393,6 +1400,9 @@ impl OneStepLayout {
                     .update(cx, |sheet, cx| sheet.close(window, cx));
                 self.change_review(cx, |review| review.ai_review_is(AiReview::NotRun));
             }
+            Scene::AgentPicker => self
+                .agent_picker
+                .update(cx, |picker, cx| picker.close(window, cx)),
             Scene::FilesList | Scene::FilesListSearch => {
                 self.files_list
                     .update(cx, |sheet, cx| sheet.close(window, cx));

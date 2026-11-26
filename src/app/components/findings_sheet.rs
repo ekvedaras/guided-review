@@ -231,6 +231,7 @@ impl FindingsSheet {
             }
             cx.notify();
         }))
+        .aria_label(format!("Open finding {}", row.id))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.list.move_cursor_to(&open_id);
             this.list.toggle_open_under_cursor();
@@ -240,6 +241,13 @@ impl FindingsSheet {
             div()
                 .id(SharedString::from(format!("findings-tick-{}", row.id)))
                 .py_1()
+                .role(gpui::Role::CheckBox)
+                .aria_label("Select finding")
+                .aria_toggled(if row.is_selected {
+                    gpui::Toggled::True
+                } else {
+                    gpui::Toggled::False
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     this.list.move_cursor_to(&tick_id);
@@ -317,6 +325,7 @@ impl FindingsSheet {
                                     ButtonSize::Small,
                                 )
                                 .child("Show on its lines")
+                                .aria_label("Show on its lines")
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
                                         this.close(window, cx);
@@ -353,6 +362,7 @@ impl FindingsSheet {
             }
             cx.notify();
         }))
+        .aria_label(format!("Open dismissed finding {}", row.id))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.list.move_cursor_to_dismissed(&cursor_id);
             cx.notify();
@@ -364,6 +374,13 @@ impl FindingsSheet {
                     row.id
                 )))
                 .py_1()
+                .role(gpui::Role::CheckBox)
+                .aria_label("Select dismissed finding")
+                .aria_toggled(if row.is_selected {
+                    gpui::Toggled::True
+                } else {
+                    gpui::Toggled::False
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     this.list.move_cursor_to_dismissed(&tick_id);
@@ -396,6 +413,7 @@ impl FindingsSheet {
                 ButtonSize::Small,
             )
             .child("Restore")
+            .aria_label("Restore")
             .on_click(cx.listener(move |_, _, _, cx| {
                 cx.stop_propagation();
                 cx.emit(FindingsEvent::Restore(vec![restore_id.clone()]));
@@ -427,6 +445,8 @@ impl FindingsSheet {
         let header = picker_row_at(colors, "findings-dismissed-header", place, None)
             .py_2()
             .gap_2()
+            .aria_label("Show or hide dismissed findings")
+            .aria_expanded(is_shown)
             .on_click(cx.listener(|this, _, _, cx| {
                 this.list.toggle_dismissed_shown();
                 cx.notify();
@@ -506,7 +526,9 @@ impl FindingsSheet {
         kind: ButtonKind,
         selection: Selection,
     ) -> gpui::Stateful<gpui::Div> {
-        let base = button(colors, id, kind, ButtonSize::Small).child(label);
+        let base = button(colors, id, kind, ButtonSize::Small)
+            .aria_label(label.clone())
+            .child(label);
         match selection {
             Selection::Selected => base,
             Selection::Unselected => base.opacity(0.45).cursor_default(),
@@ -630,6 +652,13 @@ impl Render for FindingsSheet {
                     .items_center()
                     .gap_2()
                     .cursor_pointer()
+                    .role(gpui::Role::CheckBox)
+                    .aria_label("Select all")
+                    .aria_toggled(if all_selected {
+                        gpui::Toggled::True
+                    } else {
+                        gpui::Toggled::False
+                    })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.list.toggle_all();
                         cx.notify();
