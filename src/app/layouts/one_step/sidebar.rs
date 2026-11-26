@@ -584,107 +584,64 @@ impl OneStepLayout {
             .child(self.settings_row(&colors, cx))
     }
 
-    /// Settings and the shortcuts sheet at the foot of the sidebar, under a quiet line with the version
-    /// this app runs, so the Settings row stays at the very bottom.
+    /// The foot of the sidebar: the files list, the comments list, Settings and the shortcuts sheet
+    /// on one row, each an icon with its keys and its name in a tooltip, over a quiet line with the
+    /// version this app runs.
     fn settings_row(&self, colors: &Colors, cx: &mut Context<Self>) -> impl IntoElement {
-        let shortcuts = button(
-            colors,
-            "sidebar-shortcuts",
-            ButtonKind::Ghost,
-            ButtonSize::Regular,
-        )
-        .px_2()
-        .gap_1p5()
-        .tooltip(tooltip(|_| "Keyboard shortcuts".into()))
-        .child(button_icon(
-            colors,
-            ButtonKind::Ghost,
-            ButtonSize::Regular,
-            Icon::Keyboard,
-        ))
-        .child(button_keys(
-            colors,
-            ButtonKind::Ghost,
-            Command::Shortcuts,
-            cx,
-        ))
-        .aria_label("Keyboard shortcuts")
-        .on_click(cx.listener(|this, _, window, cx| {
-            this.act(Intent::ToggleShortcuts, window, cx);
-        }));
-        let list_button = |id: &'static str, icon: Icon, label: &'static str, command, intent| {
+        let foot_button = |id: &'static str, icon: Icon, name: &'static str, command, intent| {
             button(colors, id, ButtonKind::Ghost, ButtonSize::Regular)
                 .px_2()
+                .gap_1p5()
                 .child(button_icon(
                     colors,
                     ButtonKind::Ghost,
                     ButtonSize::Regular,
                     icon,
                 ))
-                .child(label)
                 .child(button_keys(colors, ButtonKind::Ghost, command, cx))
-                .aria_label(label)
+                .tooltip(tooltip(move |_| name.into()))
+                .aria_label(name)
                 .on_click(cx.listener(move |this, _, window, cx| this.act(intent, window, cx)))
         };
-        let lists = div()
+        let row = div()
             .px_2()
             .flex()
             .items_center()
-            .gap_1()
-            .child(list_button(
+            .justify_between()
+            .child(foot_button(
                 "sidebar-files",
                 Icon::FileText,
-                "Files",
+                "Changed files",
                 Command::FilesList,
                 Intent::ToggleFilesList,
             ))
-            .child(list_button(
+            .child(foot_button(
                 "sidebar-comments",
                 Icon::MessageSquare,
-                "Comments",
+                "Comment threads",
                 Command::CommentsList,
                 Intent::ToggleCommentsList,
+            ))
+            .child(foot_button(
+                "sidebar-settings",
+                Icon::Settings,
+                "Settings",
+                Command::Settings,
+                Intent::ToggleSettings,
+            ))
+            .child(foot_button(
+                "sidebar-shortcuts",
+                Icon::Keyboard,
+                "Keyboard shortcuts",
+                Command::Shortcuts,
+                Intent::ToggleShortcuts,
             ));
-        let row = div()
-            .px_2()
-            .pb_2()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(
-                button(
-                    colors,
-                    "sidebar-settings",
-                    ButtonKind::Ghost,
-                    ButtonSize::Regular,
-                )
-                .px_2()
-                .child(button_icon(
-                    colors,
-                    ButtonKind::Ghost,
-                    ButtonSize::Regular,
-                    Icon::Settings,
-                ))
-                .child("Settings")
-                .child(button_keys(
-                    colors,
-                    ButtonKind::Ghost,
-                    Command::Settings,
-                    cx,
-                ))
-                .aria_label("Settings")
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.act(Intent::ToggleSettings, window, cx);
-                })),
-            )
-            .child(div().flex_1())
-            .child(shortcuts);
-        let version = div().px_4().pt_2().pb_1().flex().child(
+        let version = div().px_4().pt_1().pb_2().flex().child(
             version_link(colors, "sidebar-version", colors.faint_text())
                 .text_xs()
                 .line_height(px(12.)),
         );
-        div().flex_none().child(lists).child(version).child(row)
+        div().flex_none().child(row).child(version)
     }
 }
 
