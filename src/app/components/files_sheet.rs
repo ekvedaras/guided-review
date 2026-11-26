@@ -49,8 +49,8 @@ pub struct FilesSheet {
 
 impl EventEmitter<FilesEvent> for FilesSheet {}
 
-/// Indent per level of the tree, as the sidebar's file tree.
-const INDENT: f32 = 14.;
+/// Indent per level: a file's read mark then sits under its folder's icon, past the chevron and the gap.
+const INDENT: f32 = 20.;
 const DETAIL_WIDTH: f32 = 380.;
 const COUNTS_WIDTH: f32 = 96.;
 
@@ -179,8 +179,8 @@ impl FilesSheet {
         let (on_edit, on_submit, on_cancel) = (cx.entity(), cx.entity(), cx.entity());
         let is_searching = self.search_focus.is_focused(window);
         div()
-            .w(px(320.))
-            .flex_none()
+            .flex_1()
+            .min_w_0()
             .px_2()
             .py_1()
             .flex()
@@ -464,35 +464,56 @@ impl Render for FilesSheet {
             )
             .collect();
         let (added, removed) = self.list.line_counts();
+        // Two parts as wide as the panes below, so the search box ends at the line between them.
         let header = div()
-            .px_5()
-            .pt_4()
-            .pb_3()
             .flex()
             .items_center()
-            .gap_3()
             .border_b_1()
             .border_color(colors.subtle_border)
-            .child(sized_icon(Icon::FolderOpen, colors.accent, px(18.)))
             .child(
                 div()
                     .flex_1()
-                    .text_base()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(format!("Files ({})", self.list.file_count())),
+                    .min_w_0()
+                    .pl_5()
+                    .pr_4()
+                    .pt_4()
+                    .pb_3()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(sized_icon(Icon::FolderOpen, colors.accent, px(18.)))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_base()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(format!("Files ({})", self.list.file_count())),
+                    )
+                    .child(self.search_box(&colors, window, cx)),
             )
-            .child(self.search_box(&colors, window, cx))
-            .child(line_counts(&colors, added, removed))
             .child(
-                icon_button(
-                    &colors,
-                    "files-close",
-                    ButtonKind::Ghost,
-                    ButtonSize::Small,
-                    Icon::Close,
-                    "Close",
-                )
-                .on_click(cx.listener(|this, _, window, cx| this.close(window, cx))),
+                div()
+                    .w(px(DETAIL_WIDTH))
+                    .flex_none()
+                    .pr_5()
+                    .pt_4()
+                    .pb_3()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap_3()
+                    .child(line_counts(&colors, added, removed))
+                    .child(
+                        icon_button(
+                            &colors,
+                            "files-close",
+                            ButtonKind::Ghost,
+                            ButtonSize::Small,
+                            Icon::Close,
+                            "Close",
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| this.close(window, cx))),
+                    ),
             );
         let count = rows.len();
         let row_elements: Vec<AnyElement> = rows
