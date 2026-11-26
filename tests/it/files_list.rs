@@ -241,6 +241,52 @@ fn the_cursor_cycles_and_a_folded_folder_hides_its_files() {
 }
 
 #[test]
+fn left_on_a_file_folds_its_folder_and_puts_the_cursor_on_it() {
+    let shop = Shop::new();
+    let mut list = shop.guided().files_list();
+
+    list.fold_under_cursor();
+    let folded = shape(&list);
+    let on_folder = cursor_label(&list);
+    list.cursor_down();
+    list.fold_under_cursor();
+
+    assert_eq!(folded, vec!["0app/> +2 -2", "0config.yml +1 -1"]);
+    assert_eq!(on_folder.as_deref(), Some("app"));
+    assert_eq!(cursor_label(&list).as_deref(), Some("config.yml"));
+}
+
+#[test]
+fn a_search_keeps_the_files_whose_path_holds_every_word_with_their_folders() {
+    let shop = Shop::new();
+    let mut list = shop.guided().files_list();
+    list.cursor_down();
+
+    list.set_query("APP ord");
+    let found = shape(&list);
+    let cursor = cursor_label(&list);
+    list.set_query("");
+
+    assert_eq!(found, vec!["0app/ +2 -2", "1Order.php +2 -2"]);
+    assert_eq!(cursor.as_deref(), Some("Order.php"));
+    assert_eq!(list.rows().len(), 3);
+}
+
+#[test]
+fn a_search_shows_matches_inside_a_folded_folder_and_keeps_the_fold_for_after() {
+    let shop = Shop::new();
+    let mut list = shop.guided().files_list();
+    list.fold_under_cursor();
+
+    list.set_query("order");
+    let found = shape(&list);
+    list.set_query("");
+
+    assert_eq!(found, vec!["0app/ +2 -2", "1Order.php +2 -2"]);
+    assert_eq!(shape(&list), vec!["0app/> +2 -2", "0config.yml +1 -1"]);
+}
+
+#[test]
 fn a_refresh_keeps_the_folds_and_the_cursor() {
     let shop = Shop::new();
     let mut review = shop.guided();

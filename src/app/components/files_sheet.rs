@@ -17,13 +17,15 @@ use crate::viewer::{
 
 use super::button::{ButtonKind, ButtonSize, icon_button};
 use super::icon::{Icon, sized_icon};
-use super::key_cap::{KeyLabel, key_hint};
+use super::key_cap::{KeyLabel, key_cap, key_hint};
 use super::motion::OVERLAY;
 use super::overlay::{
     close_presence, modal_layer_for, overlay_panel, picker_footer, picker_row_at, rise_for,
     touching_places,
 };
 use super::palette::{CODE_FONT, Colors};
+use super::text_box::TextBox;
+use super::text_input::Lines;
 
 /// What the reviewer asked of the list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +39,9 @@ pub struct FilesSheet {
     focus: FocusHandle,
     owner_focus: FocusHandle,
     list: FilesList,
+    /// What the search box holds; `?` gives it the keys.
+    query: String,
+    search_focus: FocusHandle,
     scroll: ScrollHandle,
     /// The keys moved the cursor: the next draw scrolls its row into view.
     cursor_moved: bool,
@@ -58,6 +63,8 @@ impl FilesSheet {
             focus: cx.focus_handle(),
             owner_focus,
             list: FilesList::default(),
+            query: String::new(),
+            search_focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
             cursor_moved: false,
         }
@@ -68,11 +75,22 @@ impl FilesSheet {
             self.close(window, cx);
         } else {
             self.list = list;
+            self.query.clear();
             self.cursor_moved = true;
             self.presence.open(Instant::now());
             window.focus(&self.focus, cx);
             cx.notify();
         }
+    }
+
+    /// The list as it is after typing `query` in its search box, for a picture.
+    #[cfg(feature = "snapshots")]
+    pub fn stage_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        query.clone_into(&mut self.query);
+        self.list.set_query(query);
+        self.cursor_moved = true;
+        window.focus(&self.search_focus, cx);
+        cx.notify();
     }
 
     pub fn is_open(&self) -> bool {
@@ -104,7 +122,19 @@ impl FilesSheet {
         }
     }
 
+    /// While the search box has the keys, only Up and Down are the list's; the box takes the rest.
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_focus.is_focused(window) {
+            match event.keystroke.key.as_str() {
+                "down" => self.list.cursor_down(),
+                "up" => self.list.cursor_up(),
+                _ => return,
+            }
+            self.cursor_moved = true;
+            cx.stop_propagation();
+            cx.notify();
+            return;
+        }
         let opens_the_sheet = chord_of(&event.keystroke)
             .is_some_and(|chord| keymap(cx).chords(Command::FilesList).contains(&chord));
         cx.stop_propagation();
@@ -112,6 +142,9 @@ impl FilesSheet {
         match key {
             "escape" => self.close(window, cx),
             _ if opens_the_sheet => self.close(window, cx),
+            _ if event.keystroke.key_char.as_deref() == Some("?") || key == "?" => {
+                window.focus(&self.search_focus, cx);
+            }
             "down" | "j" => {
                 self.list.cursor_down();
                 self.cursor_moved = true;
@@ -135,6 +168,78 @@ impl FilesSheet {
             }
         }
         cx.notify();
+    }
+
+    fn search_box(
+        &self,
+        colors: &Colors,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let (on_edit, on_submit, on_cancel) = (cx.entity(), cx.entity(), cx.entity());
+        let is_searching = self.search_focus.is_focused(window);
+        div()
+            .w(px(320.))
+            .flex_none()
+            .px_2()
+            .py_1()
+            .flex()
+            .items_center()
+            .gap_2()
+            .rounded(px(6.))
+            .border_1()
+            .border_color(if is_searching {
+                colors.accent
+            } else {
+                colors.border
+            })
+            .bg(colors.inset)
+            .child(sized_icon(Icon::Search, colors.muted_text, px(14.)))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        TextBox::new(
+                            "files-search",
+                            &self.search_focus,
+                            &self.query,
+                            Lines::Single,
+                        )
+                        .on_edit(move |query, _, cx| {
+                            on_edit.update(cx, |this, cx| {
+                                this.list.set_query(&query);
+                                this.query = query;
+                                this.cursor_moved = true;
+                                cx.notify();
+                            });
+                        })
+                        .on_submit(move |window, cx| {
+                            on_submit.update(cx, |this, cx| this.go(0, window, cx));
+                        })
+                        .on_cancel(move |window, cx| {
+                            on_cancel.update(cx, |this, cx| {
+                                this.query.clear();
+                                this.list.set_query("");
+                                this.cursor_moved = true;
+                                window.focus(&this.focus, cx);
+                                cx.notify();
+                            });
+                        }),
+                    )
+                    .when(self.query.is_empty() && !is_searching, |field| {
+                        field.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .text_color(colors.muted_text)
+                                .child("Search files"),
+                        )
+                    }),
+            )
+            .children((!is_searching).then(|| key_cap(colors, KeyLabel::Text("?"))))
     }
 
     fn row(
@@ -167,7 +272,7 @@ impl FilesSheet {
                 removed,
                 ..
             } => base
-                .text_color(colors.muted_text)
+                .text_color(colors.sidebar_text)
                 .child(sized_icon(
                     if *is_folded {
                         Icon::ChevronRight
@@ -177,12 +282,21 @@ impl FilesSheet {
                     colors.muted_text,
                     px(12.),
                 ))
+                .child(sized_icon(
+                    if *is_folded {
+                        Icon::Folder
+                    } else {
+                        Icon::FolderOpen
+                    },
+                    colors.accent,
+                    px(14.),
+                ))
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .font_weight(FontWeight::MEDIUM)
+                        .font_weight(FontWeight::SEMIBOLD)
                         .child(label.clone()),
                 )
                 .child(line_counts(colors, *added, *removed)),
@@ -334,7 +448,7 @@ fn read_mark(colors: &Colors, is_read: bool) -> impl IntoElement {
 }
 
 impl Render for FilesSheet {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.presence.shown().is_none() {
             return div().into_any_element();
         }
@@ -367,6 +481,7 @@ impl Render for FilesSheet {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(format!("Files ({})", self.list.file_count())),
             )
+            .child(self.search_box(&colors, window, cx))
             .child(line_counts(&colors, added, removed))
             .child(
                 icon_button(
@@ -413,6 +528,15 @@ impl Render for FilesSheet {
                     .flex()
                     .flex_col()
                     .track_scroll(&self.scroll)
+                    .when(row_elements.is_empty(), |rows| {
+                        rows.child(
+                            div()
+                                .px_4()
+                                .py_3()
+                                .text_color(colors.muted_text)
+                                .child("No file path holds every word."),
+                        )
+                    })
                     .children(row_elements),
             )
             .child(Self::detail(&colors, picked.as_ref(), cx));
@@ -456,7 +580,8 @@ impl Render for FilesSheet {
                                 &[KeyLabel::Text("return")],
                                 "first screen",
                             ))
-                            .child(key_hint(&colors, &[KeyLabel::Text("1-9")], "that screen")),
+                            .child(key_hint(&colors, &[KeyLabel::Text("1-9")], "that screen"))
+                            .child(key_hint(&colors, &[KeyLabel::Text("?")], "search")),
                     ),
                 "files-sheet-rise",
                 &self.presence,

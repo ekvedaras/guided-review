@@ -73,6 +73,8 @@ pub struct FilesList {
     files: Vec<ListedFile>,
     folded: BTreeSet<FolderPath>,
     cursor: Option<RowKey>,
+    /// Lowercase words a shown file's path must all hold; none shows every file.
+    query: Vec<String>,
 }
 
 impl FilesList {
@@ -92,6 +94,7 @@ impl FilesList {
             files,
             folded: BTreeSet::new(),
             cursor,
+            query: Vec::new(),
         }
     }
 
@@ -137,7 +140,13 @@ impl FilesList {
         }
     }
 
+    /// Folds the folder under the cursor, or the folder of the file under it, which the cursor moves to.
     pub fn fold_under_cursor(&mut self) {
+        if let Some(RowKey::File(_)) = &self.cursor
+            && let Some(folder) = self.folder_of_cursor()
+        {
+            self.cursor = Some(RowKey::Folder(folder));
+        }
         if let Some(RowKey::Folder(folder)) = &self.cursor {
             self.folded.insert(folder.clone());
         }
@@ -154,6 +163,21 @@ impl FilesList {
             && !self.folded.remove(folder)
         {
             self.folded.insert(folder.clone());
+        }
+    }
+
+    /// Keeps the files whose path holds every word of `query`, ignoring case.
+    /// The cursor moves to the first file shown when its row is not.
+    pub fn set_query(&mut self, query: &str) {
+        self.query = query.split_whitespace().map(str::to_lowercase).collect();
+        if !self.cursor.as_ref().is_some_and(|key| self.has_row(key)) {
+            let rows = self.keyed_rows();
+            self.cursor = rows
+                .iter()
+                .map(|(key, _)| key)
+                .find(|key| matches!(key, RowKey::File(_)))
+                .or_else(|| rows.first().map(|(key, _)| key))
+                .cloned();
         }
     }
 
@@ -177,6 +201,7 @@ impl FilesList {
     pub fn refreshed_to(&self, list: &Self) -> Self {
         let mut refreshed = list.clone();
         refreshed.folded.clone_from(&self.folded);
+        refreshed.query.clone_from(&self.query);
         if self
             .cursor
             .as_ref()
@@ -191,6 +216,11 @@ impl FilesList {
         self.files.iter().find(|file| file.path == *path)
     }
 
+    fn is_shown(&self, file: &ListedFile) -> bool {
+        let path = file.path.as_str().to_lowercase();
+        self.query.iter().all(|word| path.contains(word.as_str()))
+    }
+
     fn files_under<'a>(
         &'a self,
         folder: &FolderPath,
@@ -198,7 +228,24 @@ impl FilesList {
         let prefix = format!("{folder}/");
         self.files
             .iter()
-            .filter(move |file| file.path.as_str().starts_with(&prefix))
+            .filter(move |file| file.path.as_str().starts_with(&prefix) && self.is_shown(file))
+    }
+
+    /// The nearest folder above the file under the cursor, as the rows show it.
+    fn folder_of_cursor(&self) -> Option<FolderPath> {
+        let rows = self.keyed_rows();
+        let at = rows
+            .iter()
+            .position(|(key, _)| Some(key) == self.cursor.as_ref())?;
+        let depth = rows.get(at)?.1.depth;
+        rows.iter()
+            .take(at)
+            .rev()
+            .find(|(_, row)| row.depth < depth)
+            .and_then(|(key, _)| match key {
+                RowKey::Folder(folder) => Some(folder.clone()),
+                RowKey::File(_) => None,
+            })
     }
 
     fn has_row(&self, key: &RowKey) -> bool {
@@ -221,8 +268,20 @@ impl FilesList {
     }
 
     fn keyed_rows(&self) -> Vec<(RowKey, FilesListRow)> {
-        self.tree
-            .rows(&self.folded, None, &|_| false, &|_| None)
+        // A search shows every match, so it builds its own tree and ignores the folds, which stay for after.
+        let searched;
+        let (tree, folded) = if self.query.is_empty() {
+            (&self.tree, &self.folded)
+        } else {
+            searched = FileTree::of(
+                self.files
+                    .iter()
+                    .filter(|file| self.is_shown(file))
+                    .map(|file| &file.path),
+            );
+            (&searched, &BTreeSet::new())
+        };
+        tree.rows(folded, None, &|_| false, &|_| None)
             .into_iter()
             .filter_map(|row| {
                 let (key, kind) = match row.kind {
