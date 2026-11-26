@@ -189,9 +189,9 @@ fn every_command_has_a_config_name_that_reads_back_as_itself() {
 
 #[test]
 fn open_on_host_written_under_its_name_from_before_hosts_were_named_still_binds_it() {
-    let keymap = keymap_of("[keys]\nopen_on_github = \"ctrl-alt-o\"").unwrap();
+    let keymap = keymap_of("[keys]\nopen_on_github = \"alt-shift-x\"").unwrap();
 
-    assert_eq!(keys(&keymap, Command::OpenOnHost), ["ctrl-alt-o"]);
+    assert_eq!(keys(&keymap, Command::OpenOnHost), ["alt-shift-x"]);
     assert_eq!(
         Command::of_config_name("open_on_github"),
         Some(Command::OpenOnHost)
@@ -201,10 +201,10 @@ fn open_on_host_written_under_its_name_from_before_hosts_were_named_still_binds_
 #[test]
 fn open_on_host_written_under_both_names_takes_the_new_one() {
     let keymap =
-        keymap_of("[keys]\nopen_on_github = \"ctrl-alt-o\"\nopen_on_host = \"ctrl-alt-p\"")
+        keymap_of("[keys]\nopen_on_github = \"alt-shift-x\"\nopen_on_host = \"alt-shift-y\"")
             .unwrap();
 
-    assert_eq!(keys(&keymap, Command::OpenOnHost), ["ctrl-alt-p"]);
+    assert_eq!(keys(&keymap, Command::OpenOnHost), ["alt-shift-y"]);
 }
 
 #[test]
