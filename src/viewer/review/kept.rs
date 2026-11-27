@@ -42,6 +42,19 @@ impl Review {
         self.review.saw_end_of_screen();
     }
 
+    /// The window tells which row is at the top of the view before each change, since only it knows
+    /// the scroll. No input of the page, so the page is kept.
+    pub fn note_scroll_top(&mut self, row: usize) {
+        let page = Arc::clone(self.page());
+        self.review.scrolled_to(row, &page);
+    }
+
+    /// After Back or Forward, once: the row of the page to scroll to.
+    pub fn take_row_to_scroll_to(&mut self) -> Option<usize> {
+        let page = Arc::clone(self.page());
+        self.review.row_to_scroll_to(&page)
+    }
+
     /// Asks change on every line an answer streams in, and the page shows only which lines have
     /// Asks, so the page is dropped only when those lines change.
     pub fn change_asks<T>(&mut self, change: impl FnOnce(&mut AskDesk) -> T) -> T {

@@ -14,11 +14,13 @@ use crate::tour::{Step, Tour};
 use crate::viewer::files_list::{FilePlace, FilesList, ListedFile};
 use crate::viewer::host_outage::Affected;
 use crate::viewer::jump::JumpTarget;
+use crate::viewer::page::Page;
 use crate::viewer::piece_diff::pieces_of;
 use crate::viewer::ports::HostError;
 use crate::viewer::problems::{Problem, ProblemKind};
 use crate::viewer::screen::{NextScreen, ReadSubject, Screen};
 use crate::viewer::viewed_sync::{Coverage, SyncOutcome, SyncRequest};
+use crate::viewer::visits::{ReadingSpot, Visit};
 use crate::viewer::work_agenda::{PUSH_DEBOUNCE, WorkKind};
 
 impl ReviewCore {
@@ -76,7 +78,7 @@ impl ReviewCore {
 
     pub(super) fn go_to_screen(&mut self, screen: Screen) {
         if self.reading_order().contains(&screen) {
-            self.screen = screen;
+            self.move_to(screen);
         }
     }
 
@@ -103,7 +105,7 @@ impl ReviewCore {
     pub fn go_on(&mut self) -> bool {
         match self.onward_screen() {
             Some(screen) => {
-                self.screen = screen;
+                self.move_to(screen);
                 true
             }
             None => false,
@@ -157,7 +159,7 @@ impl ReviewCore {
             .cloned();
         match next {
             Some(screen) if screen != self.screen => {
-                self.screen = screen;
+                self.move_to(screen);
                 true
             }
             _ => false,
@@ -540,7 +542,7 @@ impl ReviewCore {
             .and_then(|position| reading_order.get(position));
         match next {
             Some(screen) => {
-                self.screen = screen.clone();
+                self.move_to(screen.clone());
                 true
             }
             None => false,
@@ -637,5 +639,81 @@ impl ReviewCore {
         };
         paths.dedup();
         paths
+    }
+}
+
+/// Back and Forward: every change of screen is remembered, and going back returns to the screen
+/// and to the code the reviewer was reading on it.
+impl ReviewCore {
+    /// `page` is the one on screen, whose row `top_row` is at the top of the view.
+    pub(super) fn scrolled_to(&mut self, top_row: usize, page: &Page) {
+        self.spot = page.spot_at(top_row);
+    }
+
+    /// The row of `page`, the one on screen now, to scroll to after a Back or Forward; only once.
+    pub(super) fn row_to_scroll_to(&mut self, page: &Page) -> Option<usize> {
+        let spot = self.spot_to_restore.take()?;
+        Some(page.row_of_spot(&spot))
+    }
+
+    /// The one place a move to another screen is made, so that none escapes the history.
+    fn move_to(&mut self, screen: Screen) {
+        if screen == self.screen {
+            return;
+        }
+        let left = self.here();
+        self.screen = screen;
+        self.spot = ReadingSpot::default();
+        self.visits.left(left);
+    }
+
+    /// False when there is nowhere to go back to.
+    pub fn go_back_in_history(&mut self) -> bool {
+        let order = self.reading_order();
+        let here = self.here();
+        let visit = self.visits.back(&here, |screen| order.contains(screen));
+        self.return_to(visit)
+    }
+
+    /// False when there is nowhere to go forward to.
+    pub fn go_forward_in_history(&mut self) -> bool {
+        let order = self.reading_order();
+        let here = self.here();
+        let visit = self.visits.forward(&here, |screen| order.contains(screen));
+        self.return_to(visit)
+    }
+
+    pub fn has_history_back(&self) -> bool {
+        self.visits.has_back()
+    }
+
+    pub fn has_history_forward(&self) -> bool {
+        self.visits.has_forward()
+    }
+
+    fn return_to(&mut self, visit: Option<Visit>) -> bool {
+        let Some(visit) = visit else {
+            return false;
+        };
+        self.screen = visit.screen;
+        self.spot = ReadingSpot::default();
+        self.spot_to_restore = Some(visit.spot);
+        true
+    }
+
+    /// A re-pinned review opens on the screen the replaced one showed; that is not a move.
+    pub fn resume_on(&mut self, screen: &Screen) {
+        if matches!(screen, Screen::Step(_) | Screen::File(_))
+            && self.reading_order().contains(screen)
+        {
+            self.screen = screen.clone();
+        }
+    }
+
+    fn here(&self) -> Visit {
+        Visit {
+            screen: self.screen.clone(),
+            spot: self.spot.clone(),
+        }
     }
 }

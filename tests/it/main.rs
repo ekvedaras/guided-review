@@ -79,6 +79,7 @@ mod hand_offs;
 mod hc_tour_agent;
 mod hidden_text;
 mod highlighting;
+mod history;
 mod host_contract;
 mod host_outage;
 mod host_web;

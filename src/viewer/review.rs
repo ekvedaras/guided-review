@@ -105,6 +105,7 @@ use crate::repin::RepinStatus;
 pub use crate::tour::StepId;
 
 use super::screen::{NextScreen, ReadSubject, Screen};
+use super::visits::{ReadingSpot, Visits};
 
 pub use kept::Review;
 
@@ -346,6 +347,10 @@ pub struct ReviewCore {
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
     /// Not saved, and no input of the page.
     seen_end_of: Option<Screen>,
+    visits: Visits,
+    /// Where the reviewer is scrolled on the open screen, as the window last said. Not saved.
+    spot: ReadingSpot,
+    spot_to_restore: Option<ReadingSpot>,
 }
 
 impl Review {
@@ -558,6 +563,7 @@ impl ReviewCore {
             self.guided_tour = replaced.guided_tour;
         }
         self.seen_end_of = replaced.seen_end_of;
+        self.visits = replaced.visits;
         self.ask_desk = replaced.ask_desk;
         if switched_to_guided {
             self.take_over_from_basic(&replaced.state);
@@ -799,6 +805,9 @@ impl ReviewCore {
             steps_started_read: None,
             read_carrier: None,
             seen_end_of: None,
+            visits: Visits::default(),
+            spot: ReadingSpot::default(),
+            spot_to_restore: None,
             tour_files,
         })
     }

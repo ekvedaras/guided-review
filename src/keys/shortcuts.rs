@@ -50,6 +50,8 @@ const PRIMARY_ALT_S: Chord = primary('s').with(Modifier::Alt);
 const PRIMARY_ALT_G: Chord = primary('g').with(Modifier::Alt);
 const ESCAPE: Chord = Chord::key(Key::Escape);
 const PRIMARY_K: Chord = primary('k');
+const PRIMARY_OPEN_BRACKET: Chord = primary('[');
+const PRIMARY_CLOSE_BRACKET: Chord = primary(']');
 const PRIMARY_P: Chord = primary('p');
 const PRIMARY_C: Chord = primary('c');
 const PRIMARY_COMMA: Chord = primary(',');
@@ -121,6 +123,8 @@ impl ShortcutGroup {
 pub enum Command {
     NextScreen,
     PreviousScreen,
+    HistoryBack,
+    HistoryForward,
     NextUnreadStep,
     FindingsList,
     CommentsList,
@@ -203,9 +207,11 @@ impl Command {
         }
     }
 
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 39] = [
         Self::NextScreen,
         Self::PreviousScreen,
+        Self::HistoryBack,
+        Self::HistoryForward,
         Self::NextUnreadStep,
         Self::FindingsList,
         Self::CommentsList,
@@ -248,6 +254,8 @@ impl Command {
         match self {
             Self::NextScreen => &[RIGHT, J],
             Self::PreviousScreen => &[LEFT, K],
+            Self::HistoryBack => &[PRIMARY_OPEN_BRACKET],
+            Self::HistoryForward => &[PRIMARY_CLOSE_BRACKET],
             Self::NextUnreadStep => &[N],
             Self::FindingsList => &[F],
             Self::CommentsList => &[C],
@@ -291,6 +299,8 @@ impl Command {
         match self {
             Self::NextScreen => "next_screen",
             Self::PreviousScreen => "previous_screen",
+            Self::HistoryBack => "history_back",
+            Self::HistoryForward => "history_forward",
             Self::NextUnreadStep => "next_unread_step",
             Self::FindingsList => "findings_list",
             Self::CommentsList => "comments_list",
@@ -371,7 +381,12 @@ impl Command {
             | Self::OpenPr
             | Self::ToggleDraft
             | Self::ToggleAutoMerge => KeyScope::Page,
-            Self::Jump | Self::SwitchPr | Self::Settings | Self::CloseWindow => KeyScope::Window,
+            Self::Jump
+            | Self::HistoryBack
+            | Self::HistoryForward
+            | Self::SwitchPr
+            | Self::Settings
+            | Self::CloseWindow => KeyScope::Window,
             Self::Quit => KeyScope::App,
             Self::AddToReview
             | Self::AskAgent
@@ -387,6 +402,8 @@ impl Command {
         match self {
             Self::NextScreen
             | Self::PreviousScreen
+            | Self::HistoryBack
+            | Self::HistoryForward
             | Self::NextUnreadStep
             | Self::FindingsList
             | Self::CommentsList
@@ -428,6 +445,8 @@ impl Command {
         match self {
             Self::NextScreen => "Next screen; marks the step read once you saw its end",
             Self::PreviousScreen => "Previous screen",
+            Self::HistoryBack => "Back to where you came from, like the mouse's back button",
+            Self::HistoryForward => "Forward again after Back, like the mouse's forward button",
             Self::NextUnreadStep => "Next unread step",
             Self::FindingsList => "List the findings of the AI review",
             Self::CommentsList => "List every comment thread, to go to one",

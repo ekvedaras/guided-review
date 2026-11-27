@@ -233,3 +233,23 @@ fn switch_pull_request_has_a_key_that_works_anywhere_in_the_window() {
     assert_eq!(Command::SwitchPr.scope(), KeyScope::Window);
     assert_eq!(PaletteAction::SwitchPr.command(), Some(Command::SwitchPr));
 }
+
+#[test]
+fn primary_bracket_goes_back_and_forward_from_anywhere_in_the_window() {
+    assert_eq!(
+        Command::HistoryBack.default_chords()[0].keystroke(),
+        "secondary-["
+    );
+    assert_eq!(
+        Command::HistoryForward.default_chords()[0].keystroke(),
+        "secondary-]"
+    );
+    for command in [Command::HistoryBack, Command::HistoryForward] {
+        assert_eq!(command.scope(), KeyScope::Window);
+        assert_eq!(command.group(), ShortcutGroup::Navigate);
+    }
+    assert_eq!(
+        Command::of_config_name("history_back"),
+        Some(Command::HistoryBack)
+    );
+}

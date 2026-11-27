@@ -349,8 +349,10 @@ impl ReviewSession {
         cx: &mut Context<Self>,
         change: impl FnOnce(&mut Self) -> T,
     ) -> T {
+        self.note_where_the_reader_is();
         let result = change(self);
         self.rebuild_rows(cx);
+        self.scroll_to_restored_spot();
         self.run_due_work(cx);
         result
     }
@@ -996,6 +998,22 @@ impl ReviewSession {
             self.screen_list.scroll_to(ListOffset {
                 item_ix: top.item_ix.min(old.start + new_count - 1),
                 offset_in_item: top.offset_in_item,
+            });
+        }
+    }
+
+    /// The review keeps this for Back, which only the list can say.
+    fn note_where_the_reader_is(&mut self) {
+        let top = self.screen_list.logical_scroll_top();
+        self.review.note_scroll_top(top.item_ix);
+    }
+
+    /// After Back or Forward: to the code the reader was on, which may have moved since.
+    fn scroll_to_restored_spot(&mut self) {
+        if let Some(row) = self.review.take_row_to_scroll_to() {
+            self.screen_list.scroll_to(ListOffset {
+                item_ix: row,
+                offset_in_item: px(0.),
             });
         }
     }
@@ -1695,11 +1713,7 @@ impl ReviewSession {
         self.image_pictures.clear();
         self.loading_images.clear();
         self.rows = PageRows::none();
-        self.change(cx, |review| match screen {
-            Screen::Step(id) => review.go_to(id),
-            Screen::File(path) => review.go_to_file(path),
-            _ => {}
-        });
+        self.change(cx, |review| review.resume_on(screen));
         cx.emit(SessionEvent::Reopened);
         self.start_background_work(cx);
     }

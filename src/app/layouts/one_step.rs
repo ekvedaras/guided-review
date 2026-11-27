@@ -1,9 +1,9 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton, ParentElement,
-    Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
-    Window, actions, div, list, px,
+    Focusable, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton,
+    NavigationDirection, ParentElement, Pixels, Render, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Subscription, Window, actions, div, list, px,
 };
 use std::os::unix::process::CommandExt;
 
@@ -97,6 +97,8 @@ actions!(
     [
         GoForward,
         GoBack,
+        HistoryBack,
+        HistoryForward,
         ToggleJump,
         CopySelection,
         ToggleWrapLines,
@@ -1446,6 +1448,20 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &GoBack, window, cx| {
                 this.act(Intent::PreviousScreen, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &HistoryBack, window, cx| {
+                this.act(Intent::HistoryBack, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &HistoryForward, window, cx| {
+                this.act(Intent::HistoryForward, window, cx);
+            }))
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Back),
+                cx.listener(|this, _, window, cx| this.act(Intent::HistoryBack, window, cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Forward),
+                cx.listener(|this, _, window, cx| this.act(Intent::HistoryForward, window, cx)),
+            )
             .on_action(cx.listener(|this, _: &FocusNextChange, _, cx| {
                 this.focus_change_by(Review::focus_next_change, cx);
             }))

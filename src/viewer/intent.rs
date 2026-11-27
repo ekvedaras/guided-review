@@ -22,6 +22,10 @@ pub enum Intent {
     /// The footer's main button: ticks the step it leaves, then goes on.
     MarkReadAndGoOn,
     PreviousScreen,
+    /// Back, like a browser's: to the screen and place the reviewer came from.
+    HistoryBack,
+    /// Forward, like a browser's: undoes a Back.
+    HistoryForward,
     NextUnreadStep,
     /// From the sidebar's AI review row and the palette: to the next finding, most severe first.
     NextFinding,
@@ -178,6 +182,8 @@ pub enum ReviewChange {
         ticking: Option<ReadSubject>,
     },
     GoBack,
+    HistoryBack,
+    HistoryForward,
     GoToNextUnread,
     ToggleTick(ReadSubject),
     /// A folder of a basic tour's sidebar tree folds or unfolds.
@@ -268,6 +274,8 @@ impl Intent {
         let refused_while_reopening = match self {
             Self::NextScreen
             | Self::PreviousScreen
+            | Self::HistoryBack
+            | Self::HistoryForward
             | Self::NextUnreadStep
             | Self::NextFinding
             | Self::ToggleRead
@@ -338,6 +346,12 @@ impl ReviewCore {
                 ticking: self.unread_subject_on_screen(),
             }),
             Intent::PreviousScreen => Effect::Change(ReviewChange::GoBack),
+            Intent::HistoryBack if self.has_history_back() => {
+                Effect::Change(ReviewChange::HistoryBack)
+            }
+            Intent::HistoryForward if self.has_history_forward() => {
+                Effect::Change(ReviewChange::HistoryForward)
+            }
             Intent::NextUnreadStep => Effect::Change(ReviewChange::GoToNextUnread),
             Intent::NextFinding if self.has_findings() => Effect::NextFinding,
             Intent::ToggleFindingsList if self.can_list_findings() => {
@@ -388,7 +402,9 @@ impl ReviewCore {
                 None => Effect::OpenFinishForm,
             },
             Intent::OpenPr if self.can_open_pr() => Effect::OpenPr,
-            Intent::NextFinding
+            Intent::HistoryBack
+            | Intent::HistoryForward
+            | Intent::NextFinding
             | Intent::ToggleFindingsList
             | Intent::OpenPr
             | Intent::MarkDone => Effect::Nothing,
@@ -441,6 +457,14 @@ impl ReviewCore {
             }
             ReviewChange::GoBack => {
                 self.go_back();
+                Ok(())
+            }
+            ReviewChange::HistoryBack => {
+                self.go_back_in_history();
+                Ok(())
+            }
+            ReviewChange::HistoryForward => {
+                self.go_forward_in_history();
                 Ok(())
             }
             ReviewChange::GoToNextUnread => {

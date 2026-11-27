@@ -74,11 +74,11 @@ use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
     AskAboutStep, AskToOpenPr, CloseWindow, Collaborators, CopySelection, FocusNextChange,
-    FocusPreviousChange, GoBack, GoForward, GoToNextUnread, OneStepLayout, OpenIssue, OpenPrOnHost,
-    ReadDown, ReadUp, ShowMoreAbove, ShowMoreBelow, ToggleAutoMerge, ToggleCommentsList,
-    ToggleDraft, ToggleFilesList, ToggleFindingsList, ToggleFold, ToggleJump, TogglePieceLabels,
-    TogglePrSwitcher, ToggleRead, ToggleRenderedView, ToggleSettings, ToggleShortcuts,
-    ToggleWhitespace, ToggleWrapLines,
+    FocusPreviousChange, GoBack, GoForward, GoToNextUnread, HistoryBack, HistoryForward,
+    OneStepLayout, OpenIssue, OpenPrOnHost, ReadDown, ReadUp, ShowMoreAbove, ShowMoreBelow,
+    ToggleAutoMerge, ToggleCommentsList, ToggleDraft, ToggleFilesList, ToggleFindingsList,
+    ToggleFold, ToggleJump, TogglePieceLabels, TogglePrSwitcher, ToggleRead, ToggleRenderedView,
+    ToggleSettings, ToggleShortcuts, ToggleWhitespace, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -1121,6 +1121,8 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
             match command {
                 Command::NextScreen => KeyBinding::new(&keys, GoForward, context),
                 Command::PreviousScreen => KeyBinding::new(&keys, GoBack, context),
+                Command::HistoryBack => KeyBinding::new(&keys, HistoryBack, context),
+                Command::HistoryForward => KeyBinding::new(&keys, HistoryForward, context),
                 Command::NextUnreadStep => KeyBinding::new(&keys, GoToNextUnread, context),
                 Command::NextChange => KeyBinding::new(&keys, FocusNextChange, context),
                 Command::PreviousChange => KeyBinding::new(&keys, FocusPreviousChange, context),

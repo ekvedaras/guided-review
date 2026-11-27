@@ -111,6 +111,7 @@ mod tour_writing;
 mod typing_save;
 mod used_findings;
 mod viewed_sync;
+mod visits;
 mod word_diff;
 mod work_agenda;
 mod written_on;
@@ -311,6 +312,7 @@ pub use tour_writing::{TourWriting, WritingPhase, WritingStage};
 pub use typing_save::TypingSave;
 pub use used_findings::UsedFinding;
 pub use viewed_sync::{SyncOutcome, SyncRequest};
+pub use visits::ReadingSpot;
 pub use work_agenda::{
     AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, PULL_OF_BRANCH_RETRY, PUSH_DEBOUNCE,
     WORKING_TREE_RECHECK, Work, WorkKind, WorkOutcome, WorkPorts,
