@@ -37,8 +37,8 @@ pub struct ComposerActions {
     pub on_stop: OnCompose,
     pub on_add_to_review: OnCompose,
     pub on_comment_now: OnCompose,
-    pub on_ask_agent: OnCompose,
-    pub on_ask_agent_now: OnCompose,
+    pub on_comment_and_ask_agent: OnCompose,
+    pub on_comment_and_ask_agent_now: OnCompose,
     pub on_suggest_change: OnCompose,
     pub on_discard: OnCompose,
     /// One of a local review's task send actions.
@@ -77,9 +77,9 @@ fn offered_actions(capabilities: CommentCapabilities) -> Vec<SendAction> {
             offered.push(SendAction::CommentNow);
         }
         if capabilities.ask_agent {
-            offered.push(SendAction::AskAgent);
+            offered.push(SendAction::CommentAndAskAgent);
             if capabilities.comment_now {
-                offered.push(SendAction::AskAgentNow);
+                offered.push(SendAction::CommentAndAskAgentNow);
             }
         }
     } else if sending.tasks().len() > 1 {
@@ -110,8 +110,14 @@ fn send_button_look(
         (SendAction::AddToReview, true) => ("add-to-review", None, "Add to review"),
         (SendAction::CommentNow, true) => ("comment-now", Some(Icon::Send), "Comment now"),
         (SendAction::SuggestChange, _) => ("suggest-change", Some(Icon::Diff), "Suggest change"),
-        (SendAction::AskAgent, _) => ("ask-agent", Some(Icon::Sparkles), "Ask agent"),
-        (SendAction::AskAgentNow, _) => ("ask-agent-now", Some(Icon::Zap), "Ask agent now"),
+        (SendAction::CommentAndAskAgent, _) => {
+            ("ask-agent", Some(Icon::Sparkles), "Comment and ask agent")
+        }
+        (SendAction::CommentAndAskAgentNow, _) => (
+            "ask-agent-now",
+            Some(Icon::Zap),
+            "Comment and ask agent now",
+        ),
     }
 }
 
@@ -186,8 +192,10 @@ impl RenderOnce for CommentComposer {
                     None => Rc::clone(&actions.on_comment_now),
                 },
                 SendAction::SuggestChange => Rc::clone(&actions.on_suggest_change),
-                SendAction::AskAgent => Rc::clone(&actions.on_ask_agent),
-                SendAction::AskAgentNow => Rc::clone(&actions.on_ask_agent_now),
+                SendAction::CommentAndAskAgent => Rc::clone(&actions.on_comment_and_ask_agent),
+                SendAction::CommentAndAskAgentNow => {
+                    Rc::clone(&actions.on_comment_and_ask_agent_now)
+                }
             }
         };
         let body = if self.state == BoxState::Composing {
@@ -200,9 +208,9 @@ impl RenderOnce for CommentComposer {
                 })
             };
             let (submits, on_submit) = typed(SendAction::AddToReview);
-            let (asks, on_ask) = typed(SendAction::AskAgent);
+            let (asks, on_ask) = typed(SendAction::CommentAndAskAgent);
             let (posts, on_post) = typed(SendAction::CommentNow);
-            let (asks_now, on_ask_now) = typed(SendAction::AskAgentNow);
+            let (asks_now, on_ask_now) = typed(SendAction::CommentAndAskAgentNow);
             let (suggests, on_suggest) = typed(SendAction::SuggestChange);
             TextBox::new(
                 SharedString::from(format!("{id}-text")),
@@ -218,9 +226,9 @@ impl RenderOnce for CommentComposer {
                 }
             })
             .on_cancel(move |window, cx| on_stop(window, cx))
-            .on_submit_to_agent(asks, on_ask)
+            .on_submit_and_ask_agent(asks, on_ask)
             .on_submit_now(posts, on_post)
-            .on_submit_to_agent_now(asks_now, on_ask_now)
+            .on_submit_and_ask_agent_now(asks_now, on_ask_now)
             .on_suggest_change(suggests, on_suggest)
             .into_any_element()
         } else {
@@ -241,9 +249,9 @@ impl RenderOnce for CommentComposer {
                     None => styled_button(&colors, id, kind, ButtonSize::Regular).child(label),
                 };
                 base.child(chord_keys(&colors, kind, planned.chord))
-                    .when(planned.action == SendAction::AskAgentNow, |button| {
+                    .when(planned.action == SendAction::CommentAndAskAgentNow, |button| {
                         button.tooltip(tooltip(|_| {
-                            "Ask agent now: posts the comment at once".into()
+                            "Comment and ask agent now: posts the comment at once and hands it to your agent".into()
                         }))
                     })
                     .aria_label(label)

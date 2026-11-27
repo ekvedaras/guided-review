@@ -1137,9 +1137,13 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::ToggleRead => KeyBinding::new(&keys, ToggleRead, context),
                 Command::CopyCode => KeyBinding::new(&keys, CopySelection, context),
                 Command::AddToReview => KeyBinding::new(&keys, text_box::Submit, context),
-                Command::AskAgent => KeyBinding::new(&keys, text_box::SubmitToAgent, context),
+                Command::CommentAndAskAgent => {
+                    KeyBinding::new(&keys, text_box::SubmitAndAskAgent, context)
+                }
                 Command::CommentNow => KeyBinding::new(&keys, text_box::SubmitNow, context),
-                Command::AskAgentNow => KeyBinding::new(&keys, text_box::SubmitToAgentNow, context),
+                Command::CommentAndAskAgentNow => {
+                    KeyBinding::new(&keys, text_box::SubmitAndAskAgentNow, context)
+                }
                 Command::SuggestChange => KeyBinding::new(&keys, text_box::SuggestChange, context),
                 Command::CloseBox => KeyBinding::new(&keys, text_box::Cancel, context),
                 Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),

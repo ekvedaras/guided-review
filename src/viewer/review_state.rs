@@ -162,7 +162,7 @@ struct ViewerSections {
     /// The PR's body at the last pull, so the summary shows it before the host answers.
     #[serde(default)]
     pr_description: KeptSection<String>,
-    /// The comments sent with Ask agent and where each is with the tour agent.
+    /// The comments sent with Comment and ask agent and where each is with the tour agent.
     #[serde(default)]
     hand_offs: KeptSection<HandOffs>,
     /// The step each thread the reviewer started was written on, so it stays there.

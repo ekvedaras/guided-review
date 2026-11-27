@@ -227,7 +227,7 @@ impl ThreadMessage {
 /// Whose words a hand-off carries. Only the reviewer's own are instructions to the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum Said {
-    /// The reviewer's comment, sent with Ask agent.
+    /// The reviewer's comment, sent with Comment and ask agent.
     #[serde(rename = "comment")]
     ByReviewer(String),
     /// Someone else's comment, which the reviewer handed to the agent. Its own key, so a build that
@@ -287,7 +287,7 @@ impl HandedComment {
     }
 }
 
-/// One reviewer comment sent with Ask agent, as passed to the tour agent.
+/// One reviewer comment sent with Comment and ask agent, as passed to the tour agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HandOff {
     id: HandOffId,
@@ -1152,7 +1152,7 @@ pub enum HandToAgentRefused {
     NotAPullRequest,
     #[error("the comment is not in the threads read from the PR's host")]
     NoSuchComment,
-    #[error("it is your own comment: reply with Ask agent instead")]
+    #[error("it is your own comment: reply with Comment and ask agent instead")]
     OwnComment,
     #[error("the agent has this comment already")]
     AlreadyWithAgent,

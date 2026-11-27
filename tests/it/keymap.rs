@@ -6,7 +6,9 @@ use guided_review::viewer::{
     Chord, Command, KeyProblem, Keymap, Modifier, SendAction, SendChoice, SendRole,
 };
 
-use SendAction::{AddToReview, AskAgent, AskAgentNow, CommentNow, SuggestChange};
+use SendAction::{
+    AddToReview, CommentAndAskAgent, CommentAndAskAgentNow, CommentNow, SuggestChange,
+};
 use SendRole::{Other, Primary, Secondary};
 
 fn chord(text: &str) -> Chord {
@@ -454,8 +456,8 @@ const SEND_COMMANDS: [Command; 5] = [
     Command::AddToReview,
     Command::CommentNow,
     Command::SuggestChange,
-    Command::AskAgent,
-    Command::AskAgentNow,
+    Command::CommentAndAskAgent,
+    Command::CommentAndAskAgentNow,
 ];
 
 fn send_keys(keymap: &Keymap) -> Vec<String> {
@@ -535,7 +537,10 @@ fn no_choice_of_primary_and_secondary_gives_two_send_actions_one_key() {
 fn a_config_made_before_the_secondary_setting_still_reads() {
     let keymap = keymap_of("primary_comment_action = \"comment_now\"\n").unwrap();
 
-    assert_eq!(keymap.send_choice(), SendChoice::new(CommentNow, AskAgent));
+    assert_eq!(
+        keymap.send_choice(),
+        SendChoice::new(CommentNow, CommentAndAskAgent)
+    );
     assert_eq!(keys(&keymap, Command::CommentNow), ["primary-enter"]);
     assert_eq!(keys(&keymap, Command::AddToReview), ["primary-alt-a"]);
 }
@@ -544,7 +549,7 @@ fn a_config_made_before_the_secondary_setting_still_reads() {
 fn a_key_written_in_keys_wins_over_the_choice() {
     let keymap = keymap_of(&format!(
         "{}\n[keys]\nadd_to_review = \"primary-j\"\n",
-        choice_config(CommentNow, AskAgent)
+        choice_config(CommentNow, CommentAndAskAgent)
     ))
     .unwrap();
 
@@ -556,7 +561,7 @@ fn a_key_written_in_keys_wins_over_the_choice() {
 fn a_key_written_in_keys_that_a_main_key_takes_is_a_clash() {
     let problems = keymap_of(&format!(
         "{}\n[keys]\nadd_to_review = \"primary-enter\"\n",
-        choice_config(CommentNow, AskAgent)
+        choice_config(CommentNow, CommentAndAskAgent)
     ))
     .unwrap_err();
 
@@ -577,15 +582,15 @@ fn texts_that_name_no_action_or_the_same_one_twice_read_as_a_choice_of_two() {
     assert_eq!(read(Some("post"), Some("send")), SendChoice::default());
     assert_eq!(
         read(Some("ask_agent_now"), None),
-        SendChoice::new(AskAgentNow, AskAgent)
+        SendChoice::new(CommentAndAskAgentNow, CommentAndAskAgent)
     );
     assert_eq!(
         read(Some("ask_agent"), None),
-        SendChoice::new(AskAgent, AddToReview)
+        SendChoice::new(CommentAndAskAgent, AddToReview)
     );
     assert_eq!(
         read(Some("comment_now"), Some("comment_now")),
-        SendChoice::new(CommentNow, AskAgent)
+        SendChoice::new(CommentNow, CommentAndAskAgent)
     );
 }
 
@@ -594,41 +599,50 @@ fn picking_the_other_ones_action_swaps_primary_and_secondary() {
     let choice = SendChoice::default();
 
     assert_eq!(
-        choice.with_primary(AskAgent),
-        SendChoice::new(AskAgent, AddToReview)
+        choice.with_primary(CommentAndAskAgent),
+        SendChoice::new(CommentAndAskAgent, AddToReview)
     );
     assert_eq!(
         choice.with_primary(CommentNow),
-        SendChoice::new(CommentNow, AskAgent)
+        SendChoice::new(CommentNow, CommentAndAskAgent)
     );
     assert_eq!(
         choice.with_secondary(AddToReview),
-        SendChoice::new(AskAgent, AddToReview)
+        SendChoice::new(CommentAndAskAgent, AddToReview)
     );
     assert_eq!(
         choice.with_secondary(SuggestChange),
         SendChoice::new(AddToReview, SuggestChange)
     );
     assert_eq!(choice.role_of(AddToReview), Primary);
-    assert_eq!(choice.role_of(AskAgent), Secondary);
+    assert_eq!(choice.role_of(CommentAndAskAgent), Secondary);
     assert_eq!(choice.role_of(CommentNow), Other);
 }
 
 #[test]
 fn an_action_a_box_does_not_offer_is_stood_in_for_by_the_nearest_one_it_does() {
     assert_eq!(CommentNow.resolve(&[AddToReview, CommentNow]), CommentNow);
-    assert_eq!(CommentNow.resolve(&[AddToReview, AskAgent]), AddToReview);
+    assert_eq!(
+        CommentNow.resolve(&[AddToReview, CommentAndAskAgent]),
+        AddToReview
+    );
     assert_eq!(
         SuggestChange.resolve(&[AddToReview, CommentNow]),
         AddToReview
     );
-    assert_eq!(AskAgent.resolve(&[AddToReview, CommentNow]), AddToReview);
     assert_eq!(
-        AskAgentNow.resolve(&[AddToReview, AskAgent, CommentNow]),
-        AskAgent
+        CommentAndAskAgent.resolve(&[AddToReview, CommentNow]),
+        AddToReview
     );
-    assert_eq!(AskAgentNow.resolve(&[AddToReview, CommentNow]), CommentNow);
-    assert_eq!(AskAgentNow.resolve(&[AddToReview]), AddToReview);
+    assert_eq!(
+        CommentAndAskAgentNow.resolve(&[AddToReview, CommentAndAskAgent, CommentNow]),
+        CommentAndAskAgent
+    );
+    assert_eq!(
+        CommentAndAskAgentNow.resolve(&[AddToReview, CommentNow]),
+        CommentNow
+    );
+    assert_eq!(CommentAndAskAgentNow.resolve(&[AddToReview]), AddToReview);
 }
 
 type Button = (SendAction, SendRole, Option<String>);
@@ -654,44 +668,55 @@ fn a_box_lists_the_primary_first_then_the_secondary_then_the_rest_each_with_its_
         plan("", &EVERY_ACTION),
         [
             button(AddToReview, Primary, "primary-enter"),
-            button(AskAgent, Secondary, "primary-shift-enter"),
+            button(CommentAndAskAgent, Secondary, "primary-shift-enter"),
             button(CommentNow, Other, "primary-alt-enter"),
             button(SuggestChange, Other, "primary-alt-s"),
-            button(AskAgentNow, Other, "primary-alt-shift-enter"),
+            button(CommentAndAskAgentNow, Other, "primary-alt-shift-enter"),
         ]
     );
     assert_eq!(
-        plan(&choice_config(AskAgentNow, CommentNow), &EVERY_ACTION),
+        plan(
+            &choice_config(CommentAndAskAgentNow, CommentNow),
+            &EVERY_ACTION
+        ),
         [
-            button(AskAgentNow, Primary, "primary-enter"),
+            button(CommentAndAskAgentNow, Primary, "primary-enter"),
             button(CommentNow, Secondary, "primary-shift-enter"),
             button(AddToReview, Other, "primary-alt-a"),
             button(SuggestChange, Other, "primary-alt-s"),
-            button(AskAgent, Other, "primary-alt-g"),
+            button(CommentAndAskAgent, Other, "primary-alt-g"),
         ]
     );
 }
 
 #[test]
 fn a_main_action_the_box_lacks_is_stood_in_for_and_the_stand_in_shows_the_main_key() {
-    let no_comment_now = [AddToReview, SuggestChange, AskAgent];
+    let no_comment_now = [AddToReview, SuggestChange, CommentAndAskAgent];
 
     assert_eq!(
-        plan(&choice_config(CommentNow, AskAgent), &no_comment_now),
+        plan(
+            &choice_config(CommentNow, CommentAndAskAgent),
+            &no_comment_now
+        ),
         [
             button(AddToReview, Primary, "primary-enter"),
-            button(AskAgent, Secondary, "primary-shift-enter"),
+            button(CommentAndAskAgent, Secondary, "primary-shift-enter"),
             button(SuggestChange, Other, "primary-alt-s"),
         ]
     );
-    let reply = [AddToReview, CommentNow, AskAgent, AskAgentNow];
+    let reply = [
+        AddToReview,
+        CommentNow,
+        CommentAndAskAgent,
+        CommentAndAskAgentNow,
+    ];
     assert_eq!(
-        plan(&choice_config(SuggestChange, AskAgentNow), &reply),
+        plan(&choice_config(SuggestChange, CommentAndAskAgentNow), &reply),
         [
             button(AddToReview, Primary, "primary-enter"),
-            button(AskAgentNow, Secondary, "primary-shift-enter"),
+            button(CommentAndAskAgentNow, Secondary, "primary-shift-enter"),
             button(CommentNow, Other, "primary-alt-enter"),
-            button(AskAgent, Other, "primary-alt-g"),
+            button(CommentAndAskAgent, Other, "primary-alt-g"),
         ]
     );
 }
@@ -721,10 +746,10 @@ fn a_button_shows_a_key_written_in_keys_and_none_for_an_emptied_command() {
     let config = "[keys]\nadd_to_review = \"primary-j\"\nask_agent = []\n";
 
     assert_eq!(
-        plan(config, &[AddToReview, AskAgent]),
+        plan(config, &[AddToReview, CommentAndAskAgent]),
         [
             button(AddToReview, Primary, "primary-j"),
-            (AskAgent, Secondary, None),
+            (CommentAndAskAgent, Secondary, None),
         ]
     );
 }
@@ -732,14 +757,26 @@ fn a_button_shows_a_key_written_in_keys_and_none_for_an_emptied_command() {
 #[test]
 fn a_key_runs_its_action_where_offered_and_a_main_key_runs_what_stands_in_for_it() {
     let keymap = keymap_of(&choice_config(CommentNow, SuggestChange)).unwrap();
-    let reply = [AddToReview, AskAgent];
+    let reply = [AddToReview, CommentAndAskAgent];
 
-    assert_eq!(keymap.send_key_runs(AskAgent, &reply), Some(AskAgent));
+    assert_eq!(
+        keymap.send_key_runs(CommentAndAskAgent, &reply),
+        Some(CommentAndAskAgent)
+    );
     assert_eq!(keymap.send_key_runs(CommentNow, &reply), Some(AddToReview));
     assert_eq!(
         keymap.send_key_runs(SuggestChange, &reply),
         Some(AddToReview)
     );
-    assert_eq!(keymap.send_key_runs(AskAgentNow, &reply), None);
+    assert_eq!(keymap.send_key_runs(CommentAndAskAgentNow, &reply), None);
     assert_eq!(keymap.send_key_runs(AddToReview, &reply), Some(AddToReview));
+}
+
+#[test]
+fn the_old_names_of_the_two_agent_commands_still_bind_their_keys() {
+    let keymap =
+        keymap_of("[keys]\nask_agent = \"primary-j\"\nask_agent_now = \"primary-y\"").unwrap();
+
+    assert_eq!(keys(&keymap, Command::CommentAndAskAgent), ["primary-j"]);
+    assert_eq!(keys(&keymap, Command::CommentAndAskAgentNow), ["primary-y"]);
 }

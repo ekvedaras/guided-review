@@ -110,13 +110,13 @@ impl OneStepLayout {
                 });
                 window.focus(&this.focus, cx);
             }),
-            on_ask_agent: self.on_compose(place, cx, |this, place, window, cx| {
+            on_comment_and_ask_agent: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
                     session.send_comment(&place, SendMode::AddToReview, Audience::Agent, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
-            on_ask_agent_now: self.on_compose(place, cx, |this, place, window, cx| {
+            on_comment_and_ask_agent_now: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
                     session.send_comment(&place, SendMode::CommentNow, Audience::Agent, cx);
                 });

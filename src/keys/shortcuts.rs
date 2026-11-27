@@ -136,9 +136,9 @@ pub enum Command {
     ToggleRead,
     CopyCode,
     AddToReview,
-    AskAgent,
+    CommentAndAskAgent,
     CommentNow,
-    AskAgentNow,
+    CommentAndAskAgentNow,
     SuggestChange,
     CloseBox,
     WrapLines,
@@ -166,8 +166,8 @@ impl From<SendAction> for Command {
             SendAction::AddToReview => Self::AddToReview,
             SendAction::CommentNow => Self::CommentNow,
             SendAction::SuggestChange => Self::SuggestChange,
-            SendAction::AskAgent => Self::AskAgent,
-            SendAction::AskAgentNow => Self::AskAgentNow,
+            SendAction::CommentAndAskAgent => Self::CommentAndAskAgent,
+            SendAction::CommentAndAskAgentNow => Self::CommentAndAskAgentNow,
         }
     }
 }
@@ -179,8 +179,8 @@ impl Command {
             Self::AddToReview => Some(SendAction::AddToReview),
             Self::CommentNow => Some(SendAction::CommentNow),
             Self::SuggestChange => Some(SendAction::SuggestChange),
-            Self::AskAgent => Some(SendAction::AskAgent),
-            Self::AskAgentNow => Some(SendAction::AskAgentNow),
+            Self::CommentAndAskAgent => Some(SendAction::CommentAndAskAgent),
+            Self::CommentAndAskAgentNow => Some(SendAction::CommentAndAskAgentNow),
             _ => None,
         }
     }
@@ -199,8 +199,8 @@ impl Command {
                 SendAction::AddToReview => &[PRIMARY_ALT_A],
                 SendAction::CommentNow => &[PRIMARY_ALT_ENTER],
                 SendAction::SuggestChange => &[PRIMARY_ALT_S],
-                SendAction::AskAgent => &[PRIMARY_ALT_G],
-                SendAction::AskAgentNow => &[PRIMARY_ALT_SHIFT_ENTER],
+                SendAction::CommentAndAskAgent => &[PRIMARY_ALT_G],
+                SendAction::CommentAndAskAgentNow => &[PRIMARY_ALT_SHIFT_ENTER],
             },
         }
     }
@@ -222,9 +222,9 @@ impl Command {
         Self::ToggleRead,
         Self::CopyCode,
         Self::AddToReview,
-        Self::AskAgent,
+        Self::CommentAndAskAgent,
         Self::CommentNow,
-        Self::AskAgentNow,
+        Self::CommentAndAskAgentNow,
         Self::SuggestChange,
         Self::CloseBox,
         Self::WrapLines,
@@ -270,9 +270,9 @@ impl Command {
             Self::ToggleRead => &[M],
             Self::CopyCode => &[PRIMARY_C],
             Self::AddToReview
-            | Self::AskAgent
+            | Self::CommentAndAskAgent
             | Self::CommentNow
-            | Self::AskAgentNow
+            | Self::CommentAndAskAgentNow
             | Self::SuggestChange => self.default_chords_for(SendChoice::default()),
             Self::CloseBox => &[ESCAPE],
             Self::WrapLines => &[W],
@@ -309,9 +309,9 @@ impl Command {
             Self::ToggleRead => "toggle_read",
             Self::CopyCode => "copy_code",
             Self::AddToReview => "add_to_review",
-            Self::AskAgent => "ask_agent",
+            Self::CommentAndAskAgent => "comment_and_ask_agent",
             Self::CommentNow => "comment_now",
-            Self::AskAgentNow => "ask_agent_now",
+            Self::CommentAndAskAgentNow => "comment_and_ask_agent_now",
             Self::SuggestChange => "suggest_change",
             Self::CloseBox => "close_box",
             Self::WrapLines => "wrap_lines",
@@ -335,10 +335,13 @@ impl Command {
     }
 
     /// A name the command was written under before, still read: `open_on_github`, from before the
-    /// app named code hosts. Settings writes the new name in its place.
+    /// app named code hosts, and `ask_agent` and `ask_agent_now`, from before they were renamed to
+    /// Comment and ask agent. Settings writes the new name in its place.
     pub fn former_config_name(self) -> Option<&'static str> {
         match self {
             Self::OpenOnHost => Some("open_on_github"),
+            Self::CommentAndAskAgent => Some("ask_agent"),
+            Self::CommentAndAskAgentNow => Some("ask_agent_now"),
             _ => None,
         }
     }
@@ -383,9 +386,9 @@ impl Command {
             | Self::CloseWindow => KeyScope::Window,
             Self::Quit => KeyScope::App,
             Self::AddToReview
-            | Self::AskAgent
+            | Self::CommentAndAskAgent
             | Self::CommentNow
-            | Self::AskAgentNow
+            | Self::CommentAndAskAgentNow
             | Self::SuggestChange
             | Self::CloseBox => KeyScope::TextBox,
             Self::CopyCode => KeyScope::NotTyping,
@@ -409,9 +412,9 @@ impl Command {
             | Self::Jump => ShortcutGroup::Navigate,
             Self::ToggleRead | Self::CopyCode => ShortcutGroup::Read,
             Self::AddToReview
-            | Self::AskAgent
+            | Self::CommentAndAskAgent
             | Self::CommentNow
-            | Self::AskAgentNow
+            | Self::CommentAndAskAgentNow
             | Self::SuggestChange
             | Self::CloseBox => ShortcutGroup::Comment,
             Self::WrapLines
@@ -453,9 +456,9 @@ impl Command {
             Self::ToggleRead => "Mark the step as read, or unread",
             Self::CopyCode => "Copy the selected code",
             Self::AddToReview => "Add the comment or reply to your review",
-            Self::AskAgent => "Add it and ask your agent",
+            Self::CommentAndAskAgent => "Add it and ask your agent",
             Self::CommentNow => "Post the comment or reply at once, without your review",
-            Self::AskAgentNow => "Post it at once and ask your agent",
+            Self::CommentAndAskAgentNow => "Post it at once and ask your agent",
             Self::SuggestChange => "Put the commented lines in the box as a suggestion",
             Self::CloseBox => "Leave the box you are typing in",
             Self::WrapLines => "Wrap long lines",

@@ -59,7 +59,7 @@ pub struct ThreadView {
     pub edit_drafts: BTreeMap<CommentId, String>,
     /// The comment of this thread the reviewer is being asked to confirm the deletion of.
     pub delete_asked: Option<CommentId>,
-    /// Where the comment sent with Ask agent is, when this thread has one.
+    /// Where the comment sent with Comment and ask agent is, when this thread has one.
     pub hand_off_line: Option<Arc<str>>,
     /// The agent is at work on the thread's latest hand-off, so its line shows it busy.
     pub agent_is_working: bool,

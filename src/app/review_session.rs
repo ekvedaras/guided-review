@@ -1932,7 +1932,7 @@ impl ReviewSession {
         self.change(cx, |review| review.retry_agent_link());
     }
 
-    /// Whether the comment box offers Ask agent.
+    /// Whether the comment box offers Comment and ask agent.
     pub fn agent_link_is_on(&self) -> bool {
         !matches!(self.tour_agent, TourAgentState::LinkOff(_))
     }

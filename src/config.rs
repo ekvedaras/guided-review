@@ -44,8 +44,9 @@ pub struct Config {
     /// repo that is not in it has not been asked.
     #[serde(default)]
     language_servers: BTreeMap<String, toml::Value>,
-    /// A send action (`"add_to_review"`, `"comment_now"`, `"suggest_change"`, `"ask_agent"` or
-    /// `"ask_agent_now"`): the one with Cmd+Enter and the accent colour.
+    /// A send action (`"add_to_review"`, `"comment_now"`, `"suggest_change"`,
+    /// `"comment_and_ask_agent"` or `"comment_and_ask_agent_now"`; `"ask_agent"` and `"ask_agent_now"`
+    /// still read as those two): the one with Cmd+Enter and the accent colour.
     #[serde(default)]
     primary_comment_action: Option<String>,
     /// The send action with Cmd+Shift+Enter, one other than the primary.

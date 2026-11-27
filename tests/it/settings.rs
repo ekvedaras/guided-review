@@ -978,7 +978,10 @@ fn a_chosen_merge_method_is_written_and_a_merge_commit_leaves_no_line() {
 fn chosen_primary_and_secondary_actions_are_written_and_the_defaults_leave_no_line() {
     let (home, mut settings) = loaded_from("nickname = \"sonnet\" # quick\n");
     assert_eq!(settings.primary_comment_action(), SendAction::AddToReview);
-    assert_eq!(settings.secondary_comment_action(), SendAction::AskAgent);
+    assert_eq!(
+        settings.secondary_comment_action(),
+        SendAction::CommentAndAskAgent
+    );
 
     settings.set_primary_comment_action(SendAction::CommentNow);
     settings.set_secondary_comment_action(SendAction::SuggestChange);
@@ -993,7 +996,7 @@ fn chosen_primary_and_secondary_actions_are_written_and_the_defaults_leave_no_li
     );
 
     settings.set_primary_comment_action(SendAction::AddToReview);
-    settings.set_secondary_comment_action(SendAction::AskAgent);
+    settings.set_secondary_comment_action(SendAction::CommentAndAskAgent);
     settings.save().unwrap();
     assert_eq!(config_text(home.path()), "nickname = \"sonnet\" # quick\n");
 }
@@ -1002,15 +1005,18 @@ fn chosen_primary_and_secondary_actions_are_written_and_the_defaults_leave_no_li
 fn picking_the_secondarys_action_as_primary_swaps_them_and_both_are_written() {
     let (home, mut settings) = loaded_from("");
 
-    settings.set_primary_comment_action(SendAction::AskAgent);
+    settings.set_primary_comment_action(SendAction::CommentAndAskAgent);
     settings.save().unwrap();
 
     assert_eq!(
         config_text(home.path()),
-        "primary_comment_action = \"ask_agent\"\nsecondary_comment_action = \"add_to_review\"\n"
+        "primary_comment_action = \"comment_and_ask_agent\"\nsecondary_comment_action = \"add_to_review\"\n"
     );
     let (_, reloaded) = loaded_from(&config_text(home.path()));
-    assert_eq!(reloaded.primary_comment_action(), SendAction::AskAgent);
+    assert_eq!(
+        reloaded.primary_comment_action(),
+        SendAction::CommentAndAskAgent
+    );
     assert_eq!(reloaded.secondary_comment_action(), SendAction::AddToReview);
 }
 
@@ -1255,5 +1261,30 @@ fn a_listed_repos_answer_is_changed_by_its_row_and_saved() {
     assert_eq!(
         config_text(home.path()),
         "[language_servers]\n\"acme/shop\" = true\n\"acme/old\" = true\n"
+    );
+}
+
+#[test]
+fn the_old_ask_agent_names_in_the_config_read_as_the_comment_and_ask_agent_actions_and_are_written_under_the_new_ones()
+ {
+    let (home, mut settings) = loaded_from(
+        "primary_comment_action = \"ask_agent_now\"\nsecondary_comment_action = \"ask_agent\"\n",
+    );
+
+    assert_eq!(
+        settings.primary_comment_action(),
+        SendAction::CommentAndAskAgentNow
+    );
+    assert_eq!(
+        settings.secondary_comment_action(),
+        SendAction::CommentAndAskAgent
+    );
+    assert!(!settings.has_unsaved_changes());
+
+    settings.set_primary_comment_action(SendAction::CommentAndAskAgent);
+    settings.save().unwrap();
+    assert_eq!(
+        config_text(home.path()),
+        "primary_comment_action = \"comment_and_ask_agent\"\nsecondary_comment_action = \"comment_and_ask_agent_now\"\n"
     );
 }

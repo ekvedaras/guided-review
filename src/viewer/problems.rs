@@ -49,7 +49,7 @@ pub enum Problem {
     FolderNotLookedAt(String),
     /// Not now was clicked on a move offer and the choice could not be written, so the offer comes back.
     MoveNotDeclined(String),
-    /// A comment sent with Ask agent was posted, but the host showed no thread for it, so the agent never gets it.
+    /// A comment sent with Comment and ask agent was posted, but the host showed no thread for it, so the agent never gets it.
     HandOffNotSent { comment: String, reason: String },
     /// Another PR was asked for and could not be opened, so this one stays on screen.
     SwitchFailed(String),

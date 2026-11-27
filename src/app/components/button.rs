@@ -253,7 +253,7 @@ pub fn icon_button(
 }
 
 /// Buttons that belong together drawn as one raised control, split by hairlines: the toggles of
-/// a toolbar, or one action with a variant ("Ask agent" and "now"). Each part is a `Joined` or
+/// a toolbar, or one action with a variant ("Comment and ask agent" and "now"). Each part is a `Joined` or
 /// `JoinedOn` button.
 pub fn joined(colors: &Colors, parts: Vec<Stateful<Div>>) -> Div {
     let last = parts.len().saturating_sub(1);

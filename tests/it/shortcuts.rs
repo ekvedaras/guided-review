@@ -64,7 +64,7 @@ fn no_two_commands_of_one_scope_share_a_key() {
 fn a_chord_is_written_as_gpui_reads_it() {
     assert_eq!(Command::Jump.default_chords()[0].keystroke(), "secondary-k");
     assert_eq!(
-        Command::AskAgent.default_chords()[0].keystroke(),
+        Command::CommentAndAskAgent.default_chords()[0].keystroke(),
         "secondary-shift-enter"
     );
     assert_eq!(Command::NextScreen.default_chords()[0].keystroke(), "right");
@@ -97,14 +97,17 @@ fn the_send_now_actions_have_keys_beside_add_to_review_and_ask_agent() {
     let keys = |command: Command| command.default_chords()[0].keystroke();
 
     assert_eq!(keys(Command::CommentNow), "secondary-alt-enter");
-    assert_eq!(keys(Command::AskAgentNow), "secondary-alt-shift-enter");
-    for command in [Command::CommentNow, Command::AskAgentNow] {
+    assert_eq!(
+        keys(Command::CommentAndAskAgentNow),
+        "secondary-alt-shift-enter"
+    );
+    for command in [Command::CommentNow, Command::CommentAndAskAgentNow] {
         assert_eq!(command.scope(), KeyScope::TextBox);
         assert_eq!(command.group(), ShortcutGroup::Comment);
     }
     assert_eq!(
         Command::of_config_name("ask_agent_now"),
-        Some(Command::AskAgentNow)
+        Some(Command::CommentAndAskAgentNow)
     );
 }
 

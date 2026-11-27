@@ -768,7 +768,7 @@ impl ReviewCore {
         ThreadHome::of(&self.subject, self.state.file())
     }
 
-    /// The send actions a comment box of this review offers; Ask agent is one more for a PR.
+    /// The send actions a comment box of this review offers; Comment and ask agent is one more for a PR.
     pub fn send_modes(&self) -> &'static [SendMode] {
         if self.subject.comments_are_agent_tasks() {
             &SendMode::LOCAL

@@ -527,9 +527,9 @@ impl ThreadElement {
                 offered.push(SendAction::CommentNow);
             }
             if can_ask_agent {
-                offered.push(SendAction::AskAgent);
+                offered.push(SendAction::CommentAndAskAgent);
                 if can_reply_now {
-                    offered.push(SendAction::AskAgentNow);
+                    offered.push(SendAction::CommentAndAskAgentNow);
                 }
             }
         } else if sending.tasks().len() > 1 {
@@ -549,8 +549,8 @@ impl ThreadElement {
                         Some(&task) => (task, Audience::Agent),
                         None => (SendMode::CommentNow, Audience::Author),
                     },
-                    SendAction::AskAgent => (SendMode::AddToReview, Audience::Agent),
-                    SendAction::AskAgentNow => (SendMode::CommentNow, Audience::Agent),
+                    SendAction::CommentAndAskAgent => (SendMode::AddToReview, Audience::Agent),
+                    SendAction::CommentAndAskAgentNow => (SendMode::CommentNow, Audience::Agent),
                 };
                 send_reply(&ui, &on_action, &thread_id, mode, audience, cx);
             })
@@ -568,9 +568,9 @@ impl ThreadElement {
                 })
             };
             let (submits, on_submit) = typed(SendAction::AddToReview);
-            let (asks, on_ask) = typed(SendAction::AskAgent);
+            let (asks, on_ask) = typed(SendAction::CommentAndAskAgent);
             let (posts, on_post) = typed(SendAction::CommentNow);
-            let (asks_now, on_ask_now) = typed(SendAction::AskAgentNow);
+            let (asks_now, on_ask_now) = typed(SendAction::CommentAndAskAgentNow);
             TextBox::new(
                 SharedString::from(format!("reply-text-{thread_id}")),
                 focus,
@@ -584,9 +584,9 @@ impl ThreadElement {
                     on_submit(window, cx);
                 }
             })
-            .on_submit_to_agent(asks, on_ask)
+            .on_submit_and_ask_agent(asks, on_ask)
             .on_submit_now(posts, on_post)
-            .on_submit_to_agent_now(asks_now, on_ask_now)
+            .on_submit_and_ask_agent_now(asks_now, on_ask_now)
             .on_cancel(move |_, cx| on_cancel(ReplyDraftChange::Discard, cx))
             .into_any_element()
         };
@@ -627,8 +627,8 @@ impl ThreadElement {
                         ("add", None, "Add to review")
                     }
                     (SendAction::CommentNow, true) => ("now", None, "Reply now"),
-                    (SendAction::AskAgent, _) => ("ask", Some(Icon::Sparkles), "Ask agent"),
-                    (SendAction::AskAgentNow, _) => ("ask-now", Some(Icon::Zap), "Ask agent now"),
+                    (SendAction::CommentAndAskAgent, _) => ("ask", Some(Icon::Sparkles), "Comment and ask agent"),
+                    (SendAction::CommentAndAskAgentNow, _) => ("ask-now", Some(Icon::Zap), "Comment and ask agent now"),
                 };
                 let id = SharedString::from(format!("reply-{name}-{id}"));
                 let base = match icon {
@@ -636,13 +636,13 @@ impl ThreadElement {
                     None => plain_button(&colors, id, kind, label),
                 };
                 base.child(chord_keys(&colors, kind, planned.chord))
-                    .when(action == SendAction::AskAgent, |button| {
+                    .when(action == SendAction::CommentAndAskAgent, |button| {
                         button.tooltip(tooltip(|_| {
-                            "Ask agent: adds the reply to the review for your agent".into()
+                            "Comment and ask agent: adds the reply to the review and hands it to your agent".into()
                         }))
                     })
-                    .when(action == SendAction::AskAgentNow, |button| {
-                        button.tooltip(tooltip(|_| "Ask agent now: posts the reply at once".into()))
+                    .when(action == SendAction::CommentAndAskAgentNow, |button| {
+                        button.tooltip(tooltip(|_| "Comment and ask agent now: posts the reply at once and hands it to your agent".into()))
                     })
                     .on_click(move |_, _, cx| act(action, cx))
             });

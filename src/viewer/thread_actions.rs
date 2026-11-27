@@ -18,7 +18,7 @@ pub enum ThreadAction {
     Reply {
         thread_id: ThreadId,
         mode: SendMode,
-        /// Ask agent hands the reply to the tour agent too.
+        /// Comment and ask agent hands the reply to the tour agent too.
         audience: Audience,
     },
     Resolve {

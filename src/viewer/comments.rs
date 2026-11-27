@@ -316,7 +316,7 @@ pub enum CommentResult {
     Rejected(String),
 }
 
-/// Who a comment is for. The plain send actions are for the PR's author; only Ask agent also
+/// Who a comment is for. The plain send actions are for the PR's author; only Comment and ask agent also
 /// reaches the tour agent.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Audience {
