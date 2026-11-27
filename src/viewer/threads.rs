@@ -289,7 +289,7 @@ pub(super) fn views(
             can_hand_to_agent: thread
                 .comments
                 .iter()
-                .filter(|comment| agent.can_take(comment))
+                .filter(|comment| agent.can_take(thread, comment))
                 .map(|comment| comment.id.clone())
                 .collect(),
             hidden_text: thread
@@ -313,8 +313,8 @@ pub(super) struct AgentOfThreads<'a> {
 }
 
 impl AgentOfThreads<'_> {
-    fn can_take(&self, comment: &ThreadComment) -> bool {
-        self.takes_others_comments && !comment.by_viewer && !self.hand_offs.has_at_work(&comment.id)
+    fn can_take(&self, thread: &ReviewThread, comment: &ThreadComment) -> bool {
+        self.takes_others_comments && self.hand_offs.hand_over_refused(thread, comment).is_none()
     }
 }
 

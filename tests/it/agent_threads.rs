@@ -1,10 +1,11 @@
 //! A private thread to the tour agent in a PR's review: kept in the review's state file, answered by the
 //! tour agent into the same thread, and never sent to the host.
 
-use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use crate::support::graphql::serve_graphql;
 use crate::support::work::drive_until_idle;
+use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 use crate::support::{file_path, line};
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::PullRequestUrl;
@@ -12,11 +13,13 @@ use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     AgentReplyRequest, AgentStatus, Audience, CommentGesture, CommentId, CommentPlace,
-    CommentResult, HandOffId, HandOffState, LineLocation, LocalThreadStore, ReplyPlacement, Review,
-    ReviewStateFile, ReviewThread, SendMode, Side, TerminalId, TextBox, ThreadAction,
-    ThreadActionResult, ThreadComment, ThreadHomes, ThreadId, TourAgentPort, TourAgents, WorkPorts,
+    CommentResult, HandOffId, HandOffState, HandToAgentRefused, LineLocation, LocalThreadStore,
+    ReplyPlacement, Review, ReviewStateFile, ReviewThread, SendMode, Side, TerminalId, TextBox,
+    ThreadAction, ThreadActionResult, ThreadComment, ThreadHomes, ThreadId, TourAgentPort,
+    TourAgents, WorkPorts,
 };
 use serde_json::json;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -465,4 +468,104 @@ fn a_comment_sent_the_github_way_still_goes_to_github_beside_private_threads() {
     assert_eq!(result, CommentResult::Sent);
     assert_eq!(pull.host_writes().len(), 1);
     assert_eq!(threads_on_the_step(&review).len(), 2);
+}
+
+/// The `guided-review agent-reply` commands a message gives, each without the program name, in order.
+fn agent_reply_commands(message: &str) -> Vec<Vec<String>> {
+    message
+        .split('`')
+        .filter_map(|quoted| quoted.strip_prefix("guided-review agent-reply "))
+        .map(|args| {
+            std::iter::once("agent-reply")
+                .chain(args.split_whitespace())
+                .map(str::to_owned)
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn the_commands_the_private_question_gives_the_agent_write_its_answer_into_the_private_thread() {
+    let pull = Pull::new();
+    let host = pull.host();
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    ask_agent(&mut review, &place, &host);
+    let fake = an_idle_agent();
+    pull.drive(&mut review, &agents_of(&fake), &host);
+    drop(review);
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    let commands = agent_reply_commands(text);
+    let working = commands
+        .iter()
+        .find(|args| args.last().is_some_and(|last| last == "--working"))
+        .expect("the message gives --working");
+    let answer = commands
+        .iter()
+        .find(|args| args.ends_with(&["--body".to_owned(), "-".to_owned()]))
+        .expect("the message gives --body -");
+    let (url, asked) = serve_graphql(Vec::new());
+    let github = FakeGitHub { url };
+    let run = |args: &[String], stdin: Option<&str>| {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let runner = GuidedReview::new(&pull.repo, &github)
+            .with_env("GUIDED_REVIEW_BUILD", Path::new("test-build"));
+        let runner = match stdin {
+            Some(text) => runner.with_stdin(text),
+            None => runner,
+        };
+        runner.run(&args)
+    };
+
+    let said_working = run(working, None);
+    let answered = run(answer, Some("Because of the loop.\n"));
+
+    assert!(said_working.success, "stderr: {}", said_working.stderr);
+    assert!(answered.success, "stderr: {}", answered.stderr);
+    assert_eq!(
+        *asked.lock().unwrap(),
+        Vec::<String>::new(),
+        "nothing asked of GitHub"
+    );
+    let [thread] = pull.private_threads().try_into().unwrap();
+    let said: Vec<&str> = thread
+        .comments
+        .iter()
+        .map(|comment| comment.body.as_str())
+        .collect();
+    assert_eq!(said, ["why ten?", "Because of the loop."]);
+    let reopened = pull.open();
+    assert_eq!(
+        reopened.hand_offs().all()[0].state(),
+        &HandOffState::Answered
+    );
+}
+
+#[test]
+fn the_agents_answer_in_a_private_thread_is_not_handed_to_the_agent_as_someone_elses_comment() {
+    let pull = Pull::new();
+    let host = pull.host();
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    ask_agent(&mut review, &place, &host);
+    let done = reply_request(&pull, h0(), "Because of the loop.")
+        .run(&host)
+        .unwrap();
+    review.hand_off_replied(h0(), done.replied()).unwrap();
+    pull.drive(&mut review, &agents_of(&an_idle_agent()), &host);
+    let [view] = review.current_step().unwrap().threads.try_into().unwrap();
+    let answer = view.thread.comments[1].id.clone();
+
+    let refused = review.hand_to_agent(&answer);
+
+    assert!(
+        view.can_hand_to_agent.is_empty(),
+        "{:?}",
+        view.can_hand_to_agent
+    );
+    assert_eq!(refused, Err(HandToAgentRefused::PrivateThread));
+    assert_eq!(review.hand_offs().all().len(), 1);
 }

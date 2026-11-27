@@ -829,11 +829,8 @@ impl HandOffs {
         let (handed, after) = from_it
             .split_first()
             .ok_or(HandToAgentRefused::NoSuchComment)?;
-        if handed.by_viewer {
-            return Err(HandToAgentRefused::OwnComment);
-        }
-        if self.has_at_work(comment) {
-            return Err(HandToAgentRefused::AlreadyWithAgent);
+        if let Some(refused) = self.hand_over_refused(thread, handed) {
+            return Err(refused);
         }
         let id = self.next_id();
         self.0.push(HandOff {
@@ -860,8 +857,26 @@ impl HandOffs {
         Ok(())
     }
 
+    /// Why Hand to agent does not take `comment` of `thread`, if it does not. The agent's answer in a
+    /// private thread is no one else's comment: the reviewer replies in that thread to ask the agent.
+    pub(super) fn hand_over_refused(
+        &self,
+        thread: &ReviewThread,
+        comment: &ThreadComment,
+    ) -> Option<HandToAgentRefused> {
+        if thread.is_private() {
+            Some(HandToAgentRefused::PrivateThread)
+        } else if comment.by_viewer {
+            Some(HandToAgentRefused::OwnComment)
+        } else if self.has_at_work(&comment.id) {
+            Some(HandToAgentRefused::AlreadyWithAgent)
+        } else {
+            None
+        }
+    }
+
     /// A hand-off of the comment is on its way to the agent or with it, and not done.
-    pub(super) fn has_at_work(&self, comment: &CommentId) -> bool {
+    fn has_at_work(&self, comment: &CommentId) -> bool {
         self.0.iter().any(|hand_off| {
             hand_off.reviewer_comment.as_ref() == Some(comment)
                 && !matches!(
@@ -1180,6 +1195,8 @@ pub enum HandToAgentRefused {
     OwnComment,
     #[error("the agent has this comment already")]
     AlreadyWithAgent,
+    #[error("the thread is your private one with the agent: reply in it to ask the agent")]
+    PrivateThread,
     #[error("the hand-off could not be saved: {0}")]
     NotSaved(String),
 }
