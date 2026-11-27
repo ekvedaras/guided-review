@@ -38,7 +38,7 @@ The app already parses these languages with tree-sitter to cut files into pieces
 
 ## Locals stay in their function (2026-11-24)
 
-Issue #183, commit 8bd96a8. The by-name lookup searched the repo for a function-local `$deliveryDate` (1558 usages in 274 files, see below). Now `Lookups::look_up_at` (`src/navigation/lookup.rs`) first asks `Local::at` (`src/navigation/local.rs`) whether the name at the hovered line and column is a local; if so it parses only the hovered file and runs no file search (`Reach::EnclosingFunction`).
+Issue #183, commit 8bd96a8. The by-name lookup searched the repo for a function-local `$cartTotal` (1558 usages in 274 files, see below). Now `Lookups::look_up_at` (`src/navigation/lookup.rs`) first asks `Local::at` (`src/navigation/local.rs`) whether the name at the hovered line and column is a local; if so it parses only the hovered file and runs no file search (`Reach::EnclosingFunction`).
 
 - Which names: a PHP `$variable` other than `$this`, not a property declaration or `self::$x`; a Rust identifier that does not start with a capital (a capital in a pattern is a variant or constant); a TypeScript identifier or shorthand property. `$this->x`, `self.x`, `obj.x`, methods, functions, classes and module-level names go to the repo search as before.
 - Which function: walking up from the name, the first function-like node that binds the name (a parameter, a `let`/assignment/`foreach`/`for`/`catch`/pattern binding). A PHP function, method or closure (`function () use ($x)`) is the scope even when nothing in it binds the name, since it sees nothing around it; a PHP arrow function, a Rust closure and every TypeScript function see their parent's locals, so the walk goes on past them. A Rust `fn` that does not bind the name stops the walk: the name is a constant, function or unit struct, looked up by name.
@@ -50,7 +50,7 @@ Open: TypeScript block scope is not read (a `let` in two sibling blocks of one f
 
 ## Language servers first (2026-11-24)
 
-On 2026-11-24 the maintainer tried the card (as of `ekvedaras/guided-review@66682ce`) on a Laravel PHP repo and rejected the by-name results: a function-local `$deliveryDate` was grepped across the repo (1558 usages in 274 files, with unrelated `deliveryDate()` methods as definitions), and `$this->schedule()` listed 9 `schedule` definitions from other classes. Scope rules on top of tree-sitter were weighed and turned down as a weak copy of a type checker.
+On 2026-11-24 the maintainer tried the card (as of `ekvedaras/guided-review@66682ce`) on a Laravel PHP repo and rejected the by-name results: a function-local `$cartTotal` was grepped across the repo (1558 usages in 274 files, with unrelated `cartTotal()` methods as definitions), and `$this->schedule()` listed 9 `schedule` definitions from other classes. Scope rules on top of tree-sitter were weighed and turned down as a weak copy of a type checker.
 
 Decided by the maintainer the same day:
 

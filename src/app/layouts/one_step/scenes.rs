@@ -1594,22 +1594,22 @@ fn staged_files(lookup: &Lookup) -> Vec<(FilePath, String)> {
 
 declare(strict_types=1);
 
-namespace App\Models\Enum\StandingOrders;
+namespace App\Models\Enum\Subscriptions;
 
-use Filament\Support\Contracts\HasColor;
-use Filament\Support\Contracts\HasLabel;
+use Acme\Support\Contracts\HasColor;
+use Acme\Support\Contracts\HasLabel;
 use JsonSerializable;
 
 /**
- * Where a scheduled delivery is in its life.
+ * Where a scheduled renewal is in its life.
  */
-enum StandingOrderScheduleItemStatus: string implements HasLabel, HasColor, JsonSerializable
+enum SubscriptionRenewalStatus: string implements HasLabel, HasColor, JsonSerializable
 {
     case PENDING = 'pending';
     case WAITING_FOR_APPROVAL = 'waiting_for_approval';
     case REJECTED = 'rejected';
     case CANCELLED = 'cancelled';
-    case DELIVERED = 'delivered';
+    case RENEWED = 'renewed';
 
     public function getLabel(): string
     {
@@ -1618,7 +1618,7 @@ enum StandingOrderScheduleItemStatus: string implements HasLabel, HasColor, Json
             self::WAITING_FOR_APPROVAL => 'Waiting for approval',
             self::REJECTED => 'Rejected',
             self::CANCELLED => 'Called off',
-            self::DELIVERED => 'Delivered',
+            self::RENEWED => 'Renewed',
         };
     }
 
@@ -1637,34 +1637,39 @@ enum StandingOrderScheduleItemStatus: string implements HasLabel, HasColor, Json
                 .extension()
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
         })
-        .map(|path| (path, ENUM.to_owned()))
+        .map(|path| {
+            (
+                path,
+                ENUM.replace("SubscriptionRenewalStatus", lookup.word.as_str()),
+            )
+        })
         .collect()
 }
 
-/// The maintainer's case: a PHP enum used all over a big repo, with a same-named TypeScript enum.
+/// A PHP enum used all over a big repo, with a same-named TypeScript enum.
 fn staged_lookup(hovered: &HoveredName) -> Lookup {
     const FOLDERS: [&str; 6] = [
-        "app/Domain/StandingOrders/Actions",
-        "app/Http/Controllers/Api/V2/StandingOrders",
-        "app/Models/StandingOrders/Scopes",
-        "tests/Feature/Domain/StandingOrders",
-        "resources/js/features/standing-orders/components",
+        "app/Domain/Subscriptions/Actions",
+        "app/Http/Controllers/Api/V2/Subscriptions",
+        "app/Models/Subscriptions/Scopes",
+        "tests/Feature/Domain/Subscriptions",
+        "resources/js/features/subscriptions/components",
         "database/migrations",
     ];
     const FILES: [&str; 7] = [
-        "UpdateStandingOrder.php",
-        "StandingOrder.php",
-        "ListStandingOrderScheduleItems.php",
-        "CancelStandingOrderTest.php",
+        "UpdateSubscription.php",
+        "Subscription.php",
+        "ListSubscriptionRenewals.php",
+        "CancelSubscriptionTest.php",
         "ScheduleItemRow.tsx",
-        "StandingOrderScheduleItemFactory.php",
-        "RescheduleDeliveries.php",
+        "SubscriptionRenewalFactory.php",
+        "RescheduleRenewals.php",
     ];
     const LINES: [&str; 4] = [
-        "use App\\Models\\Enum\\StandingOrders\\{word};",
+        "use App\\Models\\Enum\\Subscriptions\\{word};",
         "->where('status', {word}::PENDING)",
         "return collect([{word}::PENDING, {word}::WAITING_FOR_APPROVAL, {word}::CANCELLED])->contains($this->status);",
-        "$items = $standingOrder->scheduleItems()->whereIn('status', [{word}::PENDING, {word}::REJECTED]);",
+        "$items = $subscription->renewals()->whereIn('status', [{word}::PENDING, {word}::REJECTED]);",
     ];
     let word = &hovered.word;
     let line = |number: u32| LineNumber::try_from(number).unwrap_or(LineNumber::FIRST);
@@ -1698,21 +1703,21 @@ fn staged_lookup(hovered: &HoveredName) -> Lookup {
             Definition {
                 name: word.clone(),
                 kind: DefinitionKind::Enum,
-                place: place("app/Models/Enum/StandingOrders/StandingOrderScheduleItemStatus.php", 14),
+                place: place("app/Models/Enum/Subscriptions/SubscriptionRenewalStatus.php", 14),
                 signature: format!(
                     "enum {word}: string implements HasLabel, HasColor, JsonSerializable"
                 )
                 .into(),
                 signature_origin: Arc::from([]),
                 doc: Some(
-                    "Where a scheduled delivery is in its life, from the week it is planned to the day it is delivered or called off. Drives the badge in the schedule."
+                    "Where a scheduled renewal is in its life, from the week it is planned to the day it is renewed or called off. Drives the badge in the schedule."
                         .into(),
                 ),
             },
             Definition {
                 name: word.clone(),
                 kind: DefinitionKind::Enum,
-                place: place("resources/js/features/standing-orders/types/standing-order-schedule-item-status.ts", 3),
+                place: place("resources/js/features/subscriptions/types/subscription-renewal-status.ts", 3),
                 signature: format!("export enum {word}").into(),
                 signature_origin: Arc::from([]),
                 doc: None,

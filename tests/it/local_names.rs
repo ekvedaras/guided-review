@@ -78,19 +78,19 @@ fn usage_lines(lookup: &Lookup) -> Vec<u32> {
 const PHP_DELIVERIES: &str = r"<?php
 class Deliveries
 {
-    private $deliveryDate;
+    private $cartTotal;
 
     public function plan(Order $order): void
     {
-        $deliveryDate = $order->deliveryDate();
-        $this->deliveryDate = $deliveryDate;
-        $this->schedule($deliveryDate);
+        $cartTotal = $order->cartTotal();
+        $this->cartTotal = $cartTotal;
+        $this->schedule($cartTotal);
     }
 
-    public function deliveryDate(): string
+    public function cartTotal(): string
     {
-        $deliveryDate = 'monday';
-        return $deliveryDate;
+        $cartTotal = '19.99';
+        return $cartTotal;
     }
 }
 ";
@@ -99,12 +99,12 @@ class Deliveries
 fn a_php_variable_is_looked_up_in_its_method_only() {
     let file = OneFile::new("app/Deliveries.php", PHP_DELIVERIES);
 
-    let lookup = file.hover(10, "deliveryDate);");
+    let lookup = file.hover(10, "cartTotal);");
 
     assert_eq!(definitions(&lookup), [(DefinitionKind::Variable, 8)]);
     assert_eq!(
         &*lookup.definitions[0].signature,
-        "$deliveryDate = $order->deliveryDate();"
+        "$cartTotal = $order->cartTotal();"
     );
     assert_eq!(usage_lines(&lookup), [9, 10]);
     assert_eq!(lookup.reach, Reach::EnclosingFunction);
@@ -246,11 +246,11 @@ fn php_this_and_properties_are_looked_up_by_name_in_the_repo() {
     let file = OneFile::new("app/Deliveries.php", PHP_DELIVERIES);
 
     let this = file.hover(9, "this->");
-    let property = file.hover(9, "deliveryDate =");
+    let property = file.hover(9, "cartTotal =");
 
     assert_eq!(this.reach, Reach::WholeRepo);
     assert_eq!(property.reach, Reach::WholeRepo);
-    assert_eq!(file.search.searches(), ["this", "deliveryDate"]);
+    assert_eq!(file.search.searches(), ["this", "cartTotal"]);
 }
 
 const PYTHON_TOTAL: &str = r"LIMIT = 10

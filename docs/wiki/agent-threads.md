@@ -24,7 +24,7 @@
 
 ## The private answer that went to GitHub (2026-11-27)
 
-The maintainer asked a private question on saltzapp/saltz.app#18833 with build 17542fde. The tour agent got `Private question h2`, ran `guided-review agent-reply <pr> h2 --working` and `--body -`, and the reply failed trying to post on GitHub.
+The maintainer asked a private question on a PR of a private repo with build 17542fde. The tour agent got `Private question h2`, ran `guided-review agent-reply <pr> h2 --working` and `--body -`, and the reply failed trying to post on GitHub.
 
 - Cause: the agent ran the release install, not the build that wrote the hand-off. The agent was the maintainer's own Claude, picked as the tour agent, and `guided-review` on its `PATH` is `~/.local/bin/guided-review`, release 0.16.0 (3df2bed). That build picks a reply's home from the review subject (`ThreadHome::of(subject)`), so for a PR it posts every reply on GitHub, here to thread `local-thread-1`. The state file was right: hand-off `h2` held thread `local-thread-1`, the private thread. The PATH fix for agents the app starts (agent-runs.md, 2026-11-16) does not reach a terminal the reviewer picked.
 - The commands the private question's message gives, run as the CLI, write the answer into the private thread and ask GitHub nothing: `agent_threads::the_commands_the_private_question_gives_the_agent_write_its_answer_into_the_private_thread` takes them from the message the fake agent got. Red when `ThreadHomes::of_thread` names the host for every thread, with the maintainer's error.

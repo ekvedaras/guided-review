@@ -26,6 +26,7 @@ Rust 2024 gpui app.
 
 ## Tests
 
+- Test data, scenes, fixtures, examples, docs and commit messages use invented names (`acme/shop`, `Order`, `Cart`), never names copied from the maintainer's PRs, screenshots, terminals or other repos, even ones an agent saw during the task. No word list: the check is where the name came from.
 - All integration tests are one crate, `tests/it/main.rs`, one module per topic. A new file needs a `mod` line there.
 - `tests/it/support/` holds the fixture repo, CLI runner and fake ports (`fake_ports.rs`). `tests/fixtures/` holds recorded data.
 - `src/viewer/` is the window-free core and is tested through those fakes. `src/app/` is gpui with no window tests, so put logic behind a viewer method.
@@ -44,6 +45,8 @@ The snapshot scripts work on macOS only, and say so elsewhere: pictures need gpu
 `scripts/snapshot <pr-url> [out-dir] [--only <name-start>,...] [--light|--dark]` writes PNGs of the app to `<out>/light` and `<out>/dark` (default `/tmp/guided-review-snapshots`): `NN-top`/`NN-end` of every tour screen, then the scenes from `20-settings` on, staged in `src/app/layouts/one_step/scenes.rs`. To check one change, take only the pictures it shows, e.g. `--only 00-top --dark`; the full run takes minutes. It builds the `snapshots` feature, runs on a throwaway HOME with only that PR's tour, and draws on a timer, so it works with the screen locked. A scene is taken once its picture is unchanged for 1s (20s cap), so finite animations end first. The PR needs a tour where `guided-review tour-path <pr-url>` says; use public PRs only (ekvedaras/guided-review#12 has one) for pictures that leave the machine. `screencapture` is blocked in auto mode.
 
 `scripts/snapshot-compare <before-dir> <after-dir> <out-dir> [markers.json]` puts each scene side by side, before left. Markers number spots on the after picture, in its pixels: `{ "21-jump-palette": [{ "x": 640, "y": 260, "n": 1 }] }`.
+
+Scenes show invented names only (see Tests): a picture goes into a PR and leaves the machine.
 
 A PR that changes what the app shows puts before and after pictures in its Evidence: snapshot `main` and the branch, run `snapshot-compare`, and upload with `gh attach`. When the change is a small part of the window, crop both pictures to that part and a little around it before comparing (`sips -c <h> <w> --cropOffset <y> <x>`), one picture per changed spot. Open every picture with the Read tool before you upload it: on 2026-11-17 six crops with a wrong offset showed a file header instead of the title bar and went into a PR. When no scene shows the change, stage one in `scenes.rs` in the same PR, so the next change to it has a picture too.
 
