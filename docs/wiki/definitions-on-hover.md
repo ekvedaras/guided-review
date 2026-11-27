@@ -287,3 +287,18 @@ Open:
 - The dependency note does not count `go.mod`, `go.sum` or `go.work`.
 - Not measured on a large Go repo; gopls answered a one-file module in under a second once built.
 - The build has no time limit of its own: a stalled proxy keeps the card on "Downloading gopls…" and holds the download lock.
+
+## Code beside the card (2026-11-27)
+
+Maintainer's decision, in the branch that holds Back/Forward and the agent threads. The Definition card has a code pane at its right, inside the same card: the 640 px lists stay, and 520 px of code is added when any row has code (`FoundNames::shows_code`); with none, the card keeps its width.
+
+- What it shows: a definition row's pane is its body, from its line to the end of the declaration that starts there (`declaration_end` in `src/navigation/declaration.rs`: the largest tree-sitter node whose first token is the line's first token, never the file's root), cut after 40 lines with a "…" line (`BODY_LINES_AT_MOST`). A usage row's pane is the 3 lines above and below it (`USAGE_CONTEXT_LINES`) with the usage line marked. Both are coloured by the whole file's highlights, like the diff, with line numbers, and scroll above 400 px.
+- Which row: `FoundNames::code_pane(Option<CardRow>)`. The pane follows the last row the pointer entered (`OnCardRow` from a row's hover) and keeps it when the pointer leaves, so the reviewer can cross to the pane and scroll it; before any row is hovered, and for a row with no code, it shows the first definition's. The keyboard has no row cursor in the card, so "or cursor" is not built.
+- Where the code comes from: the same file reads `NameHighlights::of` already does for the colours, at the lookup's commit, on the lookup's background thread (`HighlightedFile::body` and `around`). The panes are built when the lookup lands, so drawing parses nothing. A file that cannot be read or has no highlight language has no pane.
+- Leading tabs are shown as 4 spaces (`PaneLine::of`); other tabs stay as they are.
+- Scene `96-name-card` stages the enum's own file (`staged_files` in `scenes.rs`), so the pane shows a PHP enum's body; the usages there are made up and have no file, so no scene shows a usage's pane.
+
+Open:
+- A definition from a language server that gives only the name's line (a local, or a signature cut from hover) gets the declaration that starts on that line; a line that begins no declaration gets no pane.
+- A declaration whose first token is not on the definition's line (the name on a later line than `fn`) gets no pane.
+- The pane scrolls vertically only; a long line is clipped, not scrolled sideways.

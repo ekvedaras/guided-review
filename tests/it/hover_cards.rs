@@ -11,8 +11,8 @@ use guided_review::pull_request::Sha;
 use guided_review::review_subject::WorkTreeRoot;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    Capture, CardNote, CodeRun, DefinitionCard, FoundNames, HoveredName, JumpPlace, LineLocation,
-    NameTarget, Review, ReviewStateFile, Side, Snippet,
+    Capture, CardNote, CardRow, CodeRun, DefinitionCard, FoundNames, HoveredName, JumpPlace,
+    LineLocation, NameTarget, Review, ReviewStateFile, Side, Snippet,
 };
 use serde_json::{Value, json};
 
@@ -1259,4 +1259,161 @@ fn a_pr_that_changes_no_dependency_file_and_an_answer_by_name_carry_no_dependenc
         ),
         Vec::<String>::new()
     );
+}
+
+fn lines_of(pane: &guided_review::viewer::CodePane) -> Vec<(&str, &str)> {
+    pane.lines
+        .iter()
+        .map(|line| (&*line.number, &*line.text))
+        .collect()
+}
+
+const CART_RS: &str = "pub fn total(\n    cart: &Cart,\n) -> u32 {\n    1\n}\n\nfn other() {}\n";
+
+fn shop_with_rust_total(body: &str) -> Shop {
+    Shop::with_files(&[("src/cart.rs".to_owned(), body.to_owned())])
+}
+
+fn rust_total_row(card: &FoundNames) -> &guided_review::viewer::DefinitionRow {
+    card.definitions
+        .iter()
+        .find(|row| row.place.starts_with("src/cart.rs"))
+        .unwrap()
+}
+
+#[test]
+fn a_definitions_code_runs_from_its_line_to_the_end_of_its_body() {
+    let shop = shop_with_rust_total(CART_RS);
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 5, "total"),
+    ));
+
+    let code = rust_total_row(&card).code.as_ref().unwrap();
+    assert_eq!(&*code.place, "src/cart.rs:1");
+    assert_eq!(
+        lines_of(code),
+        vec![
+            ("1", "pub fn total("),
+            ("2", "    cart: &Cart,"),
+            ("3", ") -> u32 {"),
+            ("4", "    1"),
+            ("5", "}"),
+        ]
+    );
+    assert!(!code.cut);
+    assert_eq!(code.marked, None);
+}
+
+#[test]
+fn a_definitions_code_is_coloured_like_the_diff() {
+    let shop = shop_with_rust_total(CART_RS);
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 5, "total"),
+    ));
+
+    let code = rust_total_row(&card).code.as_ref().unwrap();
+    let first = &code.lines[0];
+    let painted = painted(&first.text, &first.runs);
+    assert!(
+        painted.contains(&("fn", Some(Capture::Keyword), false)),
+        "{painted:?}"
+    );
+}
+
+#[test]
+fn a_body_longer_than_forty_lines_is_cut_and_says_so() {
+    let body: String = format!("pub fn total() {{\n{}}}\n", "    let a = 1;\n".repeat(60));
+    let shop = shop_with_rust_total(&body);
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 5, "total"),
+    ));
+
+    let code = rust_total_row(&card).code.as_ref().unwrap();
+    assert_eq!(code.lines.len(), guided_review::viewer::BODY_LINES_AT_MOST);
+    assert_eq!(&*code.lines[39].number, "40");
+    assert!(code.cut);
+}
+
+#[test]
+fn a_usages_code_is_the_lines_around_it_with_the_usage_marked() {
+    let shop = Shop::with_files(&[(
+        "app/orders.ts".to_owned(),
+        "// one\n// two\n// three\n// four\nnew Cart('x');\n// six\n// seven\n".to_owned(),
+    )]);
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 4, "Cart"),
+    ));
+
+    let orders = card
+        .usages
+        .iter()
+        .find(|file| &*file.path == "app/orders.ts")
+        .unwrap();
+    let code = orders.lines[0].code.as_ref().unwrap();
+    assert_eq!(&*code.place, "app/orders.ts:5");
+    assert_eq!(
+        lines_of(code),
+        vec![
+            ("2", "// two"),
+            ("3", "// three"),
+            ("4", "// four"),
+            ("5", "new Cart('x');"),
+            ("6", "// six"),
+            ("7", "// seven"),
+        ]
+    );
+    assert_eq!(code.marked, Some(3));
+}
+
+#[test]
+fn the_pane_follows_the_row_under_the_pointer_and_falls_back_to_the_first_definition() {
+    let shop = Shop::with_files(&[
+        ("src/cart.rs".to_owned(), CART_RS.to_owned()),
+        ("app/orders.ts".to_owned(), "total();\n".to_owned()),
+    ]);
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("src/checkout.ts", Side::Head, 5, "total"),
+    ));
+
+    let first = card.code_pane(Some(CardRow::Definition(0))).unwrap();
+    let orders = card
+        .usages
+        .iter()
+        .position(|file| &*file.path == "app/orders.ts")
+        .unwrap();
+    let usage = card
+        .code_pane(Some(CardRow::Usage {
+            file: orders,
+            line: 0,
+        }))
+        .unwrap();
+    assert_eq!(&*usage.place, "app/orders.ts:1");
+    assert_ne!(first.place, usage.place);
+    assert!(card.shows_code());
+    assert_eq!(card.code_pane(None), Some(first));
 }

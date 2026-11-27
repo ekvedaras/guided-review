@@ -18,6 +18,7 @@ use crate::navigation::{
 use super::code_link::CodeLink;
 use super::highlight::Capture;
 use super::jump::JumpTarget;
+use super::name_code::{CodePane, CodeRun};
 use super::name_highlights::NameHighlights;
 
 /// Where a click on a definition or a usage goes.
@@ -83,56 +84,6 @@ impl ServerQuestion {
     }
 }
 
-/// A stretch of a card's code text: what it is, for the colour, and whether it is the hovered name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeRun {
-    pub range: Range<usize>,
-    pub capture: Option<Capture>,
-    pub is_name: bool,
-}
-
-impl CodeRun {
-    /// The captures cut around `name`, which gets a run of its own that keeps the capture it sat in.
-    /// `captures` are in text order and do not overlap.
-    pub fn compose(
-        captures: &[(Range<usize>, Capture)],
-        name: Option<&Range<usize>>,
-    ) -> Arc<[Self]> {
-        let mut runs: Vec<Self> = Vec::new();
-        for (range, capture) in captures {
-            let pieces = match name {
-                Some(name) => vec![
-                    range.start..range.end.min(name.start),
-                    range.start.max(name.end)..range.end,
-                ],
-                None => vec![range.clone()],
-            };
-            runs.extend(
-                pieces
-                    .into_iter()
-                    .filter(|piece| piece.start < piece.end)
-                    .map(|range| Self {
-                        range,
-                        capture: Some(*capture),
-                        is_name: false,
-                    }),
-            );
-        }
-        if let Some(name) = name {
-            runs.push(Self {
-                range: name.clone(),
-                capture: captures
-                    .iter()
-                    .find(|(range, _)| range.start <= name.start && name.start < range.end)
-                    .map(|(_, capture)| *capture),
-                is_name: true,
-            });
-        }
-        runs.sort_by_key(|run| run.range.start);
-        runs.into()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefinitionRow {
     pub signature: Arc<str>,
@@ -143,6 +94,8 @@ pub struct DefinitionRow {
     /// The definition sits in a file the review changes.
     pub in_pr: bool,
     pub target: NameTarget,
+    /// Its body, when the file could be read.
+    pub code: Option<Arc<CodePane>>,
 }
 
 /// A usage's line as the card shows it: the name is findable at a glance, even in a long line.
@@ -253,6 +206,8 @@ pub struct UsageLine {
     pub number: Arc<str>,
     pub snippet: Snippet,
     pub target: NameTarget,
+    /// The lines around it, when the file could be read.
+    pub code: Option<Arc<CodePane>>,
 }
 
 /// A file's usages as an IDE's references list groups them.
@@ -289,6 +244,47 @@ pub struct FoundNames {
     pub question: Option<ServerQuestion>,
     /// "and 6 more in 2 files"
     pub more_usages: Option<Arc<str>>,
+}
+
+/// A row of the card's lists, which the code pane can follow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardRow {
+    Definition(usize),
+    Usage { file: usize, line: usize },
+}
+
+impl FoundNames {
+    /// The code beside the lists for the row under the pointer: that row's own, else the first
+    /// definition's that has one. `None` when no row has code, so the card stays narrow.
+    pub fn code_pane(&self, row: Option<CardRow>) -> Option<&CodePane> {
+        let of_row = match row {
+            Some(CardRow::Definition(index)) => self
+                .definitions
+                .get(index)
+                .and_then(|row| row.code.as_deref()),
+            Some(CardRow::Usage { file, line }) => self
+                .usages
+                .get(file)
+                .and_then(|file| file.lines.get(line))
+                .and_then(|line| line.code.as_deref()),
+            None => None,
+        };
+        of_row.or_else(|| self.first_definition_code())
+    }
+
+    fn first_definition_code(&self) -> Option<&CodePane> {
+        self.definitions.iter().find_map(|row| row.code.as_deref())
+    }
+
+    /// Whether the card has code to show beside its lists.
+    pub fn shows_code(&self) -> bool {
+        self.first_definition_code().is_some()
+            || self
+                .usages
+                .iter()
+                .flat_map(|file| &file.lines)
+                .any(|line| line.code.is_some())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -455,6 +451,7 @@ fn usage_file(
                     highlights.usage(&usage.place),
                 ),
                 target: review.target_of(&usage.place),
+                code: highlights.usage_code(&usage.place),
             })
             .collect(),
     })
@@ -517,6 +514,7 @@ fn definition_row(
         place: place_label(&definition.place),
         in_pr: review.is_changed(&definition.place.path),
         target: review.target_of(&definition.place),
+        code: highlights.definition_code(&definition.place),
     }
 }
 

@@ -74,7 +74,7 @@
 
 **Usage**: A line at a commit that refers to a name by that name, not where it is defined. Like a definition, it is found by the by-name lookup, so it can belong to another thing of the same name; a local's usages are only those in its own function. Avoid: reference, call site.
 
-**Definition card**: What a hover of a name in a diff line of a Rust, PHP, TypeScript, Python or Go file shows: its definitions, best match first and how many when more than one, and its usages. Named after what it leads with, like the issue card. With a local clone it searches the whole repo at that commit; with code read from GitHub only the review's changed files, and it says so. Avoid: symbol card, hover info.
+**Definition card**: What a hover of a name in a diff line of a Rust, PHP, TypeScript, Python or Go file shows: its definitions, best match first and how many when more than one, and its usages. Named after what it leads with, like the issue card. With a local clone it searches the whole repo at that commit; with code read from GitHub only the review's changed files, and it says so. Beside the lists it has a code pane: the body of the definition, or the lines around the usage under the pointer. Avoid: symbol card, hover info.
 
 **PR description**: The PR's own body on GitHub, shown under the summary. The viewer keeps the last one it read; it is not part of the tour.
 

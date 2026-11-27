@@ -280,8 +280,7 @@ impl Scene {
             Self::CommentComposerNowPrimary => "91-comment-composer-now-primary",
             Self::TitleBarMerging => "92-title-bar-merging",
             Self::FoldedMarkdownParts => "93-folded-markdown-parts",
-            Self::StationsBusy => "95-sidebar-stations-busy",
-            Self::FilesList => "97-files-list",
+            Self::StationsBusy => "95-sidebar-stations-busy",            Self::FilesList => "97-files-list",
             Self::FilesListSearch => "98-files-list-search",
             Self::AgentPicker => "99-agent-picker",
             Self::AgentThread => "100-agent-thread",
@@ -848,8 +847,9 @@ impl OneStepLayout {
         cx: &mut Context<Self>,
     ) {
         let lookup = staged_lookup(&under.name);
+        let files = staged_files(&lookup);
         self.session.update(cx, |session, cx| {
-            session.stage_name_card(&under.name, lookup, cx);
+            session.stage_name_card(&under.name, lookup, &files, cx);
         });
         self.show_staged_name_card(under, word, cx);
     }
@@ -1574,6 +1574,59 @@ impl OneStepLayout {
     }
 }
 
+/// The enum's own file, so the card's code pane has a body to show beside the lists.
+fn staged_files(lookup: &Lookup) -> Vec<(FilePath, String)> {
+    const ENUM: &str = r"<?php
+
+declare(strict_types=1);
+
+namespace App\Models\Enum\StandingOrders;
+
+use Filament\Support\Contracts\HasColor;
+use Filament\Support\Contracts\HasLabel;
+use JsonSerializable;
+
+/**
+ * Where a scheduled delivery is in its life.
+ */
+enum StandingOrderScheduleItemStatus: string implements HasLabel, HasColor, JsonSerializable
+{
+    case PENDING = 'pending';
+    case WAITING_FOR_APPROVAL = 'waiting_for_approval';
+    case REJECTED = 'rejected';
+    case CANCELLED = 'cancelled';
+    case DELIVERED = 'delivered';
+
+    public function getLabel(): string
+    {
+        return match ($this) {
+            self::PENDING => 'Planned',
+            self::WAITING_FOR_APPROVAL => 'Waiting for approval',
+            self::REJECTED => 'Rejected',
+            self::CANCELLED => 'Called off',
+            self::DELIVERED => 'Delivered',
+        };
+    }
+
+    public function jsonSerialize(): string
+    {
+        return $this->value;
+    }
+}
+";
+    lookup
+        .definitions
+        .iter()
+        .map(|definition| definition.place.path.clone())
+        .filter(|path| {
+            std::path::Path::new(path.as_str())
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
+        })
+        .map(|path| (path, ENUM.to_owned()))
+        .collect()
+}
+
 /// The maintainer's case: a PHP enum used all over a big repo, with a same-named TypeScript enum.
 fn staged_lookup(hovered: &HoveredName) -> Lookup {
     const FOLDERS: [&str; 6] = [
@@ -1631,7 +1684,7 @@ fn staged_lookup(hovered: &HoveredName) -> Lookup {
             Definition {
                 name: word.clone(),
                 kind: DefinitionKind::Enum,
-                place: place("app/Models/Enum/StandingOrders/StandingOrderScheduleItemStatus.php", 12),
+                place: place("app/Models/Enum/StandingOrders/StandingOrderScheduleItemStatus.php", 14),
                 signature: format!(
                     "enum {word}: string implements HasLabel, HasColor, JsonSerializable"
                 )

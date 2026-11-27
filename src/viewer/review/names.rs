@@ -90,9 +90,14 @@ impl ReviewCore {
 
     /// A snapshot scene's lookup, landed as if it had run, for a name the review does not have to
     /// hold in a real file.
-    pub fn stage_looked_up_name(&mut self, hovered: &HoveredName, lookup: Lookup) {
+    pub fn stage_looked_up_name(
+        &mut self,
+        hovered: &HoveredName,
+        lookup: Lookup,
+        files: &[(FilePath, String)],
+    ) {
         if let Some(key) = self.name_key(hovered) {
-            let highlights = NameHighlights::staged(&lookup);
+            let highlights = NameHighlights::staged(&lookup, files);
             let answered_by = AnsweredBy::ByName { because: None };
             self.keep_card_of(
                 key,

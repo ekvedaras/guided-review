@@ -1063,9 +1063,10 @@ impl ReviewSession {
         &mut self,
         hovered: &HoveredName,
         lookup: crate::navigation::Lookup,
+        files: &[(FilePath, String)],
         cx: &mut Context<Self>,
     ) {
-        self.review.stage_looked_up_name(hovered, lookup);
+        self.review.stage_looked_up_name(hovered, lookup, files);
         cx.notify();
     }
 

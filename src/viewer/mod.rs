@@ -54,6 +54,7 @@ mod merging;
 mod move_offer;
 mod move_to_pr;
 mod name_card;
+mod name_code;
 mod name_desk;
 mod name_highlights;
 mod name_hover;
@@ -209,9 +210,10 @@ pub use merging::{
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 pub use move_to_pr::{DropLocalReview, PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
 pub use name_card::{
-    CardNote, CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, ServerQuestion,
+    CardNote, CardRow, DefinitionCard, DefinitionRow, FoundNames, NameTarget, ServerQuestion,
     Snippet, UsageFile, UsageLine,
 };
+pub use name_code::{BODY_LINES_AT_MOST, CodePane, CodeRun, PaneLine, USAGE_CONTEXT_LINES};
 pub use name_desk::{HoveredName, NameOutcome, NameUnderPointer, NameWaiting, NameWork};
 pub use name_highlights::NameHighlights;
 pub use name_highlights::USAGES_SHOWN;
