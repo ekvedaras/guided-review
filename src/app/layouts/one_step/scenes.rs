@@ -1600,9 +1600,9 @@ use Acme\Support\Contracts\HasColor;
 use Acme\Support\Contracts\HasLabel;
 use JsonSerializable;
 
-/**
- * Where a scheduled renewal is in its life.
- */
+/** Where a scheduled renewal is in its life. */
+#[Entity]
+#[Table('renewals')]
 enum SubscriptionRenewalStatus: string implements HasLabel, HasColor, JsonSerializable
 {
     case PENDING = 'pending';
@@ -1613,6 +1613,7 @@ enum SubscriptionRenewalStatus: string implements HasLabel, HasColor, JsonSerial
 
     public function getLabel(): string
     {
+        // The label a customer reads in the renewal reminder email, the account page and the invoice footer.
         return match ($this) {
             self::PENDING => 'Planned',
             self::WAITING_FOR_APPROVAL => 'Waiting for approval',

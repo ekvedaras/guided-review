@@ -1310,6 +1310,45 @@ fn a_definitions_code_runs_from_its_line_to_the_end_of_its_body() {
 }
 
 #[test]
+fn a_php_interface_with_its_brace_on_the_next_line_shows_its_whole_body() {
+    let shop = Shop::with_changes(
+        &[(
+            "app/Priced.php".to_owned(),
+            "<?php\n\nnamespace Shop;\n\ninterface Priced\n{\n    public function price(): int;\n}\n".to_owned(),
+        )],
+        |repo| {
+            repo.write(
+                "app/Orders.php",
+                "<?php\n\nnamespace Shop;\n\nfinal class Orders implements Priced\n{\n}\n",
+            );
+        },
+    );
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("app/Orders.php", Side::Head, 5, "Priced"),
+    ));
+
+    let row = card
+        .definitions
+        .iter()
+        .find(|row| row.place.starts_with("app/Priced.php"))
+        .unwrap();
+    assert_eq!(
+        lines_of(row.code.as_ref().unwrap()),
+        vec![
+            ("5", "interface Priced"),
+            ("6", "{"),
+            ("7", "    public function price(): int;"),
+            ("8", "}"),
+        ]
+    );
+}
+
+#[test]
 fn a_definitions_code_is_coloured_like_the_diff() {
     let shop = shop_with_rust_total(CART_RS);
     let source = shop.source();

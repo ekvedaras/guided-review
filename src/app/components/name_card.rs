@@ -416,7 +416,8 @@ fn usage_line(
     )))
 }
 
-/// The code beside the lists: lines coloured like the diff, scrolling inside the card.
+/// The code beside the lists: lines coloured like the diff, scrolling both ways inside the card;
+/// a long line runs on past the pane instead of being cut.
 fn code_pane(colors: &Colors, pane: &CodePane) -> Div {
     div()
         .w(px(CODE_PANE_WIDTH))
@@ -443,28 +444,31 @@ fn code_pane(colors: &Colors, pane: &CodePane) -> Div {
         .child(
             div()
                 .id(SharedString::from(Arc::clone(&pane.place)))
+                .min_w_0()
                 .max_h(px(NAME_CARD_LISTS_HEIGHT))
-                .overflow_y_scroll()
+                .overflow_scroll()
                 .py_2()
-                .flex()
-                .flex_col()
                 .font_family(*CODE_FONT)
                 .text_xs()
-                .children(
-                    pane.lines
-                        .iter()
-                        .enumerate()
-                        .map(|(index, line)| pane_line(colors, line, pane.marked == Some(index))),
-                )
-                .when(pane.cut, |lines| {
-                    lines.child(
-                        div()
-                            .flex_none()
-                            .pl(px(LINE_GUTTER + 24.))
-                            .text_color(colors.muted_text)
-                            .child("…"),
-                    )
-                }),
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_none()
+                        .min_w_full()
+                        .children(pane.lines.iter().enumerate().map(|(index, line)| {
+                            pane_line(colors, line, pane.marked == Some(index))
+                        }))
+                        .when(pane.cut, |lines| {
+                            lines.child(
+                                div()
+                                    .flex_none()
+                                    .pl(px(LINE_GUTTER + 24.))
+                                    .text_color(colors.muted_text)
+                                    .child("…"),
+                            )
+                        }),
+                ),
         )
 }
 
@@ -485,9 +489,7 @@ fn pane_line(colors: &Colors, line: &PaneLine, marked: bool) -> Div {
         )
         .child(
             div()
-                .flex_1()
-                .min_w_0()
-                .overflow_hidden()
+                .flex_none()
                 .whitespace_nowrap()
                 .child(code_text(colors, &line.text, &line.runs)),
         )

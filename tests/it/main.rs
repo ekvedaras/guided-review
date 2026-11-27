@@ -47,6 +47,7 @@ mod code_source;
 mod comment_actions;
 mod comments_list;
 mod contrast;
+mod declaration_end;
 mod definitions;
 mod desktop_file;
 mod diagrams;
