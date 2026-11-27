@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::ReviewCore;
+use crate::viewer::jump::JumpTarget;
 use crate::viewer::page::Page;
 use crate::viewer::replacing_jobs::{ReplacingJob, StartedJob};
 use crate::viewer::work_agenda::Work;
@@ -46,6 +47,12 @@ impl Review {
     pub fn note_scroll_top(&mut self, row: usize) {
         let page = Arc::clone(self.page());
         self.review.scrolled_to(row, &page);
+    }
+
+    /// The page is asked where the jump lands before the review changes.
+    pub fn jump_to(&mut self, target: &JumpTarget) {
+        let landing_row = self.page().row_of_jump(target);
+        self.deref_mut().jump_to(target, landing_row);
     }
 
     /// After Back or Forward, once: the row of the page to scroll to.

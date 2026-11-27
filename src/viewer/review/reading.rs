@@ -51,8 +51,13 @@ impl ReviewCore {
 
     /// A folded step opens for the session so the file or symbol the reviewer asked for is on screen.
     /// A jump is a visit even when it lands on the screen already open: Back returns to the line it left.
-    pub fn jump_to(&mut self, target: &JumpTarget) {
-        if self.reading_order().contains(&target.screen) {
+    /// `landing_row` is the row it lands on in the page shown now; a jump to the place already at the
+    /// top of the view leaves no entry, since Back would only return to where the reviewer is.
+    pub fn jump_to(&mut self, target: &JumpTarget, landing_row: usize) {
+        let is_shown_already = target.screen == self.screen
+            && landing_row == self.spot.row_hint()
+            && !matches!(&target.screen, Screen::Step(id) if self.is_folded(id));
+        if self.reading_order().contains(&target.screen) && !is_shown_already {
             self.leave_for(target.screen.clone());
         }
         if let Screen::Step(id) = &target.screen

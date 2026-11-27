@@ -11,6 +11,7 @@ The 2026-11-27 decisions that gave the reviewer a history of where they have bee
 - **Scope.** Per review. A re-pin carries it over (`carry_on_from`) and the reopened review resumes on its screen without a visit (`resume_on`); entries for screens the new tour no longer has are passed over. It is gone when another PR is opened (Cmd+P), since that replaces the layout and the review.
 
 - **Jumps on the same screen are visits too (2026-11-27, after trying the first version).** A jump to a `JumpTarget` (palette, Definition card, comments and files lists) pushes the place it left even when it lands on the open screen, so Back returns to the line jumped from instead of the previous screen (`ReviewCore::jump_to`). An entry is a screen plus a reading spot; scrolling by hand does not push. A jump that lands on the very row already at the top still leaves an entry, so one Back then looks like it did nothing.
+- **A jump to the place already shown leaves no entry (2026-11-27, supersedes the line above).** `Review::jump_to` asks the page where the jump lands (`Page::row_of_jump`) and `ReviewCore::jump_to` pushes nothing when that is the open screen's row at the top of the view. A folded step does not count as shown, since the jump opens it and moves its rows.
 
 ## Open
 
