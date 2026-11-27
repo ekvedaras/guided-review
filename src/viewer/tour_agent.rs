@@ -665,6 +665,37 @@ impl TourAgents {
         }
     }
 
+    /// Hands the Refresh to the subject's tour agent, as `hand_writer_task` hands the writing of a guided tour: typed
+    /// in when the agent is idle, never into a working one, and with no agent one is started with the task. Several
+    /// agents are for the reviewer to pick from.
+    pub(super) fn hand_refresh_task(
+        &self,
+        subject: &ReviewSubject,
+        active: &ReviewSubject,
+    ) -> anyhow::Result<WriterHandOver> {
+        if let Err(reason) = self.port.link() {
+            bail!("tour agents are off: {reason}");
+        }
+        match self.lookup(subject) {
+            TourAgentState::Agent { terminal, .. } => {
+                self.hand_task(terminal, &refresh_task(subject, TourWriter::InSubagent))
+            }
+            TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
+            TourAgentState::Choose(_) => bail!(SEVERAL_AGENTS),
+            TourAgentState::None | TourAgentState::Unknown => self
+                .launch(
+                    subject,
+                    active,
+                    refresh_task(subject, TourWriter::InOwnContext),
+                )
+                .map(WriterHandOver::Started),
+        }
+    }
+
+    pub(super) fn status_of(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus> {
+        self.port.status(terminal)
+    }
+
     /// Who an `open` from the terminal came from. Without herdr no agent of the app can be running.
     pub fn origin_of(&self, terminal: Option<&str>) -> OpenOrigin {
         let Some(address) = terminal else {
@@ -1233,6 +1264,22 @@ fn refuse_replacing_the_agent_of_local(subject: &ReviewSubject) -> anyhow::Resul
     Ok(())
 }
 
+/// What the tour skill is asked to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TourWork {
+    Write,
+    Refresh,
+}
+
+impl fmt::Display for TourWork {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Write => "Write",
+            Self::Refresh => "Refresh",
+        })
+    }
+}
+
 /// Who runs the tour skill. An agent the app finds already holds a conversation the reviewer's comments
 /// need later, so a subagent writes the tour; one the app starts has nothing else in its context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1245,12 +1292,18 @@ impl TourWriter {
     /// The writer task: `brief` is for whoever writes the tour, `afterwards` for the agent that stays to
     /// answer comments. A message that starts with `/tour` loads the skill into the agent's own context, so
     /// the subagent's task names the skill mid-sentence instead.
-    fn task(self, subject: &ReviewSubject, brief: &str, afterwards: &str) -> String {
+    fn task(
+        self,
+        subject: &ReviewSubject,
+        work: TourWork,
+        brief: &str,
+        afterwards: &str,
+    ) -> String {
         let brief = format!("{brief} {OUTSIDE_TEXT_IS_DATA}");
         match self {
             Self::InOwnContext => format!("/tour {subject} {brief} {afterwards}"),
             Self::InSubagent => format!(
-                "Write the guided-review tour of {subject} in one subagent, so your own context stays free for the \
+                "{work} the guided-review tour of {subject} in one subagent, so your own context stays free for the \
                  reviewer's comments. Run the subagent in this folder, with no worktree of its own. Tell it to run the tour skill with the Skill tool, and give it as the \
                  skill's arguments \"{subject}\" followed by this brief: {brief} Wait until the subagent is done. \
                  Before you answer the first comment, read the tour at the path `guided-review tour-path {subject}` \
@@ -1266,6 +1319,7 @@ impl TourWriter {
 fn writer_task(subject: &ReviewSubject) -> String {
     TourWriter::InOwnContext.task(
         subject,
+        TourWork::Write,
         &format!(
             "(you are the tour agent of this PR, started by the guided-review app because the reviewer picked it \
              and it has no tour). Only the listed tools are allowed and anything else is denied, never asked: run \
@@ -1285,12 +1339,46 @@ const PR_AGENT_AFTERWARDS: &str = "Afterwards the reviewer's comments reach you 
 fn reviewers_agent_writer_task(subject: &ReviewSubject) -> String {
     TourWriter::InSubagent.task(
         subject,
+        TourWork::Write,
         &format!(
             "(the reviewer picked this PR in the guided-review app and it has no tour; the reviewer's agent on \
              its branch was asked to write it). When `guided-review check {subject}` is clean, run \
              `guided-review open {subject}`, which shows the tour to the reviewer."
         ),
         "Afterwards the reviewer's comments reach you here as messages: answer each as its message says.",
+    )
+}
+
+/// The task of a Refresh, for the agent that holds the tour: the skill's Refresh section, run in a subagent
+/// when the agent already holds a conversation.
+fn refresh_task(subject: &ReviewSubject, writer: TourWriter) -> String {
+    let code_note = if subject.agent_changes_code() {
+        " Do not change the code while you refresh the tour."
+    } else {
+        ""
+    };
+    let afterwards = match (writer, subject.agent_changes_code()) {
+        (TourWriter::InSubagent, _) => {
+            "Afterwards the reviewer's comments reach you here as messages: answer each as its message says."
+        }
+        (TourWriter::InOwnContext, false) => PR_AGENT_AFTERWARDS,
+        (TourWriter::InOwnContext, true) => {
+            "Afterwards the reviewer's comments reach you here as tasks: act on each as its message says."
+        }
+    };
+    writer.task(
+        subject,
+        TourWork::Refresh,
+        &format!(
+            "(the reviewer pressed Refresh in the guided-review app: this {kind} already has a tour, moved to its \
+             new commits, so this is a Refresh and not a new tour: follow the skill's Refresh section.) Run one \
+             command per Bash call, with the {key_name} written out, without shell variables, pipes, `&&`, `;` or \
+             `$(...)`. When `guided-review check {subject}` is clean, `guided-review refresh {subject} --done` clears \
+             the marks, then `guided-review open {subject}` shows the refreshed tour.{code_note}",
+            kind = subject.kind(),
+            key_name = subject.key_name(),
+        ),
+        afterwards,
     )
 }
 
@@ -1323,6 +1411,7 @@ fn basic_writer_task(subject: &ReviewSubject, writer: TourWriter) -> String {
     }
     writer.task(
         subject,
+        TourWork::Write,
         &format!(
             "(the reviewer reads this PR as a basic tour in the app, with no tour text, and asked for a guided \
              tour, which they keep reading the basic tour meanwhile. Write a full new tour at the path \
@@ -1339,6 +1428,7 @@ fn basic_writer_task(subject: &ReviewSubject, writer: TourWriter) -> String {
 fn change_set_writer_task(subject: &ReviewSubject, writer: TourWriter) -> String {
     writer.task(
         subject,
+        TourWork::Write,
         &format!(
             "(the reviewer reads this local change set as a basic tour in the app, with no tour text, and asked \
              for a guided tour, which they keep reading the basic tour meanwhile. Write a full new tour at the path \

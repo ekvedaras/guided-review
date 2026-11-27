@@ -2,7 +2,7 @@
 //! Views read its state and send it user actions; tests drive it the same way.
 
 mod active_pr;
-mod agent_event;
+mod agent_refresh;
 mod ai_review;
 mod ai_review_run;
 mod app_state;
@@ -121,7 +121,7 @@ pub use crate::merge_method::MergeMethod;
 pub use crate::more_lines::{MoreLines, MoreLinesEntry};
 pub use active_pr::WritingFact;
 pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOutcome, WriteDecision};
-pub use agent_event::AgentEvent;
+pub use agent_refresh::{Pace, TourAgentRefresh};
 pub use ai_review::AiReview;
 pub use ai_review_run::{
     AiReviewAction, AiReviewRefusal, AiReviewRun, AiReviewStage, RunningReview,

@@ -57,6 +57,10 @@ pub struct FakeTourAgent {
     reviewing: Mutex<BTreeMap<TerminalId, ReviewSubject>>,
     /// Herdr fails to start an agent, with this reason.
     start_refusal: Mutex<Option<String>>,
+    /// What `status` reports after a send, one per look, the last one from then on.
+    after_send: Mutex<Vec<AgentStatus>>,
+    /// What the looks at the status after the send report now.
+    looks: Mutex<VecDeque<AgentStatus>>,
     /// What `follow` reports, in order, before its stream ends.
     coming: Mutex<VecDeque<AgentStatus>>,
     calls: Mutex<Vec<TourAgentCall>>,
@@ -77,6 +81,8 @@ impl FakeTourAgent {
             terminals: Mutex::default(),
             reviewing: Mutex::default(),
             start_refusal: Mutex::new(None),
+            after_send: Mutex::default(),
+            looks: Mutex::default(),
             coming: Mutex::default(),
             calls: Mutex::default(),
             live: Mutex::default(),
@@ -235,6 +241,12 @@ impl FakeTourAgent {
         self.with_terminal(terminal, None, AgentStatus::Unreported)
     }
 
+    /// After the next send, each look at the terminal's status reports the next of these.
+    pub fn after_a_send_looks_report(self, statuses: &[AgentStatus]) -> Self {
+        *self.after_send.lock().unwrap() = statuses.to_vec();
+        self
+    }
+
     pub fn then_reports(self, statuses: &[AgentStatus]) -> Self {
         self.coming.lock().unwrap().extend(statuses.iter().copied());
         self
@@ -343,6 +355,16 @@ impl TourAgentPort for FakeTourAgent {
     }
 
     fn status(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus> {
+        let mut looks = self.looks.lock().unwrap();
+        let scripted = if looks.len() > 1 {
+            looks.pop_front()
+        } else {
+            looks.front().copied()
+        };
+        if let Some(status) = scripted {
+            return Ok(status);
+        }
+        drop(looks);
         self.terminals
             .lock()
             .unwrap()
@@ -392,6 +414,8 @@ impl TourAgentPort for FakeTourAgent {
             .ok_or_else(|| anyhow::anyhow!("no terminal {terminal}"))?;
         *status = AgentStatus::Working;
         drop(terminals);
+        let script = std::mem::take(&mut *self.after_send.lock().unwrap());
+        self.looks.lock().unwrap().extend(script);
         self.record(TourAgentCall::Send {
             terminal: terminal.clone(),
             text: text.to_owned(),
@@ -449,6 +473,9 @@ impl TourAgentPort for FakeTourAgent {
             .lock()
             .unwrap()
             .insert(terminal.clone(), u64::MAX);
+        drop(terminals);
+        let script = std::mem::take(&mut *self.after_send.lock().unwrap());
+        self.looks.lock().unwrap().extend(script);
         Ok(terminal)
     }
 

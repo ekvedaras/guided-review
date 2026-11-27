@@ -116,7 +116,7 @@
 
 **Re-pin**: Moving a tour to the PR's new head after new commits, or a local review's tour to a new snapshot, with no AI. Each diff piece becomes same, changed, gone or new. Steps with changed pieces lose their read tick. In a basic tour, files with changed or new pieces lose their read tick.
 
-**Refresh**: An AI pass on a re-pinned tour. It rewrites only the steps whose pieces changed and places new pieces into steps.
+**Refresh**: An AI pass on a re-pinned tour. It rewrites only the steps whose pieces changed and places new pieces into steps. The Refresh tour button hands it to the subject's tour agent (the herdr terminal the sidebar shows as the tour agent) as a message, like Hand to agent, and lasts until the agent's turn ends (`TourAgentRefresh`); since 2026-11-27 no Claude session of its own is started for it.
 
 **Test set**: A fixed list of real PRs used to score the tour writer. Every change to how tours are written runs on it.
 

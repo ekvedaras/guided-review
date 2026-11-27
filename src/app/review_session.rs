@@ -1975,6 +1975,11 @@ impl ReviewSession {
         ));
     }
 
+    /// Several agents fit and none is picked, so a hand-off to the agent cannot choose.
+    pub fn tour_agent_must_be_picked(&self) -> bool {
+        !self.tour_agent.choices().is_empty()
+    }
+
     pub fn tour_agents(&self) -> TourAgents {
         self.tour_work.tour_agents.clone()
     }

@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
-use crate::claude_cli::ClaudeRefreshWriter;
 use crate::code_source::CodeSource;
 use crate::config::Config;
 use crate::hc_tour_agent::HcTourAgents;
@@ -12,8 +11,8 @@ use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner, adapte
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::Tour;
 use crate::viewer::{
-    CodeHost, HostCapabilities, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher,
-    TourReloader, TourSwitcher,
+    CodeHost, HostCapabilities, Pace, PrMover, PullsOfBranchPort, Review, TourAgentRefresh,
+    TourAgents, TourRefresher, TourReloader, TourSwitcher,
 };
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
@@ -49,17 +48,16 @@ pub fn open_review(
     let agent_folder = clone
         .clone()
         .unwrap_or_else(|| folders.home().to_path_buf());
+    let tour_agents = TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
+        .finding_head_branches_with(Arc::clone(&host) as Arc<dyn PullsOfBranchPort>)
+        .starting_in(agent_folder)
+        .with_summary_skill(Config::skill_for_launch::<TourWriter>(folders));
     let refresher = TourRefresher {
         folders: folders.clone(),
         subject: subject.clone(),
         pick_code_source: Arc::clone(&pick_code_source),
         host: capabilities,
-        writer: Arc::new(ClaudeRefreshWriter::new(
-            clone
-                .clone()
-                .unwrap_or_else(|| folders.home().to_path_buf()),
-            Tour::tours_dir(folders),
-        )),
+        writer: Arc::new(TourAgentRefresh::new(tour_agents.clone(), Pace::real())),
     };
     let reloader = TourReloader {
         folders: folders.clone(),
@@ -79,10 +77,6 @@ pub fn open_review(
         pick_code_source,
         host: capabilities,
     };
-    let tour_agents = TourAgents::new(Arc::new(HcTourAgents::new(Tour::tours_dir(folders))))
-        .finding_head_branches_with(Arc::clone(&host) as Arc<dyn PullsOfBranchPort>)
-        .starting_in(agent_folder)
-        .with_summary_skill(Config::skill_for_launch::<TourWriter>(folders));
     Ok(OpenedReview {
         review,
         source: source.into(),

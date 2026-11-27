@@ -129,7 +129,7 @@ fn reopened(opened: OpenedReview, rebuilt: RepinnedTour) -> Review {
 struct WriterThatChangesNothing;
 
 impl RefreshWriter for WriterThatChangesNothing {
-    fn refresh(&self, _: &ReviewSubject, _: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
+    fn refresh(&self, _: &ReviewSubject, _: &mut dyn FnMut(String)) -> anyhow::Result<()> {
         Ok(())
     }
 }

@@ -41,7 +41,7 @@ impl RenderOnce for RefreshBanner {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Colors::active(cx);
         let message = match &self.progress {
-            JobProgress::Running { .. } => "Refreshing the tour with your claude…".to_owned(),
+            JobProgress::Running { .. } => "Refreshing the tour with the tour agent…".to_owned(),
             JobProgress::Idle | JobProgress::Failed(_) => format!(
                 "{} to rewrite, {} to place since the new commits.",
                 counted(self.brief.stale_steps.len(), "step", "steps"),

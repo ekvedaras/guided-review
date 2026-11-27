@@ -17,6 +17,16 @@ Lessons that hold beyond this bug:
 - An agent with a fixed tool list fails on chained shell commands. Prompts and skills it reads should ask for one command per call.
 - As of `8a99930` the app keeps no log of an agent run's output, so the only evidence was Claude Code's own transcripts. Open.
 
+## Refresh tour goes to the tour agent (2026-11-27)
+
+The maintainer decided that Refresh tour no longer runs `claude -p` ("guided-review agents", started by the app, never used again) but is handed to the PR's tour agent, as Hand to agent is. This supersedes the "refresh writer keeps `dontAsk`" line of 2026-11-10 and the 2026-11-06 account above of how the refresh runs; the lessons there still hold.
+
+- `TourAgentRefresh` (`viewer/agent_refresh.rs`) is the `RefreshWriter`. It types the task into the idle agent as the writing of a guided tour is typed (`TourAgents::hand_refresh_task`): a subagent runs the skill's Refresh section when the agent already holds a conversation. With no agent the app starts one, as every other hand-off does, with the task as its first (under `tour_agent_tools`, which already allows `repin`, `refresh`, `check` and `open`); several agents are for the reviewer to pick, and the Refresh button opens Pick the agent instead of starting. A local review's agent is also told not to change the code.
+- Done is the agent's turn ending, read by looking at its herdr status every 2 s: it has to be seen working, then idle. A busy agent is waited for up to 10 minutes, one that does not start on the task for 60 s. `TourRefresher` then checks the outcome as before: the marks must be gone, else the refresh fails and the sidebar says so. "The agent finished its turn" still proves nothing alone.
+- The banner's activity line is now what the app does (waiting for the agent, the agent is refreshing, it waits for you), not each tool Claude used: herdr gives a status, not a tool stream. `AgentEvent`, the stream-json reader, went with `ClaudeRefreshWriter`.
+- The agent's own `open` at the end reloads the review (`reload_tour`) after the Refresh landed, which is a second, harmless rebuild.
+- Open: no way to cancel a Refresh that waits for the agent; a Refresh while the agent is on a long turn blocks every other replacing job for up to 10 minutes. Not tried on a live agent.
+
 ## One window, a PR switcher, and the tour agent hears comments (2026-11-06)
 
 The maintainer asked for: comments reach the tour's agent at once; a PR switcher that starts a tour writer for a PR with no tour; one window that every CLI command reuses. The spec goes to a GitHub issue ([where work is tracked](delivery.md)).

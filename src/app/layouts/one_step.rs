@@ -1544,8 +1544,16 @@ impl Render for OneStepLayout {
                                 RefreshBanner::new(
                                     brief,
                                     refresh_progress,
-                                    cx.listener(|this, _, _, cx| {
-                                        this.session.update(cx, ReviewSession::refresh_tour);
+                                    cx.listener(|this, _, window, cx| {
+                                        if this.session.read(cx).tour_agent_must_be_picked() {
+                                            this.open_agent_picker(
+                                                crate::viewer::AgentRole::Tour,
+                                                window,
+                                                cx,
+                                            );
+                                        } else {
+                                            this.session.update(cx, ReviewSession::refresh_tour);
+                                        }
                                     }),
                                 )
                             }),

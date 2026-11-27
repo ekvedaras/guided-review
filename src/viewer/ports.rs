@@ -421,10 +421,13 @@ pub struct ViewedFile {
     pub state: ViewedState,
 }
 
-/// Starts the local AI on the tour skill to Refresh the tour of a PR. Blocks until it is done.
+/// Has the subject's tour agent Refresh its tour. Blocks until the agent is done.
 pub trait RefreshWriter: Send + Sync {
-    /// Passes every stream line of the AI to `on_line` as it arrives. The core reads them, so adapters stay
-    /// thin. An `Ok` says only that the AI ran to its end, not that it refreshed the tour.
-    fn refresh(&self, subject: &ReviewSubject, on_line: &mut dyn FnMut(&str))
-    -> anyhow::Result<()>;
+    /// Tells what is going on to `on_activity` as it happens. An `Ok` says only that the agent ran to its
+    /// end, not that it refreshed the tour.
+    fn refresh(
+        &self,
+        subject: &ReviewSubject,
+        on_activity: &mut dyn FnMut(String),
+    ) -> anyhow::Result<()>;
 }

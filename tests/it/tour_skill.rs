@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use guided_review::claude_cli::{refresh_writer_tools, tour_agent_tools};
+use guided_review::claude_cli::{tour_agent_tools, tour_skill_tools};
 
 const SKILL: &str = include_str!("../../skills/tour/SKILL.md");
 
@@ -58,11 +58,11 @@ fn a_tour_agent_may_run_every_command_the_tour_skill_asks_for() {
 }
 
 #[test]
-fn the_refresh_writer_may_run_every_command_the_refresh_section_asks_for() {
+fn the_tour_agent_may_run_every_command_the_refresh_section_asks_for() {
     let commands = commands_in(refresh_section());
     assert!(commands.len() >= 6, "{commands:?}");
 
-    let tools = refresh_writer_tools(
+    let tools = tour_skill_tools(
         Path::new("/clones/shop"),
         Path::new("/home/me/.local/state/guided-review/tours"),
     );
@@ -70,8 +70,8 @@ fn the_refresh_writer_may_run_every_command_the_refresh_section_asks_for() {
 }
 
 #[test]
-fn the_refresh_writer_may_read_grep_and_glob_but_reads_only_its_clone_and_the_tours_folder() {
-    let tools = refresh_writer_tools(
+fn the_tour_agent_may_read_grep_and_glob_but_reads_only_its_clone_and_the_tours_folder() {
+    let tools = tour_skill_tools(
         Path::new("/clones/shop"),
         Path::new("/home/me/.local/state/guided-review/tours"),
     );

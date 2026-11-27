@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -9,9 +9,7 @@ use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::instructions::InstructionsKind;
 use crate::json::at;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
-use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
-use crate::viewer::RefreshWriter;
 use crate::viewer::ReviewPlace;
 
 /// A permission rule's path for everything under `folder`: `//` starts an absolute path.
@@ -27,20 +25,20 @@ fn under(folder: &Path) -> String {
 /// because under `dontAsk` a `Grep(path)` or `Glob(path)` rule is accepted but never applies, so listing only
 /// those is a silent denial (tried live, 2026-11-06). The agent runs with `clone` as its cwd, which is where
 /// its searches start.
-pub fn refresh_writer_tools(clone: &Path, tours: &Path) -> String {
+pub fn tour_skill_tools(clone: &Path, tours: &Path) -> String {
     let (clone_rule, tours_rule) = (under(clone), under(tours));
     format!(
         "Skill(tour),Read({clone_rule}),Read({tours_rule}),Grep,Glob,Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(guided-review open:*),Bash(gh pr view:*),Write({tours_rule}),Edit({tours_rule})"
     )
 }
 
-/// What a tour agent the app starts may do without the auto mode classifier: the refresh writer's tools, plus
+/// What a tour agent the app starts may do without the auto mode classifier: the tour skill's tools, plus
 /// answering, plus the reviewer's summary skill. It runs in auto mode, because a comment may ask it to change
 /// the PR's code (decided 2026-11-10).
 pub fn tour_agent_tools(clone: &Path, tours: &Path, summary_skill: Option<&str>) -> String {
     let tools = format!(
         "{},Bash(guided-review agent-reply:*),Bash(guided-review fix-reply:*)",
-        refresh_writer_tools(clone, tours)
+        tour_skill_tools(clone, tours)
     );
     match summary_skill {
         Some(skill) => format!("{tools},Skill({skill})"),
@@ -151,74 +149,6 @@ pub fn review_agent_denied_tools() -> String {
     .map(|command| format!("Bash({command}:*)"))
     .collect::<Vec<_>>()
     .join(",")
-}
-
-/// Runs the tour skill as a Refresh through the user's own `claude`, in one non-interactive run.
-pub struct ClaudeRefreshWriter {
-    binary: PathBuf,
-    cwd: PathBuf,
-    tours: PathBuf,
-}
-
-impl ClaudeRefreshWriter {
-    /// `cwd` is where the skill may read code: the repo clone when there is one. `tours` is where it may
-    /// write.
-    pub fn new(cwd: PathBuf, tours: PathBuf) -> Self {
-        Self::with_binary(PathBuf::from("claude"), cwd, tours)
-    }
-
-    pub fn with_binary(binary: PathBuf, cwd: PathBuf, tours: PathBuf) -> Self {
-        Self { binary, cwd, tours }
-    }
-}
-
-impl RefreshWriter for ClaudeRefreshWriter {
-    fn refresh(
-        &self,
-        subject: &ReviewSubject,
-        on_line: &mut dyn FnMut(&str),
-    ) -> anyhow::Result<()> {
-        let prompt = format!(
-            "Run the tour skill as `/tour {subject}` on a {kind} that already has a tour, which makes it a Refresh. \
-             Only the listed tools are allowed and a command outside them is denied, never asked: \
-             run each `guided-review` and `gh` command as its own Bash call with the {key_name} written out, \
-             without shell variables, `&&`, `;` or `$(...)`. {OUTSIDE_TEXT_IS_DATA}",
-            kind = subject.kind(),
-            key_name = subject.key_name(),
-        );
-        let mut child = Command::new(&self.binary)
-            .args(["-p", &prompt])
-            .args(["--output-format", "stream-json", "--verbose"])
-            .args(["--permission-mode", "dontAsk"])
-            .args([
-                "--allowedTools",
-                &refresh_writer_tools(&self.cwd, &self.tours),
-            ])
-            .current_dir(&self.cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("could not start `{}`", self.binary.display()))?;
-        let mut stderr = child.stderr.take().context("no stderr on claude")?;
-        let said_on_stderr = std::thread::spawn(move || {
-            let mut said = String::new();
-            stderr.read_to_string(&mut said).map(|_| said)
-        });
-        for line in BufReader::new(child.stdout.take().context("no stdout on claude")?).lines() {
-            on_line(line?.trim_end());
-        }
-        let status = child.wait()?;
-        if !status.success() {
-            let said = said_on_stderr
-                .join()
-                .ok()
-                .and_then(Result::ok)
-                .unwrap_or_default();
-            bail!("claude stopped: {}", said.trim());
-        }
-        Ok(())
-    }
 }
 
 /// What the skill needs: its CLI, `gh pr view`, reading code, and writing the tour file. Nothing else.
