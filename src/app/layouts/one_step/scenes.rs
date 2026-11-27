@@ -119,6 +119,7 @@ enum Scene {
     TitleBarMerging,
     FoldedMarkdownParts,
     StationsBusy,
+    GithubCardLongState,
     FilesList,
     FilesListSearch,
     AgentPicker,
@@ -126,7 +127,7 @@ enum Scene {
 }
 
 impl Scene {
-    const ALL: [Self; 77] = [
+    const ALL: [Self; 78] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -200,6 +201,7 @@ impl Scene {
         Self::TitleBarMerging,
         Self::FoldedMarkdownParts,
         Self::StationsBusy,
+        Self::GithubCardLongState,
         Self::FilesList,
         Self::FilesListSearch,
         Self::AgentPicker,
@@ -280,7 +282,9 @@ impl Scene {
             Self::CommentComposerNowPrimary => "91-comment-composer-now-primary",
             Self::TitleBarMerging => "92-title-bar-merging",
             Self::FoldedMarkdownParts => "93-folded-markdown-parts",
-            Self::StationsBusy => "95-sidebar-stations-busy",            Self::FilesList => "97-files-list",
+            Self::StationsBusy => "95-sidebar-stations-busy",
+            Self::GithubCardLongState => "101-sidebar-github-card-long-state",
+            Self::FilesList => "97-files-list",
             Self::FilesListSearch => "98-files-list-search",
             Self::AgentPicker => "99-agent-picker",
             Self::AgentThread => "100-agent-thread",
@@ -1250,6 +1254,11 @@ impl OneStepLayout {
                 self.session
                     .update(cx, |session, cx| session.stage_viewed_wait(true, cx));
             }
+            Scene::GithubCardLongState => {
+                self.picked_station = Some(StationKind::Host);
+                self.session
+                    .update(cx, |session, cx| session.stage_viewed_wait(true, cx));
+            }
             Scene::RefreshRunning => {
                 self.scroll_to_row(0);
                 self.session
@@ -1380,6 +1389,11 @@ impl OneStepLayout {
                     review.ai_review_is(AiReview::NotRun);
                     review.go_to_summary();
                 });
+            }
+            Scene::GithubCardLongState => {
+                self.picked_station = None;
+                self.session
+                    .update(cx, |session, cx| session.stage_viewed_wait(false, cx));
             }
             Scene::HostOutage => {
                 self.session.update(cx, ReviewSession::unstage_outage);

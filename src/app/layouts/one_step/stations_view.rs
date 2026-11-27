@@ -327,7 +327,7 @@ impl OneStepLayout {
                 div()
                     .min_h(px(TILE_SIZE))
                     .flex()
-                    .items_center()
+                    .items_start()
                     .gap(px(TILE_GAP))
                     .text_xs()
                     .child(
@@ -356,20 +356,28 @@ impl OneStepLayout {
                                 px(12.),
                             )),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(station.kind.name()),
-                    )
+                    // The state goes under the name when the two do not fit one line, as a station's
+                    // line under the card does, so a long state never runs over the name.
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
+                            .pt(px((TILE_SIZE - LINE_HEIGHT) / 2.))
                             .flex()
-                            .justify_end()
-                            .text_right()
-                            .child(state_text(colors, station, "station-card-state")),
+                            .flex_wrap()
+                            .justify_between()
+                            .gap_x_3()
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(station.kind.name()),
+                            )
+                            .child(div().min_w_0().child(state_text(
+                                colors,
+                                station,
+                                "station-card-state",
+                            ))),
                     )
                     .when(!head_buttons.is_empty(), |head| {
                         head.child(
@@ -377,6 +385,7 @@ impl OneStepLayout {
                                 .flex_none()
                                 .flex()
                                 .items_center()
+                                .self_center()
                                 .my(px(-2.))
                                 .mr(px(-6.))
                                 .children(head_buttons),

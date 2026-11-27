@@ -2040,7 +2040,7 @@ impl ReviewSession {
                 rows.stations.stage(Station::of_host(
                     pr.host,
                     StationHealth::Waiting,
-                    "3 viewed marks waiting · 4 min",
+                    "90 viewed marks waiting · 12 min",
                 ));
             }
         }
