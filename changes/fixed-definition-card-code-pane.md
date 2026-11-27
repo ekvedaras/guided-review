@@ -1,1 +1,1 @@
-The Definition card's code pane shows a whole declaration under an attribute and scrolls sideways.
+The Definition card's code pane shows a declaration whole, with its doc comment and attributes, and scrolls sideways.

@@ -1,9 +1,14 @@
 use guided_review::language::Language;
 use guided_review::line_number::LineNumber;
-use guided_review::navigation::declaration_end;
+use guided_review::navigation::declaration_lines;
+
+fn lines_of(language: Language, source: &str, line: usize) -> Option<(u32, u32)> {
+    declaration_lines(language, source, LineNumber::try_from(line).unwrap())
+        .map(|lines| (lines.start.get(), lines.end.get()))
+}
 
 fn end_of(language: Language, source: &str, line: usize) -> Option<u32> {
-    declaration_end(language, source, LineNumber::try_from(line).unwrap()).map(LineNumber::get)
+    lines_of(language, source, line).map(|(_, end)| end)
 }
 
 #[test]
@@ -139,4 +144,61 @@ fn a_php_abstract_method_under_an_attribute_ends_at_its_semicolon() {
     let source = "<?php\n\nabstract class Cart\n{\n    #[Route('/total')]\n    abstract public function total(): int;\n\n    public function other(): int\n    {\n        return 1;\n    }\n}\n";
 
     assert_eq!(end_of(Language::Php, source, 6), Some(6));
+}
+
+#[test]
+fn a_php_interface_method_starts_at_its_doc_comment() {
+    let source = "<?php\n\ninterface Priced\n{\n    /**\n     * The price in cents.\n     */\n    public function price(int $a, int $b): ?Money;\n}\n";
+
+    assert_eq!(lines_of(Language::Php, source, 8), Some((5, 8)));
+}
+
+#[test]
+fn a_php_abstract_method_under_an_attribute_with_a_signature_over_many_lines_is_whole() {
+    let source = "<?php\n\nabstract class Cart\n{\n    /** The total. */\n    #[Route('/total')]\n    abstract public function total(\n        int $a,\n    ): int;\n}\n";
+
+    assert_eq!(lines_of(Language::Php, source, 7), Some((5, 9)));
+}
+
+#[test]
+fn a_rust_trait_fn_without_a_body_starts_at_its_doc_comment_and_attribute() {
+    let source = "pub trait Priced {\n    /// The price in cents.\n    #[must_use]\n    fn price(&self) -> u32;\n}\n";
+
+    assert_eq!(lines_of(Language::Rust, source, 4), Some((2, 4)));
+}
+
+#[test]
+fn a_typescript_overload_starts_at_its_doc_comment() {
+    let source = "/** Adds them up. */\nexport function total(a: number): number;\nexport function total(a: number, b?: number): number {\n    return a;\n}\n";
+
+    assert_eq!(lines_of(Language::TypeScript, source, 2), Some((1, 2)));
+}
+
+#[test]
+fn a_go_interface_method_starts_at_its_comment() {
+    let source =
+        "package shop\n\ntype Priced interface {\n\t// Price is in cents.\n\tPrice() int\n}\n";
+
+    assert_eq!(lines_of(Language::Go, source, 5), Some((4, 5)));
+}
+
+#[test]
+fn a_rust_fn_with_a_body_starts_at_its_doc_comment() {
+    let source = "/// The total.\npub fn total() -> u32 {\n    1\n}\n";
+
+    assert_eq!(lines_of(Language::Rust, source, 2), Some((1, 4)));
+}
+
+#[test]
+fn a_python_def_starts_at_its_decorator() {
+    let source = "import functools\n\n\n@functools.cache\ndef total():\n    return 1\n";
+
+    assert_eq!(lines_of(Language::Python, source, 5), Some((4, 6)));
+}
+
+#[test]
+fn a_comment_apart_from_the_declaration_by_a_blank_line_is_not_its_own() {
+    let source = "<?php\n\nclass Cart\n{\n    // Totals.\n\n    public function total(): int\n    {\n        return 1;\n    }\n}\n";
+
+    assert_eq!(lines_of(Language::Php, source, 7), Some((7, 10)));
 }

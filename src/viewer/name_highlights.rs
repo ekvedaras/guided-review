@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::language::Language;
-use crate::navigation::{Lookup, Place, declaration_end};
+use crate::navigation::{Lookup, Place, declaration_lines};
 use crate::pull_request::Sha;
 use crate::symbols::NO_ORIGIN;
 
@@ -112,6 +112,13 @@ impl NameHighlights {
             highlights
                 .usages
                 .insert(usage.place.clone(), alone(&usage.place.path, &usage.text));
+            if let Some(pane) =
+                staged_file(files, &usage.place.path).and_then(|file| file.around(&usage.place))
+            {
+                highlights
+                    .usage_code
+                    .insert(usage.place.clone(), Arc::new(pane));
+            }
         }
         highlights
     }
@@ -184,11 +191,12 @@ impl HighlightedFile {
         })
     }
 
-    /// A definition's lines, from its own to the end of its body, or the first ones of a long body.
+    /// A definition's lines, from its doc comment and attributes to the end of its body, or the
+    /// first ones of a long declaration.
     fn body(&self, place: &Place) -> Option<CodePane> {
         let language = Language::for_path(self.path.as_str())?;
-        let last = declaration_end(language, &self.source, place.line)?;
-        let (first, last) = (place.line.get() as usize, last.get() as usize);
+        let lines = declaration_lines(language, &self.source, place.line)?;
+        let (first, last) = (lines.start.get() as usize, lines.end.get() as usize);
         let shown_last = last.min(first + BODY_LINES_AT_MOST - 1);
         self.pane(place, first, shown_last, last > shown_last, None)
     }

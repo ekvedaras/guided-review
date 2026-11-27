@@ -1349,6 +1349,45 @@ fn a_php_interface_with_its_brace_on_the_next_line_shows_its_whole_body() {
 }
 
 #[test]
+fn an_interface_methods_code_shows_its_doc_comment_above_its_whole_signature() {
+    let shop = Shop::with_changes(
+        &[(
+            "app/Priced.php".to_owned(),
+            "<?php\n\nnamespace Shop;\n\ninterface Priced\n{\n    /**\n     * The price in cents, or none before checkout.\n     */\n    public function price(int $a, int $b): ?Money;\n}\n".to_owned(),
+        )],
+        |repo| {
+            repo.write(
+                "app/Orders.php",
+                "<?php\n\nnamespace Shop;\n\nfunction pay(Priced $cart)\n{\n    return $cart->price(1, 2);\n}\n",
+            );
+        },
+    );
+    let source = shop.source();
+    let mut review = shop.open(&source);
+
+    let card = found(card_of(
+        &mut review,
+        &source,
+        &hover("app/Orders.php", Side::Head, 7, "price"),
+    ));
+
+    let row = card
+        .definitions
+        .iter()
+        .find(|row| row.place.starts_with("app/Priced.php"))
+        .unwrap();
+    assert_eq!(
+        lines_of(row.code.as_ref().unwrap()),
+        vec![
+            ("7", "    /**"),
+            ("8", "     * The price in cents, or none before checkout."),
+            ("9", "     */"),
+            ("10", "    public function price(int $a, int $b): ?Money;"),
+        ]
+    );
+}
+
+#[test]
 fn a_definitions_code_is_coloured_like_the_diff() {
     let shop = shop_with_rust_total(CART_RS);
     let source = shop.source();

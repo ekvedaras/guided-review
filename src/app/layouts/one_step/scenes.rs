@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use gpui::{
     App, AsyncWindowContext, Bounds, Context, Keystroke, ListOffset, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Task, WeakEntity, Window,
-    point, px,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, ScrollDelta, ScrollEvent,
+    ScrollHandle, Task, TouchPhase, WeakEntity, Window, point, px,
 };
 
 use super::OneStepLayout;
@@ -29,8 +29,9 @@ use crate::review_subject::{BranchName, ReviewSubject};
 use crate::update::running_build;
 use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer};
 use crate::version::Version;
+use crate::viewer::DefinitionCard;
 use crate::viewer::{
-    AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
+    AgentStatus, AiReview, AiReviewRun, AutoMerge, CardRow, CheckRun, CheckState, Checks, FileView,
     HoveredName, LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability,
     Merging, NameUnderPointer, OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind,
     Readiness, Review, TerminalId, TextBox,
@@ -523,7 +524,84 @@ async fn hover_a_name(
     cx.update(|window, cx| window.dispatch_event(move_to(point(px(-1000.), px(-1000.))), cx))?;
     layout.update(cx, |layout, cx| layout.stage_name_card(under, word, cx))?;
     camera.take("96-name-card", cx).await?;
+    let pane = layout.update(cx, |layout, _| layout.name_card_code_scroll.clone())?;
+    swipe_the_code_pane(
+        camera,
+        &pane,
+        ("97-name-card-swiped-sideways", Modifiers::default()),
+        ScrollDelta::Pixels(point(px(-600.), px(0.))),
+        cx,
+    )
+    .await?;
+    layout.update(cx, OneStepLayout::follow_a_long_usage_line)?;
+    // A mouse wheel turned with shift held, as macOS hands it over: the turn comes as lines along x.
+    swipe_the_code_pane(
+        camera,
+        &pane,
+        (
+            "98-name-card-usage-shift-wheel",
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+        ),
+        ScrollDelta::Lines(point(-30., 0.)),
+        cx,
+    )
+    .await?;
     layout.update(cx, OneStepLayout::dismiss_name_card)
+}
+
+/// The open card's code pane scrolled by one sideways scroll event, as the window gets it from the
+/// trackpad or the mouse wheel; fails when the pane did not move, so the run checks the scroll.
+async fn swipe_the_code_pane(
+    camera: &Camera,
+    pane: &ScrollHandle,
+    (name, modifiers): (&str, Modifiers),
+    delta: ScrollDelta,
+    cx: &mut AsyncWindowContext,
+) -> anyhow::Result<()> {
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+    })?;
+    let spot = pane.bounds().center();
+    cx.update(|window, cx| {
+        window.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: spot,
+                pressed_button: None,
+                modifiers,
+            }),
+            cx,
+        );
+        window.refresh();
+        window.draw(cx).clear(cx);
+        window.dispatch_event(
+            PlatformInput::Scroll(ScrollEvent {
+                position: spot,
+                delta,
+                modifiers,
+                touch_phase: TouchPhase::Moved,
+                ..ScrollEvent::default()
+            }),
+            cx,
+        );
+        window.refresh();
+        window.draw(cx).clear(cx);
+    })?;
+    let (offset, most) = (pane.offset(), pane.max_offset());
+    eprintln!(
+        "{name}: the code pane scrolled to x {} of {}",
+        offset.x, most.x
+    );
+    anyhow::ensure!(
+        offset.x < px(0.),
+        "{name}: the code pane did not scroll sideways (x {}, at most {})",
+        offset.x,
+        most.x
+    );
+    camera.take(name, cx).await
 }
 
 /// The issue card's description dragged down by its scrollbar, as the mouse gives it: pressed on the
@@ -844,6 +922,22 @@ impl OneStepLayout {
 
     /// The card by `word`, with a lookup that found two definitions, some usages and a note, so
     /// the card has all its parts.
+    /// The code pane follows the third usage of the first file, whose line runs past the pane.
+    fn follow_a_long_usage_line(&mut self, cx: &mut Context<Self>) {
+        let Some(name) = self.name_hover.shown().cloned() else {
+            return;
+        };
+        let Some(card) = self.session.read(cx).review().definition_card(&name) else {
+            return;
+        };
+        let DefinitionCard::Found(found) = &*card else {
+            return;
+        };
+        let staged = found.usages.first().and_then(|file| file.lines.get(2));
+        self.follow_card_row(staged.map(|_| CardRow::Usage { file: 0, line: 2 }));
+        cx.notify();
+    }
+
     fn stage_name_card(
         &mut self,
         under: NameUnderPointer,
@@ -1644,7 +1738,37 @@ enum SubscriptionRenewalStatus: string implements HasLabel, HasColor, JsonSerial
                 ENUM.replace("SubscriptionRenewalStatus", lookup.word.as_str()),
             )
         })
+        .chain(first_usage_file(lookup))
         .collect()
+}
+
+/// The file the card lists first, holding its usages at their lines, so a usage's pane has code.
+fn first_usage_file(lookup: &Lookup) -> Option<(FilePath, String)> {
+    let path = first_usage_path(lookup)?;
+    let mut lines = vec!["<?php".to_owned()];
+    for usage in lookup
+        .usages
+        .iter()
+        .filter(|usage| usage.place.path == path)
+    {
+        let index = usize::try_from(usage.place.line.get()).ok()? - 1;
+        if lines.len() <= index {
+            lines.resize(index + 1, String::new());
+        }
+        if let Some(line) = lines.get_mut(index) {
+            *line = format!("        {}", usage.text);
+        }
+    }
+    Some((path, lines.join("\n") + "\n"))
+}
+
+/// The card lists usage files by path, as none of the staged ones is in the PR.
+fn first_usage_path(lookup: &Lookup) -> Option<FilePath> {
+    lookup
+        .usages
+        .iter()
+        .map(|usage| usage.place.path.clone())
+        .min()
 }
 
 /// A PHP enum used all over a big repo, with a same-named TypeScript enum.

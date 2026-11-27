@@ -178,6 +178,8 @@ pub struct OneStepLayout {
     name_card_place: Option<NameCardPlace>,
     /// The row of the open card the code pane follows; `None` shows the first definition's.
     name_card_row: Option<crate::viewer::CardRow>,
+    /// How far the open card's code pane is scrolled; back to the top left for each new pane.
+    name_card_code_scroll: gpui::ScrollHandle,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
     /// Which way the reader went to the screen on show, so its content comes in from that side.
@@ -401,6 +403,7 @@ impl OneStepLayout {
             name_card_waits_at: gpui::Bounds::default(),
             name_card_place: None,
             name_card_row: None,
+            name_card_code_scroll: gpui::ScrollHandle::new(),
             selection_notice: None,
             page_drag: ScrollbarDrag::default(),
             issue_card_drag: ScrollbarDrag::default(),

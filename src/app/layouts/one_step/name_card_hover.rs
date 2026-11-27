@@ -82,7 +82,14 @@ impl OneStepLayout {
         }
         self.name_hover.dismiss();
         self.name_card_place = None;
-        self.name_card_row = None;
+        self.follow_card_row(None);
+    }
+
+    /// The code pane follows `row`, from its top left.
+    pub(super) fn follow_card_row(&mut self, row: Option<crate::viewer::CardRow>) {
+        self.name_card_row = row;
+        self.name_card_code_scroll
+            .set_offset(gpui::Point::default());
     }
 
     fn wait(
@@ -176,7 +183,7 @@ impl OneStepLayout {
                 layout
                     .update(cx, |this, cx| {
                         if this.name_card_row != Some(row) {
-                            this.name_card_row = Some(row);
+                            this.follow_card_row(Some(row));
                             cx.notify();
                         }
                     })
@@ -203,6 +210,7 @@ impl OneStepLayout {
             on_answer: &on_answer,
             on_row: &on_row,
             followed: self.name_card_row,
+            code_scroll: &self.name_card_code_scroll,
         };
         let colors = Colors::active(cx);
         let room = window.viewport_size().width - px(2. * WINDOW_MARGIN);

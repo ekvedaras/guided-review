@@ -7,7 +7,7 @@ use std::sync::Arc;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, Div, FontWeight, HighlightStyle, InteractiveElement, IntoElement, ParentElement, Pixels,
-    SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div, px,
+    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div, px,
 };
 
 use crate::navigation::ServerAnswer;
@@ -40,12 +40,14 @@ pub type OnCardRow = Rc<dyn Fn(CardRow, &mut Window, &mut App)>;
 /// What a click on Yes or No under the card's question does.
 pub type OnServerAnswer = Rc<dyn Fn(ServerAnswer, &mut Window, &mut App)>;
 
-/// What a click and the pointer on its rows do, and the row the code pane follows.
+/// What a click and the pointer on its rows do, the row the code pane follows, and how far the
+/// pane is scrolled.
 pub struct CardActions<'a> {
     pub on_open: &'a OnNameTarget,
     pub on_answer: &'a OnServerAnswer,
     pub on_row: &'a OnCardRow,
     pub followed: Option<CardRow>,
+    pub code_scroll: &'a ScrollHandle,
 }
 
 /// `room` is the width the window leaves for the card, so a narrow window shrinks it.
@@ -60,6 +62,7 @@ pub fn name_card(
         on_answer,
         on_row,
         followed,
+        code_scroll,
     } = actions;
     let panel = overlay_panel(colors).w(px(NAME_CARD_WIDTH)).max_w(room);
     match card {
@@ -88,7 +91,7 @@ pub fn name_card(
                     .w(px(NAME_CARD_WIDTH + CODE_PANE_WIDTH))
                     .flex_row()
                     .child(lists)
-                    .child(code_pane(colors, pane)),
+                    .child(code_pane(colors, pane, code_scroll)),
                 None => panel.child(lists),
             }
         }
@@ -418,7 +421,11 @@ fn usage_line(
 
 /// The code beside the lists: lines coloured like the diff, scrolling both ways inside the card;
 /// a long line runs on past the pane instead of being cut.
-fn code_pane(colors: &Colors, pane: &CodePane) -> Div {
+///
+/// The scroll area is a flex row that does not stretch its child, so the lines' block is as wide
+/// as its longest line: gpui scrolls only as far as its children's bounds reach past its own
+/// (`content_size` in gpui's `div.rs`), and a block child is only as wide as the pane.
+fn code_pane(colors: &Colors, pane: &CodePane, scroll: &ScrollHandle) -> Div {
     div()
         .w(px(CODE_PANE_WIDTH))
         .flex_none()
@@ -444,8 +451,11 @@ fn code_pane(colors: &Colors, pane: &CodePane) -> Div {
         .child(
             div()
                 .id(SharedString::from(Arc::clone(&pane.place)))
+                .track_scroll(scroll)
                 .min_w_0()
                 .max_h(px(NAME_CARD_LISTS_HEIGHT))
+                .flex()
+                .items_start()
                 .overflow_scroll()
                 .py_2()
                 .font_family(*CODE_FONT)

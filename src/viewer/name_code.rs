@@ -73,7 +73,7 @@ pub struct PaneLine {
 /// Some lines of one file at the commit the lookup read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodePane {
-    /// `src/cart.ts:4`: where the first line is.
+    /// `src/cart.ts:4`: where the definition or the usage is.
     pub place: Arc<str>,
     pub lines: Vec<PaneLine>,
     /// The body goes on past the last line shown.
