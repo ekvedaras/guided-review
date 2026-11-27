@@ -85,14 +85,8 @@ impl SettingsPanel {
         setting_row(
             name,
             note,
-            Segmented::new(
-                id,
-                SegmentLayout::Row {
-                    segment_width: px(140.),
-                },
-                segments,
-            )
-            .picked(SendAction::ALL.iter().position(|action| *action == chosen)),
+            Segmented::new(id, SegmentLayout::Column, segments)
+                .picked(SendAction::ALL.iter().position(|action| *action == chosen)),
         )
     }
 
