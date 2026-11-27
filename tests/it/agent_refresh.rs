@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use crate::support::fake_tour_agent::{FakeTourAgent, TRIAL_BUILD, TourAgentCall};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
     AgentStatus, Cancel, Pace, RefreshCancelled, RefreshWriter, TourAgentPort, TourAgentRefresh,
@@ -72,6 +72,32 @@ fn an_idle_agent_is_typed_the_refresh_task_and_the_refresh_ends_when_its_turn_do
 }
 
 #[test]
+fn a_trial_build_names_itself_in_the_refresh_task_and_tells_the_skill_to_run_it_too() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .with_terminal("t3", Some(PR), AgentStatus::Idle)
+            .after_a_send_looks_report(&[AgentStatus::Working, AgentStatus::Idle])
+            .of_a_trial_build(),
+    );
+
+    let (refreshed, _) = refresh(&fake, PR);
+
+    refreshed.unwrap();
+    let text = sent_text(&fake);
+    assert!(
+        text.contains(&format!("`{TRIAL_BUILD} refresh {PR} --done`")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!(
+            "Run every `guided-review` command the skill names as `{TRIAL_BUILD}`"
+        )),
+        "{text}"
+    );
+    assert!(!text.contains("`guided-review "), "{text}");
+}
+
+#[test]
 fn a_busy_agent_is_not_typed_into_and_the_refresh_fails_saying_it_was_not_free() {
     let fake = Arc::new(FakeTourAgent::new().with_terminal("t3", Some(PR), AgentStatus::Working));
 
@@ -132,6 +158,34 @@ fn a_pr_with_no_agent_gets_one_started_whose_first_task_is_the_refresh() {
     );
     assert!(first_task.contains("Refresh"), "{first_task}");
     assert!(!first_task.contains("subagent"), "{first_task}");
+}
+
+#[test]
+fn a_trial_build_names_itself_in_the_refresh_it_starts_an_agent_with() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .after_a_send_looks_report(&[AgentStatus::Working, AgentStatus::Idle])
+            .of_a_trial_build(),
+    );
+
+    let (refreshed, _) = refresh(&fake, PR);
+
+    refreshed.unwrap();
+    let calls = fake.calls();
+    let [TourAgentCall::Start { first_task, .. }] = calls.as_slice() else {
+        panic!("one start and nothing else, got {calls:?}");
+    };
+    assert!(
+        first_task.contains(&format!("`{TRIAL_BUILD} open {PR}`")),
+        "{first_task}"
+    );
+    assert!(
+        first_task.contains(&format!(
+            "Run every `guided-review` command the skill names as `{TRIAL_BUILD}`"
+        )),
+        "{first_task}"
+    );
+    assert!(!first_task.contains("`guided-review "), "{first_task}");
 }
 
 #[test]

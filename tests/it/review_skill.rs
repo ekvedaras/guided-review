@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use crate::support::fake_tour_agent::TRIAL_BUILD;
+use guided_review::agent_cli::AgentCli;
 use guided_review::app_folders::AppFolders;
 use guided_review::claude_cli::{review_agent_denied_tools, review_agent_tools};
 use guided_review::review_brief::ReviewBrief;
@@ -10,7 +12,12 @@ const AGENT_FOLDER: &str = "/work/shop";
 const FINDINGS: &str = "/state/tours/acme/shop/7.findings.json";
 
 fn tools(skill: Option<&str>) -> String {
-    review_agent_tools(&own_worktree(), Path::new(FINDINGS), skill)
+    review_agent_tools(
+        &own_worktree(),
+        Path::new(FINDINGS),
+        skill,
+        &AgentCli::OnPath,
+    )
 }
 
 fn own_worktree() -> ReviewPlace {
@@ -58,6 +65,23 @@ fn allowed_command_prefixes(tools: &str) -> Vec<String> {
 }
 
 #[test]
+fn a_trial_build_names_itself_in_every_command_of_the_review_brief() {
+    let subject: ReviewSubject = "https://github.com/acme/shop/pull/7".parse().unwrap();
+    let home = tempfile::TempDir::new().unwrap();
+    let folders = crate::support::folders_in(home.path());
+
+    let brief = ReviewBrief::of(&folders, &subject)
+        .running_guided_review_as(AgentCli::At(TRIAL_BUILD.into()))
+        .to_string();
+
+    assert!(
+        brief.contains(&format!("`{TRIAL_BUILD} check-findings {subject}`")),
+        "{brief}"
+    );
+    assert!(!brief.contains("`guided-review "), "{brief}");
+}
+
+#[test]
 fn a_review_agent_may_run_every_command_the_brief_asks_for() {
     let commands = commands_in(&brief());
     assert!(commands.len() >= 4, "{commands:?}");
@@ -98,7 +122,12 @@ fn a_review_agent_writes_only_its_findings_file() {
 
 #[test]
 fn a_review_agent_reads_its_folder_and_its_findings_and_may_search_and_start_subagents() {
-    let tools = review_agent_tools(&tour_agent_folder(), Path::new(FINDINGS), None);
+    let tools = review_agent_tools(
+        &tour_agent_folder(),
+        Path::new(FINDINGS),
+        None,
+        &AgentCli::OnPath,
+    );
     let tools = listed(&tools);
 
     for wanted in [
@@ -183,7 +212,12 @@ fn nothing_the_review_agent_needs_for_its_own_worktree_is_denied() {
 
 #[test]
 fn an_agent_in_the_tour_agents_folder_makes_no_worktree() {
-    let tools = review_agent_tools(&tour_agent_folder(), Path::new(FINDINGS), None);
+    let tools = review_agent_tools(
+        &tour_agent_folder(),
+        Path::new(FINDINGS),
+        None,
+        &AgentCli::OnPath,
+    );
 
     assert!(!tools.contains("Worktree"), "{tools}");
     assert!(!tools.contains("checkout"), "{tools}");

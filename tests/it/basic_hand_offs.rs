@@ -1,5 +1,5 @@
 use crate::support::fake_ports::{FakeHost, SentLog};
-use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use crate::support::fake_tour_agent::{FakeTourAgent, TRIAL_BUILD, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use crate::support::{FixtureRepo, file_path};
 use guided_review::local_git::LocalGit;
@@ -184,6 +184,26 @@ fn with_no_agent_one_is_started_whose_first_task_says_the_tour_is_basic_and_poin
     for gone in ["tour-path", "fix the tour"] {
         assert!(!first_task.contains(gone), "{gone} is in {first_task}");
     }
+}
+
+#[test]
+fn a_trial_build_names_itself_in_the_first_task_of_the_agent_it_starts() {
+    let pull = Pull::new();
+    let mut review = handed_off(&pull);
+    let fake = Arc::new(FakeTourAgent::new().of_a_trial_build());
+    let agents = agents_of(&fake).starting_in("/clones/shop".into());
+
+    pull.deliver(&mut review, &agents);
+
+    let calls = fake.calls();
+    let [TourAgentCall::Start { first_task, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(
+        first_task.contains(&format!("`{TRIAL_BUILD} outline {PR}`")),
+        "{first_task}"
+    );
+    assert!(!first_task.contains("`guided-review "), "{first_task}");
 }
 
 #[test]

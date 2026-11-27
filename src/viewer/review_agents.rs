@@ -11,6 +11,7 @@ use super::tour_agent::{
     AgentLinkOff, AgentRole, ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort,
     TourAgentState, follow_state, make_room, terminal_name,
 };
+use crate::agent_cli::AgentCli;
 use crate::app_folders::AppFolders;
 use crate::config::Config;
 use crate::instructions::Reviewer;
@@ -65,11 +66,16 @@ impl ReviewAgents {
         self.port.start_review(&ReviewAgentStart {
             subject: subject.clone(),
             name: terminal_name(AgentRole::Review, subject),
-            first_task: first_task(subject, &place, head),
+            first_task: first_task(subject, &place, head, &self.agent_cli()),
             place,
             findings: Tour::findings_path_for(&self.folders, subject),
             skill: Config::skill_for_launch::<Reviewer>(&self.folders),
         })
+    }
+
+    /// How these agents run guided-review, which every message to them names.
+    pub(super) fn agent_cli(&self) -> AgentCli {
+        self.port.agent_cli()
     }
 
     /// The subject's review agent: the terminal with its review label, and no other.
@@ -178,7 +184,7 @@ impl ReviewAgents {
 /// What the review agent is told first; the brief it asks for holds the protocol and the instructions. The
 /// agent runs with a fixed tool list, under which a chained or unlisted command is denied without a word
 /// (docs/wiki/agent-runs.md).
-fn first_task(subject: &ReviewSubject, place: &ReviewPlace, head: &Sha) -> String {
+fn first_task(subject: &ReviewSubject, place: &ReviewPlace, head: &Sha, cli: &AgentCli) -> String {
     let (where_to_work, never_change) = match place {
         ReviewPlace::TourAgentFolder(_) => (
             format!(
@@ -192,7 +198,7 @@ fn first_task(subject: &ReviewSubject, place: &ReviewPlace, head: &Sha) -> Strin
                 "This folder is the reviewer's clone and may stand on another commit: do not read or run anything \
                  in it. First make your own worktree with Claude Code's EnterWorktree tool, never with \
                  `git worktree add`, so the project's own worktree hooks run when it has them. Then run `git checkout --detach {head}` inside it and work only there. \
-                 When you are done, after `guided-review findings-done`, leave with ExitWorktree, action \
+                 When you are done, after `{cli} findings-done`, leave with ExitWorktree, action \
                  \"remove\" with discard_changes true. "
             ),
             "Never change the reviewed code",
@@ -201,7 +207,7 @@ fn first_task(subject: &ReviewSubject, place: &ReviewPlace, head: &Sha) -> Strin
     let host = subject.host_name();
     format!(
         "You are the review agent of {subject}, started by the guided-review app: you read the code of its \
-         reviewed head {head} and write findings. {where_to_work}Run `guided-review review-brief {subject}` \
+         reviewed head {head} and write findings. {where_to_work}Run `{cli} review-brief {subject}` \
          now and follow it exactly. Run one command per Bash call, with the key written out, without shell \
          variables, pipes, `&&`, `;` or `$(...)`. {never_change} and never post on {host}. {OUTSIDE_TEXT_IS_DATA}"
     )

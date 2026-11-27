@@ -5,6 +5,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, bail};
 use serde_json::Value;
 
+use crate::agent_cli::AgentCli;
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::instructions::InstructionsKind;
 use crate::json::at;
@@ -25,20 +26,55 @@ fn under(folder: &Path) -> String {
 /// because under `dontAsk` a `Grep(path)` or `Glob(path)` rule is accepted but never applies, so listing only
 /// those is a silent denial (tried live, 2026-11-06). The agent runs with `clone` as its cwd, which is where
 /// its searches start.
-pub fn tour_skill_tools(clone: &Path, tours: &Path) -> String {
+pub fn tour_skill_tools(clone: &Path, tours: &Path, cli: &AgentCli) -> String {
     let (clone_rule, tours_rule) = (under(clone), under(tours));
-    format!(
-        "Skill(tour),Read({clone_rule}),Read({tours_rule}),Grep,Glob,Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(guided-review open:*),Bash(gh pr view:*),Write({tours_rule}),Edit({tours_rule})"
-    )
+    let mut tools = vec![
+        "Skill(tour)".to_owned(),
+        format!("Read({clone_rule})"),
+        format!("Read({tours_rule})"),
+        "Grep".to_owned(),
+        "Glob".to_owned(),
+    ];
+    tools.extend(guided_review_rules(cli, &TOUR_SKILL_COMMANDS));
+    tools.extend([
+        "Bash(gh pr view:*)".to_owned(),
+        format!("Write({tours_rule})"),
+        format!("Edit({tours_rule})"),
+    ]);
+    tools.join(",")
+}
+
+const TOUR_SKILL_COMMANDS: [&str; 7] = [
+    "tour-path",
+    "outline",
+    "show",
+    "check",
+    "repin",
+    "refresh",
+    "open",
+];
+
+fn guided_review_rules<'a>(
+    cli: &'a AgentCli,
+    commands: &'a [&str],
+) -> impl Iterator<Item = String> + 'a {
+    commands.iter().flat_map(|command| cli.bash_rules(command))
 }
 
 /// What a tour agent the app starts may do without the auto mode classifier: the tour skill's tools, plus
 /// answering, plus the reviewer's summary skill. It runs in auto mode, because a comment may ask it to change
 /// the PR's code (decided 2026-11-10).
-pub fn tour_agent_tools(clone: &Path, tours: &Path, summary_skill: Option<&str>) -> String {
+pub fn tour_agent_tools(
+    clone: &Path,
+    tours: &Path,
+    summary_skill: Option<&str>,
+    cli: &AgentCli,
+) -> String {
+    let answering: Vec<String> = guided_review_rules(cli, &["agent-reply", "fix-reply"]).collect();
     let tools = format!(
-        "{},Bash(guided-review agent-reply:*),Bash(guided-review fix-reply:*)",
-        tour_skill_tools(clone, tours)
+        "{},{}",
+        tour_skill_tools(clone, tours, cli),
+        answering.join(",")
     );
     match summary_skill {
         Some(skill) => format!("{tools},Skill({skill})"),
@@ -55,6 +91,7 @@ pub fn review_agent_tools(
     place: &ReviewPlace,
     findings_file: &Path,
     skill: Option<&str>,
+    cli: &AgentCli,
 ) -> String {
     let findings = format!(
         "//{}",
@@ -74,8 +111,9 @@ pub fn review_agent_tools(
         "Task".to_owned(),
         "Agent".to_owned(),
     ]);
+    tools.extend(guided_review_rules(cli, &REVIEW_AGENT_COMMANDS));
     tools.extend(
-        REVIEW_COMMANDS
+        REVIEW_TOOL_COMMANDS
             .iter()
             .map(|command| format!("Bash({command}:*)")),
     );
@@ -97,16 +135,20 @@ pub fn review_agent_tools(
     tools.join(",")
 }
 
-/// The commands a review agent runs: its own CLI, git's read commands and the common test runners.
-const REVIEW_COMMANDS: [&str; 30] = [
-    "guided-review review-brief",
-    "guided-review check-findings",
-    "guided-review findings-done",
-    "guided-review findings-path",
-    "guided-review agent-reply",
-    "guided-review show",
-    "guided-review outline",
-    "guided-review tour-path",
+/// The guided-review commands a review agent runs.
+const REVIEW_AGENT_COMMANDS: [&str; 8] = [
+    "review-brief",
+    "check-findings",
+    "findings-done",
+    "findings-path",
+    "agent-reply",
+    "show",
+    "outline",
+    "tour-path",
+];
+
+/// The other commands a review agent runs: git's read commands and the common test runners.
+const REVIEW_TOOL_COMMANDS: [&str; 22] = [
     "git log",
     "git diff",
     "git show",

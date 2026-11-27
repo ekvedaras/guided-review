@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::support::fake_app::{CliEnded, answering_one_request};
 use crate::support::fake_ports::{FakeHost, SentLog};
-use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use crate::support::fake_tour_agent::{FakeTourAgent, TRIAL_BUILD, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run, file_path};
 use guided_review::build::Build;
@@ -60,6 +60,16 @@ impl Feature {
 
     fn key(&self) -> String {
         self.subject.to_string()
+    }
+
+    /// The app is a trial build, so the change set's agent runs guided-review by its full path.
+    fn of_a_trial_build(mut self) -> Self {
+        self.agent = Arc::new(
+            FakeTourAgent::new()
+                .with_terminal("t1", Some(&self.key()), AgentStatus::Idle)
+                .of_a_trial_build(),
+        );
+        self
     }
 
     fn folder(&self) -> String {
@@ -912,6 +922,26 @@ fn send_tasks_hands_every_queued_task_to_the_agent_as_one_message_in_reading_ord
     );
     assert_eq!(opened.review.queued_tasks(), 0);
     assert_eq!(feature.sent.host_calls(), []);
+}
+
+#[test]
+fn a_trial_build_names_itself_in_every_command_of_the_tasks_it_sends() {
+    let feature = Feature::with_work_in_progress().of_a_trial_build();
+    let mut opened = feature.open();
+    add_to_tasks(&feature, &mut opened, "world", "Say who the world is");
+
+    send_tasks(&feature, &mut opened);
+
+    let typed = feature.typed_into_agent();
+    let [message] = typed.as_slice() else {
+        panic!("{typed:?}");
+    };
+    let key = feature.key();
+    assert!(
+        message.contains(&format!("`{TRIAL_BUILD} agent-reply {key} h0 --body -`")),
+        "{message}"
+    );
+    assert!(!message.contains("`guided-review "), "{message}");
 }
 
 /// A Claude herdr has no status from may be waiting on a question the task text would answer, so the

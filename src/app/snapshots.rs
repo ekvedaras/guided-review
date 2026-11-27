@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use gpui::{AsyncWindowContext, Global, Modifiers, MouseMoveEvent, PlatformInput, point, px};
 
+use crate::agent_cli::AgentCli;
 use crate::app::components::palette::Appearance;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::ReviewSubject;
@@ -287,6 +288,10 @@ impl RelevantPullRequestsPort for SamplePullRequests {
 pub struct NoReviewerTerminals(pub Arc<dyn TourAgentPort>);
 
 impl TourAgentPort for NoReviewerTerminals {
+    fn agent_cli(&self) -> AgentCli {
+        self.0.agent_cli()
+    }
+
     fn link(&self) -> Result<(), AgentLinkOff> {
         self.0.link()
     }

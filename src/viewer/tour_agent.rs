@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use super::ports::PullsOfBranchPort;
 use super::review_place::ReviewPlace;
 use super::toasts::ToastTone;
+use crate::agent_cli::AgentCli;
 use crate::local_work_tree::LocalWorkTree;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::pull_request::{HostedRepo, PullRequestUrl};
@@ -288,6 +289,10 @@ pub trait TourAgentPort: Send + Sync {
     /// Whether tour agents can be reached at all; the reason when not.
     fn link(&self) -> Result<(), AgentLinkOff>;
 
+    /// How an agent in herdr runs guided-review, as every message to one and every agent's tool list
+    /// names it.
+    fn agent_cli(&self) -> AgentCli;
+
     /// The live terminals labelled as the tour agent of the subject.
     fn terminals_of(&self, subject: &ReviewSubject) -> anyhow::Result<Vec<TerminalId>>;
 
@@ -513,6 +518,11 @@ impl TourAgents {
         }
     }
 
+    /// How these agents run guided-review, which every message to them names.
+    pub(super) fn agent_cli(&self) -> AgentCli {
+        self.port.agent_cli()
+    }
+
     pub fn finding_head_branches_with(mut self, head_branches: Arc<dyn PullsOfBranchPort>) -> Self {
         self.head_branches = Some(head_branches);
         self
@@ -539,8 +549,12 @@ impl TourAgents {
         if let Err(reason) = self.port.link() {
             bail!("tour agents are off: {reason}");
         }
-        self.launch(subject, active, first_task(subject, tour))
-            .map(drop)
+        self.launch(
+            subject,
+            active,
+            first_task(subject, tour, &self.agent_cli()),
+        )
+        .map(drop)
     }
 
     fn launch(
@@ -587,9 +601,10 @@ impl TourAgents {
             }
         }
         match self.find(subject)? {
-            TourAgentState::Agent { terminal, .. } => {
-                self.hand_task(terminal, &reviewers_agent_writer_task(subject))
-            }
+            TourAgentState::Agent { terminal, .. } => self.hand_task(
+                terminal,
+                &reviewers_agent_writer_task(subject, &self.agent_cli()),
+            ),
             TourAgentState::Choose(terminals) => {
                 let named: Vec<String> = terminals.iter().map(ToString::to_string).collect();
                 let branch = subject
@@ -605,7 +620,7 @@ impl TourAgents {
                 )
             }
             TourAgentState::None | TourAgentState::Unknown | TourAgentState::LinkOff(_) => self
-                .launch(subject, active, writer_task(subject))
+                .launch(subject, active, writer_task(subject, &self.agent_cli()))
                 .map(WriterHandOver::Started),
         }
     }
@@ -651,7 +666,7 @@ impl TourAgents {
         match self.lookup(subject) {
             TourAgentState::Agent { terminal, .. } => self.hand_task(
                 terminal,
-                &basic_writer_task(subject, TourWriter::InSubagent),
+                &basic_writer_task(subject, TourWriter::InSubagent, &self.agent_cli()),
             ),
             TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
             TourAgentState::Choose(_) => bail!(SEVERAL_AGENTS),
@@ -659,7 +674,7 @@ impl TourAgents {
                 .launch(
                     subject,
                     active,
-                    basic_writer_task(subject, TourWriter::InOwnContext),
+                    basic_writer_task(subject, TourWriter::InOwnContext, &self.agent_cli()),
                 )
                 .map(WriterHandOver::Started),
         }
@@ -677,16 +692,17 @@ impl TourAgents {
             bail!("tour agents are off: {reason}");
         }
         match self.lookup(subject) {
-            TourAgentState::Agent { terminal, .. } => {
-                self.hand_task(terminal, &refresh_task(subject, TourWriter::InSubagent))
-            }
+            TourAgentState::Agent { terminal, .. } => self.hand_task(
+                terminal,
+                &refresh_task(subject, TourWriter::InSubagent, &self.agent_cli()),
+            ),
             TourAgentState::LinkOff(reason) => bail!("tour agents are off: {reason}"),
             TourAgentState::Choose(_) => bail!(SEVERAL_AGENTS),
             TourAgentState::None | TourAgentState::Unknown => self
                 .launch(
                     subject,
                     active,
-                    refresh_task(subject, TourWriter::InOwnContext),
+                    refresh_task(subject, TourWriter::InOwnContext, &self.agent_cli()),
                 )
                 .map(WriterHandOver::Started),
         }
@@ -895,7 +911,7 @@ impl TourAgents {
     ) -> OwnAgentHandOff {
         let first_task = format!(
             "{}\n\nThe reviewer's first task:\n{text}",
-            change_set_first_task(subject, change_set)
+            change_set_first_task(subject, change_set, &self.agent_cli())
         );
         match self.launch(subject, subject, first_task) {
             Ok(terminal) => OwnAgentHandOff::Started(terminal),
@@ -1298,15 +1314,19 @@ impl TourWriter {
         work: TourWork,
         brief: &str,
         afterwards: &str,
+        cli: &AgentCli,
     ) -> String {
-        let brief = format!("{brief} {OUTSIDE_TEXT_IS_DATA}");
+        let brief = match cli.skill_note() {
+            Some(skill_note) => format!("{brief} {skill_note} {OUTSIDE_TEXT_IS_DATA}"),
+            None => format!("{brief} {OUTSIDE_TEXT_IS_DATA}"),
+        };
         match self {
             Self::InOwnContext => format!("/tour {subject} {brief} {afterwards}"),
             Self::InSubagent => format!(
                 "{work} the guided-review tour of {subject} in one subagent, so your own context stays free for the \
                  reviewer's comments. Run the subagent in this folder, with no worktree of its own. Tell it to run the tour skill with the Skill tool, and give it as the \
                  skill's arguments \"{subject}\" followed by this brief: {brief} Wait until the subagent is done. \
-                 Before you answer the first comment, read the tour at the path `guided-review tour-path {subject}` \
+                 Before you answer the first comment, read the tour at the path `{cli} tour-path {subject}` \
                  prints. {afterwards}"
             ),
         }
@@ -1316,7 +1336,7 @@ impl TourWriter {
 /// The first task of an agent that writes a tour. It starts with the skill, so Claude runs it; the rest
 /// reaches the skill as its arguments. The agent runs with a fixed tool list, under which a chained or
 /// unlisted command is denied without a word (docs/wiki/agent-runs.md).
-fn writer_task(subject: &ReviewSubject) -> String {
+fn writer_task(subject: &ReviewSubject, cli: &AgentCli) -> String {
     TourWriter::InOwnContext.task(
         subject,
         TourWork::Write,
@@ -1324,10 +1344,11 @@ fn writer_task(subject: &ReviewSubject) -> String {
             "(you are the tour agent of this PR, started by the guided-review app because the reviewer picked it \
              and it has no tour). Only the listed tools are allowed and anything else is denied, never asked: run \
              one command per Bash call, with the PR url written out, without shell variables, pipes, `&&`, `;` or \
-             `$(...)`. The Write tool makes the tour's folder. When `guided-review check {subject}` is clean, run \
-             `guided-review open {subject}`, which shows the tour to the reviewer."
+             `$(...)`. The Write tool makes the tour's folder. When `{cli} check {subject}` is clean, run \
+             `{cli} open {subject}`, which shows the tour to the reviewer."
         ),
         PR_AGENT_AFTERWARDS,
+        cli,
     )
 }
 
@@ -1336,22 +1357,23 @@ const PR_AGENT_AFTERWARDS: &str = "Afterwards the reviewer's comments reach you 
      message says, fix the tour when a comment shows it is wrong, and never change the PR's code.";
 
 /// The writer task typed into the reviewer's own agent of the PR, which runs with their tools and context.
-fn reviewers_agent_writer_task(subject: &ReviewSubject) -> String {
+fn reviewers_agent_writer_task(subject: &ReviewSubject, cli: &AgentCli) -> String {
     TourWriter::InSubagent.task(
         subject,
         TourWork::Write,
         &format!(
             "(the reviewer picked this PR in the guided-review app and it has no tour; the reviewer's agent on \
-             its branch was asked to write it). When `guided-review check {subject}` is clean, run \
-             `guided-review open {subject}`, which shows the tour to the reviewer."
+             its branch was asked to write it). When `{cli} check {subject}` is clean, run \
+             `{cli} open {subject}`, which shows the tour to the reviewer."
         ),
         "Afterwards the reviewer's comments reach you here as messages: answer each as its message says.",
+        cli,
     )
 }
 
 /// The task of a Refresh, for the agent that holds the tour: the skill's Refresh section, run in a subagent
 /// when the agent already holds a conversation.
-fn refresh_task(subject: &ReviewSubject, writer: TourWriter) -> String {
+fn refresh_task(subject: &ReviewSubject, writer: TourWriter, cli: &AgentCli) -> String {
     let code_note = if subject.agent_changes_code() {
         " Do not change the code while you refresh the tour."
     } else {
@@ -1373,12 +1395,13 @@ fn refresh_task(subject: &ReviewSubject, writer: TourWriter) -> String {
             "(the reviewer pressed Refresh in the guided-review app: this {kind} already has a tour, moved to its \
              new commits, so this is a Refresh and not a new tour: follow the skill's Refresh section.) Run one \
              command per Bash call, with the {key_name} written out, without shell variables, pipes, `&&`, `;` or \
-             `$(...)`. When `guided-review check {subject}` is clean, `guided-review refresh {subject} --done` clears \
-             the marks, then `guided-review open {subject}` shows the refreshed tour.{code_note}",
+             `$(...)`. When `{cli} check {subject}` is clean, `{cli} refresh {subject} --done` clears \
+             the marks, then `{cli} open {subject}` shows the refreshed tour.{code_note}",
             kind = subject.kind(),
             key_name = subject.key_name(),
         ),
         afterwards,
+        cli,
     )
 }
 
@@ -1405,9 +1428,9 @@ impl WriterHandOver {
 
 /// The writer task for a PR the reviewer reads as a basic tour. The basic tour is not a tour file, and the
 /// guided tour never replaces it on disk, so the agent writes a whole tour at the guided path.
-fn basic_writer_task(subject: &ReviewSubject, writer: TourWriter) -> String {
+fn basic_writer_task(subject: &ReviewSubject, writer: TourWriter, cli: &AgentCli) -> String {
     if subject.agent_changes_code() {
-        return change_set_writer_task(subject, writer);
+        return change_set_writer_task(subject, writer, cli);
     }
     writer.task(
         subject,
@@ -1415,49 +1438,51 @@ fn basic_writer_task(subject: &ReviewSubject, writer: TourWriter) -> String {
         &format!(
             "(the reviewer reads this PR as a basic tour in the app, with no tour text, and asked for a guided \
              tour, which they keep reading the basic tour meanwhile. Write a full new tour at the path \
-             `guided-review tour-path {subject}` prints: the basic tour is not a tour file and needs no edit.) Run \
+             `{cli} tour-path {subject}` prints: the basic tour is not a tour file and needs no edit.) Run \
              one command per Bash call, with the PR url written out, without shell variables, pipes, `&&`, `;` or \
-             `$(...)`. When `guided-review check {subject}` is clean, run `guided-review open {subject}`, which tells \
+             `$(...)`. When `{cli} check {subject}` is clean, run `{cli} open {subject}`, which tells \
              the app the guided tour is ready and does not move the reviewer's screen."
         ),
         PR_AGENT_AFTERWARDS,
+        cli,
     )
 }
 
 /// The writer task for a local change set's agent, which wrote the code and is not on a fixed tool list.
-fn change_set_writer_task(subject: &ReviewSubject, writer: TourWriter) -> String {
+fn change_set_writer_task(subject: &ReviewSubject, writer: TourWriter, cli: &AgentCli) -> String {
     writer.task(
         subject,
         TourWork::Write,
         &format!(
             "(the reviewer reads this local change set as a basic tour in the app, with no tour text, and asked \
              for a guided tour, which they keep reading the basic tour meanwhile. Write a full new tour at the path \
-             `guided-review tour-path {subject}` prints: the basic tour is not a tour file and needs no edit.) Run \
+             `{cli} tour-path {subject}` prints: the basic tour is not a tour file and needs no edit.) Run \
              one command per Bash call, with the key written out, without shell variables, pipes, `&&`, `;` or \
-             `$(...)`. When `guided-review check {subject}` is clean, run `guided-review open {subject}`, which \
+             `$(...)`. When `{cli} check {subject}` is clean, run `{cli} open {subject}`, which \
              tells the app the guided tour is ready and does not move the reviewer's screen. Do not change the code \
              while you write the tour."
         ),
         "Afterwards the reviewer's comments reach you here as tasks: act on each as its message says.",
+        cli,
     )
 }
 
 /// What a tour agent the app started is told first. Hand-offs follow as messages that carry the rest of the protocol.
-fn first_task(subject: &ReviewSubject, tour: TourKind) -> String {
+fn first_task(subject: &ReviewSubject, tour: TourKind, cli: &AgentCli) -> String {
     if let Some(change_set) = subject.local() {
-        return change_set_first_task(subject, change_set);
+        return change_set_first_task(subject, change_set, cli);
     }
     match tour {
         TourKind::Guided => format!(
             "You are the tour agent of {subject}: you wrote or know its guided-review tour, and the reviewer's comments on it \
-             reach you here as messages. Find the tour file with `guided-review tour-path {subject}` and read it now, so you \
+             reach you here as messages. Find the tour file with `{cli} tour-path {subject}` and read it now, so you \
              can answer. Answer each comment as its message says, fix the tour when a comment shows it is wrong, and never \
              change the PR's code. {OUTSIDE_TEXT_IS_DATA} Then wait for the next message."
         ),
         TourKind::Basic => format!(
             "You are the tour agent of {subject}: the reviewer reads it as a basic tour, its changed files with no tour text, \
              and their comments on the code reach you here as messages. Read the changed code now with \
-             `guided-review outline {subject}`, and `guided-review show {subject} <piece ids> --around` for more of it, so you can \
+             `{cli} outline {subject}`, and `{cli} show {subject} <piece ids> --around` for more of it, so you can \
              answer. Answer each comment as its message says, and never change the PR's code. {OUTSIDE_TEXT_IS_DATA} \
              Then wait for the next message."
         ),
@@ -1466,12 +1491,16 @@ fn first_task(subject: &ReviewSubject, tour: TourKind) -> String {
 
 /// What the change set's agent the app starts is told first. Unlike a PR's tour agent it changes code: in its
 /// own folder, and it pushes nothing.
-fn change_set_first_task(subject: &ReviewSubject, change_set: &LocalChangeSet) -> String {
+fn change_set_first_task(
+    subject: &ReviewSubject,
+    change_set: &LocalChangeSet,
+    cli: &AgentCli,
+) -> String {
     format!(
         "You are the agent of the local change set {subject}: the reviewer reads the changes of branch {} in {} \
          (commits not on the default branch, and uncommitted files) in guided-review, and their comments reach \
-         you here as tasks. Read the change now with `guided-review outline {subject}`, and \
-         `guided-review show {subject} <piece ids> --around` for more of it, so you can act on a task. Change \
+         you here as tasks. Read the change now with `{cli} outline {subject}`, and \
+         `{cli} show {subject} <piece ids> --around` for more of it, so you can act on a task. Change \
          code in this folder when a task asks for it, do not push, and commit only if your session normally \
          would. {OUTSIDE_TEXT_IS_DATA} Then wait for the next message.",
         change_set.branch().as_str(),

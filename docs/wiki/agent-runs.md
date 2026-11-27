@@ -158,6 +158,8 @@ Found by the maintainer on a trial build in `~/.cargo/bin`, with `~/.local/bin` 
 - That `open` started the release app, which had nothing on screen. `ActivePr::request` keeps an app-started agent's open in the background (`KeepInBackground`) whatever is shown, so the app opened no window and stayed in the Dock. A click on the Dock icon did nothing: macOS sends a running app a reopen event, not a new launch, and the app had no handler. Now `AppWindow::relaunched` decides: with no window the switcher opens alone; a window out of sight (minimized) comes back as it was. On Linux gpui never fires reopen; the launcher starts a new process, which hands `show_switcher` to the running app as before.
 - Open: the CLI still answers "the reviewer reads another PR" when nothing is on screen.
 
+2026-11-27: the `PATH` fix above reaches only the agents the app starts. A terminal the reviewer picked keeps its own `PATH`, so its `guided-review` was the release install; since then a trial build names its own binary by its full path in every message (see [agent-threads.md](agent-threads.md), "A trial build names itself to agents").
+
 ## 2026-11-16: a command never quits an app of another build
 
 The same day a tour agent's `guided-review open`, of another build than the maintainer's running trial build, quit that app and its session: `hand_over` answered an app of another build by sending it a quit and starting its own build's app.

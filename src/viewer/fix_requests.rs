@@ -8,6 +8,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent_cli::AgentCli;
 use crate::findings::{Finding, FindingId};
 use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
@@ -333,7 +334,7 @@ impl FixRequests {
             return Some(FixDeliveryRequest {
                 ids: vec![request.finding.id.clone()],
                 subject: subject.clone(),
-                text: answer_message(request, subject),
+                message: FixMessage::Answer(request.clone()),
                 tour,
             });
         }
@@ -342,10 +343,11 @@ impl FixRequests {
             .iter()
             .find(|request| request.state == FixState::Queued)?
             .batch;
-        let requests: Vec<&FixRequest> = self
+        let requests: Vec<FixRequest> = self
             .0
             .iter()
             .filter(|request| request.batch == batch && request.state == FixState::Queued)
+            .cloned()
             .collect();
         Some(FixDeliveryRequest {
             ids: requests
@@ -353,7 +355,7 @@ impl FixRequests {
                 .map(|request| request.finding.id.clone())
                 .collect(),
             subject: subject.clone(),
-            text: fixes_message(&requests, subject),
+            message: FixMessage::Fixes(requests),
             tour,
         })
     }
@@ -414,7 +416,7 @@ impl FixRequests {
 }
 
 /// What the tour agent is typed for one batch: everything it needs to fix and answer without asking back.
-fn fixes_message(requests: &[&FixRequest], subject: &ReviewSubject) -> String {
+fn fixes_message(requests: &[FixRequest], subject: &ReviewSubject, cli: &AgentCli) -> String {
     let key = shell_word(&subject.to_string());
     let ids: Vec<String> = requests
         .iter()
@@ -445,29 +447,29 @@ fn fixes_message(requests: &[&FixRequest], subject: &ReviewSubject) -> String {
         }
         lines.push(format!(
             "Needs the reviewer's decision first? Ask through the app, not in your terminal, where they \
-             may not look: `guided-review fix-reply {key} {id} --question --body -` with the question on \
+             may not look: `{cli} fix-reply {key} {id} --question --body -` with the question on \
              stdin, in a quoted heredoc. Then go on with the next finding, or stop if it was the last: \
              the reviewer's answer is typed to you as a new message."
         ));
         lines.push(format!(
-            "Answer: `guided-review fix-reply {key} {id} --working` when you start on it, then \
-             `guided-review fix-reply {key} {id} --fixed <commit sha> --body -` once it is committed, with \
+            "Answer: `{cli} fix-reply {key} {id} --working` when you start on it, then \
+             `{cli} fix-reply {key} {id} --fixed <commit sha> --body -` once it is committed, with \
              what you changed and why on stdin, in a quoted heredoc, for the reviewer to judge, or \
-             `guided-review fix-reply {key} {id} --not-fixed --body -` with the reason on stdin, in a \
+             `{cli} fix-reply {key} {id} --not-fixed --body -` with the reason on stdin, in a \
              quoted heredoc (`<<'EOF'`), when the finding is wrong or cannot be fixed."
         ));
     }
     lines.push(String::new());
     lines.push(format!(
         "Answer each finding on its own, with its own id, in this order. Read the reviewed change with \
-         `guided-review outline {key}` and `guided-review show {key} <piece ids> --around`."
+         `{cli} outline {key}` and `{cli} show {key} <piece ids> --around`."
     ));
     lines.join("\n")
 }
 
 /// What the tour agent is typed once the reviewer answered its question: the finding again, since its
 /// context may have moved on, and how to go on.
-fn answer_message(request: &FixRequest, subject: &ReviewSubject) -> String {
+fn answer_message(request: &FixRequest, subject: &ReviewSubject, cli: &AgentCli) -> String {
     let key = shell_word(&subject.to_string());
     let finding = &request.finding;
     let id = &finding.id;
@@ -482,8 +484,8 @@ fn answer_message(request: &FixRequest, subject: &ReviewSubject) -> String {
         format!("Finding:\n{}", quoted(&finding.body)),
         format!("Answer: {answer}"),
         format!(
-            "Go on: `guided-review fix-reply {key} {id} --working`, then `guided-review fix-reply {key} {id} --fixed <commit sha>` \
-             once it is committed, or `guided-review fix-reply {key} {id} --not-fixed --body -` with the reason on stdin, in a \
+            "Go on: `{cli} fix-reply {key} {id} --working`, then `{cli} fix-reply {key} {id} --fixed <commit sha>` \
+             once it is committed, or `{cli} fix-reply {key} {id} --not-fixed --body -` with the reason on stdin, in a \
              quoted heredoc (`<<'EOF'`). Ask again with `--question --body -` if you still need a decision."
         ),
     ]
@@ -513,14 +515,15 @@ fn local_where_to_fix(change_set: &LocalChangeSet) -> String {
 pub(super) struct FixDeliveryRequest {
     ids: Vec<FindingId>,
     subject: ReviewSubject,
-    text: String,
+    message: FixMessage,
     /// What a tour agent started for this batch has to read.
     tour: TourKind,
 }
 
 impl FixDeliveryRequest {
     pub(super) fn run(self, agents: &TourAgents) -> FixDeliveryOutcome {
-        let how = match agents.send_if_idle(&self.subject, &self.text) {
+        let text = self.message.text(&self.subject, &agents.agent_cli());
+        let how = match agents.send_if_idle(&self.subject, &text) {
             Ok(SendOutcome::Delivered) => FixDelivery::Delivered,
             Ok(SendOutcome::Unreported(_) | SendOutcome::Refused(_) | SendOutcome::Starting) => {
                 FixDelivery::Waiting
@@ -534,6 +537,23 @@ impl FixDeliveryRequest {
             Err(error) => FixDelivery::Failed(format!("{error:#}")),
         };
         FixDeliveryOutcome { ids: self.ids, how }
+    }
+}
+
+/// What one delivery types, written when it goes in the words of the agent it goes to (`AgentCli`).
+enum FixMessage {
+    /// The reviewer's answer to the agent's question on one finding.
+    Answer(FixRequest),
+    /// One batch of findings to fix.
+    Fixes(Vec<FixRequest>),
+}
+
+impl FixMessage {
+    fn text(&self, subject: &ReviewSubject, cli: &AgentCli) -> String {
+        match self {
+            Self::Answer(request) => answer_message(request, subject, cli),
+            Self::Fixes(requests) => fixes_message(requests, subject, cli),
+        }
     }
 }
 

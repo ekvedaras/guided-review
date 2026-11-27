@@ -2,7 +2,7 @@
 //! tour agent into the same thread, and never sent to the host.
 
 use crate::support::fake_ports::{FakeHost, HostCall, SentLog};
-use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use crate::support::fake_tour_agent::{FakeTourAgent, TRIAL_BUILD, TourAgentCall};
 use crate::support::graphql::serve_graphql;
 use crate::support::work::drive_until_idle;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
@@ -542,6 +542,32 @@ fn the_commands_the_private_question_gives_the_agent_write_its_answer_into_the_p
         reopened.hand_offs().all()[0].state(),
         &HandOffState::Answered
     );
+}
+
+#[test]
+fn a_trial_build_names_itself_by_its_full_path_in_every_command_of_the_private_question() {
+    let pull = Pull::new();
+    let host = pull.host();
+    let mut review = pull.open();
+    let place = comment_on_line_ten(&mut review, "why ten?");
+    ask_agent(&mut review, &place, &host);
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .with_terminal("t1", Some(PR), AgentStatus::Idle)
+            .of_a_trial_build(),
+    );
+
+    pull.drive(&mut review, &agents_of(&fake), &host);
+
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(
+        text.contains(&format!("`{TRIAL_BUILD} agent-reply {PR} h0 --body -`")),
+        "{text}"
+    );
+    assert!(!text.contains("`guided-review "), "{text}");
 }
 
 #[test]

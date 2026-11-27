@@ -13,6 +13,7 @@ mod support;
 
 mod active_pr;
 mod agent_choices;
+mod agent_cli;
 mod agent_link;
 mod agent_refresh;
 mod agent_reply;

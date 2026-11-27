@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::support::FixtureRepo;
-use crate::support::fake_tour_agent::FakeTourAgent;
+use crate::support::fake_tour_agent::{FakeTourAgent, TRIAL_BUILD, TourAgentCall};
 use guided_review::opened_subject::writer_folder;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
@@ -110,6 +110,24 @@ fn picking_a_pr_with_no_tour_shows_its_writer_on_the_loading_screen() {
         Some(&pr(SHOWN)),
         "the old PR stays behind it"
     );
+}
+
+#[test]
+fn a_trial_build_names_itself_in_the_writers_first_task() {
+    let fake = Arc::new(FakeTourAgent::new().of_a_trial_build());
+    let mut active = showing_a_pr();
+
+    pick_no_tour(&mut active, &fake);
+
+    let calls = fake.calls();
+    let [TourAgentCall::Start { first_task, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(
+        first_task.contains(&format!("`{TRIAL_BUILD} open {NO_TOUR}`")),
+        "{first_task}"
+    );
+    assert!(!first_task.contains("`guided-review "), "{first_task}");
 }
 
 #[test]

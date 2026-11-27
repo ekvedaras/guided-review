@@ -10,6 +10,7 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use serde_json::Value;
 
+use crate::agent_cli::AgentCli;
 use crate::claude_cli::{review_agent_denied_tools, review_agent_tools, tour_agent_tools};
 use crate::json::at;
 use crate::platform::{HerdrRaise, Os, RaiseFailed};
@@ -45,6 +46,7 @@ pub struct HcTourAgents {
     herdr_raise_program: PathBuf,
     /// The `PATH` an agent the app starts runs with.
     agents_path: String,
+    cli: AgentCli,
 }
 
 impl HcTourAgents {
@@ -56,6 +58,7 @@ impl HcTourAgents {
         );
         Self::with_binaries(PathBuf::from("hc"), PathBuf::from("herdr-app"), tours)
             .giving_agents_path(&agents_path)
+            .agents_running_guided_review_as(AgentCli::of_running_app())
     }
 
     pub fn with_binaries(hc: PathBuf, herdr_app: PathBuf, tours: PathBuf) -> Self {
@@ -67,6 +70,7 @@ impl HcTourAgents {
             herdr_raise,
             herdr_raise_program: PathBuf::from(herdr_raise.program),
             agents_path: String::new(),
+            cli: AgentCli::OnPath,
         }
     }
 
@@ -79,6 +83,11 @@ impl HcTourAgents {
 
     pub fn giving_agents_path(mut self, path: &str) -> Self {
         path.clone_into(&mut self.agents_path);
+        self
+    }
+
+    pub fn agents_running_guided_review_as(mut self, cli: AgentCli) -> Self {
+        self.cli = cli;
         self
     }
 
@@ -168,6 +177,10 @@ fn status_in(line: &Value, address: &str) -> Option<AgentStatus> {
 }
 
 impl TourAgentPort for HcTourAgents {
+    fn agent_cli(&self) -> AgentCli {
+        self.cli.clone()
+    }
+
     fn link(&self) -> Result<(), AgentLinkOff> {
         match self.hc(&["server", "status", "--json"]) {
             Ok(_) => Ok(()),
@@ -362,7 +375,12 @@ impl TourAgentPort for HcTourAgents {
     }
 
     fn start(&self, start: &TourAgentStart) -> anyhow::Result<TerminalId> {
-        let tools = tour_agent_tools(&start.folder, &self.tours, start.summary_skill.as_deref());
+        let tools = tour_agent_tools(
+            &start.folder,
+            &self.tours,
+            start.summary_skill.as_deref(),
+            &self.cli,
+        );
         self.run_agent(&RunAgent {
             role: AgentRole::Tour,
             subject: &start.subject,
@@ -375,7 +393,12 @@ impl TourAgentPort for HcTourAgents {
     }
 
     fn start_review(&self, start: &ReviewAgentStart) -> anyhow::Result<TerminalId> {
-        let tools = review_agent_tools(&start.place, &start.findings, start.skill.as_deref());
+        let tools = review_agent_tools(
+            &start.place,
+            &start.findings,
+            start.skill.as_deref(),
+            &self.cli,
+        );
         self.run_agent(&RunAgent {
             role: AgentRole::Review,
             subject: &start.subject,

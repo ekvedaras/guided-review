@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use crate::support::FixtureRepo;
 use crate::support::fake_ports::{FakeHost, SentLog};
-use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use crate::support::fake_tour_agent::{FakeTourAgent, TRIAL_BUILD, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use guided_review::findings::FindingId;
 use guided_review::local_git::LocalGit;
@@ -125,6 +125,30 @@ fn a_batch_of_fix_requests_goes_to_the_tour_agent_as_one_message_in_reading_orde
         review.fix_state_of(&id("early")),
         Some(&FixState::Delivered)
     );
+}
+
+#[test]
+fn a_trial_build_names_itself_in_every_command_of_a_fix_request() {
+    let shop = Shop::with_findings(&[on_line("early", 1, "First.")]);
+    let mut review = shop.open();
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .with_terminal("t1", Some(PR), AgentStatus::Idle)
+            .of_a_trial_build(),
+    );
+
+    review.fix_findings(&[id("early")]);
+    shop.deliver(&mut review, &agents_of(&fake));
+
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(
+        text.contains(&format!("`{TRIAL_BUILD} fix-reply {PR} early --working`")),
+        "{text}"
+    );
+    assert!(!text.contains("`guided-review "), "{text}");
 }
 
 /// Two changed files, `a.txt` and `b.txt`, the tour reads `b.txt` first.

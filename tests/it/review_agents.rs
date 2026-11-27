@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::support::fake_checkouts::FakeCheckouts;
-use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use crate::support::fake_tour_agent::{FakeTourAgent, TRIAL_BUILD, TourAgentCall};
 use crate::support::folders_in;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::pull_request::Sha;
@@ -102,6 +102,20 @@ fn started_in(fake: &FakeTourAgent) -> std::path::PathBuf {
         panic!("one review start, got {calls:?}");
     };
     folder.clone()
+}
+
+#[test]
+fn a_trial_build_names_itself_in_the_review_agents_first_task() {
+    let desk = Desk::with(FakeTourAgent::new().of_a_trial_build());
+
+    desk.start(&pr()).unwrap();
+
+    let (_, first_task, _, _) = started_review(&desk.fake);
+    assert!(
+        first_task.contains(&format!("`{TRIAL_BUILD} review-brief {PR}`")),
+        "{first_task}"
+    );
+    assert!(!first_task.contains("`guided-review "), "{first_task}");
 }
 
 #[test]

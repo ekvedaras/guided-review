@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::ops::ControlFlow;
 use std::sync::Mutex;
 
+use guided_review::agent_cli::AgentCli;
 use guided_review::claude_cli::{review_agent_denied_tools, review_agent_tools};
 use guided_review::review_subject::ReviewSubject;
 use std::path::PathBuf;
@@ -10,6 +11,9 @@ use guided_review::viewer::{
     AgentLinkOff, AgentRole, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, ReviewAgentStart,
     SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
 };
+
+/// Where the trial build of `FakeTourAgent::of_a_trial_build` runs from.
+pub const TRIAL_BUILD: &str = "/Users/me/.cargo/bin/guided-review";
 
 /// One change the app core made through `FakeTourAgent`, in the order it made them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +75,7 @@ pub struct FakeTourAgent {
     screen: Mutex<Vec<String>>,
     /// Terminals whose screen has not settled since they started, so herdr types nothing into them.
     starting: Mutex<Vec<TerminalId>>,
+    cli: AgentCli,
 }
 
 impl FakeTourAgent {
@@ -89,7 +94,14 @@ impl FakeTourAgent {
             started_by_app: Mutex::default(),
             screen: Mutex::default(),
             starting: Mutex::default(),
+            cli: AgentCli::OnPath,
         }
+    }
+
+    /// The app is a trial build, so agents run guided-review by its full path, `TRIAL_BUILD`.
+    pub fn of_a_trial_build(mut self) -> Self {
+        self.cli = AgentCli::At(PathBuf::from(TRIAL_BUILD));
+        self
     }
 
     pub fn without_herdr(self, off: AgentLinkOff) -> Self {
@@ -274,6 +286,10 @@ impl FakeTourAgent {
 }
 
 impl TourAgentPort for FakeTourAgent {
+    fn agent_cli(&self) -> AgentCli {
+        self.cli.clone()
+    }
+
     fn link(&self) -> Result<(), AgentLinkOff> {
         self.link.lock().unwrap().clone()
     }
@@ -488,7 +504,12 @@ impl TourAgentPort for FakeTourAgent {
             subject: start.subject.clone(),
             folder: start.place.folder().to_path_buf(),
             first_task: start.first_task.clone(),
-            tools: review_agent_tools(&start.place, &start.findings, start.skill.as_deref()),
+            tools: review_agent_tools(
+                &start.place,
+                &start.findings,
+                start.skill.as_deref(),
+                &self.cli,
+            ),
             denied_tools: review_agent_denied_tools(),
         });
         let mut terminals = self.terminals.lock().unwrap();

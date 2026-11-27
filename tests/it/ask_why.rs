@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::support::fake_app::{CliEnded, answering_one_request};
 use crate::support::fake_checkouts::FakeCheckouts;
 use crate::support::fake_ports::{FakeHost, SentLog};
-use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use crate::support::fake_tour_agent::{FakeTourAgent, TRIAL_BUILD, TourAgentCall};
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run, folders_in};
 use guided_review::findings::FindingId;
 use guided_review::open_review::open_review;
@@ -116,6 +116,32 @@ fn a_question_goes_to_the_idle_review_agent_with_the_finding_and_how_to_answer()
         assert!(text.contains(part), "{part} missing from {text}");
     }
     assert_eq!(review.why_state_of(&id("f1")), Some(&WhyState::Delivered));
+}
+
+#[test]
+fn a_trial_build_names_itself_in_the_command_that_answers_a_question_on_a_finding() {
+    let shop = Shop::with_findings(&[on_line("f1", 2, "B is shouted.")]);
+    let mut review = shop.open();
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .review_agent("r1", PR, AgentStatus::Idle, 0)
+            .of_a_trial_build(),
+    );
+    review.ai_review_agent_resumed(TerminalId::new("r1"), Some(AgentStatus::Idle));
+
+    ask_why(&mut review, "f1", "Why is that wrong?");
+    let delivery = review.why_delivery().unwrap();
+    review.why_delivered(delivery.run(&shop.agents(&fake)));
+
+    let calls = fake.calls();
+    let [TourAgentCall::Send { text, .. }] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    assert!(
+        text.contains(&format!("`{TRIAL_BUILD} agent-reply {PR} f1 --body -`")),
+        "{text}"
+    );
+    assert!(!text.contains("`guided-review "), "{text}");
 }
 
 #[test]
