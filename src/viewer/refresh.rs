@@ -4,6 +4,7 @@ use crate::app_folders::AppFolders;
 use crate::review_subject::ReviewSubject;
 use crate::tour::{GuidedTour, Tour};
 
+use super::cancel::Cancel;
 use super::capability::HostCapabilities;
 use super::new_commits::PickCodeSource;
 use super::ports::RefreshWriter;
@@ -20,9 +21,13 @@ pub struct TourRefresher {
 }
 
 impl TourRefresher {
-    /// Blocks until the agent is done; the app runs it off the main thread. `on_activity` hears what the agent is doing.
-    pub fn run(&self, on_activity: &mut dyn FnMut(String)) -> anyhow::Result<RepinnedTour> {
-        self.writer.refresh(&self.subject, on_activity)?;
+    /// Blocks until the agent is done; the app runs it off the main thread. `on_activity` hears what the agent is doing, and `cancel` ends the wait for the agent.
+    pub fn run(
+        &self,
+        cancel: &Cancel,
+        on_activity: &mut dyn FnMut(String),
+    ) -> anyhow::Result<RepinnedTour> {
+        self.writer.refresh(&self.subject, cancel, on_activity)?;
         let tour =
             GuidedTour::load_of(&Tour::path_for(&self.folders, &self.subject), &self.subject)?;
         let source = (self.pick_code_source)(&tour.pin.pinned_tips())?;

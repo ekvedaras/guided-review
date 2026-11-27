@@ -1555,6 +1555,9 @@ impl Render for OneStepLayout {
                                             this.session.update(cx, ReviewSession::refresh_tour);
                                         }
                                     }),
+                                    cx.listener(|this, _, _, cx| {
+                                        this.session.read(cx).cancel_refresh();
+                                    }),
                                 )
                             }),
                     )

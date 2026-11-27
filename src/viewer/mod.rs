@@ -9,6 +9,7 @@ mod app_state;
 mod app_window;
 mod avatars;
 mod branch_link;
+mod cancel;
 mod capability;
 mod carried;
 mod clone_offer;
@@ -133,6 +134,7 @@ pub use app_window::{
 };
 pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub use branch_link::{BranchOffer, local_reviews_of_repo};
+pub use cancel::{Cancel, RefreshCancelled};
 pub use capability::{Capability, HostCapabilities};
 pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState};
 pub use code_link::{

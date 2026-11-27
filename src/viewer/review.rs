@@ -37,6 +37,7 @@ use std::path::PathBuf;
 use super::ai_review::AiReview;
 use super::ai_review_run::{AiReviewRun, ReviewAgentLife};
 use super::branch_link::BranchLink;
+use super::cancel::RefreshCancelled;
 use super::capability::HostCapabilities;
 use super::carried::ReadCarrier;
 use super::code_link::{CodeLinks, CodeOnWeb, CodeOpener, WorkingCopy};
@@ -433,6 +434,7 @@ impl Review {
                 self.job_failed(ReplacingJob::Repin, &error, None);
                 stays
             }
+            JobOutcome::Refresh(Err(error)) if error.is::<RefreshCancelled>() => stays,
             JobOutcome::Refresh(Err(error)) => {
                 self.job_failed(
                     ReplacingJob::Refresh,

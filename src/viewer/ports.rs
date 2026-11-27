@@ -3,6 +3,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use super::cancel::Cancel;
 use super::capability::{Capability, HostCapabilities};
 use super::comments::{CommentPlace, SendMode};
 use super::host_outage::OutageCause;
@@ -421,13 +422,15 @@ pub struct ViewedFile {
     pub state: ViewedState,
 }
 
-/// Has the subject's tour agent Refresh its tour. Blocks until the agent is done.
+/// Has the subject's tour agent Refresh its tour. Blocks until the agent is done, or until `cancel`, which
+/// ends the wait with a `RefreshCancelled` and does not interrupt the agent.
 pub trait RefreshWriter: Send + Sync {
     /// Tells what is going on to `on_activity` as it happens. An `Ok` says only that the agent ran to its
     /// end, not that it refreshed the tour.
     fn refresh(
         &self,
         subject: &ReviewSubject,
+        cancel: &Cancel,
         on_activity: &mut dyn FnMut(String),
     ) -> anyhow::Result<()>;
 }

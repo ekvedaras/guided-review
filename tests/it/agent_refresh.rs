@@ -5,7 +5,8 @@ use std::sync::Arc;
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::viewer::{
-    AgentStatus, Pace, RefreshWriter, TourAgentPort, TourAgentRefresh, TourAgents,
+    AgentStatus, Cancel, Pace, RefreshCancelled, RefreshWriter, TourAgentPort, TourAgentRefresh,
+    TourAgents,
 };
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
@@ -16,8 +17,13 @@ fn refresh(fake: &Arc<FakeTourAgent>, subject: &str) -> (anyhow::Result<()>, Vec
         .starting_in("/clones/shop".into());
     let subject: ReviewSubject = subject.parse().unwrap();
     let mut activities = Vec::new();
-    let refreshed = TourAgentRefresh::new(agents, Pace::at_once())
-        .refresh(&subject, &mut |activity| activities.push(activity));
+    let refreshed = TourAgentRefresh::new(agents, Pace::at_once()).refresh(
+        &subject,
+        &Cancel::default(),
+        &mut |activity| {
+            activities.push(activity);
+        },
+    );
     (refreshed, activities)
 }
 
@@ -169,4 +175,58 @@ fn with_the_agent_link_off_the_refresh_fails_and_says_why() {
     let (refreshed, _) = refresh(&fake, PR);
 
     assert!(format!("{:#}", refreshed.unwrap_err()).contains("herdr server is not running"));
+}
+
+fn waits_long() -> Pace {
+    Pace {
+        poll: std::time::Duration::from_millis(5),
+        free_agent: std::time::Duration::from_millis(400),
+        start: std::time::Duration::from_millis(400),
+    }
+}
+
+fn refresh_until_cancelled(fake: &Arc<FakeTourAgent>) -> anyhow::Result<()> {
+    let agents = TourAgents::new(Arc::clone(fake) as Arc<dyn TourAgentPort>)
+        .starting_in("/clones/shop".into());
+    let subject: ReviewSubject = PR.parse().unwrap();
+    let cancel = Cancel::default();
+    let waiting = {
+        let cancel = cancel.clone();
+        let (ended, refreshed) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let refresh =
+                TourAgentRefresh::new(agents, waits_long()).refresh(&subject, &cancel, &mut |_| {});
+            ended.send(refresh).ok();
+        });
+        refreshed
+    };
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    cancel.cancel();
+    waiting
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the refresh still waits after the cancel")
+}
+
+#[test]
+fn cancel_ends_the_wait_for_a_busy_agent_without_typing_into_it() {
+    let fake = Arc::new(FakeTourAgent::new().with_terminal("t3", Some(PR), AgentStatus::Working));
+
+    let refreshed = refresh_until_cancelled(&fake);
+
+    assert!(refreshed.unwrap_err().is::<RefreshCancelled>());
+    assert_eq!(fake.calls(), vec![]);
+}
+
+#[test]
+fn cancel_ends_the_wait_for_the_agents_turn_and_leaves_the_agent_alone() {
+    let fake = Arc::new(
+        FakeTourAgent::new()
+            .with_terminal("t3", Some(PR), AgentStatus::Idle)
+            .after_a_send_looks_report(&[AgentStatus::Working]),
+    );
+
+    let refreshed = refresh_until_cancelled(&fake);
+
+    assert!(refreshed.unwrap_err().is::<RefreshCancelled>());
+    assert_eq!(fake.calls().len(), 1, "{:?}", fake.calls());
 }

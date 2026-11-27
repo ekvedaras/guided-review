@@ -21,6 +21,7 @@ pub struct RefreshBanner {
     brief: RefreshBrief,
     progress: JobProgress,
     on_refresh: OnRefresh,
+    on_cancel: OnRefresh,
 }
 
 impl RefreshBanner {
@@ -28,11 +29,13 @@ impl RefreshBanner {
         brief: RefreshBrief,
         progress: JobProgress,
         on_refresh: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_cancel: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
             brief,
             progress,
             on_refresh: Box::new(on_refresh),
+            on_cancel: Box::new(on_cancel),
         }
     }
 }
@@ -78,7 +81,17 @@ impl RenderOnce for RefreshBanner {
             JobProgress::Idle | JobProgress::Running { .. } | JobProgress::Failed(_) => None,
         };
         let is_running = matches!(self.progress, JobProgress::Running { .. });
-        let button = (!is_running).then(|| {
+        let button = if is_running {
+            icon_label_button(
+                &colors,
+                "cancel-refresh-tour",
+                ButtonKind::Secondary,
+                ButtonSize::Small,
+                Icon::Close,
+                "Cancel",
+            )
+            .on_click(self.on_cancel)
+        } else {
             icon_label_button(
                 &colors,
                 "refresh-tour",
@@ -88,7 +101,7 @@ impl RenderOnce for RefreshBanner {
                 button_label,
             )
             .on_click(self.on_refresh)
-        });
+        };
         let redo_hint = self.brief.redo_hint().filter(|_| !is_running).map(|hint| {
             div().child(SelectableText::new(
                 "refresh-redo-hint",
@@ -112,7 +125,7 @@ impl RenderOnce for RefreshBanner {
                     .items_center()
                     .gap_3()
                     .child(message)
-                    .children(button),
+                    .child(button),
             )
             .children(activity)
             .children(redo_hint)

@@ -811,7 +811,12 @@ impl ReviewSession {
         self.start_job(ReplacingJob::Reload, cx);
     }
 
-    /// Runs only on the button: the user's `claude` rewrites the marked steps.
+    /// The banner's Cancel while the Refresh waits for the tour agent.
+    pub fn cancel_refresh(&self) {
+        self.review.cancel_refresh();
+    }
+
+    /// Runs only on the button: the PR's tour agent rewrites the marked steps.
     pub fn refresh_tour(&mut self, cx: &mut Context<Self>) {
         self.start_job(ReplacingJob::Refresh, cx);
     }
@@ -854,7 +859,7 @@ impl ReviewSession {
         self.run_off_thread(cx, run, Self::land_job).detach();
     }
 
-    /// Each tool claude uses shows in the banner, so a long refresh is seen to be working.
+    /// What the tour agent is waited for to do shows in the banner, so a long refresh is seen to be working.
     fn refresh_reporting_activity(
         &self,
         cx: &mut Context<Self>,
@@ -873,8 +878,9 @@ impl ReviewSession {
         })
         .detach();
         let refresher = Arc::clone(&self.tour_work.refresher);
+        let cancel = self.review.refresh_cancel();
         Box::new(move || {
-            JobOutcome::Refresh(refresher.run(&mut |activity| {
+            JobOutcome::Refresh(refresher.run(&cancel, &mut |activity| {
                 activities.unbounded_send(activity).ok();
             }))
         })

@@ -7,7 +7,7 @@ use guided_review::pull_request::Sha;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, Tour, TourPin};
 use guided_review::viewer::{
-    MergeMethod, ProblemKind, RefreshWriter, RepinnedTour, Review, TourRefresher,
+    Cancel, MergeMethod, ProblemKind, RefreshWriter, RepinnedTour, Review, TourRefresher,
 };
 use serde_json::json;
 
@@ -129,7 +129,12 @@ fn reopened(opened: OpenedReview, rebuilt: RepinnedTour) -> Review {
 struct WriterThatChangesNothing;
 
 impl RefreshWriter for WriterThatChangesNothing {
-    fn refresh(&self, _: &ReviewSubject, _: &mut dyn FnMut(String)) -> anyhow::Result<()> {
+    fn refresh(
+        &self,
+        _: &ReviewSubject,
+        _: &Cancel,
+        _: &mut dyn FnMut(String),
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -207,7 +212,7 @@ fn a_review_refreshed_keeps_what_the_config_and_disk_say() {
         writer: Arc::new(WriterThatChangesNothing),
     };
 
-    let refreshed = refresher.run(&mut |_| {}).unwrap();
+    let refreshed = refresher.run(&Cancel::default(), &mut |_| {}).unwrap();
 
     assert_eq!(
         BuiltFacts::of(&reopened(opened, refreshed)),

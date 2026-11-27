@@ -8,7 +8,7 @@ use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
-use guided_review::viewer::{JobOutcome, ReplacingJob};
+use guided_review::viewer::{Cancel, JobOutcome, ReplacingJob};
 use guided_review::viewer::{
     PickCodeSource, Problem, RefreshWriter, Review, ReviewStateFile, TourRefresher, repin_tour,
 };
@@ -232,6 +232,7 @@ impl RefreshWriter for SkillStandIn {
     fn refresh(
         &self,
         subject: &ReviewSubject,
+        _: &Cancel,
         on_activity: &mut dyn FnMut(String),
     ) -> anyhow::Result<()> {
         assert_eq!(subject.to_string(), self.pr.to_string());
@@ -274,7 +275,7 @@ fn the_refresh_button_runs_the_writer_then_reopens_the_review_without_the_marks(
     shop.repin_onto_head_with_a_new_class();
 
     let refreshed = refresher(&shop, Writer::Refreshes)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .unwrap();
 
     assert!(refreshed.review.refresh_brief().is_empty());
@@ -287,7 +288,9 @@ fn the_refresh_tells_what_the_agent_is_doing_while_it_works() {
     let mut activities = Vec::new();
 
     refresher(&shop, Writer::Refreshes)
-        .run(&mut |activity| activities.push(activity))
+        .run(&Cancel::default(), &mut |activity| {
+            activities.push(activity);
+        })
         .unwrap();
 
     assert_eq!(activities, ["The tour agent t3 is refreshing the tour"]);
@@ -299,7 +302,7 @@ fn a_failed_writer_is_reported_and_leaves_the_marks() {
     shop.repin_onto_head_with_a_new_class();
 
     let error = refresher(&shop, Writer::Fails)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .err()
         .unwrap();
 
@@ -313,7 +316,7 @@ fn a_writer_that_ends_without_refreshing_fails_the_refresh() {
     shop.repin_onto_head_with_a_new_class();
 
     let error = refresher(&shop, Writer::GivesUp)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .err()
         .unwrap();
 
@@ -338,7 +341,7 @@ fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_
     .unwrap();
 
     let error = refresher(&shop, Writer::GivesUp)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .err()
         .unwrap();
     review.start_job(ReplacingJob::Refresh).unwrap();
@@ -352,7 +355,7 @@ fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_
         )]
     );
     let refreshed = refresher(&shop, Writer::Refreshes)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .unwrap();
     assert_eq!(refreshed.review.problems(), []);
 }

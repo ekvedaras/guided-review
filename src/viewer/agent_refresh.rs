@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::bail;
 
+use super::cancel::Cancel;
 use super::ports::RefreshWriter;
 use super::tour_agent::{AgentStatus, TerminalId, TourAgents, WriterHandOver};
 use crate::review_subject::ReviewSubject;
@@ -55,6 +56,7 @@ impl TourAgentRefresh {
     fn hand_over(
         &self,
         subject: &ReviewSubject,
+        cancel: &Cancel,
         on_activity: &mut dyn FnMut(String),
     ) -> anyhow::Result<TerminalId> {
         let waiting_since = Instant::now();
@@ -68,7 +70,7 @@ impl TourAgentRefresh {
                         bail!("the tour agent {terminal} was not free to take the refresh");
                     }
                     on_activity(format!("Waiting for the tour agent {terminal} to be free"));
-                    std::thread::sleep(self.pace.poll);
+                    cancel.pause(self.pace.poll)?;
                 }
             }
         }
@@ -78,6 +80,7 @@ impl TourAgentRefresh {
     fn wait_for_its_turn(
         &self,
         terminal: &TerminalId,
+        cancel: &Cancel,
         on_activity: &mut dyn FnMut(String),
     ) -> anyhow::Result<()> {
         let handed_over = Instant::now();
@@ -106,7 +109,7 @@ impl TourAgentRefresh {
                     }
                 }
             }
-            std::thread::sleep(self.pace.poll);
+            cancel.pause(self.pace.poll)?;
         }
     }
 }
@@ -115,10 +118,12 @@ impl RefreshWriter for TourAgentRefresh {
     fn refresh(
         &self,
         subject: &ReviewSubject,
+        cancel: &Cancel,
         on_activity: &mut dyn FnMut(String),
     ) -> anyhow::Result<()> {
-        let terminal = self.hand_over(subject, on_activity)?;
+        cancel.check()?;
+        let terminal = self.hand_over(subject, cancel, on_activity)?;
         on_activity(format!("The tour agent {terminal} is refreshing the tour"));
-        self.wait_for_its_turn(&terminal, on_activity)
+        self.wait_for_its_turn(&terminal, cancel, on_activity)
     }
 }
