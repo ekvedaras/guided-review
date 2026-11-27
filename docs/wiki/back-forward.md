@@ -10,6 +10,8 @@ The 2026-11-27 decisions that gave the reviewer a history of where they have bee
 - **Where it lives.** `ReviewCore` holds the history (`viewer/visits.rs` for the visits, the moves in `review/reading.rs`). The one place a screen changes is `ReviewCore::move_to`. `ReviewSession::change_session`, which every change of the review goes through, tells the review which row is at the top of the view before the change (`Review::note_scroll_top`) and scrolls to the restored row after it (`Review::take_row_to_scroll_to`).
 - **Scope.** Per review. A re-pin carries it over (`carry_on_from`) and the reopened review resumes on its screen without a visit (`resume_on`); entries for screens the new tour no longer has are passed over. It is gone when another PR is opened (Cmd+P), since that replaces the layout and the review.
 
+- **Jumps on the same screen are visits too (2026-11-27, after trying the first version).** A jump to a `JumpTarget` (palette, Definition card, comments and files lists) pushes the place it left even when it lands on the open screen, so Back returns to the line jumped from instead of the previous screen (`ReviewCore::jump_to`). An entry is a screen plus a reading spot; scrolling by hand does not push. A jump that lands on the very row already at the top still leaves an entry, so one Back then looks like it did nothing.
+
 ## Open
 
 - Back does not cross a PR switch.

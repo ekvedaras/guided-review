@@ -185,6 +185,27 @@ fn back_returns_to_where_the_reviewer_was_scrolled() {
 }
 
 #[test]
+fn back_returns_to_the_line_a_jump_on_the_same_screen_left() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let mut review = three_step_review(&repo);
+    review.go_to(&"one".into());
+    let row = first_line_row(&review);
+    review.note_scroll_top(row);
+    let target = review
+        .jump_targets("README")
+        .into_iter()
+        .find(|target| target.screen == step("one"))
+        .unwrap();
+
+    review.jump_to(&target);
+    review.note_scroll_top(row + 1);
+    assert!(review.go_back_in_history());
+
+    assert_eq!(review.screen(), &step("one"));
+    assert_eq!(review.take_row_to_scroll_to(), Some(row));
+}
+
+#[test]
 fn forward_returns_to_where_the_reviewer_was_when_they_went_back() {
     let repo = FixtureRepo::cloned_from("acme/shop");
     let mut review = three_step_review(&repo);

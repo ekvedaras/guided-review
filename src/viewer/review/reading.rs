@@ -50,8 +50,11 @@ impl ReviewCore {
     }
 
     /// A folded step opens for the session so the file or symbol the reviewer asked for is on screen.
+    /// A jump is a visit even when it lands on the screen already open: Back returns to the line it left.
     pub fn jump_to(&mut self, target: &JumpTarget) {
-        self.go_to_screen(target.screen.clone());
+        if self.reading_order().contains(&target.screen) {
+            self.leave_for(target.screen.clone());
+        }
         if let Screen::Step(id) = &target.screen
             && self.is_folded(id)
         {
@@ -658,9 +661,12 @@ impl ReviewCore {
 
     /// The one place a move to another screen is made, so that none escapes the history.
     fn move_to(&mut self, screen: Screen) {
-        if screen == self.screen {
-            return;
+        if screen != self.screen {
+            self.leave_for(screen);
         }
+    }
+
+    fn leave_for(&mut self, screen: Screen) {
         let left = self.here();
         self.screen = screen;
         self.spot = ReadingSpot::default();
