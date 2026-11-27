@@ -12,13 +12,12 @@ use std::sync::Arc;
 use crate::findings::FindingId;
 
 pub use rows::{
-    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
+    BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
     FullDiffControl, HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow,
     RouteStopRow, ScreenFooter, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
     SummaryStatsRow, ThreadRowPlace, Toolbar, line_count, pluralised,
 };
 
-use super::ask::{Place, ShownOn};
 use super::comments::CommentPlace;
 use super::diff_line::DiffLine;
 use super::file_block::FileBlock;
@@ -30,6 +29,7 @@ use super::review::ReviewCore;
 use super::review_thread::ThreadId;
 use super::row_selection::{RowSelection, SelectedLines};
 use super::screen::Screen;
+use super::visits::ReadingSpot;
 use crate::file_path::FilePath;
 use crate::local_facts::LocalChange;
 use crate::pieces::PieceId;
@@ -51,6 +51,9 @@ pub struct Page {
     /// The index in `changes` of the focused change, when the screen shows it.
     focused: Option<usize>,
 }
+
+/// How many rows from the top of the view a spot looks for a line to name it by.
+const SPOT_REACH: usize = 40;
 
 #[derive(Clone)]
 struct PieceAt {
@@ -223,6 +226,22 @@ impl Page {
         }
     }
 
+    /// The code at the top of the view when it shows `row`, to come back to it after rows change.
+    pub fn spot_at(&self, row: usize) -> ReadingSpot {
+        let anchor = (row..self.rows.len())
+            .take(SPOT_REACH)
+            .find_map(|index| self.line(index))
+            .map(|line| line.location.clone());
+        ReadingSpot::new(anchor, row)
+    }
+
+    /// The row to scroll to for `spot`: its code where this page shows it, else the row it was at.
+    pub fn row_of_spot(&self, spot: &ReadingSpot) -> usize {
+        spot.anchor()
+            .and_then(|code| self.row_of_line(code))
+            .unwrap_or_else(|| spot.row_hint().min(self.rows.len().saturating_sub(1)))
+    }
+
     /// The row a finding is on; `None` when this page does not show it.
     pub fn row_of_finding(&self, id: &FindingId) -> Option<usize> {
         self.rows
@@ -290,22 +309,6 @@ impl Page {
         selection.resolve(self.lines())
     }
 
-    /// What an Ask about the selected lines is about: the lines and the pieces of this page that hold them.
-    pub fn place_of(&self, selected: &SelectedLines) -> Place {
-        Place::Lines {
-            shown_on: self.screen.shown_on().unwrap_or(ShownOn::SafetyNet),
-            start: selected.first().clone(),
-            end: selected.last().clone(),
-            pieces: self
-                .blocks
-                .iter()
-                .flat_map(|block| &block.pieces)
-                .filter(|piece| piece.lines().any(|line| selected.contains(&line.location)))
-                .map(|piece| piece.id.clone())
-                .collect(),
-        }
-    }
-
     /// The pictures of the page that are not loaded yet, each once, folded boxes too.
     pub fn images_to_load(&self) -> &[FilePath] {
         &self.images_to_load
@@ -365,14 +368,6 @@ impl Page {
     pub fn screen_change(&self) -> Option<LocalChange> {
         self.rows.iter().find_map(|row| match row {
             PageRow::Toolbar(toolbar) => toolbar.change,
-            _ => None,
-        })
-    }
-
-    /// What the screen's own Ask button asks about, as its toolbar offers it.
-    pub fn screen_ask(&self) -> Option<&AskAt> {
-        self.rows.iter().find_map(|row| match row {
-            PageRow::Toolbar(toolbar) => toolbar.ask.as_ref(),
             _ => None,
         })
     }

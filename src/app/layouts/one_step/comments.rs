@@ -73,7 +73,6 @@ impl OneStepLayout {
             ask_agent: session.agent_link_is_on(),
             sending: review.sending(),
         };
-        let ask_place = review.ask_place_of(place);
         let on_type = {
             let (layout, draft) = (cx.entity(), TextBox::Draft(place.clone()));
             Rc::new(move |body: String, _: &mut Window, cx: &mut App| {
@@ -111,15 +110,21 @@ impl OneStepLayout {
                 });
                 window.focus(&this.focus, cx);
             }),
-            on_ask_agent: self.on_compose(place, cx, |this, place, window, cx| {
+            on_comment_and_ask_agent: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
                     session.send_comment(&place, SendMode::AddToReview, Audience::Agent, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
-            on_ask_agent_now: self.on_compose(place, cx, |this, place, window, cx| {
+            on_comment_and_ask_agent_now: self.on_compose(place, cx, |this, place, window, cx| {
                 this.session.update(cx, |session, cx| {
                     session.send_comment(&place, SendMode::CommentNow, Audience::Agent, cx);
+                });
+                window.focus(&this.focus, cx);
+            }),
+            on_ask_agent: self.on_compose(place, cx, |this, place, window, cx| {
+                this.session.update(cx, |session, cx| {
+                    session.send_comment(&place, SendMode::SendNow, Audience::Agent, cx);
                 });
                 window.focus(&this.focus, cx);
             }),
@@ -147,28 +152,14 @@ impl OneStepLayout {
                 })
             },
         };
-        let ask = ask_place.map(|ask_place| {
-            let label = ask_place.lines_label().unwrap_or_default();
-            self.ask_button(
-                format!("ask-{}", place.describe()),
-                ask_place,
-                label,
-                ButtonKind::Ghost,
-                cx,
-            )
-            .into_any_element()
-        });
-        Some(
-            CommentComposer::new(
-                draft,
-                self.composer_focus.clone(),
-                state,
-                capabilities,
-                problem,
-                actions,
-            )
-            .with_ask(ask),
-        )
+        Some(CommentComposer::new(
+            draft,
+            self.composer_focus.clone(),
+            state,
+            capabilities,
+            problem,
+            actions,
+        ))
     }
 
     fn on_thread_action(&self) -> OnThreadAction {

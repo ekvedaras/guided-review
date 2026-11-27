@@ -37,8 +37,9 @@ pub struct ComposerActions {
     pub on_stop: OnCompose,
     pub on_add_to_review: OnCompose,
     pub on_comment_now: OnCompose,
+    pub on_comment_and_ask_agent: OnCompose,
+    pub on_comment_and_ask_agent_now: OnCompose,
     pub on_ask_agent: OnCompose,
-    pub on_ask_agent_now: OnCompose,
     pub on_suggest_change: OnCompose,
     pub on_discard: OnCompose,
     /// One of a local review's task send actions.
@@ -77,10 +78,11 @@ fn offered_actions(capabilities: CommentCapabilities) -> Vec<SendAction> {
             offered.push(SendAction::CommentNow);
         }
         if capabilities.ask_agent {
-            offered.push(SendAction::AskAgent);
+            offered.push(SendAction::CommentAndAskAgent);
             if capabilities.comment_now {
-                offered.push(SendAction::AskAgentNow);
+                offered.push(SendAction::CommentAndAskAgentNow);
             }
+            offered.push(SendAction::AskAgent);
         }
     } else if sending.tasks().len() > 1 {
         offered.push(SendAction::CommentNow);
@@ -110,8 +112,15 @@ fn send_button_look(
         (SendAction::AddToReview, true) => ("add-to-review", None, "Add to review"),
         (SendAction::CommentNow, true) => ("comment-now", Some(Icon::Send), "Comment now"),
         (SendAction::SuggestChange, _) => ("suggest-change", Some(Icon::Diff), "Suggest change"),
-        (SendAction::AskAgent, _) => ("ask-agent", Some(Icon::Sparkles), "Ask agent"),
-        (SendAction::AskAgentNow, _) => ("ask-agent-now", Some(Icon::Zap), "Ask agent now"),
+        (SendAction::CommentAndAskAgent, _) => {
+            ("ask-agent", Some(Icon::Sparkles), "Comment and ask agent")
+        }
+        (SendAction::CommentAndAskAgentNow, _) => (
+            "ask-agent-now",
+            Some(Icon::Zap),
+            "Comment and ask agent now",
+        ),
+        (SendAction::AskAgent, _) => ("ask-agent-only", Some(Icon::Terminal), "Ask agent"),
     }
 }
 
@@ -125,8 +134,6 @@ pub struct CommentComposer {
     /// What stops the comment, or what went wrong with the last send.
     problem: Option<CommentProblem>,
     actions: ComposerActions,
-    /// Asks the AI about the box's lines; on the box, so it goes when the box goes.
-    ask: Option<gpui::AnyElement>,
 }
 
 impl CommentComposer {
@@ -147,13 +154,7 @@ impl CommentComposer {
             capabilities,
             problem,
             actions,
-            ask: None,
         }
-    }
-
-    pub fn with_ask(mut self, ask: Option<gpui::AnyElement>) -> Self {
-        self.ask = ask;
-        self
     }
 }
 
@@ -194,8 +195,11 @@ impl RenderOnce for CommentComposer {
                     None => Rc::clone(&actions.on_comment_now),
                 },
                 SendAction::SuggestChange => Rc::clone(&actions.on_suggest_change),
+                SendAction::CommentAndAskAgent => Rc::clone(&actions.on_comment_and_ask_agent),
+                SendAction::CommentAndAskAgentNow => {
+                    Rc::clone(&actions.on_comment_and_ask_agent_now)
+                }
                 SendAction::AskAgent => Rc::clone(&actions.on_ask_agent),
-                SendAction::AskAgentNow => Rc::clone(&actions.on_ask_agent_now),
             }
         };
         let body = if self.state == BoxState::Composing {
@@ -208,9 +212,10 @@ impl RenderOnce for CommentComposer {
                 })
             };
             let (submits, on_submit) = typed(SendAction::AddToReview);
-            let (asks, on_ask) = typed(SendAction::AskAgent);
+            let (asks, on_ask) = typed(SendAction::CommentAndAskAgent);
             let (posts, on_post) = typed(SendAction::CommentNow);
-            let (asks_now, on_ask_now) = typed(SendAction::AskAgentNow);
+            let (asks_now, on_ask_now) = typed(SendAction::CommentAndAskAgentNow);
+            let (asks_alone, on_ask_alone) = typed(SendAction::AskAgent);
             let (suggests, on_suggest) = typed(SendAction::SuggestChange);
             TextBox::new(
                 SharedString::from(format!("{id}-text")),
@@ -226,9 +231,10 @@ impl RenderOnce for CommentComposer {
                 }
             })
             .on_cancel(move |window, cx| on_stop(window, cx))
-            .on_submit_to_agent(asks, on_ask)
+            .on_submit_and_ask_agent(asks, on_ask)
             .on_submit_now(posts, on_post)
-            .on_submit_to_agent_now(asks_now, on_ask_now)
+            .on_submit_and_ask_agent_now(asks_now, on_ask_now)
+            .on_submit_ask_agent(asks_alone, on_ask_alone)
             .on_suggest_change(suggests, on_suggest)
             .into_any_element()
         } else {
@@ -249,9 +255,14 @@ impl RenderOnce for CommentComposer {
                     None => styled_button(&colors, id, kind, ButtonSize::Regular).child(label),
                 };
                 base.child(chord_keys(&colors, kind, planned.chord))
-                    .when(planned.action == SendAction::AskAgentNow, |button| {
+                    .when(planned.action == SendAction::CommentAndAskAgentNow, |button| {
                         button.tooltip(tooltip(|_| {
-                            "Ask agent now: posts the comment at once".into()
+                            "Comment and ask agent now: posts the comment at once and hands it to your agent".into()
+                        }))
+                    })
+                    .when(planned.action == SendAction::AskAgent, |button| {
+                        button.tooltip(tooltip(|_| {
+                            "Ask agent: only your agent sees this, nothing goes to GitHub".into()
                         }))
                     })
                     .aria_label(label)
@@ -284,18 +295,12 @@ impl RenderOnce for CommentComposer {
             .font_family(*super::palette::TEXT_FONT)
             .on_click(move |_, window, cx| on_focus(window, cx))
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(colors.muted_text)
-                            .child(place.describe()),
-                    )
-                    .children(self.ask),
+                div().flex().items_center().justify_between().gap_2().child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(place.describe()),
+                ),
             )
             .child(
                 Field::new(&self.focus)

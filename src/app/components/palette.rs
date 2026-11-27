@@ -735,7 +735,7 @@ impl Colors {
         vec![BoxShadow::new(px(0.), px(-6.), self.shadow.opacity(0.5).into()).blur_radius(px(20.))]
     }
 
-    /// The page lies on top of the sidebar, and the Ask panel on top of the page: each casts leftwards.
+    /// The page lies on top of the sidebar and casts leftwards.
     pub fn page_shadow(&self) -> Vec<BoxShadow> {
         vec![BoxShadow::new(px(-2.), px(0.), self.shadow.opacity(0.6).into()).blur_radius(px(14.))]
     }

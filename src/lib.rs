@@ -1,3 +1,4 @@
+pub mod agent_cli;
 pub mod agent_reply;
 pub mod app;
 pub mod app_folders;

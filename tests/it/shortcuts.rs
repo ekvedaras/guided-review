@@ -64,7 +64,7 @@ fn no_two_commands_of_one_scope_share_a_key() {
 fn a_chord_is_written_as_gpui_reads_it() {
     assert_eq!(Command::Jump.default_chords()[0].keystroke(), "secondary-k");
     assert_eq!(
-        Command::AskAgent.default_chords()[0].keystroke(),
+        Command::CommentAndAskAgent.default_chords()[0].keystroke(),
         "secondary-shift-enter"
     );
     assert_eq!(Command::NextScreen.default_chords()[0].keystroke(), "right");
@@ -97,14 +97,17 @@ fn the_send_now_actions_have_keys_beside_add_to_review_and_ask_agent() {
     let keys = |command: Command| command.default_chords()[0].keystroke();
 
     assert_eq!(keys(Command::CommentNow), "secondary-alt-enter");
-    assert_eq!(keys(Command::AskAgentNow), "secondary-alt-shift-enter");
-    for command in [Command::CommentNow, Command::AskAgentNow] {
+    assert_eq!(
+        keys(Command::CommentAndAskAgentNow),
+        "secondary-alt-shift-enter"
+    );
+    for command in [Command::CommentNow, Command::CommentAndAskAgentNow] {
         assert_eq!(command.scope(), KeyScope::TextBox);
         assert_eq!(command.group(), ShortcutGroup::Comment);
     }
     assert_eq!(
         Command::of_config_name("ask_agent_now"),
-        Some(Command::AskAgentNow)
+        Some(Command::CommentAndAskAgentNow)
     );
 }
 
@@ -210,17 +213,13 @@ fn the_keys_of_the_focused_change_are_on_the_page_with_defaults() {
 }
 
 #[test]
-fn s_hides_whitespace_and_a_asks_about_the_step_wherever_the_page_takes_keys() {
+fn s_hides_whitespace_wherever_the_page_takes_keys() {
     let keys = |command: Command| command.default_chords()[0].keystroke();
 
     assert_eq!(keys(Command::HideWhitespace), "s");
     assert_eq!(Command::HideWhitespace.scope(), KeyScope::Page);
     assert_eq!(Command::HideWhitespace.group(), ShortcutGroup::View);
     assert_eq!(Command::HideWhitespace.config_name(), "hide_whitespace");
-    assert_eq!(keys(Command::AskAboutStep), "a");
-    assert_eq!(Command::AskAboutStep.scope(), KeyScope::Page);
-    assert_eq!(Command::AskAboutStep.group(), ShortcutGroup::Read);
-    assert_eq!(Command::AskAboutStep.config_name(), "ask_about_step");
 }
 
 #[test]
@@ -232,4 +231,47 @@ fn switch_pull_request_has_a_key_that_works_anywhere_in_the_window() {
     assert_eq!(Command::SwitchPr.config_name(), "switch_pr");
     assert_eq!(Command::SwitchPr.scope(), KeyScope::Window);
     assert_eq!(PaletteAction::SwitchPr.command(), Some(Command::SwitchPr));
+}
+
+#[test]
+fn primary_bracket_goes_back_and_forward_from_anywhere_in_the_window() {
+    assert_eq!(
+        Command::HistoryBack.default_chords()[0].keystroke(),
+        "secondary-["
+    );
+    assert_eq!(
+        Command::HistoryForward.default_chords()[0].keystroke(),
+        "secondary-]"
+    );
+    for command in [Command::HistoryBack, Command::HistoryForward] {
+        assert_eq!(command.scope(), KeyScope::Window);
+        assert_eq!(command.group(), ShortcutGroup::Navigate);
+    }
+    assert_eq!(
+        Command::of_config_name("history_back"),
+        Some(Command::HistoryBack)
+    );
+}
+
+#[test]
+fn ask_agent_has_its_own_key_in_the_comment_group_and_a_name_that_leaves_the_old_one_alone() {
+    assert_eq!(
+        Command::AskAgent.default_chords()[0].keystroke(),
+        "secondary-alt-p"
+    );
+    assert_eq!(Command::AskAgent.config_name(), "ask_agent_only");
+    assert_eq!(Command::AskAgent.scope(), KeyScope::TextBox);
+    assert_eq!(Command::AskAgent.group(), ShortcutGroup::Comment);
+    assert_eq!(
+        Command::of_config_name("ask_agent_only"),
+        Some(Command::AskAgent)
+    );
+    assert_eq!(
+        Command::of_config_name("ask_agent"),
+        Some(Command::CommentAndAskAgent)
+    );
+    assert_eq!(
+        Command::AskAgent.label(),
+        "Ask your agent without posting anything"
+    );
 }

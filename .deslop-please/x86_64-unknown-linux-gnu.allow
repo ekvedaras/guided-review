@@ -5,8 +5,8 @@ module-cycle guided_review::viewer::focused_change,guided_review::viewer::page,g
 module-cycle guided_review::viewer::hand_offs,guided_review::viewer::local_thread_store,guided_review::viewer::review_state
 tangle guided_review::app::apply_keymap,guided_review::app::bind_keys,guided_review::app::components::settings_panel::Editing,guided_review::app::components::settings_panel::InstructionsEntry,guided_review::app::components::settings_panel::Loaded,guided_review::app::components::settings_panel::SettingsPanel,guided_review::app::layouts::one_step::OneStepLayout,guided_review::app::layouts::one_step::page::finish_card,guided_review::app::layouts::one_step::page::lead_button,guided_review::app::layouts::one_step::page::route_stop,guided_review::app::layouts::one_step::page::screen_footer,guided_review::app::layouts::one_step::page::step_heading,guided_review::app::layouts::one_step::page::tick_button,guided_review::app::layouts::one_step::scenes::drag_the_issue_cards_scrollbar,guided_review::app::layouts::one_step::scenes::hover_a_name,guided_review::app::layouts::one_step::scenes::pick_a_word_and_copy,guided_review::app::layouts::one_step::scenes::shoot,guided_review::app::layouts::one_step::scenes::start,guided_review::app::layouts::one_step::title_bar::merge_button
 tangle guided_review::app::components::palette::Appearance,guided_review::app::snapshots::appearance
-tangle guided_review::viewer::hand_offs::AgentReplyRefused,guided_review::viewer::hand_offs::AgentReplyRequest,guided_review::viewer::hand_offs::HandOffs,guided_review::viewer::hand_offs::Reviewed,guided_review::viewer::local_thread_store::LocalThreadStore,guided_review::viewer::local_thread_store::ThreadHome,guided_review::viewer::review_state::ReviewState,guided_review::viewer::review_state::ReviewStateFile,guided_review::viewer::review_state::ViewerSections
-tangle guided_review::viewer::page::Page,guided_review::viewer::page::build::Builder,guided_review::viewer::page::build::UnderLine,guided_review::viewer::page::build::UnderLines,guided_review::viewer::page::build::comment_box_row,guided_review::viewer::page::build::comments_and_asks,guided_review::viewer::page::build::file,guided_review::viewer::page::build::overview,guided_review::viewer::page::build::reviewer_summary_row,guided_review::viewer::page::build::safety_net,guided_review::viewer::page::build::screen_footer,guided_review::viewer::page::build::step,guided_review::viewer::page::build::summary,guided_review::viewer::review::ReviewCore,guided_review::viewer::review::names::ReviewPlaces,guided_review::viewer::review::walk
+tangle guided_review::viewer::hand_offs::AgentReplyRequest,guided_review::viewer::hand_offs::HandOffs,guided_review::viewer::local_thread_store::LocalThreadStore,guided_review::viewer::local_thread_store::ThreadHome,guided_review::viewer::review_state::ReviewState,guided_review::viewer::review_state::ReviewStateFile,guided_review::viewer::review_state::ViewerSections
+tangle guided_review::viewer::page::Page,guided_review::viewer::page::build::Builder,guided_review::viewer::page::build::UnderLine,guided_review::viewer::page::build::UnderLines,guided_review::viewer::page::build::comment_box_row,guided_review::viewer::page::build::comments_here,guided_review::viewer::page::build::file,guided_review::viewer::page::build::overview,guided_review::viewer::page::build::reviewer_summary_row,guided_review::viewer::page::build::safety_net,guided_review::viewer::page::build::screen_footer,guided_review::viewer::page::build::step,guided_review::viewer::page::build::summary,guided_review::viewer::review::ReviewCore,guided_review::viewer::review::names::ReviewPlaces,guided_review::viewer::review::walk
 tangle guided_review::viewer::replacing_jobs::AfterJob,guided_review::viewer::replacing_jobs::JobOutcome,guided_review::viewer::replacing_jobs::RepinnedTour,guided_review::viewer::review::kept::Review
 field-leak guided_review::app::components::diagram::memory::DiagramMemory::pending_svgs
 field-leak guided_review::app::components::markdown_view::InlineText::links
@@ -28,14 +28,6 @@ field-leak guided_review::app::components::text_box::EditState::draft
 field-leak guided_review::app::components::text_box::EditState::focus
 field-leak guided_review::app::components::text_box::EditState::is_dragging
 field-leak guided_review::app::components::text_box::EditState::layout
-field-leak guided_review::app::components::text_box::EditState::lines
-field-leak guided_review::app::components::text_box::EditState::on_cancel
-field-leak guided_review::app::components::text_box::EditState::on_edit
-field-leak guided_review::app::components::text_box::EditState::on_submit
-field-leak guided_review::app::components::text_box::EditState::on_submit_now
-field-leak guided_review::app::components::text_box::EditState::on_submit_to_agent
-field-leak guided_review::app::components::text_box::EditState::on_submit_to_agent_now
-field-leak guided_review::app::components::text_box::EditState::on_suggest_change
 field-leak guided_review::app::components::text_box::EditState::scroll_x
 field-leak guided_review::app::page_rows::PageRows::description_hidden
 field-leak guided_review::app::review_session::ReviewSession::clone_offer
@@ -51,8 +43,6 @@ field-leak guided_review::update::release_install::ReleaseInstall::desktop_entry
 field-leak guided_review::viewer::active_pr::ActivePr::replies_for_reopened
 field-leak guided_review::viewer::active_pr::ActivePr::shown
 field-leak guided_review::viewer::active_pr::ActivePr::switching
-field-leak guided_review::viewer::ask_desk::AskDesk::code_changed
-field-leak guided_review::viewer::ask_desk::AskDesk::target
 field-leak guided_review::viewer::clone_offer::CloneOffer::state
 field-leak guided_review::viewer::comment_desk::CommentDesk::selection
 field-leak guided_review::viewer::display_options::DisplayOptions::files_at_head
@@ -77,7 +67,6 @@ field-leak guided_review::viewer::pr_switcher::PrSwitcher::hovered
 field-leak guided_review::viewer::pr_switcher::PrSwitcher::selected
 field-leak guided_review::viewer::press_again::PressAgain::to_send
 field-leak guided_review::viewer::review::ReviewCore::ai_review_run
-field-leak guided_review::viewer::review::ReviewCore::ask_desk
 field-leak guided_review::viewer::review::ReviewCore::display_options
 field-leak guided_review::viewer::review::ReviewCore::guided_tour
 field-leak guided_review::viewer::review::ReviewCore::pr_origin

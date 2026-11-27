@@ -5,10 +5,9 @@ use std::time::Instant;
 
 use crate::support::FixtureRepo;
 use crate::support::fake_checkouts::FakeCheckouts;
-use crate::support::fake_ports::{FakeAskProcesses, FakeHost, SentLog};
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::work::drive_until_idle;
-use guided_review::config::AskSettings;
 use guided_review::file_path::FilePath;
 use guided_review::findings::FindingId;
 use guided_review::findings::{Anchor, AnchorSide, Finding, FindingsFile};
@@ -356,15 +355,7 @@ fn a_question_waiting_for_the_review_agent_follows_its_finding_to_the_new_lines(
     let shop = Shop::with_findings(&[finding("two", on_lines("head", 2, 2))]);
     let mut review = shop.open();
     review.ai_review_agent_resumed(TerminalId::new("r1"), Some(AgentStatus::Working));
-    review
-        .ask_why(
-            &id("two"),
-            "Why?",
-            &AskSettings::default(),
-            Instant::now(),
-            &mut FakeAskProcesses::default(),
-        )
-        .unwrap();
+    review.ask_why(&id("two"), "Why?").unwrap();
     let second = shop.commit_second_head();
 
     shop.repin_onto(&second);

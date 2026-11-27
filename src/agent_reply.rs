@@ -12,7 +12,7 @@ use anyhow::Context;
 use crate::app_link::{Answer, AppFolder, Request, tell_app};
 use crate::findings::FindingId;
 use crate::viewer::{
-    AgentReplied, CodeHost, HandOffId, ReplyPlacement, ReviewStateFile, ThreadHome, WhyReply,
+    AgentReplied, CodeHost, HandOffId, ReplyPlacement, ReviewStateFile, ThreadHomes, WhyReply,
 };
 
 /// What the agent posts on the hand-off's thread.
@@ -86,10 +86,10 @@ pub fn agent_reply(
 ) -> anyhow::Result<String> {
     let state_file = ReviewStateFile::for_subject(folders, subject);
     let state = state_file.load()?;
-    let home = ThreadHome::of(subject, &state_file);
+    let homes = ThreadHomes::of(subject, &state_file);
     let request = match reply {
-        AgentReply::Answer(body) => state.hand_offs().agent_reply(&home, id, body)?,
-        AgentReply::WorkingOnIt => state.hand_offs().agent_working_on_it(&home, id)?,
+        AgentReply::Answer(body) => homes.agent_reply(state.hand_offs(), id, body)?,
+        AgentReply::WorkingOnIt => homes.agent_working_on_it(state.hand_offs(), id)?,
     };
     let done = request
         .run(host)
@@ -106,8 +106,11 @@ pub fn agent_reply(
         (ReplyPlacement::PostedAtOnce, ReviewSubject::PullRequest(pr)) => {
             format!("{what} {id}: posted on {pr}")
         }
-        (ReplyPlacement::PostedAtOnce, ReviewSubject::Local(_)) => {
+        (ReplyPlacement::PostedAtOnce | ReplyPlacement::KeptOnThread, ReviewSubject::Local(_)) => {
             format!("{what} {id}: on its thread in the local review")
+        }
+        (ReplyPlacement::KeptOnThread, ReviewSubject::PullRequest(pr)) => {
+            format!("{what} {id}: on its private thread, which is not posted on {pr}")
         }
         (ReplyPlacement::ReplacedWorkingOnIt, _) => {
             format!("{what} {id}: in place of the \"Working on it…\" reply")

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent_cli::AgentCli;
 use crate::file_path::FilePath;
 use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::pull_request::PullRequestUrl;
@@ -23,15 +24,19 @@ use super::tour_agent::{AgentStatus, SendOutcome, TourAgents, TourKind};
 
 const WORKING_ON_IT: &str = "Working on it…";
 
+const PRIVATE_NOTE: &str = "Not on GitHub: the reviewer asks you alone. Neither the question nor your answer goes on the PR, \
+     and nobody else sees them.";
+
 const LOCAL_REVIEW_NOTE: &str = "This is a local review: the reviewer reads your branch and its \
      uncommitted files on this machine, and there is no PR.";
 
 /// The tasks one Send tasks sent, in reading order, as one message: the agent sees the whole
 /// review at once and answers each task on its own thread.
 fn tasks_message(
-    tasks: &[&HandOff],
+    tasks: &[HandOff],
     subject: &ReviewSubject,
     change_set: &LocalChangeSet,
+    cli: &AgentCli,
 ) -> String {
     let folder = change_set.folder().as_path().display();
     let branch = change_set.branch().as_str();
@@ -51,10 +56,10 @@ fn tasks_message(
         let id = task.id;
         lines.push(String::new());
         lines.push(format!("Task {id}"));
-        lines.extend(task.task_lines());
+        lines.extend(task.task_lines("Task"));
         lines.push(format!(
-            "Answer: `guided-review agent-reply {key} {id} --body -`, after \
-             `guided-review agent-reply {key} {id} --working` if it asks for a change."
+            "Answer: `{cli} agent-reply {key} {id} --body -`, after \
+             `{cli} agent-reply {key} {id} --working` if it asks for a change."
         ));
     }
     lines.push(String::new());
@@ -64,7 +69,7 @@ fn tasks_message(
          on its own, with its own id. `--working` says \"{WORKING_ON_IT}\" on the task's thread, \
          and your answer replaces it. Give each answer on stdin, in a quoted heredoc (`<<'EOF'`): \
          short paragraphs, a list for several points, code names in backticks. Read the reviewed \
-         change with `guided-review outline {key}` and `guided-review show {key} <piece \
+         change with `{cli} outline {key}` and `{cli} show {key} <piece \
          ids> --around`."
     ));
     lines.join("\n")
@@ -227,7 +232,7 @@ impl ThreadMessage {
 /// Whose words a hand-off carries. Only the reviewer's own are instructions to the agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum Said {
-    /// The reviewer's comment, sent with Ask agent.
+    /// The reviewer's comment, sent with Comment and ask agent.
     #[serde(rename = "comment")]
     ByReviewer(String),
     /// Someone else's comment, which the reviewer handed to the agent. Its own key, so a build that
@@ -287,7 +292,7 @@ impl HandedComment {
     }
 }
 
-/// One reviewer comment sent with Ask agent, as passed to the tour agent.
+/// One reviewer comment sent with Comment and ask agent, as passed to the tour agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HandOff {
     id: HandOffId,
@@ -392,15 +397,23 @@ impl HandOff {
     }
 
     /// What the tour agent is typed: everything it needs to answer without asking back.
-    fn message(&self, subject: &ReviewSubject) -> String {
+    fn message(&self, subject: &ReviewSubject, cli: &AgentCli) -> String {
         match subject {
-            ReviewSubject::PullRequest(_) => self.pull_request_message(subject),
-            ReviewSubject::Local(change_set) => self.task_message(subject, change_set),
+            ReviewSubject::PullRequest(_) if self.mode.is_task() => {
+                self.private_message(subject, cli)
+            }
+            ReviewSubject::PullRequest(_) => self.pull_request_message(subject, cli),
+            ReviewSubject::Local(change_set) => self.task_message(subject, change_set, cli),
         }
     }
 
     /// A task of a local review, for the change set's agent, which wrote the code in its own folder.
-    fn task_message(&self, subject: &ReviewSubject, change_set: &LocalChangeSet) -> String {
+    fn task_message(
+        &self,
+        subject: &ReviewSubject,
+        change_set: &LocalChangeSet,
+        cli: &AgentCli,
+    ) -> String {
         let id = self.id;
         let folder = change_set.folder().as_path().display();
         let branch = change_set.branch().as_str();
@@ -410,22 +423,22 @@ impl HandOff {
             LOCAL_REVIEW_NOTE.to_owned(),
             OUTSIDE_TEXT_IS_DATA.to_owned(),
         ];
-        lines.extend(self.task_lines());
+        lines.extend(self.task_lines("Task"));
         lines.push(format!(
             "Make the change in {folder}, on {branch}. Commit only if you normally would, and do not push \
              for the review: the reviewer sees what changed on disk and updates. If the task asks for a \
-             change, first run `guided-review agent-reply {key} {id} --working`: it says \
+             change, first run `{cli} agent-reply {key} {id} --working`: it says \
              \"{WORKING_ON_IT}\" on the task's thread, and your answer replaces it. Answer with \
-             `guided-review agent-reply {key} {id} --body -` and the answer on stdin, in a quoted \
+             `{cli} agent-reply {key} {id} --body -` and the answer on stdin, in a quoted \
              heredoc (`<<'EOF'`): short paragraphs, a list for several points, code names in \
-             backticks. Read the reviewed change with `guided-review outline {key}` and \
-             `guided-review show {key} <piece ids> --around`."
+             backticks. Read the reviewed change with `{cli} outline {key}` and \
+             `{cli} show {key} <piece ids> --around`."
         ));
         lines.join("\n")
     }
 
     /// Where the task is and what it asks, without how to answer it.
-    fn task_lines(&self) -> Vec<String> {
+    fn task_lines(&self, label: &str) -> Vec<String> {
         let mut lines = vec![format!("Place:\n{}", quoted(&self.place))];
         lines.extend(
             self.file
@@ -439,11 +452,25 @@ impl HandOff {
             lines.push("Thread so far:".to_owned());
             lines.extend(self.thread_so_far.iter().map(ThreadMessage::quoted));
         }
-        lines.push(format!("Task: {}", self.comment()));
+        lines.push(format!("{label}: {}", self.comment()));
         lines
     }
 
-    fn pull_request_message(&self, subject: &ReviewSubject) -> String {
+    /// A question of the reviewer's for the agent alone: its thread and its answer stay on the reviewer's
+    /// machine, so the message says where it is and leaves out everything about the host.
+    fn private_message(&self, subject: &ReviewSubject, cli: &AgentCli) -> String {
+        let id = self.id;
+        let mut lines = vec![
+            format!("Private question {id} on {subject}"),
+            PRIVATE_NOTE.to_owned(),
+            OUTSIDE_TEXT_IS_DATA.to_owned(),
+        ];
+        lines.extend(self.task_lines("Question"));
+        lines.push(self.answer_instructions(subject, "the question", "Markdown", cli));
+        lines.join("\n")
+    }
+
+    fn pull_request_message(&self, subject: &ReviewSubject, cli: &AgentCli) -> String {
         let id = self.id;
         let mut lines = vec![
             match &self.said {
@@ -481,40 +508,51 @@ impl HandOff {
             Said::ByReviewer(comment) => lines.push(format!("Comment: {comment}")),
             Said::Handed(handed) => lines.extend(handed.lines()),
         }
-        let tour_note = if self.file.is_some() {
-            format!(
-                "The tour is a basic tour: there is no tour file to fix. Read the changed code with \
-                 `guided-review outline {subject}` and `guided-review show {subject} <piece ids> --around`."
-            )
-        } else {
-            format!(
-                "If the comment shows the tour is wrong, fix the tour file, run `guided-review check {subject}` until it \
-                 is clean, then `guided-review open {subject}`."
-            )
-        };
         let markdown = subject.host().map_or_else(
             || "Markdown".to_owned(),
             |host| format!("{} markdown", host.name()),
         );
-        lines.push(format!(
-            "Answer with `guided-review agent-reply {subject} {id} --body -` and the answer on stdin, in a quoted heredoc \
+        lines.push(self.answer_instructions(subject, "the comment", &markdown, cli));
+        lines.join("\n")
+    }
+
+    /// How the agent answers, and what it does when the message asks for a change to the PR's code.
+    fn answer_instructions(
+        &self,
+        subject: &ReviewSubject,
+        what: &str,
+        markdown: &str,
+        cli: &AgentCli,
+    ) -> String {
+        let id = self.id;
+        let tour_note = if self.file.is_some() {
+            format!(
+                "The tour is a basic tour: there is no tour file to fix. Read the changed code with \
+                 `{cli} outline {subject}` and `{cli} show {subject} <piece ids> --around`."
+            )
+        } else {
+            format!(
+                "If {what} shows the tour is wrong, fix the tour file, run `{cli} check {subject}` until it \
+                 is clean, then `{cli} open {subject}`."
+            )
+        };
+        format!(
+            "Answer with `{cli} agent-reply {subject} {id} --body -` and the answer on stdin, in a quoted heredoc \
              (`<<'EOF'`). Write it in {markdown}: answer the question in the first sentence, then at most 3 bullets, a \
-             blank line between paragraphs, code names in backticks. If the comment asks for a change to the \
-             PR's code, first run `guided-review agent-reply {subject} {id} --working`: it posts \"{WORKING_ON_IT}\" on the \
+             blank line between paragraphs, code names in backticks. If {what} asks for a change to the \
+             PR's code, first run `{cli} agent-reply {subject} {id} --working`: it posts \"{WORKING_ON_IT}\" on the \
              thread, and your answer replaces it. Make the change in your folder when it is a clone of the PR's repo on \
              the PR's branch with none of the reviewer's own changes in it; else in a new git worktree, or a shallow \
              clone, of the PR's branch. Commit, push to the PR's branch, and name the commit in your answer. {tour_note}"
-        ));
-        lines.join("\n")
+        )
     }
 }
 
 /// Sending the oldest queued hand-off to the tour agent, owned so it can run on a background thread.
 pub(super) struct DeliveryRequest {
-    /// One hand-off, or the tasks of one Send tasks, which go as one message.
     ids: Vec<HandOffId>,
     subject: ReviewSubject,
-    text: String,
+    message: HandOffMessage,
     /// What a tour agent started for this hand-off has to read.
     tour: TourKind,
     reviewer_comment: Option<CommentId>,
@@ -525,10 +563,11 @@ pub(super) struct DeliveryRequest {
 impl DeliveryRequest {
     /// A delivered hand-off puts the seen mark on the reviewer's comment.
     pub(super) fn run(self, agents: &TourAgents, host: &dyn CodeHost) -> DeliveryOutcome {
+        let text = self.message.text(&self.subject, &agents.agent_cli());
         let sent = if self.anyway {
-            agents.send_anyway(&self.subject, &self.text)
+            agents.send_anyway(&self.subject, &text)
         } else {
-            agents.send_if_idle(&self.subject, &self.text)
+            agents.send_if_idle(&self.subject, &text)
         };
         let how = match sent {
             Ok(SendOutcome::Delivered) => Delivery::Delivered,
@@ -550,6 +589,22 @@ impl DeliveryRequest {
             ids: self.ids,
             how,
             seen_mark,
+        }
+    }
+}
+
+/// What one delivery types: one hand-off, or the tasks of one Send tasks as one message. It is written
+/// when it goes, in the words of the agent it goes to (`AgentCli`).
+enum HandOffMessage {
+    One(HandOff),
+    Tasks(Vec<HandOff>, LocalChangeSet),
+}
+
+impl HandOffMessage {
+    fn text(&self, subject: &ReviewSubject, cli: &AgentCli) -> String {
+        match self {
+            Self::One(hand_off) => hand_off.message(subject, cli),
+            Self::Tasks(tasks, change_set) => tasks_message(tasks, subject, change_set, cli),
         }
     }
 }
@@ -805,11 +860,8 @@ impl HandOffs {
         let (handed, after) = from_it
             .split_first()
             .ok_or(HandToAgentRefused::NoSuchComment)?;
-        if handed.by_viewer {
-            return Err(HandToAgentRefused::OwnComment);
-        }
-        if self.has_at_work(comment) {
-            return Err(HandToAgentRefused::AlreadyWithAgent);
+        if let Some(refused) = self.hand_over_refused(thread, handed) {
+            return Err(refused);
         }
         let id = self.next_id();
         self.0.push(HandOff {
@@ -836,8 +888,26 @@ impl HandOffs {
         Ok(())
     }
 
+    /// Why Hand to agent does not take `comment` of `thread`, if it does not. The agent's answer in a
+    /// private thread is no one else's comment: the reviewer replies in that thread to ask the agent.
+    pub(super) fn hand_over_refused(
+        &self,
+        thread: &ReviewThread,
+        comment: &ThreadComment,
+    ) -> Option<HandToAgentRefused> {
+        if thread.is_private() {
+            Some(HandToAgentRefused::PrivateThread)
+        } else if comment.by_viewer {
+            Some(HandToAgentRefused::OwnComment)
+        } else if self.has_at_work(&comment.id) {
+            Some(HandToAgentRefused::AlreadyWithAgent)
+        } else {
+            None
+        }
+    }
+
     /// A hand-off of the comment is on its way to the agent or with it, and not done.
-    pub(super) fn has_at_work(&self, comment: &CommentId) -> bool {
+    fn has_at_work(&self, comment: &CommentId) -> bool {
         self.0.iter().any(|hand_off| {
             hand_off.reviewer_comment.as_ref() == Some(comment)
                 && !matches!(
@@ -859,24 +929,25 @@ impl HandOffs {
             .0
             .iter()
             .find(|h| matches!(h.state, HandOffState::Queued | HandOffState::SendAnyway))?;
-        let (ids, text) = match (next.batch, subject) {
+        let (ids, message) = match (next.batch, subject) {
             (Some(batch), ReviewSubject::Local(change_set)) => {
-                let tasks: Vec<&HandOff> = self
+                let tasks: Vec<HandOff> = self
                     .0
                     .iter()
                     .filter(|h| h.state == next.state && h.batch == Some(batch))
+                    .cloned()
                     .collect();
                 (
                     tasks.iter().map(|task| task.id).collect(),
-                    tasks_message(&tasks, subject, change_set),
+                    HandOffMessage::Tasks(tasks, change_set.clone()),
                 )
             }
-            _ => (vec![next.id], next.message(subject)),
+            _ => (vec![next.id], HandOffMessage::One(next.clone())),
         };
         Some(DeliveryRequest {
             ids,
             subject: subject.clone(),
-            text,
+            message,
             tour: if next.file.is_some() {
                 TourKind::Basic
             } else {
@@ -885,7 +956,7 @@ impl HandOffs {
             reviewer_comment: next
                 .reviewer_comment
                 .clone()
-                .filter(|_| subject.has_pending_review()),
+                .filter(|_| subject.has_pending_review() && !next.mode.is_task()),
             anyway: next.state == HandOffState::SendAnyway,
         })
     }
@@ -1057,7 +1128,7 @@ impl HandOffs {
     /// The agent's answer. It replaces the agent's "Working on it…" reply when there is one.
     pub fn agent_reply(
         &self,
-        home: &ThreadHome,
+        (home_of, reviewed): (&dyn Fn(&ThreadId) -> ThreadHome, Reviewed),
         id: HandOffId,
         body: &str,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
@@ -1065,13 +1136,13 @@ impl HandOffs {
         if said.is_empty() {
             return Err(AgentReplyRefused::Empty);
         }
-        let hand_off = self.find(home, id)?;
+        let hand_off = self.find(reviewed, id)?;
         let replacing = match &hand_off.state {
             HandOffState::WorkingOnIt { reply } => Some(reply.clone()),
             _ => None,
         };
         Self::reply_request(
-            home,
+            home_of,
             hand_off,
             AgentReplyKind::Answer {
                 said: said.to_owned(),
@@ -1083,29 +1154,29 @@ impl HandOffs {
     /// The agent's "Working on it…" reply, which its answer replaces later.
     pub fn agent_working_on_it(
         &self,
-        home: &ThreadHome,
+        (home_of, reviewed): (&dyn Fn(&ThreadId) -> ThreadHome, Reviewed),
         id: HandOffId,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
-        let hand_off = self.find(home, id)?;
+        let hand_off = self.find(reviewed, id)?;
         if matches!(hand_off.state, HandOffState::WorkingOnIt { .. }) {
             return Err(AgentReplyRefused::AlreadyWorkingOnIt { id });
         }
-        Self::reply_request(home, hand_off, AgentReplyKind::WorkingOnIt)
+        Self::reply_request(home_of, hand_off, AgentReplyKind::WorkingOnIt)
     }
 
-    fn find(&self, home: &ThreadHome, id: HandOffId) -> Result<&HandOff, AgentReplyRefused> {
+    fn find(&self, reviewed: Reviewed, id: HandOffId) -> Result<&HandOff, AgentReplyRefused> {
         self.0
             .iter()
             .find(|hand_off| hand_off.id == id)
             .ok_or_else(|| AgentReplyRefused::Unknown {
                 id,
                 known: self.0.iter().map(|hand_off| hand_off.id).collect(),
-                reviewed: Reviewed::from(home),
+                reviewed,
             })
     }
 
     fn reply_request(
-        home: &ThreadHome,
+        home_of: &dyn Fn(&ThreadId) -> ThreadHome,
         hand_off: &HandOff,
         kind: AgentReplyKind,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
@@ -1130,7 +1201,7 @@ impl HandOffs {
             .clone()
             .filter(|_| hand_off.seen_mark == SeenMark::On);
         Ok(AgentReplyRequest {
-            home: home.clone(),
+            home: home_of(&thread),
             thread,
             kind,
             seen_mark: hand_off.seen_mark.clone(),
@@ -1152,10 +1223,12 @@ pub enum HandToAgentRefused {
     NotAPullRequest,
     #[error("the comment is not in the threads read from the PR's host")]
     NoSuchComment,
-    #[error("it is your own comment: reply with Ask agent instead")]
+    #[error("it is your own comment: reply with Comment and ask agent instead")]
     OwnComment,
     #[error("the agent has this comment already")]
     AlreadyWithAgent,
+    #[error("the thread is your private one with the agent: reply in it to ask the agent")]
+    PrivateThread,
     #[error("the hand-off could not be saved: {0}")]
     NotSaved(String),
 }
@@ -1188,15 +1261,6 @@ pub enum Reviewed {
     Either,
 }
 
-impl From<&ThreadHome> for Reviewed {
-    fn from(home: &ThreadHome) -> Self {
-        match home {
-            ThreadHome::Host(_) => Self::PullRequest,
-            ThreadHome::StateFile(_) => Self::Local,
-        }
-    }
-}
-
 impl fmt::Display for Reviewed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -1223,6 +1287,8 @@ pub enum ReplyPlacement {
     PostedAtOnce,
     /// In place of the agent's "Working on it…" reply, wherever that went.
     ReplacedWorkingOnIt,
+    /// On a thread kept on this machine, which the host never gets.
+    KeptOnThread,
 }
 
 /// What an agent reply changed, for the hand-off to take on.
@@ -1342,11 +1408,11 @@ impl AgentReplyRequest {
                 replacing: None,
             } => {
                 store.reply(&self.thread, said, LocalAuthor::Agent)?;
-                (ReplyPlacement::PostedAtOnce, None)
+                (ReplyPlacement::KeptOnThread, None)
             }
             AgentReplyKind::WorkingOnIt => {
                 let reply = store.reply(&self.thread, WORKING_ON_IT, LocalAuthor::Agent)?;
-                (ReplyPlacement::PostedAtOnce, Some(reply))
+                (ReplyPlacement::KeptOnThread, Some(reply))
             }
         })
     }

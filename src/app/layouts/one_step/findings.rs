@@ -302,8 +302,8 @@ impl OneStepLayout {
         window.focus(&self.focus, cx);
     }
 
-    /// The typed question goes to the review agent on the finding's thread while it lives, else into the
-    /// Ask panel. A question that was refused stays in its box.
+    /// The typed question goes to the review agent on the finding's thread. A question that was
+    /// refused stays in its box.
     pub(super) fn send_finding_box(
         &mut self,
         id: &FindingId,
@@ -360,13 +360,11 @@ impl OneStepLayout {
             .unwrap_or_default()
             .to_owned();
         let asked = self
-            .ask
-            .update(cx, |panel, cx| panel.ask_why(id, &question, window, cx));
+            .session
+            .update(cx, |session, cx| session.ask_why(id, &question, cx));
         if asked.is_ok() {
             self.finding_questions.close(id);
-            if asked == Ok(WhyAsked::ToReviewAgent) {
-                window.focus(&self.focus, cx);
-            }
+            window.focus(&self.focus, cx);
         }
         if asked == Ok(WhyAsked::ToReviewAgent) {
             self.session.update(cx, ReviewSession::deliver_questions);

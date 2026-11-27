@@ -7,7 +7,8 @@ use guided_review::local_git::LocalGit;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
     BoxEdges, CommentGesture, CommentId, LineKind, LineLocation, Page, PageRow, PieceLabels,
-    Review, ReviewStateFile, ReviewThread, Screen, Side, ThreadComment, ThreadId, ThreadRowPlace,
+    ReadingSpot, Review, ReviewStateFile, ReviewThread, Screen, Side, ThreadComment, ThreadId,
+    ThreadRowPlace,
 };
 use serde_json::{Value, json};
 
@@ -133,8 +134,7 @@ fn the_page_is_built_once_and_kept_while_the_review_does_not_change() {
     review.begin_selection(at_head("notes.txt", 10));
     let page = Arc::clone(review.page());
 
-    let selected = review.selected_lines().unwrap();
-    review.place_of_lines(&selected);
+    review.selected_lines().unwrap();
     review.image_preview_requests();
 
     assert!(Arc::ptr_eq(&page, review.page()));
@@ -198,7 +198,6 @@ fn shape(row: &PageRow) -> String {
         PageRow::Thread { view, place, .. } => format!("thread {} {place:?}", view.thread.id),
         PageRow::Composer { .. } => "comment box".into(),
         PageRow::QueuedComment(_) => "queued".into(),
-        PageRow::AskMarker(_) => "ask marker".into(),
         PageRow::Image { .. } => "image".into(),
         PageRow::NoChangeSinceRead => "no change since read".into(),
         _ => "other".into(),
@@ -476,4 +475,56 @@ fn a_pinned_header_names_the_symbol_the_top_row_is_in() {
         pinned_at(page, in_total),
         Some(("app/Cart.php".to_owned(), Some("Cart::total".to_owned())))
     );
+}
+
+#[test]
+fn a_spot_names_the_code_at_the_top_of_the_view() {
+    let review = Pull::new().open(notes_step());
+    let page = review.page();
+    let row = row_of(page, "+10");
+
+    let spot = page.spot_at(row);
+
+    assert_eq!(spot.anchor(), Some(&at_head("notes.txt", 10)));
+    assert_eq!(spot.row_hint(), row);
+}
+
+#[test]
+fn a_spot_on_a_row_that_is_no_line_names_the_next_line_shown() {
+    let review = Pull::new().open(notes_step());
+    let page = review.page();
+    let first_line = page
+        .rows()
+        .iter()
+        .position(|row| matches!(row, PageRow::Line(_)))
+        .unwrap();
+
+    let spot = page.spot_at(0);
+
+    assert!(first_line > 0, "a header comes first");
+    assert_eq!(spot.row_hint(), 0);
+    assert_eq!(page.row_of_spot(&spot), first_line);
+}
+
+#[test]
+fn a_spot_finds_its_code_again_after_rows_were_added_above_it() {
+    let mut review = Pull::new().open(notes_step());
+    let before = review.page().spot_at(row_of(review.page(), "+30"));
+    review.set_threads(&[thread_on("T1", Some(10))]);
+
+    let page = review.page();
+
+    assert_eq!(page.row_of_spot(&before), row_of(page, "+30"));
+    assert!(page.row_of_spot(&before) > before.row_hint());
+}
+
+#[test]
+fn a_spot_whose_code_is_gone_falls_back_to_its_row_within_the_page() {
+    let review = Pull::new().open(notes_step());
+    let page = review.page();
+    let gone = ReadingSpot::new(Some(at_head("gone.txt", 1)), 3);
+    let far_below = ReadingSpot::new(None, usize::MAX);
+
+    assert_eq!(page.row_of_spot(&gone), 3);
+    assert_eq!(page.row_of_spot(&far_below), page.rows().len() - 1);
 }

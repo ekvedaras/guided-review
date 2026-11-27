@@ -1,6 +1,7 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
+use guided_review::agent_cli::AgentCli;
 use guided_review::agent_reply::{AgentReply, ReplyTo, agent_reply, why_reply};
 use guided_review::app_folders::AppFolders;
 use guided_review::app_link::{
@@ -362,7 +363,8 @@ fn show(subject: &ReviewSubject, ids: &[String], around: bool) -> anyhow::Result
 }
 
 fn review_brief(subject: &ReviewSubject) -> anyhow::Result<()> {
-    let brief = ReviewBrief::of(&AppFolders::running()?, subject);
+    let brief = ReviewBrief::of(&AppFolders::running()?, subject)
+        .running_guided_review_as(AgentCli::of_running_app());
     if let Some(warning) = brief.warning() {
         eprintln!("warning: {warning}");
     }

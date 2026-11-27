@@ -11,6 +11,7 @@ use crate::viewer::line_location::{LineLocation, Side};
 use crate::viewer::review_thread::{CommentId, ReviewThread, ThreadComment, ThreadId};
 
 const STAGED_THREAD: &str = "staged-from-finding";
+const STAGED_PRIVATE_THREAD: &str = "local-thread-1";
 
 impl ReviewCore {
     /// The fixes a snapshot scene shows on the open findings.
@@ -258,5 +259,60 @@ impl ReviewCore {
         self.pulled_threads
             .retain(|thread| !staged.iter().any(|gone| gone.id == thread.id));
         self.place_threads();
+    }
+
+    /// A private thread on the first line of the open screen: the reviewer's question to the tour agent
+    /// and its answer, kept on this machine only.
+    pub fn stage_private_thread(&mut self) {
+        let page = crate::viewer::page::Page::of(self);
+        let Some(at) = page.lines().next().map(|line| line.location.clone()) else {
+            return;
+        };
+        drop(page);
+        let said = |id: &str, author: &str, by_agent: bool, body: &str| ThreadComment {
+            id: CommentId::new(id),
+            author: author.to_owned(),
+            avatar_url: None,
+            is_bot: false,
+            by_agent: Some(by_agent),
+            by_viewer: !by_agent,
+            body: body.to_owned(),
+            url: String::new(),
+            reactions: Vec::new(),
+        };
+        let thread = ReviewThread {
+            id: ThreadId::new(STAGED_PRIVATE_THREAD),
+            is_resolved: false,
+            is_outdated: false,
+            path: at.path.clone(),
+            line: Some(at.line),
+            start_line: None,
+            side: at.side,
+            is_file_comment: false,
+            original_line: Some(at.line),
+            original_start_line: None,
+            original_commit: None,
+            comments: vec![
+                said(
+                    "local-comment-1",
+                    "You",
+                    false,
+                    "Why does this change the order of the checks?",
+                ),
+                said(
+                    "local-comment-2",
+                    "Your agent",
+                    true,
+                    "The old order ran the cheap check last. Moving it first skips the expensive one on bad input.",
+                ),
+            ],
+        };
+        self.staged_threads = vec![thread.clone()];
+        self.pulled_threads.push(thread);
+        self.place_threads();
+    }
+
+    pub fn unstage_private_thread(&mut self) {
+        self.unstage_comment_threads();
     }
 }

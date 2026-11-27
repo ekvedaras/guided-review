@@ -144,3 +144,5 @@ Commit `4ae77c74`. 19 field leaks fixed on each target; the macOS allow list wen
 `scripts/deslop-added <base>` lists the lines the allow lists on disk have that they did not have at the fork point with the base; a list that did not exist there is named with its count. `scripts/check` runs it after `scripts/deslop`, outside CI, against the same base as the change notes. It warns and never fails: a rename may need a new key.
 
 Open as of 2026-11-25: 100 entries on macOS, 101 on Linux.
+
+2026-11-27: the `Asks` and `AskDesk` entries named above are gone with the Ask panel; 6 allow-list entries went with them.

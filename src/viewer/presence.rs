@@ -1,5 +1,5 @@
 //! Whether an overlay is on screen, and whether it is on its way out. Every overlay (the palette,
-//! the PR switcher, Settings, the shortcuts sheet, the Ask panel) keeps one, so they close the same
+//! the PR switcher, Settings, the shortcuts sheet) keeps one, so they close the same
 //! way: the overlay stays drawn while it leaves, takes no input meanwhile, and is dropped once its
 //! leaving move has played.
 //!

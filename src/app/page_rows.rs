@@ -5,7 +5,7 @@
 //! Rule for every change of the review: take the review's page into new `PageRows` and tell the list
 //! what `change_from` says. A row's key holds what decides its identity and height; rows whose key stayed
 //! keep their measured height and the reader's scroll position, rows with a new key are measured again.
-//! So a row's look may change freely (colours, ask counts, the drag selection), but whatever changes its
+//! So a row's look may change freely (colours, the drag selection), but whatever changes its
 //! height must be in its key. Rows on screen are measured on every frame anyway, so the key matters for
 //! the rows off screen.
 
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use crate::app::components::markdown_view::{OpenDetails, PreparedMarkdown};
 use crate::findings::FindingId;
 use crate::viewer::{
-    AskAt, BoxEdges, HiddenText, JumpTarget, LineKind, Page, PageRow, PinnedHeader, Review,
-    RowSelection, SelectedRows, ShownLine, StepHeading, line_count,
+    BoxEdges, HiddenText, JumpTarget, LineKind, Page, PageRow, PinnedHeader, Review, RowSelection,
+    SelectedRows, ShownLine, StepHeading, line_count,
 };
 use crate::viewer::{CommentPlace, ThreadId};
 
@@ -109,13 +109,6 @@ impl PageRows {
             description_hidden,
             page: Some(page),
         }
-    }
-
-    /// Whether these rows were laid out from this very page.
-    pub fn shows(&self, page: &Arc<Page>) -> bool {
-        self.page
-            .as_ref()
-            .is_some_and(|shown| Arc::ptr_eq(shown, page))
     }
 
     pub fn len(&self) -> usize {
@@ -214,10 +207,6 @@ impl PageRows {
 
     pub fn selected_rows(&self, selection: &RowSelection) -> Option<SelectedRows> {
         self.page.as_deref()?.selected_rows(selection)
-    }
-
-    pub fn screen_ask(&self) -> Option<&AskAt> {
-        self.page.as_deref()?.screen_ask()
     }
 
     pub fn offers_hiding_whitespace(&self) -> bool {
@@ -336,9 +325,7 @@ fn key(row: &PageRow, open_details: &OpenDetails) -> RowKey {
             }
             columns.description.hash(&mut hasher);
         }
-        PageRow::AskMarker(ask) => ask.id.hash(&mut hasher),
         PageRow::Toolbar(toolbar) => {
-            toolbar.ask.as_ref().map(|ask| &ask.id).hash(&mut hasher);
             toolbar.run_ai_review.hash(&mut hasher);
             toolbar.comment_on_file.hash(&mut hasher);
             toolbar.fold.hash(&mut hasher);

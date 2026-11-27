@@ -1,11 +1,10 @@
 //! Where a review's threads are kept, and the local threads in a review's state file, changed under its lock.
 
-use super::comments::CommentPlace;
-#[cfg(feature = "snapshots")]
-use super::local_threads::without_last_comment;
+use super::comments::{CommentPlace, SendMode};
+use super::hand_offs::{AgentReplyRefused, AgentReplyRequest, HandOffId, HandOffs, Reviewed};
 use super::local_threads::{LocalAuthor, LocalThreads};
 use super::outdated_lines::{FollowedLines, follow_outdated};
-use super::ports::Resolution;
+use super::ports::{HostError, Resolution, ReviewThreadsPort};
 use super::review_state::ReviewStateFile;
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use crate::code_source::CodeSource;
@@ -13,7 +12,7 @@ use crate::pull_request::{PullRequestUrl, Sha};
 use crate::review_subject::ReviewSubject;
 use std::collections::BTreeMap;
 
-/// Where a review's threads are kept: on the host for a PR, in its state file for a local review.
+/// Where one thread is kept: on the host, or in the review's state file.
 #[derive(Debug, Clone)]
 pub enum ThreadHome {
     Host(PullRequestUrl),
@@ -21,12 +20,118 @@ pub enum ThreadHome {
 }
 
 impl ThreadHome {
+    /// Whether the thread is kept here.
+    pub fn holds(&self, thread: &ReviewThread) -> bool {
+        match self {
+            Self::Host(_) => !thread.is_private(),
+            Self::StateFile(_) => thread.is_private(),
+        }
+    }
+}
+
+/// Where the threads of a review are kept. A local review keeps all of them in its state file. A PR's
+/// threads are the host's, and its review also keeps private threads in the state file: questions to
+/// the tour agent that the host never sees. Each thread knows its own home.
+#[derive(Debug, Clone)]
+pub struct ThreadHomes {
+    host: Option<PullRequestUrl>,
+    private: LocalThreadStore,
+}
+
+impl ThreadHomes {
     pub fn of(subject: &ReviewSubject, state_file: &ReviewStateFile) -> Self {
-        match subject {
-            ReviewSubject::PullRequest(pr) => Self::Host(pr.clone()),
-            ReviewSubject::Local(_) => {
-                Self::StateFile(LocalThreadStore::in_file(state_file.clone()))
-            }
+        Self {
+            host: subject.pull_request().cloned(),
+            private: LocalThreadStore::in_file(state_file.clone()),
+        }
+    }
+
+    /// Where the thread of a comment that exists already is kept, told by its id.
+    pub fn of_comment(&self, comment: &CommentId) -> ThreadHome {
+        self.home(!comment.is_private())
+    }
+
+    /// Where a new thread sent this way is kept: a task of the agent stays on this machine.
+    pub fn for_new(&self, mode: SendMode) -> ThreadHome {
+        self.home(!mode.is_task())
+    }
+
+    /// Every home the review has, to read all its threads.
+    pub fn all(&self) -> Vec<ThreadHome> {
+        self.host
+            .iter()
+            .map(|pr| ThreadHome::Host(pr.clone()))
+            .chain([ThreadHome::StateFile(self.private.clone())])
+            .collect()
+    }
+
+    /// The threads of every home at `head`, and where each outdated one's lines are.
+    pub fn read(
+        &self,
+        host: &(impl ReviewThreadsPort + ?Sized),
+        source: &(impl CodeSource + ?Sized),
+        head: &Sha,
+    ) -> Result<(Vec<ReviewThread>, BTreeMap<ThreadId, FollowedLines>), HostError> {
+        let mut threads = Vec::new();
+        let mut followed = BTreeMap::new();
+        for home in self.all() {
+            let (more, moved) = match &home {
+                ThreadHome::Host(pr) => host.review_threads(pr).map(|threads| {
+                    let moved = follow_outdated(&threads, source, head);
+                    (threads, moved)
+                })?,
+                ThreadHome::StateFile(store) => store
+                    .threads_and_followed_at(source, head)
+                    .map_err(HostError::Other)?,
+            };
+            threads.extend(more);
+            followed.extend(moved);
+        }
+        Ok((threads, followed))
+    }
+
+    fn home(&self, on_host: bool) -> ThreadHome {
+        match &self.host {
+            Some(pr) if on_host => ThreadHome::Host(pr.clone()),
+            _ => ThreadHome::StateFile(self.private.clone()),
+        }
+    }
+}
+
+impl ThreadHomes {
+    /// Where a thread that exists already is kept, told by its id.
+    pub fn of_thread(&self, thread: &ThreadId) -> ThreadHome {
+        self.home(!thread.is_private())
+    }
+
+    /// The agent's answer to a hand-off, to be written where the hand-off's thread is kept.
+    pub fn agent_reply(
+        &self,
+        hand_offs: &HandOffs,
+        id: HandOffId,
+        body: &str,
+    ) -> Result<AgentReplyRequest, AgentReplyRefused> {
+        hand_offs.agent_reply(
+            (&|thread| self.of_thread(thread), self.reviewed()),
+            id,
+            body,
+        )
+    }
+
+    /// The agent's "Working on it…" for a hand-off, to be written where the hand-off's thread is kept.
+    pub fn agent_working_on_it(
+        &self,
+        hand_offs: &HandOffs,
+        id: HandOffId,
+    ) -> Result<AgentReplyRequest, AgentReplyRefused> {
+        hand_offs.agent_working_on_it((&|thread| self.of_thread(thread), self.reviewed()), id)
+    }
+
+    fn reviewed(&self) -> Reviewed {
+        if self.host.is_some() {
+            Reviewed::PullRequest
+        } else {
+            Reviewed::Local
         }
     }
 }
@@ -41,6 +146,12 @@ pub struct LocalThreadStore {
 impl LocalThreadStore {
     pub fn in_file(file: ReviewStateFile) -> Self {
         Self { file }
+    }
+
+    /// The state file the threads are kept in, for what changes more of it than the threads.
+    #[cfg(feature = "snapshots")]
+    pub(super) fn file(&self) -> &ReviewStateFile {
+        &self.file
     }
 
     pub fn threads_at(&self, head: &Sha) -> anyhow::Result<Vec<ReviewThread>> {
@@ -101,116 +212,6 @@ impl LocalThreadStore {
 
     pub fn set_resolved(&self, thread: &ThreadId, resolution: Resolution) -> anyhow::Result<()> {
         self.change(|threads| threads.set_resolved(thread, resolution))
-    }
-
-    /// A task the agent answered, written as Send now and `agent-reply` would write it, for a snapshot
-    /// scene of a local review. Nothing is written when the review has threads already.
-    #[cfg(feature = "snapshots")]
-    pub fn stage_answered_task(
-        &self,
-        place: &CommentPlace,
-        head: &Sha,
-        (task, answer): (&str, &str),
-    ) -> anyhow::Result<()> {
-        use super::hand_offs::{AgentReplied, SentComment, SentFrom};
-
-        if !self.threads_at(head)?.is_empty() {
-            return Ok(());
-        }
-        let thread = self.start(place, task, head)?;
-        self.reply(&thread, answer, LocalAuthor::Agent)?;
-        let threads = self.threads_at(head)?;
-        let mut answered = Ok(());
-        self.file.update(|state| {
-            let hand_offs = state.hand_offs_mut();
-            hand_offs.record_new_thread(
-                place.path(),
-                &SentComment {
-                    place: place.describe(),
-                    from: SentFrom::File(place.path().clone()),
-                    mode: super::comments::SendMode::SendNow,
-                    body: task,
-                    code: None,
-                },
-                Some(&Ok(threads.iter().map(without_last_comment).collect())),
-            );
-            if let Some(id) = hand_offs.all().last().map(super::hand_offs::HandOff::id) {
-                answered = hand_offs.replied(id, &AgentReplied::default());
-            }
-        })?;
-        Ok(answered?)
-    }
-
-    /// A task added to tasks and not sent yet, written as Add to tasks would write it, for a snapshot
-    /// scene of a local review. Nothing is written when a thread holds the task already.
-    #[cfg(feature = "snapshots")]
-    pub fn stage_queued_task(
-        &self,
-        place: &CommentPlace,
-        head: &Sha,
-        task: &str,
-    ) -> anyhow::Result<()> {
-        use super::hand_offs::{SentComment, SentFrom};
-
-        let staged = self.threads_at(head)?;
-        if staged
-            .iter()
-            .any(|thread| thread.comments.iter().any(|said| said.body == task))
-        {
-            return Ok(());
-        }
-        self.start(place, task, head)?;
-        let threads = self.threads_at(head)?;
-        self.file.update(|state| {
-            state.hand_offs_mut().record_new_thread(
-                place.path(),
-                &SentComment {
-                    place: place.describe(),
-                    from: SentFrom::File(place.path().clone()),
-                    mode: super::comments::SendMode::AddToTasks,
-                    body: task,
-                    code: None,
-                },
-                Some(&Ok(threads)),
-            );
-        })
-    }
-
-    /// A task sent to an agent that does not report its state, held back until the reviewer sends it
-    /// anyway, for a snapshot scene of a local review. Nothing is written when a thread holds the task already.
-    #[cfg(feature = "snapshots")]
-    pub fn stage_held_back_task(
-        &self,
-        place: &CommentPlace,
-        head: &Sha,
-        task: &str,
-    ) -> anyhow::Result<()> {
-        use super::hand_offs::{SentComment, SentFrom};
-
-        let staged = self.threads_at(head)?;
-        if staged
-            .iter()
-            .any(|thread| thread.comments.iter().any(|said| said.body == task))
-        {
-            return Ok(());
-        }
-        self.start(place, task, head)?;
-        let threads = self.threads_at(head)?;
-        self.file.update(|state| {
-            let hand_offs = state.hand_offs_mut();
-            hand_offs.record_new_thread(
-                place.path(),
-                &SentComment {
-                    place: place.describe(),
-                    from: SentFrom::File(place.path().clone()),
-                    mode: super::comments::SendMode::SendNow,
-                    body: task,
-                    code: None,
-                },
-                Some(&Ok(threads)),
-            );
-            hand_offs.hold_back_latest();
-        })
     }
 
     /// Nothing is written when the change is refused.

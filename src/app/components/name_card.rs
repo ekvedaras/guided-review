@@ -7,13 +7,13 @@ use std::sync::Arc;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, Div, FontWeight, HighlightStyle, InteractiveElement, IntoElement, ParentElement, Pixels,
-    SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div, px,
+    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div, px,
 };
 
 use crate::navigation::ServerAnswer;
 use crate::viewer::{
-    CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, ServerQuestion, UsageFile,
-    UsageLine,
+    CardRow, CodePane, CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, PaneLine,
+    ServerQuestion, UsageFile, UsageLine,
 };
 
 use super::button::{ButtonKind, ButtonSize, button};
@@ -23,6 +23,8 @@ use super::palette::{CODE_FONT, Colors, Tone};
 use super::sidebar_row::RowPlace;
 
 const NAME_CARD_WIDTH: f32 = 640.;
+/// The code pane's width, added to the card's when it has code to show.
+const CODE_PANE_WIDTH: f32 = 520.;
 /// How tall the lists are before they scroll.
 const NAME_CARD_LISTS_HEIGHT: f32 = 400.;
 const DOC_LINES: usize = 2;
@@ -32,17 +34,36 @@ const LINE_GUTTER: f32 = 40.;
 /// What a click on a row of the card does: jumps in the tour or opens the code.
 pub type OnNameTarget = Rc<dyn Fn(&NameTarget, &mut Window, &mut App)>;
 
+/// What the pointer coming onto a row of the card does: the code pane follows it.
+pub type OnCardRow = Rc<dyn Fn(CardRow, &mut Window, &mut App)>;
+
 /// What a click on Yes or No under the card's question does.
 pub type OnServerAnswer = Rc<dyn Fn(ServerAnswer, &mut Window, &mut App)>;
+
+/// What a click and the pointer on its rows do, the row the code pane follows, and how far the
+/// pane is scrolled.
+pub struct CardActions<'a> {
+    pub on_open: &'a OnNameTarget,
+    pub on_answer: &'a OnServerAnswer,
+    pub on_row: &'a OnCardRow,
+    pub followed: Option<CardRow>,
+    pub code_scroll: &'a ScrollHandle,
+}
 
 /// `room` is the width the window leaves for the card, so a narrow window shrinks it.
 pub fn name_card(
     colors: &Colors,
     card: &DefinitionCard,
-    on_open: &OnNameTarget,
-    on_answer: &OnServerAnswer,
+    actions: &CardActions,
     room: Pixels,
 ) -> Div {
+    let CardActions {
+        on_open,
+        on_answer,
+        on_row,
+        followed,
+        code_scroll,
+    } = actions;
     let panel = overlay_panel(colors).w(px(NAME_CARD_WIDTH)).max_w(room);
     match card {
         DefinitionCard::Loading { says, .. } | DefinitionCard::Waiting { says, .. } => panel.child(
@@ -51,15 +72,29 @@ pub fn name_card(
         DefinitionCard::Failed { says, .. } => {
             panel.child(line(colors.danger, SharedString::from(Arc::clone(says))))
         }
-        DefinitionCard::Found(found) => panel
-            .child(header(colors, found))
-            .children(
-                found
-                    .question
-                    .as_ref()
-                    .map(|question| question_band(colors, question, on_answer)),
-            )
-            .child(found_lists(colors, found, on_open)),
+        DefinitionCard::Found(found) => {
+            let lists = div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(header(colors, found))
+                .children(
+                    found
+                        .question
+                        .as_ref()
+                        .map(|question| question_band(colors, question, on_answer)),
+                )
+                .child(found_lists(colors, found, on_open, on_row));
+            match found.code_pane(*followed).filter(|_| found.shows_code()) {
+                Some(pane) => panel
+                    .w(px(NAME_CARD_WIDTH + CODE_PANE_WIDTH))
+                    .flex_row()
+                    .child(lists)
+                    .child(code_pane(colors, pane, code_scroll)),
+                None => panel.child(lists),
+            }
+        }
     }
 }
 
@@ -140,7 +175,12 @@ fn question_band(colors: &Colors, question: &ServerQuestion, on_answer: &OnServe
         )
 }
 
-fn found_lists(colors: &Colors, found: &FoundNames, on_open: &OnNameTarget) -> Div {
+fn found_lists(
+    colors: &Colors,
+    found: &FoundNames,
+    on_open: &OnNameTarget,
+    on_row: &OnCardRow,
+) -> Div {
     let nothing_found = found.definitions.is_empty() && found.usages.is_empty();
     let both = !found.definitions.is_empty() && !found.usages.is_empty();
     let notes = (!found.note_lines.is_empty()).then(|| {
@@ -194,7 +234,7 @@ fn found_lists(colors: &Colors, found: &FoundNames, on_open: &OnNameTarget) -> D
                         .definitions
                         .iter()
                         .enumerate()
-                        .map(|(index, row)| definition_row(colors, index, row, on_open)),
+                        .map(|(index, row)| definition_row(colors, index, row, (on_open, on_row))),
                 )
                 .when(both, |lists| {
                     lists.child(
@@ -211,7 +251,7 @@ fn found_lists(colors: &Colors, found: &FoundNames, on_open: &OnNameTarget) -> D
                         .usages
                         .iter()
                         .enumerate()
-                        .map(|(index, file)| usage_file(colors, index, file, on_open)),
+                        .map(|(index, file)| usage_file(colors, index, file, (on_open, on_row))),
                 )
                 .children(found.more_usages.as_ref().map(|label| {
                     div()
@@ -231,9 +271,10 @@ fn definition_row(
     colors: &Colors,
     index: usize,
     row: &DefinitionRow,
-    on_open: &OnNameTarget,
+    (on_open, on_row): (&OnNameTarget, &OnCardRow),
 ) -> impl IntoElement {
     let (target, on_open) = (row.target.clone(), Rc::clone(on_open));
+    let on_row = Rc::clone(on_row);
     picker_row_at(colors, ("name-definition", index), RowPlace::Apart, None)
         .flex_none()
         .py_1p5()
@@ -242,6 +283,11 @@ fn definition_row(
         .gap_0p5()
         .aria_label(format!("Open definition in {}", row.place))
         .on_click(move |_, window, cx| on_open(&target, window, cx))
+        .on_hover(move |hovered, window, cx| {
+            if *hovered {
+                on_row(CardRow::Definition(index), window, cx);
+            }
+        })
         .child(
             div()
                 .flex()
@@ -279,7 +325,12 @@ fn definition_row(
         )
 }
 
-fn usage_file(colors: &Colors, index: usize, file: &UsageFile, on_open: &OnNameTarget) -> Div {
+fn usage_file(
+    colors: &Colors,
+    index: usize,
+    file: &UsageFile,
+    (on_open, on_row): (&OnNameTarget, &OnCardRow),
+) -> Div {
     let (target, open_file) = (file.target.clone(), Rc::clone(on_open));
     div()
         .flex_none()
@@ -323,7 +374,7 @@ fn usage_file(colors: &Colors, index: usize, file: &UsageFile, on_open: &OnNameT
             file.lines
                 .iter()
                 .enumerate()
-                .map(|(line, row)| usage_line(colors, (index, line), row, on_open)),
+                .map(|(line, row)| usage_line(colors, (index, line), row, (on_open, on_row))),
         )
 }
 
@@ -331,9 +382,10 @@ fn usage_line(
     colors: &Colors,
     (file, line): (usize, usize),
     row: &UsageLine,
-    on_open: &OnNameTarget,
+    (on_open, on_row): (&OnNameTarget, &OnCardRow),
 ) -> impl IntoElement {
     let (target, on_open) = (row.target.clone(), Rc::clone(on_open));
+    let on_row = Rc::clone(on_row);
     picker_row_at(
         colors,
         ("name-usage-line", file * 1000 + line),
@@ -347,6 +399,11 @@ fn usage_line(
     .text_xs()
     .aria_label(format!("Open line {}", row.number))
     .on_click(move |_, window, cx| on_open(&target, window, cx))
+    .on_hover(move |hovered, window, cx| {
+        if *hovered {
+            on_row(CardRow::Usage { file, line }, window, cx);
+        }
+    })
     .child(
         div()
             .flex_none()
@@ -360,6 +417,92 @@ fn usage_line(
         &row.snippet.text,
         &row.snippet.runs,
     )))
+}
+
+/// The code beside the lists: lines coloured like the diff, scrolling both ways inside the card;
+/// a long line runs on past the pane instead of being cut.
+///
+/// The scroll area is a flex row that does not stretch its child, so the lines' block is as wide
+/// as its longest line: gpui scrolls only as far as its children's bounds reach past its own
+/// (`content_size` in gpui's `div.rs`), and a block child is only as wide as the pane.
+fn code_pane(colors: &Colors, pane: &CodePane, scroll: &ScrollHandle) -> Div {
+    div()
+        .w(px(CODE_PANE_WIDTH))
+        .flex_none()
+        .flex()
+        .flex_col()
+        .border_l_1()
+        .border_color(colors.subtle_border)
+        .child(
+            div()
+                .flex_none()
+                .px_4()
+                .py_2()
+                .border_b_1()
+                .border_color(colors.subtle_border)
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis_start()
+                .font_family(*CODE_FONT)
+                .text_xs()
+                .text_color(colors.muted_text)
+                .child(SharedString::from(Arc::clone(&pane.place))),
+        )
+        .child(
+            div()
+                .id(SharedString::from(Arc::clone(&pane.place)))
+                .track_scroll(scroll)
+                .min_w_0()
+                .max_h(px(NAME_CARD_LISTS_HEIGHT))
+                .flex()
+                .items_start()
+                .overflow_scroll()
+                .py_2()
+                .font_family(*CODE_FONT)
+                .text_xs()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_none()
+                        .min_w_full()
+                        .children(pane.lines.iter().enumerate().map(|(index, line)| {
+                            pane_line(colors, line, pane.marked == Some(index))
+                        }))
+                        .when(pane.cut, |lines| {
+                            lines.child(
+                                div()
+                                    .flex_none()
+                                    .pl(px(LINE_GUTTER + 24.))
+                                    .text_color(colors.muted_text)
+                                    .child("…"),
+                            )
+                        }),
+                ),
+        )
+}
+
+fn pane_line(colors: &Colors, line: &PaneLine, marked: bool) -> Div {
+    div()
+        .flex_none()
+        .flex()
+        .gap_3()
+        .px_4()
+        .when(marked, |row| row.bg(colors.current))
+        .child(
+            div()
+                .flex_none()
+                .w(px(LINE_GUTTER))
+                .text_right()
+                .text_color(colors.muted_text)
+                .child(SharedString::from(Arc::clone(&line.number))),
+        )
+        .child(
+            div()
+                .flex_none()
+                .whitespace_nowrap()
+                .child(code_text(colors, &line.text, &line.runs)),
+        )
 }
 
 /// The text coloured like the diff's code; the hovered name is semibold in its own colour.

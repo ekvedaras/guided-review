@@ -14,7 +14,6 @@ const fn primary(face: char) -> Chord {
 }
 
 const S: Chord = key('s');
-const A: Chord = key('a');
 const J: Chord = key('j');
 const K: Chord = key('k');
 const N: Chord = key('n');
@@ -48,8 +47,11 @@ const PRIMARY_ALT_SHIFT_ENTER: Chord = PRIMARY_ALT_ENTER.with(Modifier::Shift);
 const PRIMARY_ALT_A: Chord = primary('a').with(Modifier::Alt);
 const PRIMARY_ALT_S: Chord = primary('s').with(Modifier::Alt);
 const PRIMARY_ALT_G: Chord = primary('g').with(Modifier::Alt);
+const PRIMARY_ALT_P: Chord = primary('p').with(Modifier::Alt);
 const ESCAPE: Chord = Chord::key(Key::Escape);
 const PRIMARY_K: Chord = primary('k');
+const PRIMARY_OPEN_BRACKET: Chord = primary('[');
+const PRIMARY_CLOSE_BRACKET: Chord = primary(']');
 const PRIMARY_P: Chord = primary('p');
 const PRIMARY_C: Chord = primary('c');
 const PRIMARY_COMMA: Chord = primary(',');
@@ -121,6 +123,8 @@ impl ShortcutGroup {
 pub enum Command {
     NextScreen,
     PreviousScreen,
+    HistoryBack,
+    HistoryForward,
     NextUnreadStep,
     FindingsList,
     CommentsList,
@@ -133,14 +137,14 @@ pub enum Command {
     ToggleRead,
     CopyCode,
     AddToReview,
-    AskAgent,
+    CommentAndAskAgent,
     CommentNow,
-    AskAgentNow,
+    CommentAndAskAgentNow,
+    AskAgent,
     SuggestChange,
     CloseBox,
     WrapLines,
     HideWhitespace,
-    AskAboutStep,
     MoreAbove,
     MoreBelow,
     ToggleRenderedView,
@@ -164,8 +168,9 @@ impl From<SendAction> for Command {
             SendAction::AddToReview => Self::AddToReview,
             SendAction::CommentNow => Self::CommentNow,
             SendAction::SuggestChange => Self::SuggestChange,
+            SendAction::CommentAndAskAgent => Self::CommentAndAskAgent,
+            SendAction::CommentAndAskAgentNow => Self::CommentAndAskAgentNow,
             SendAction::AskAgent => Self::AskAgent,
-            SendAction::AskAgentNow => Self::AskAgentNow,
         }
     }
 }
@@ -177,8 +182,9 @@ impl Command {
             Self::AddToReview => Some(SendAction::AddToReview),
             Self::CommentNow => Some(SendAction::CommentNow),
             Self::SuggestChange => Some(SendAction::SuggestChange),
+            Self::CommentAndAskAgent => Some(SendAction::CommentAndAskAgent),
+            Self::CommentAndAskAgentNow => Some(SendAction::CommentAndAskAgentNow),
             Self::AskAgent => Some(SendAction::AskAgent),
-            Self::AskAgentNow => Some(SendAction::AskAgentNow),
             _ => None,
         }
     }
@@ -197,15 +203,18 @@ impl Command {
                 SendAction::AddToReview => &[PRIMARY_ALT_A],
                 SendAction::CommentNow => &[PRIMARY_ALT_ENTER],
                 SendAction::SuggestChange => &[PRIMARY_ALT_S],
-                SendAction::AskAgent => &[PRIMARY_ALT_G],
-                SendAction::AskAgentNow => &[PRIMARY_ALT_SHIFT_ENTER],
+                SendAction::CommentAndAskAgent => &[PRIMARY_ALT_G],
+                SendAction::CommentAndAskAgentNow => &[PRIMARY_ALT_SHIFT_ENTER],
+                SendAction::AskAgent => &[PRIMARY_ALT_P],
             },
         }
     }
 
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 39] = [
         Self::NextScreen,
         Self::PreviousScreen,
+        Self::HistoryBack,
+        Self::HistoryForward,
         Self::NextUnreadStep,
         Self::FindingsList,
         Self::CommentsList,
@@ -218,14 +227,14 @@ impl Command {
         Self::ToggleRead,
         Self::CopyCode,
         Self::AddToReview,
-        Self::AskAgent,
+        Self::CommentAndAskAgent,
         Self::CommentNow,
-        Self::AskAgentNow,
+        Self::CommentAndAskAgentNow,
+        Self::AskAgent,
         Self::SuggestChange,
         Self::CloseBox,
         Self::WrapLines,
         Self::HideWhitespace,
-        Self::AskAboutStep,
         Self::MoreAbove,
         Self::MoreBelow,
         Self::ToggleRenderedView,
@@ -248,6 +257,8 @@ impl Command {
         match self {
             Self::NextScreen => &[RIGHT, J],
             Self::PreviousScreen => &[LEFT, K],
+            Self::HistoryBack => &[PRIMARY_OPEN_BRACKET],
+            Self::HistoryForward => &[PRIMARY_CLOSE_BRACKET],
             Self::NextUnreadStep => &[N],
             Self::FindingsList => &[F],
             Self::CommentsList => &[C],
@@ -265,14 +276,14 @@ impl Command {
             Self::ToggleRead => &[M],
             Self::CopyCode => &[PRIMARY_C],
             Self::AddToReview
-            | Self::AskAgent
+            | Self::CommentAndAskAgent
             | Self::CommentNow
-            | Self::AskAgentNow
+            | Self::CommentAndAskAgentNow
+            | Self::AskAgent
             | Self::SuggestChange => self.default_chords_for(SendChoice::default()),
             Self::CloseBox => &[ESCAPE],
             Self::WrapLines => &[W],
             Self::HideWhitespace => &[S],
-            Self::AskAboutStep => &[A],
             Self::Settings => &[PRIMARY_COMMA],
             Self::Shortcuts => &[QUESTION],
             Self::OpenOnHost => &[G],
@@ -291,6 +302,8 @@ impl Command {
         match self {
             Self::NextScreen => "next_screen",
             Self::PreviousScreen => "previous_screen",
+            Self::HistoryBack => "history_back",
+            Self::HistoryForward => "history_forward",
             Self::NextUnreadStep => "next_unread_step",
             Self::FindingsList => "findings_list",
             Self::CommentsList => "comments_list",
@@ -303,14 +316,14 @@ impl Command {
             Self::ToggleRead => "toggle_read",
             Self::CopyCode => "copy_code",
             Self::AddToReview => "add_to_review",
-            Self::AskAgent => "ask_agent",
+            Self::CommentAndAskAgent => "comment_and_ask_agent",
             Self::CommentNow => "comment_now",
-            Self::AskAgentNow => "ask_agent_now",
+            Self::CommentAndAskAgentNow => "comment_and_ask_agent_now",
+            Self::AskAgent => "ask_agent_only",
             Self::SuggestChange => "suggest_change",
             Self::CloseBox => "close_box",
             Self::WrapLines => "wrap_lines",
             Self::HideWhitespace => "hide_whitespace",
-            Self::AskAboutStep => "ask_about_step",
             Self::MoreAbove => "more_above",
             Self::MoreBelow => "more_below",
             Self::ToggleRenderedView => "toggle_rendered_view",
@@ -330,10 +343,13 @@ impl Command {
     }
 
     /// A name the command was written under before, still read: `open_on_github`, from before the
-    /// app named code hosts. Settings writes the new name in its place.
+    /// app named code hosts, and `ask_agent` and `ask_agent_now`, from before they were renamed to
+    /// Comment and ask agent. Settings writes the new name in its place.
     pub fn former_config_name(self) -> Option<&'static str> {
         match self {
             Self::OpenOnHost => Some("open_on_github"),
+            Self::CommentAndAskAgent => Some("ask_agent"),
+            Self::CommentAndAskAgentNow => Some("ask_agent_now"),
             _ => None,
         }
     }
@@ -359,7 +375,6 @@ impl Command {
             | Self::ToggleRead
             | Self::WrapLines
             | Self::HideWhitespace
-            | Self::AskAboutStep
             | Self::MoreAbove
             | Self::MoreBelow
             | Self::ToggleRenderedView
@@ -371,12 +386,18 @@ impl Command {
             | Self::OpenPr
             | Self::ToggleDraft
             | Self::ToggleAutoMerge => KeyScope::Page,
-            Self::Jump | Self::SwitchPr | Self::Settings | Self::CloseWindow => KeyScope::Window,
+            Self::Jump
+            | Self::HistoryBack
+            | Self::HistoryForward
+            | Self::SwitchPr
+            | Self::Settings
+            | Self::CloseWindow => KeyScope::Window,
             Self::Quit => KeyScope::App,
             Self::AddToReview
-            | Self::AskAgent
+            | Self::CommentAndAskAgent
             | Self::CommentNow
-            | Self::AskAgentNow
+            | Self::CommentAndAskAgentNow
+            | Self::AskAgent
             | Self::SuggestChange
             | Self::CloseBox => KeyScope::TextBox,
             Self::CopyCode => KeyScope::NotTyping,
@@ -387,6 +408,8 @@ impl Command {
         match self {
             Self::NextScreen
             | Self::PreviousScreen
+            | Self::HistoryBack
+            | Self::HistoryForward
             | Self::NextUnreadStep
             | Self::FindingsList
             | Self::CommentsList
@@ -396,11 +419,12 @@ impl Command {
             | Self::ReadDown
             | Self::ReadUp
             | Self::Jump => ShortcutGroup::Navigate,
-            Self::ToggleRead | Self::CopyCode | Self::AskAboutStep => ShortcutGroup::Read,
+            Self::ToggleRead | Self::CopyCode => ShortcutGroup::Read,
             Self::AddToReview
-            | Self::AskAgent
+            | Self::CommentAndAskAgent
             | Self::CommentNow
-            | Self::AskAgentNow
+            | Self::CommentAndAskAgentNow
+            | Self::AskAgent
             | Self::SuggestChange
             | Self::CloseBox => ShortcutGroup::Comment,
             Self::WrapLines
@@ -428,6 +452,8 @@ impl Command {
         match self {
             Self::NextScreen => "Next screen; marks the step read once you saw its end",
             Self::PreviousScreen => "Previous screen",
+            Self::HistoryBack => "Back to where you came from, like the mouse's back button",
+            Self::HistoryForward => "Forward again after Back, like the mouse's forward button",
             Self::NextUnreadStep => "Next unread step",
             Self::FindingsList => "List the findings of the AI review",
             Self::CommentsList => "List every comment thread, to go to one",
@@ -440,14 +466,14 @@ impl Command {
             Self::ToggleRead => "Mark the step as read, or unread",
             Self::CopyCode => "Copy the selected code",
             Self::AddToReview => "Add the comment or reply to your review",
-            Self::AskAgent => "Add it and ask your agent",
+            Self::CommentAndAskAgent => "Add it and ask your agent",
             Self::CommentNow => "Post the comment or reply at once, without your review",
-            Self::AskAgentNow => "Post it at once and ask your agent",
+            Self::CommentAndAskAgentNow => "Post it at once and ask your agent",
+            Self::AskAgent => "Ask your agent without posting anything",
             Self::SuggestChange => "Put the commented lines in the box as a suggestion",
             Self::CloseBox => "Leave the box you are typing in",
             Self::WrapLines => "Wrap long lines",
             Self::HideWhitespace => "Hide whitespace-only changes",
-            Self::AskAboutStep => "Ask your agent about this step",
             Self::MoreAbove => "Show more lines above the focused change",
             Self::MoreBelow => "Show more lines below the focused change",
             Self::ToggleRenderedView => "Show the focused change's file rendered, or as code",

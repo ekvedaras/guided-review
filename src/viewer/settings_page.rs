@@ -32,9 +32,7 @@ impl SettingsPage {
     pub fn of(problem: &SettingProblem) -> Self {
         match problem {
             SettingProblem::InstructionsFileGone(..)
-            | SettingProblem::InstructionsUnreadable(..)
-            | SettingProblem::AskEffortUnknown(_)
-            | SettingProblem::AskModelBlank => Self::Agents,
+            | SettingProblem::InstructionsUnreadable(..) => Self::Agents,
             SettingProblem::Clone { .. }
             | SettingProblem::IdeTemplateBlank
             | SettingProblem::MoreLinesNotACount(_) => Self::Code,

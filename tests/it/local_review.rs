@@ -508,7 +508,7 @@ fn the_overview_counts_its_uncommitted_files_in_words() {
 }
 
 #[test]
-fn the_overview_rows_of_a_local_review_hold_its_facts_and_ask_about_the_whole_change() {
+fn the_overview_rows_of_a_local_review_hold_its_facts() {
     let feature = Feature::with_work_in_progress();
     let review = feature.open();
     let pr = PullRequest::changing_a_file().open();
@@ -518,9 +518,7 @@ fn the_overview_rows_of_a_local_review_hold_its_facts_and_ask_about_the_whole_ch
 
     assert_eq!(local.branch.as_str(), "feature");
     assert_eq!(local.commit_subjects, ["Add the cart"]);
-    assert_eq!(page.screen_ask().unwrap().label, "the whole change");
     assert_eq!(pr.page().overview().unwrap().local, None);
-    assert_eq!(pr.page().screen_ask().unwrap().label, "the whole PR");
 }
 
 #[test]
@@ -665,22 +663,4 @@ fn a_local_reviews_github_port_refuses_every_call() {
         .pull_request_tips(&"https://github.com/acme/shop/pull/7".parse().unwrap());
 
     assert!(tips.is_err());
-}
-
-#[test]
-fn an_ask_handed_to_the_agent_of_a_local_review_names_the_change_set_not_a_pr() {
-    let feature = Feature::with_work_in_progress();
-    let review = feature.open();
-    let mut asks = guided_review::viewer::Asks::load(std::sync::Arc::new(
-        crate::support::fake_ports::FakeAskStore::default(),
-    ))
-    .unwrap();
-    let id = asks.start(guided_review::viewer::Place::Tour, review.head());
-    let ask = asks.get(id).unwrap().clone();
-
-    let text = review.ask_hand_off_text(&ask, "the whole change");
-
-    assert!(text.contains(&feature.subject().to_string()), "{text}");
-    assert!(text.contains("guided-review outline"), "{text}");
-    assert!(!text.contains("PR"), "{text}");
 }

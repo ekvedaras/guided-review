@@ -1,4 +1,5 @@
 use super::ReviewCore;
+use crate::viewer::cancel::Cancel;
 use crate::viewer::problems::Problem;
 use crate::viewer::replacing_jobs::{JobProgress, ReplacingJob, StartedJob};
 
@@ -36,6 +37,17 @@ impl ReviewCore {
             return None;
         }
         self.start_job(ReplacingJob::Reload)
+    }
+
+    /// What the running Refresh's wait looks at.
+    pub fn refresh_cancel(&self) -> Cancel {
+        self.jobs.refresh_cancel()
+    }
+
+    /// The reviewer's Cancel: the Refresh stops waiting for the agent and lands as cancelled, which
+    /// frees the slot of the replacing jobs. The agent is not interrupted.
+    pub fn cancel_refresh(&self) {
+        self.jobs.cancel_refresh();
     }
 
     /// What `job` did last, for its banner; an activity that arrives after it landed is dropped.

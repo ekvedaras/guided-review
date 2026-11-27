@@ -6,8 +6,8 @@ use guided_review::pull_request::PullRequestUrl;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::GuidedTour;
 use guided_review::viewer::{
-    AfterJob, JobOutcome, JobProgress, Problem, RepinnedTour, ReplacingJob, Review,
-    ReviewStateFile, Screen, StartedJob, StepId,
+    AfterJob, JobOutcome, JobProgress, Problem, RefreshCancelled, RepinnedTour, ReplacingJob,
+    Review, ReviewStateFile, Screen, StartedJob, StepId,
 };
 use serde_json::json;
 
@@ -309,4 +309,39 @@ fn a_pr_review_cannot_be_dropped() {
     assert_eq!(review.start_job(ReplacingJob::DropReview), None);
     assert_eq!(review.start_job(ReplacingJob::MoveToPr), None, "no offer");
     review.tick(&notes()).unwrap();
+}
+
+#[test]
+fn cancelling_a_refresh_is_no_failure_and_frees_the_slot_once_the_wait_ended() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    review.start_job(ReplacingJob::Refresh).unwrap();
+    let wait = review.refresh_cancel();
+    assert!(!wait.is_cancelled());
+
+    review.cancel_refresh();
+
+    assert!(wait.is_cancelled());
+    assert!(review.job_is_running(ReplacingJob::Refresh));
+    let after = review.land_job(JobOutcome::Refresh(Err(RefreshCancelled.into())));
+    assert!(matches!(after, AfterJob::Stays { toast: None }));
+    assert_eq!(review.problems(), []);
+    assert_eq!(
+        review.job_progress(ReplacingJob::Refresh),
+        JobProgress::Idle
+    );
+    assert!(review.start_job(ReplacingJob::Repin).is_some());
+}
+
+#[test]
+fn a_cancel_of_an_earlier_refresh_does_not_cancel_the_next_one() {
+    let pull = Pull::new();
+    let mut review = pull.open();
+    review.start_job(ReplacingJob::Refresh).unwrap();
+    review.cancel_refresh();
+    review.land_job(JobOutcome::Refresh(Err(RefreshCancelled.into())));
+
+    review.start_job(ReplacingJob::Refresh).unwrap();
+
+    assert!(!review.refresh_cancel().is_cancelled());
 }

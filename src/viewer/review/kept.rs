@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::ReviewCore;
-use crate::viewer::ask_desk::AskDesk;
+use crate::viewer::jump::JumpTarget;
 use crate::viewer::page::Page;
 use crate::viewer::replacing_jobs::{ReplacingJob, StartedJob};
 use crate::viewer::work_agenda::Work;
@@ -42,15 +42,23 @@ impl Review {
         self.review.saw_end_of_screen();
     }
 
-    /// Asks change on every line an answer streams in, and the page shows only which lines have
-    /// Asks, so the page is dropped only when those lines change.
-    pub fn change_asks<T>(&mut self, change: impl FnOnce(&mut AskDesk) -> T) -> T {
-        let before = self.review.ask_desk.asked_lines_on(&self.review.screen);
-        let result = change(&mut self.review.ask_desk);
-        if self.review.ask_desk.asked_lines_on(&self.review.screen) != before {
-            self.page.take();
-        }
-        result
+    /// The window tells which row is at the top of the view before each change, since only it knows
+    /// the scroll. No input of the page, so the page is kept.
+    pub fn note_scroll_top(&mut self, row: usize) {
+        let page = Arc::clone(self.page());
+        self.review.scrolled_to(row, &page);
+    }
+
+    /// The page is asked where the jump lands before the review changes.
+    pub fn jump_to(&mut self, target: &JumpTarget) {
+        let landing_row = self.page().row_of_jump(target);
+        self.deref_mut().jump_to(target, landing_row);
+    }
+
+    /// After Back or Forward, once: the row of the page to scroll to.
+    pub fn take_row_to_scroll_to(&mut self) -> Option<usize> {
+        let page = Arc::clone(self.page());
+        self.review.row_to_scroll_to(&page)
     }
 
     /// The work agenda is no input of the page, so work falls due and is wanted without dropping

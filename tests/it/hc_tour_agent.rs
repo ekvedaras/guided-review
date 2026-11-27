@@ -1,6 +1,7 @@
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
+use guided_review::agent_cli::AgentCli;
 use guided_review::claude_cli::{review_agent_denied_tools, review_agent_tools};
 use guided_review::hc_tour_agent::HcTourAgents;
 use guided_review::platform::Os;
@@ -688,6 +689,44 @@ fn a_tour_agent_is_started_in_the_background_outliving_the_app_with_its_labels_t
 }
 
 #[test]
+fn the_agents_of_a_trial_build_may_run_it_by_its_full_path_and_by_name() {
+    let dir = TempDir::new().unwrap();
+    answer(dir.path(), "run", r#"{"address":"t9"}"#);
+    let trial = AgentCli::At(PathBuf::from("/Users/me/.cargo/bin/guided-review"));
+    let agents = adapter(dir.path()).agents_running_guided_review_as(trial);
+
+    start_shop_agent(&agents).unwrap();
+    agents
+        .start_review(&ReviewAgentStart {
+            subject: pr(),
+            name: "review-acme-shop-7".to_owned(),
+            place: ReviewPlace::TourAgentFolder(PathBuf::from("/worktrees/7")),
+            first_task: "You are the review agent".to_owned(),
+            findings: PathBuf::from("/tours/findings.json"),
+            skill: None,
+        })
+        .unwrap();
+
+    let calls = calls(dir.path(), "calls");
+    let [tour_agent, review_agent] = calls.as_slice() else {
+        panic!("{calls:?}");
+    };
+    for (call, command) in [(tour_agent, "agent-reply"), (review_agent, "findings-done")] {
+        let (_, tools) = call.split_once(" --allowedTools ").unwrap();
+        let tools: Vec<&str> = tools.split(',').collect();
+        for needed in [
+            format!("Bash(guided-review {command}:*)"),
+            format!("Bash(/Users/me/.cargo/bin/guided-review {command}:*)"),
+        ] {
+            assert!(
+                tools.contains(&needed.as_str()),
+                "{needed} missing from {tools:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_review_agent_is_labelled_for_review_and_started_with_the_tools_it_may_and_may_not_use() {
     let dir = TempDir::new().unwrap();
     answer(dir.path(), "run", r#"{"address":"t9"}"#);
@@ -706,6 +745,7 @@ fn a_review_agent_is_labelled_for_review_and_started_with_the_tools_it_may_and_m
         &ReviewPlace::TourAgentFolder(PathBuf::from("/worktrees/7")),
         Path::new("/tours/findings.json"),
         None,
+        &AgentCli::OnPath,
     );
     let denied = review_agent_denied_tools();
 

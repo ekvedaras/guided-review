@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::ops::ControlFlow;
 use std::sync::Mutex;
 
+use guided_review::agent_cli::AgentCli;
 use guided_review::claude_cli::{review_agent_denied_tools, review_agent_tools};
 use guided_review::review_subject::ReviewSubject;
 use std::path::PathBuf;
@@ -10,6 +11,9 @@ use guided_review::viewer::{
     AgentLinkOff, AgentRole, AgentStatus, AppAgent, HerdrRefused, LiveTerminal, ReviewAgentStart,
     SendOutcome, TerminalId, TourAgentPort, TourAgentStart,
 };
+
+/// Where the trial build of `FakeTourAgent::of_a_trial_build` runs from.
+pub const TRIAL_BUILD: &str = "/Users/me/.cargo/bin/guided-review";
 
 /// One change the app core made through `FakeTourAgent`, in the order it made them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +61,10 @@ pub struct FakeTourAgent {
     reviewing: Mutex<BTreeMap<TerminalId, ReviewSubject>>,
     /// Herdr fails to start an agent, with this reason.
     start_refusal: Mutex<Option<String>>,
+    /// What `status` reports after a send, one per look, the last one from then on.
+    after_send: Mutex<Vec<AgentStatus>>,
+    /// What the looks at the status after the send report now.
+    looks: Mutex<VecDeque<AgentStatus>>,
     /// What `follow` reports, in order, before its stream ends.
     coming: Mutex<VecDeque<AgentStatus>>,
     calls: Mutex<Vec<TourAgentCall>>,
@@ -67,6 +75,7 @@ pub struct FakeTourAgent {
     screen: Mutex<Vec<String>>,
     /// Terminals whose screen has not settled since they started, so herdr types nothing into them.
     starting: Mutex<Vec<TerminalId>>,
+    cli: AgentCli,
 }
 
 impl FakeTourAgent {
@@ -77,13 +86,22 @@ impl FakeTourAgent {
             terminals: Mutex::default(),
             reviewing: Mutex::default(),
             start_refusal: Mutex::new(None),
+            after_send: Mutex::default(),
+            looks: Mutex::default(),
             coming: Mutex::default(),
             calls: Mutex::default(),
             live: Mutex::default(),
             started_by_app: Mutex::default(),
             screen: Mutex::default(),
             starting: Mutex::default(),
+            cli: AgentCli::OnPath,
         }
+    }
+
+    /// The app is a trial build, so agents run guided-review by its full path, `TRIAL_BUILD`.
+    pub fn of_a_trial_build(mut self) -> Self {
+        self.cli = AgentCli::At(PathBuf::from(TRIAL_BUILD));
+        self
     }
 
     pub fn without_herdr(self, off: AgentLinkOff) -> Self {
@@ -235,6 +253,12 @@ impl FakeTourAgent {
         self.with_terminal(terminal, None, AgentStatus::Unreported)
     }
 
+    /// After the next send, each look at the terminal's status reports the next of these.
+    pub fn after_a_send_looks_report(self, statuses: &[AgentStatus]) -> Self {
+        *self.after_send.lock().unwrap() = statuses.to_vec();
+        self
+    }
+
     pub fn then_reports(self, statuses: &[AgentStatus]) -> Self {
         self.coming.lock().unwrap().extend(statuses.iter().copied());
         self
@@ -262,6 +286,10 @@ impl FakeTourAgent {
 }
 
 impl TourAgentPort for FakeTourAgent {
+    fn agent_cli(&self) -> AgentCli {
+        self.cli.clone()
+    }
+
     fn link(&self) -> Result<(), AgentLinkOff> {
         self.link.lock().unwrap().clone()
     }
@@ -343,6 +371,16 @@ impl TourAgentPort for FakeTourAgent {
     }
 
     fn status(&self, terminal: &TerminalId) -> anyhow::Result<AgentStatus> {
+        let mut looks = self.looks.lock().unwrap();
+        let scripted = if looks.len() > 1 {
+            looks.pop_front()
+        } else {
+            looks.front().copied()
+        };
+        if let Some(status) = scripted {
+            return Ok(status);
+        }
+        drop(looks);
         self.terminals
             .lock()
             .unwrap()
@@ -392,6 +430,8 @@ impl TourAgentPort for FakeTourAgent {
             .ok_or_else(|| anyhow::anyhow!("no terminal {terminal}"))?;
         *status = AgentStatus::Working;
         drop(terminals);
+        let script = std::mem::take(&mut *self.after_send.lock().unwrap());
+        self.looks.lock().unwrap().extend(script);
         self.record(TourAgentCall::Send {
             terminal: terminal.clone(),
             text: text.to_owned(),
@@ -449,6 +489,9 @@ impl TourAgentPort for FakeTourAgent {
             .lock()
             .unwrap()
             .insert(terminal.clone(), u64::MAX);
+        drop(terminals);
+        let script = std::mem::take(&mut *self.after_send.lock().unwrap());
+        self.looks.lock().unwrap().extend(script);
         Ok(terminal)
     }
 
@@ -461,7 +504,12 @@ impl TourAgentPort for FakeTourAgent {
             subject: start.subject.clone(),
             folder: start.place.folder().to_path_buf(),
             first_task: start.first_task.clone(),
-            tools: review_agent_tools(&start.place, &start.findings, start.skill.as_deref()),
+            tools: review_agent_tools(
+                &start.place,
+                &start.findings,
+                start.skill.as_deref(),
+                &self.cli,
+            ),
             denied_tools: review_agent_denied_tools(),
         });
         let mut terminals = self.terminals.lock().unwrap();

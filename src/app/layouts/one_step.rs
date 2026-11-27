@@ -1,9 +1,9 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton, ParentElement,
-    Pixels, Render, SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription,
-    Window, actions, div, list, px,
+    Focusable, InteractiveElement, IntoElement, ListOffset, ListState, MouseButton,
+    NavigationDirection, ParentElement, Pixels, Render, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Subscription, Window, actions, div, list, px,
 };
 use std::os::unix::process::CommandExt;
 
@@ -19,7 +19,6 @@ use crate::app::code_links::{
 };
 use crate::app::code_selection::{CodeSelection, TextSpot};
 use crate::app::components::agent_picker::AgentPicker;
-use crate::app::components::ask_panel::{AskPanel, HandToAgent, UseAsComment, ask_button};
 use crate::app::components::button::{ButtonKind, ButtonSize, button_keys, icon_label_button};
 use crate::app::components::chip::{dropping_in, notice_band};
 use crate::app::components::comment_composer::CommentComposer;
@@ -61,15 +60,14 @@ use crate::code_source::CodeSource;
 use crate::file_path::FilePath;
 use crate::findings::FindingId;
 use crate::ide::{Ide, NoIde};
-use crate::open_review::AskSetup;
 use crate::tour::ToursOnDisk;
 use crate::update::running_build;
 use crate::viewer::{
-    AgentReplied, AiReviewAction, AskAt, CodeHost, CodeLink, Command, CommentGesture, Departure,
-    Effect, FileToggle, FileView, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, Overlay,
-    PieceLabels, Place, PressStep, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs,
-    RestartGuard, RestartStep, Review, Screen, ScreenTravel, SettingsSheet, ToastTone, Travel,
-    ViewSwitch, WindowMoment,
+    AgentReplied, AiReviewAction, CodeHost, CodeLink, Command, CommentGesture, Departure, Effect,
+    FileToggle, FileView, HandOffId, InFlight, Intent, LabelSwitch, LineLocation, Overlay,
+    PieceLabels, PressStep, Refusal, Reopen, ReopenAfterSave, Reopening, RestartArgs, RestartGuard,
+    RestartStep, Review, Screen, ScreenTravel, SettingsSheet, ToastTone, Travel, ViewSwitch,
+    WindowMoment,
 };
 use crate::viewer::{FixReply, IssueDetails, NameHover, StationKind, WhyReply};
 use issue_card::IssueHover;
@@ -97,11 +95,12 @@ actions!(
     [
         GoForward,
         GoBack,
+        HistoryBack,
+        HistoryForward,
         ToggleJump,
         CopySelection,
         ToggleWrapLines,
         ToggleWhitespace,
-        AskAboutStep,
         ToggleSettings,
         GoToNextUnread,
         FocusNextChange,
@@ -143,7 +142,7 @@ pub struct Collaborators {
 /// The one layout: step tree on the left, one screen on the right (the summary, or one step).
 ///
 /// It draws from the `ReviewSession` and forwards the reader's input to it. Looks-only state (the drag
-/// selection, hover, ask counts) is read when drawn.
+/// selection, hover) is read when drawn.
 pub struct OneStepLayout {
     session: Entity<ReviewSession>,
     /// The session's list of the screen's rows; the layout scrolls it.
@@ -156,7 +155,6 @@ pub struct OneStepLayout {
     composer_focus: FocusHandle,
     /// The Ask why boxes open on findings.
     finding_questions: FindingQuestions,
-    ask: Entity<AskPanel>,
     code_selection: Option<CodeSelection>,
     /// The sidebar row touching the current one that the mouse is on, so the current row squares the corners they share.
     hovered_touching_row: Option<(usize, RowPlace)>,
@@ -178,6 +176,10 @@ pub struct OneStepLayout {
     /// Where the card goes if the pointer rests on the name it is on now.
     name_card_waits_at: gpui::Bounds<Pixels>,
     name_card_place: Option<NameCardPlace>,
+    /// The row of the open card the code pane follows; `None` shows the first definition's.
+    name_card_row: Option<crate::viewer::CardRow>,
+    /// How far the open card's code pane is scrolled; back to the top left for each new pane.
+    name_card_code_scroll: gpui::ScrollHandle,
     /// Counts the asks to open the finish-review form; the form opens when it sees a new one.
     finish_form_request: u32,
     /// Which way the reader went to the screen on show, so its content comes in from that side.
@@ -188,7 +190,6 @@ pub struct OneStepLayout {
     selection_notice: Option<String>,
     page_drag: ScrollbarDrag,
     issue_card_drag: ScrollbarDrag,
-    /// The rows of the last drag, to ask the AI about.
     frame_stats: FrameStatsHook,
     #[cfg(feature = "snapshots")]
     _snapshots: Option<gpui::Task<()>>,
@@ -209,7 +210,6 @@ pub struct OneStepLayout {
     /// `None` opens all code on the host.
     ide: Result<Ide, NoIde>,
     _session_subscriptions: [Subscription; 2],
-    _use_as_comment_subscription: Subscription,
     _keys_back_to_page: Subscription,
 }
 
@@ -219,7 +219,6 @@ impl OneStepLayout {
     pub fn new(
         review: Review,
         source: Arc<dyn CodeSource>,
-        ask: AskSetup,
         collaborators: Collaborators,
         carried_settings: Option<Entity<SettingsPanel>>,
         window: &mut Window,
@@ -231,8 +230,6 @@ impl OneStepLayout {
             tour_work,
         } = collaborators;
         let focus = cx.focus_handle();
-        #[cfg(feature = "snapshots")]
-        let ask = crate::app::snapshots::quiet_ask(ask);
         let frame_stats = FrameStatsHook::from_env();
         let session = cx.new(|cx| {
             ReviewSession::new(
@@ -247,7 +244,6 @@ impl OneStepLayout {
                 cx,
             )
         });
-        let ask = cx.new(|cx| AskPanel::new(ask, session.clone(), focus.clone(), cx));
         let session_subscriptions = [
             cx.observe(&session, |this, session, cx| {
                 this.screen_travel.arrive(session.read(cx).review());
@@ -347,34 +343,6 @@ impl OneStepLayout {
             })
             .detach();
         }
-        let use_as_comment_subscription =
-            cx.subscribe_in(&ask, window, |this, _, UseAsComment(ask), window, cx| {
-                this.open_comment_box(CommentGesture::AskAnswer(ask), window, cx);
-            });
-        cx.subscribe(&ask, |this, _, HandToAgent { ask, place, anyway }, cx| {
-            let handing = this
-                .session
-                .read(cx)
-                .hand_ask_to_agent(ask, place, *anyway, cx);
-            let id = ask.id;
-            this.reopen_after_save.ask_handed_to_agent();
-            cx.spawn(async move |this, cx| {
-                let outcome = handing.await;
-                this.update(cx, |this, cx| {
-                    this.session.update(cx, |session, cx| {
-                        session.change_asks(cx, |review| {
-                            review.change_asks(|desk| desk.hand_off_ended(id, &outcome));
-                        });
-                    });
-                    let in_flight = this.in_flight(cx);
-                    let reopen = this.reopen_after_save.ask_hand_off_ended(in_flight);
-                    this.reopen_if_due(reopen, cx);
-                })
-                .ok();
-            })
-            .detach();
-        })
-        .detach();
         let layout_handle = cx.weak_entity();
         let on_row_gesture: OnRowGesture = Rc::new(move |gesture, at, _window, cx| {
             layout_handle
@@ -421,7 +389,6 @@ impl OneStepLayout {
             focus,
             composer_focus: cx.focus_handle(),
             finding_questions: FindingQuestions::default(),
-            ask,
             code_selection: None,
             hovered_touching_row: None,
             picked_station: None,
@@ -435,6 +402,8 @@ impl OneStepLayout {
             name_hover: NameHover::default(),
             name_card_waits_at: gpui::Bounds::default(),
             name_card_place: None,
+            name_card_row: None,
+            name_card_code_scroll: gpui::ScrollHandle::new(),
             selection_notice: None,
             page_drag: ScrollbarDrag::default(),
             issue_card_drag: ScrollbarDrag::default(),
@@ -455,7 +424,6 @@ impl OneStepLayout {
             restart_guard: RestartGuard::default(),
             ide,
             _session_subscriptions: session_subscriptions,
-            _use_as_comment_subscription: use_as_comment_subscription,
             _keys_back_to_page: keys_back_to_page,
         }
     }
@@ -576,24 +544,6 @@ impl OneStepLayout {
         window.request_animation_frame();
     }
 
-    fn ask_button(
-        &self,
-        key: String,
-        place: Place,
-        label: String,
-        kind: ButtonKind,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let count = self.session.read(cx).review().asks().count_at(&place);
-        ask_button(&Colors::active(cx), SharedString::from(key), count, kind).on_click(cx.listener(
-            move |this, _, window, cx| {
-                this.ask.update(cx, |panel, cx| {
-                    panel.open(place.clone(), label.clone(), window, cx);
-                });
-            },
-        ))
-    }
-
     /// To the screen, scrolled to the row the jump lands on.
     fn jump_to(&mut self, target: &crate::viewer::JumpTarget, cx: &mut Context<Self>) {
         let row = self.session.update(cx, |session, cx| {
@@ -690,7 +640,7 @@ impl OneStepLayout {
     }
 
     /// The box that opens takes the keys. A refusal is named above the page until the next press
-    /// on the rows or the next answer used as a comment.
+    /// on the rows.
     fn open_comment_box(
         &mut self,
         gesture: CommentGesture,
@@ -701,12 +651,7 @@ impl OneStepLayout {
             session.change(cx, |review| review.open_comment_box(gesture))
         });
         match opened {
-            Ok(Some(_)) => {
-                if matches!(gesture, CommentGesture::AskAnswer(_)) {
-                    self.selection_notice = None;
-                }
-                window.focus(&self.composer_focus, cx);
-            }
+            Ok(Some(_)) => window.focus(&self.composer_focus, cx),
             Ok(None) => {}
             Err(refusal) => self.selection_notice = Some(refusal.to_string()),
         }
@@ -842,8 +787,8 @@ impl OneStepLayout {
         }
     }
 
-    /// Whether the app may be left now: with an Ask answering or a hand-off being sent the first
-    /// ask only warns, and the same ask again soon after goes ahead.
+    /// Whether the app may be left now: with a hand-off being sent the first ask only warns, and the
+    /// same ask again soon after goes ahead.
     fn may_leave(&mut self, departure: Departure, cx: &mut Context<Self>) -> bool {
         let in_flight = self.in_flight(cx);
         match self
@@ -931,16 +876,6 @@ impl OneStepLayout {
         cx.notify();
     }
 
-    /// Asks about the screen, as its toolbar's Ask button does.
-    fn ask_about_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(AskAt { place, label, .. }) = self.session.read(cx).rows().screen_ask().cloned()
-        else {
-            return;
-        };
-        self.ask
-            .update(cx, |panel, cx| panel.open(place, label, window, cx));
-    }
-
     /// Settings asked for from outside the window, by `guided-review settings`: opens it, never closes it.
     pub fn show_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.act(Intent::ShowSettings, window, cx);
@@ -965,12 +900,11 @@ impl OneStepLayout {
 
     fn in_flight(&self, cx: &App) -> InFlight {
         InFlight {
-            asks_answering: self.session.read(cx).review().asks().answering(),
             delivering_hand_offs: self.session.read(cx).is_delivering_hand_offs(),
         }
     }
 
-    /// Called whenever an Ask turn, a hand-off or an Ask handed to the agent may have ended.
+    /// Called whenever a hand-off may have ended.
     fn reopen_if_work_ended(&mut self, cx: &mut Context<Self>) {
         let in_flight = self.in_flight(cx);
         let reopen = self.reopen_after_save.work_in_flight_changed(in_flight);
@@ -1124,7 +1058,6 @@ impl OneStepLayout {
             Effect::OpenPrSwitcher => self
                 .pr_switcher
                 .update(cx, |switcher, cx| switcher.show(window, cx)),
-            Effect::AskAboutScreen => self.ask_about_screen(window, cx),
             Effect::NextFinding => self.go_to_next_finding(cx),
             Effect::OpenFinishForm => self.open_finish_form(cx),
             Effect::SendTasks => self.session.update(cx, ReviewSession::send_tasks),
@@ -1446,6 +1379,20 @@ impl Render for OneStepLayout {
             .on_action(cx.listener(|this, _: &GoBack, window, cx| {
                 this.act(Intent::PreviousScreen, window, cx);
             }))
+            .on_action(cx.listener(|this, _: &HistoryBack, window, cx| {
+                this.act(Intent::HistoryBack, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &HistoryForward, window, cx| {
+                this.act(Intent::HistoryForward, window, cx);
+            }))
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Back),
+                cx.listener(|this, _, window, cx| this.act(Intent::HistoryBack, window, cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Forward),
+                cx.listener(|this, _, window, cx| this.act(Intent::HistoryForward, window, cx)),
+            )
             .on_action(cx.listener(|this, _: &FocusNextChange, _, cx| {
                 this.focus_change_by(Review::focus_next_change, cx);
             }))
@@ -1486,9 +1433,6 @@ impl Render for OneStepLayout {
                 if this.session.read(cx).rows().offers_hiding_whitespace() {
                     this.act(Intent::ToggleWhitespace, window, cx);
                 }
-            }))
-            .on_action(cx.listener(|this, _: &AskAboutStep, window, cx| {
-                this.act(Intent::AskAboutScreen, window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleJump, window, cx| {
                 this.act(Intent::ToggleJump, window, cx);
@@ -1606,17 +1550,25 @@ impl Render for OneStepLayout {
                                 RefreshBanner::new(
                                     brief,
                                     refresh_progress,
+                                    cx.listener(|this, _, window, cx| {
+                                        if this.session.read(cx).tour_agent_must_be_picked() {
+                                            this.open_agent_picker(
+                                                crate::viewer::AgentRole::Tour,
+                                                window,
+                                                cx,
+                                            );
+                                        } else {
+                                            this.session.update(cx, ReviewSession::refresh_tour);
+                                        }
+                                    }),
                                     cx.listener(|this, _, _, cx| {
-                                        this.session.update(cx, ReviewSession::refresh_tour);
+                                        this.session.read(cx).cancel_refresh();
                                     }),
                                 )
                             }),
                     )
                     .child(screen),
             )
-            .when(self.ask.read(cx).is_shown(cx), |row| {
-                row.child(self.ask.clone())
-            })
             .child(self.settings.clone())
             .child(self.loading.clone())
             .children(switching_veil)

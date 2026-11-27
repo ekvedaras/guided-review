@@ -1,8 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use super::cancel::Cancel;
 use super::capability::{Capability, HostCapabilities};
 use super::comments::{CommentPlace, SendMode};
 use super::host_outage::OutageCause;
@@ -421,43 +422,15 @@ pub struct ViewedFile {
     pub state: ViewedState,
 }
 
-/// How to start the local AI for one Ask.
-#[derive(Debug, Clone)]
-pub struct AgentLaunch {
-    /// The repo checkout the AI reads code in.
-    pub cwd: PathBuf,
-    pub model: String,
-    pub effort: String,
-    pub system_prompt: String,
-    /// The earlier session of an Ask that survived an app restart.
-    pub resume: Option<String>,
-}
-
-/// Starts a live conversation. Starting must not wait for the first answer.
-pub trait AgentLauncher: Send + Sync {
-    fn start(&self, launch: &AgentLaunch) -> anyhow::Result<Box<dyn AgentPort>>;
-}
-
-/// One live conversation with the local AI. The core reads its raw stream lines
-/// and turns them into `AgentEvent`s, so adapters stay thin.
-pub trait AgentPort: Send {
-    /// Sends one message and blocks until the answer to it is complete,
-    /// passing every stream line to `on_line` as it arrives.
-    fn ask(&mut self, message: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()>;
-
-    /// Stops the turn `ask` is waiting on, from another thread. The turn then ends as usual
-    /// and the conversation stays live for the next question.
-    fn turn_stopper(&self) -> Arc<dyn TurnStopper>;
-}
-
-pub trait TurnStopper: Send + Sync {
-    fn stop_turn(&self) -> anyhow::Result<()>;
-}
-
-/// Starts the local AI on the tour skill to Refresh the tour of a PR. Blocks until it is done.
+/// Has the subject's tour agent Refresh its tour. Blocks until the agent is done, or until `cancel`, which
+/// ends the wait with a `RefreshCancelled` and does not interrupt the agent.
 pub trait RefreshWriter: Send + Sync {
-    /// Passes every stream line of the AI to `on_line` as it arrives. The core reads them, so adapters stay
-    /// thin. An `Ok` says only that the AI ran to its end, not that it refreshed the tour.
-    fn refresh(&self, subject: &ReviewSubject, on_line: &mut dyn FnMut(&str))
-    -> anyhow::Result<()>;
+    /// Tells what is going on to `on_activity` as it happens. An `Ok` says only that the agent ran to its
+    /// end, not that it refreshed the tour.
+    fn refresh(
+        &self,
+        subject: &ReviewSubject,
+        cancel: &Cancel,
+        on_activity: &mut dyn FnMut(String),
+    ) -> anyhow::Result<()>;
 }

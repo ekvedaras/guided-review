@@ -10,6 +10,7 @@ use std::sync::Arc;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 
+use super::cancel::Cancel;
 use super::move_offer::StartedMove;
 use super::review::Review;
 use super::screen::Screen;
@@ -116,6 +117,8 @@ pub struct ReplacingJobs {
     activity: Option<Arc<str>>,
     /// A reload asked for while another job ran, which starts once it landed.
     reload_wanted: bool,
+    /// Ends the wait of the Refresh that runs, for the reviewer's Cancel.
+    refresh_cancel: Cancel,
     failures: BTreeMap<ReplacingJob, Arc<str>>,
 }
 
@@ -155,9 +158,22 @@ impl ReplacingJobs {
         if job == ReplacingJob::Reload {
             self.reload_wanted = false;
         }
+        if job == ReplacingJob::Refresh {
+            self.refresh_cancel = Cancel::default();
+        }
         self.activity = None;
         self.running = Some(started.clone());
         started
+    }
+
+    pub(super) fn refresh_cancel(&self) -> Cancel {
+        self.refresh_cancel.clone()
+    }
+
+    pub(super) fn cancel_refresh(&self) {
+        if self.is_running(ReplacingJob::Refresh) {
+            self.refresh_cancel.cancel();
+        }
     }
 
     pub(super) const fn reload_is_due(&self) -> bool {

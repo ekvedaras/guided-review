@@ -70,6 +70,30 @@ struct LocalComment {
     body: String,
 }
 
+/// What the ids a private thread store gives start with; no host's id does.
+const PRIVATE_ID_START: &str = "local-";
+
+impl ThreadId {
+    /// Whether a private thread store gave the id, not a host.
+    pub fn is_private(&self) -> bool {
+        self.as_str().starts_with(PRIVATE_ID_START)
+    }
+}
+
+impl CommentId {
+    /// Whether a private thread store gave the id, not a host.
+    pub fn is_private(&self) -> bool {
+        self.as_str().starts_with(PRIVATE_ID_START)
+    }
+}
+
+impl ReviewThread {
+    /// Whether the thread is kept on this machine only, which a host never sees.
+    pub fn is_private(&self) -> bool {
+        self.id.is_private()
+    }
+}
+
 impl LocalThreads {
     pub fn is_empty(&self) -> bool {
         self.threads.is_empty()
@@ -77,7 +101,7 @@ impl LocalThreads {
 
     fn next_id(&mut self, kind: &str) -> String {
         self.last_id += 1;
-        format!("local-{kind}-{}", self.last_id)
+        format!("{PRIVATE_ID_START}{kind}-{}", self.last_id)
     }
 
     pub(super) fn start(&mut self, place: &CommentPlace, body: &str, at: &Sha) -> ThreadId {

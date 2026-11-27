@@ -1,20 +1,18 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, write_executable};
+use crate::support::{FakeGitHub, FixtureRepo, GuidedReview};
 use guided_review::app_folders::AppFolders;
-use guided_review::claude_cli::ClaudeRefreshWriter;
 use guided_review::local_git::LocalGit;
 use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{GuidedTour, Tour};
-use guided_review::viewer::{JobOutcome, ReplacingJob};
+use guided_review::viewer::{Cancel, JobOutcome, ReplacingJob};
 use guided_review::viewer::{
     PickCodeSource, Problem, RefreshWriter, Review, ReviewStateFile, TourRefresher, repin_tour,
 };
 use serde_json::json;
-use tempfile::TempDir;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -220,10 +218,8 @@ fn the_app_offers_the_same_brief_until_done() {
 enum Writer {
     Refreshes,
     Fails,
-    /// Ends without an error but leaves the tour as it was, as claude does when a tool it needs is denied.
+    /// Ends without an error but leaves the tour as it was, as an agent does when a tool it needs is denied.
     GivesUp,
-    /// Exits cleanly but its last line says the run failed, as when the API is overloaded.
-    EndsWithAnError,
 }
 
 struct SkillStandIn {
@@ -236,44 +232,21 @@ impl RefreshWriter for SkillStandIn {
     fn refresh(
         &self,
         subject: &ReviewSubject,
-        on_line: &mut dyn FnMut(&str),
+        _: &Cancel,
+        on_activity: &mut dyn FnMut(String),
     ) -> anyhow::Result<()> {
         assert_eq!(subject.to_string(), self.pr.to_string());
         match self.writer {
-            Writer::Fails => anyhow::bail!("claude stopped"),
-            Writer::GivesUp => {
-                on_line(&result_line(
-                    "I could not do the refresh. Bash is blocked.",
-                    false,
-                ));
-                Ok(())
-            }
-            Writer::EndsWithAnError => {
-                on_line(&result_line("API Error: overloaded", true));
-                Ok(())
-            }
+            Writer::Fails => anyhow::bail!("the tour agent t3 failed while it refreshed the tour"),
+            Writer::GivesUp => Ok(()),
             Writer::Refreshes => {
-                on_line(&tool_use_line("Read", "file_path", "app/Pricing.php"));
-                on_line(&tool_use_line("Edit", "file_path", "tour.json"));
+                on_activity("The tour agent t3 is refreshing the tour".to_owned());
                 ReviewStateFile::for_subject(&self.folders, subject)
                     .update(guided_review::viewer::ReviewState::finish_refresh)?;
-                on_line(&result_line("Refreshed the tour.", false));
                 Ok(())
             }
         }
     }
-}
-
-fn tool_use_line(tool: &str, key: &str, value: &str) -> String {
-    json!({
-        "type": "assistant",
-        "message": {"content": [{"type": "tool_use", "name": tool, "input": {key: value}}]}
-    })
-    .to_string()
-}
-
-fn result_line(said: &str, is_error: bool) -> String {
-    json!({"type": "result", "is_error": is_error, "result": said, "session_id": "s1"}).to_string()
 }
 
 fn refresher(shop: &Shop, writer: Writer) -> TourRefresher {
@@ -302,40 +275,25 @@ fn the_refresh_button_runs_the_writer_then_reopens_the_review_without_the_marks(
     shop.repin_onto_head_with_a_new_class();
 
     let refreshed = refresher(&shop, Writer::Refreshes)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .unwrap();
 
     assert!(refreshed.review.refresh_brief().is_empty());
 }
 
 #[test]
-fn the_refresh_tells_what_claude_is_doing_while_it_works() {
+fn the_refresh_tells_what_the_agent_is_doing_while_it_works() {
     let shop = Shop::with_tour_at_first_head();
     shop.repin_onto_head_with_a_new_class();
     let mut activities = Vec::new();
 
     refresher(&shop, Writer::Refreshes)
-        .run(&mut |activity| activities.push(activity))
+        .run(&Cancel::default(), &mut |activity| {
+            activities.push(activity);
+        })
         .unwrap();
 
-    assert_eq!(activities, ["Read app/Pricing.php", "Edit tour.json"]);
-}
-
-#[test]
-fn a_claude_whose_last_line_is_an_error_fails_the_refresh_with_that_error() {
-    let shop = Shop::with_tour_at_first_head();
-    shop.repin_onto_head_with_a_new_class();
-
-    let error = refresher(&shop, Writer::EndsWithAnError)
-        .run(&mut |_| {})
-        .err()
-        .unwrap();
-
-    assert_eq!(
-        format!("{error:#}"),
-        "claude stopped: API Error: overloaded"
-    );
-    assert!(shop.text_may_be_old("total"));
+    assert_eq!(activities, ["The tour agent t3 is refreshing the tour"]);
 }
 
 #[test]
@@ -344,27 +302,27 @@ fn a_failed_writer_is_reported_and_leaves_the_marks() {
     shop.repin_onto_head_with_a_new_class();
 
     let error = refresher(&shop, Writer::Fails)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .err()
         .unwrap();
 
-    assert!(format!("{error:#}").contains("claude stopped"));
+    assert!(format!("{error:#}").contains("failed while it refreshed"));
     assert!(shop.text_may_be_old("total"));
 }
 
 #[test]
-fn a_writer_that_ends_without_refreshing_fails_the_refresh_with_what_it_said() {
+fn a_writer_that_ends_without_refreshing_fails_the_refresh() {
     let shop = Shop::with_tour_at_first_head();
     shop.repin_onto_head_with_a_new_class();
 
     let error = refresher(&shop, Writer::GivesUp)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .err()
         .unwrap();
 
     assert_eq!(
         format!("{error:#}"),
-        "claude ended without refreshing the tour: I could not do the refresh. Bash is blocked."
+        "the tour agent ended its turn without refreshing the tour: the marks are still there"
     );
     assert!(shop.text_may_be_old("total"));
 }
@@ -383,7 +341,7 @@ fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_
     .unwrap();
 
     let error = refresher(&shop, Writer::GivesUp)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .err()
         .unwrap();
     review.start_job(ReplacingJob::Refresh).unwrap();
@@ -392,122 +350,12 @@ fn a_failed_refresh_is_a_problem_in_the_sidebar_with_its_reason_until_a_refresh_
     assert_eq!(
         review.problems(),
         [Problem::TourNotRefreshed(
-            "claude ended without refreshing the tour: I could not do the refresh. Bash is blocked."
+            "the tour agent ended its turn without refreshing the tour: the marks are still there"
                 .into()
         )]
     );
     let refreshed = refresher(&shop, Writer::Refreshes)
-        .run(&mut |_| {})
+        .run(&Cancel::default(), &mut |_| {})
         .unwrap();
     assert_eq!(refreshed.review.problems(), []);
-}
-
-fn fake_claude(dir: &Path, exit_code: u8) -> PathBuf {
-    let script = dir.join("claude");
-    write_executable(
-        &script,
-        format!(
-            "#!/bin/sh\necho \"$@\" > \"{dir}/args\"\npwd > \"{dir}/cwd\"\necho '{{\"type\":\"assistant\",\"message\":{{\"content\":[]}}}}'\necho '{{\"type\":\"result\",\"is_error\":false,\"result\":\"Refreshed the tour.\"}}'\necho 'no login' >&2\nexit {exit_code}\n",
-            dir = dir.display()
-        ),
-    );
-    script
-}
-
-#[test]
-fn claude_runs_the_tour_skill_in_the_background_with_a_narrow_tool_list_and_no_skipped_permissions()
-{
-    let dir = TempDir::new().unwrap();
-    let cwd = TempDir::new().unwrap();
-    let writer = ClaudeRefreshWriter::with_binary(
-        fake_claude(dir.path(), 0),
-        cwd.path().to_path_buf(),
-        PathBuf::from("/home/me/.local/state/guided-review/tours"),
-    );
-
-    let mut lines = Vec::new();
-    writer
-        .refresh(&PR.parse().unwrap(), &mut |line| {
-            lines.push(line.to_owned());
-        })
-        .unwrap();
-
-    assert_eq!(
-        lines,
-        [
-            r#"{"type":"assistant","message":{"content":[]}}"#,
-            r#"{"type":"result","is_error":false,"result":"Refreshed the tour."}"#
-        ]
-    );
-    let args = std::fs::read_to_string(dir.path().join("args")).unwrap();
-    assert!(
-        args.contains("--output-format stream-json --verbose"),
-        "{args}"
-    );
-    assert!(args.contains("-p "), "{args}");
-    assert!(args.contains(PR), "{args}");
-    assert!(args.contains("--permission-mode dontAsk"), "{args}");
-    assert!(args.contains("--allowedTools"), "{args}");
-    assert!(args.contains("Bash(guided-review refresh:*)"), "{args}");
-    assert!(args.contains("Bash(guided-review tour-path:*)"), "{args}");
-    assert!(args.contains("as its own Bash call"), "{args}");
-    assert!(args.contains(OUTSIDE_TEXT_IS_DATA), "{args}");
-    let reads_in_cwd = format!(
-        "Read(//{}/**)",
-        cwd.path().display().to_string().trim_start_matches('/')
-    );
-    assert!(args.contains(&reads_in_cwd), "{args}");
-    assert!(!args.contains(",Read,"), "{args}");
-    assert!(
-        args.contains("Write(//home/me/.local/state/guided-review/tours/**)"),
-        "{args}"
-    );
-    assert!(!args.contains("--dangerously-skip-permissions"), "{args}");
-    assert!(
-        !args.contains("--bare") && !args.contains("--redo"),
-        "{args}"
-    );
-    let ran_in = std::fs::read_to_string(dir.path().join("cwd")).unwrap();
-    assert_eq!(
-        std::fs::canonicalize(ran_in.trim()).unwrap(),
-        std::fs::canonicalize(cwd.path()).unwrap()
-    );
-}
-
-#[test]
-fn a_claude_that_exits_with_an_error_fails_the_refresh_with_what_it_said() {
-    let dir = TempDir::new().unwrap();
-    let writer = ClaudeRefreshWriter::with_binary(
-        fake_claude(dir.path(), 1),
-        dir.path().to_path_buf(),
-        dir.path().join("tours"),
-    );
-
-    let error = writer
-        .refresh(&PR.parse().unwrap(), &mut |_| {})
-        .unwrap_err();
-
-    assert!(format!("{error:#}").contains("no login"), "{error:#}");
-}
-
-#[test]
-fn claude_refreshing_a_local_review_is_asked_about_the_local_key_not_a_pr() {
-    let dir = TempDir::new().unwrap();
-    let writer = ClaudeRefreshWriter::with_binary(
-        fake_claude(dir.path(), 0),
-        dir.path().to_path_buf(),
-        dir.path().join("tours"),
-    );
-    let key = "local:/work/shop@feature";
-
-    writer.refresh(&key.parse().unwrap(), &mut |_| {}).unwrap();
-
-    let args = std::fs::read_to_string(dir.path().join("args")).unwrap();
-    assert!(args.contains(&format!("/tour {key}")), "{args}");
-    assert!(
-        args.contains("a local review that already has a tour"),
-        "{args}"
-    );
-    assert!(args.contains("with the local key written out"), "{args}");
-    assert!(!args.contains("PR"), "{args}");
 }

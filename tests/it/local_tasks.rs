@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::support::fake_app::{CliEnded, answering_one_request};
 use crate::support::fake_ports::{FakeHost, SentLog};
-use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
+use crate::support::fake_tour_agent::{FakeTourAgent, TRIAL_BUILD, TourAgentCall};
 use crate::support::work::drive_until_idle;
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run, file_path};
 use guided_review::build::Build;
@@ -18,7 +18,7 @@ use guided_review::viewer::{
     AgentLinkOff, AgentStatus, Audience, CommentGesture, CommentPlace, CommentProblem,
     CommentRefusal, CommentResult, Effect, FinishRefusal, HandOffButton, HandOffState,
     HandToAgentRefused, Intent, LineLocation, PieceDiff, ReviewStateFile, ReviewVerdict, SendMode,
-    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadHome, ThreadMessage,
+    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadHomes, ThreadMessage,
     ThreadView, TourAgentPort, TourAgentState, TourAgents, WindowMoment, WorkPorts,
 };
 
@@ -60,6 +60,16 @@ impl Feature {
 
     fn key(&self) -> String {
         self.subject.to_string()
+    }
+
+    /// The app is a trial build, so the change set's agent runs guided-review by its full path.
+    fn of_a_trial_build(mut self) -> Self {
+        self.agent = Arc::new(
+            FakeTourAgent::new()
+                .with_terminal("t1", Some(&self.key()), AgentStatus::Idle)
+                .of_a_trial_build(),
+        );
+        self
     }
 
     fn folder(&self) -> String {
@@ -346,10 +356,10 @@ fn the_app_and_agent_reply_never_write_a_stale_thread_over_each_others_words() {
     let mut app = task_sent(&feature);
 
     // The app shows the review, so the command writes the thread and the app takes the hand-off.
-    let home = ThreadHome::of(&feature.subject, &app.review.state_file());
+    let home = ThreadHomes::of(&feature.subject, &app.review.state_file());
     let state = app.review.state_file().load().unwrap();
     let first = app.review.hand_offs().all()[0].id();
-    let request = state.hand_offs().agent_working_on_it(&home, first).unwrap();
+    let request = home.agent_working_on_it(state.hand_offs(), first).unwrap();
     let done = request.run(&feature.host()).unwrap();
     app.review.hand_off_replied(first, done.replied()).unwrap();
     feature.run_work(&mut app);
@@ -914,6 +924,26 @@ fn send_tasks_hands_every_queued_task_to_the_agent_as_one_message_in_reading_ord
     assert_eq!(feature.sent.host_calls(), []);
 }
 
+#[test]
+fn a_trial_build_names_itself_in_every_command_of_the_tasks_it_sends() {
+    let feature = Feature::with_work_in_progress().of_a_trial_build();
+    let mut opened = feature.open();
+    add_to_tasks(&feature, &mut opened, "world", "Say who the world is");
+
+    send_tasks(&feature, &mut opened);
+
+    let typed = feature.typed_into_agent();
+    let [message] = typed.as_slice() else {
+        panic!("{typed:?}");
+    };
+    let key = feature.key();
+    assert!(
+        message.contains(&format!("`{TRIAL_BUILD} agent-reply {key} h0 --body -`")),
+        "{message}"
+    );
+    assert!(!message.contains("`guided-review "), "{message}");
+}
+
 /// A Claude herdr has no status from may be waiting on a question the task text would answer, so the
 /// reviewer looks at it first; no second agent is started beside it.
 #[test]
@@ -1010,13 +1040,10 @@ fn sending_tasks_while_the_agent_answers_another_loses_no_task_thread_or_answer(
 /// `agent-reply` writes the answer on the thread, the running app marks the hand-off, and the
 /// agent is idle again.
 fn answered_while_the_app_shows(feature: &Feature, app: &mut OpenedReview, nth: usize, body: &str) {
-    let home = ThreadHome::of(&feature.subject, &app.review.state_file());
+    let home = ThreadHomes::of(&feature.subject, &app.review.state_file());
     let hand_off = app.review.hand_offs().all()[nth].id();
     let state = app.review.state_file().load().unwrap();
-    let request = state
-        .hand_offs()
-        .agent_reply(&home, hand_off, body)
-        .unwrap();
+    let request = home.agent_reply(state.hand_offs(), hand_off, body).unwrap();
     let done = request.run(&feature.host()).unwrap();
     app.review
         .hand_off_replied(hand_off, done.replied())

@@ -115,8 +115,8 @@ fn a_choice_matches_a_search_when_every_word_is_in_its_space_folder_repo_or_bran
         terminal: TerminalId::new("t6k"),
         space: "claude-a".to_owned(),
         folder: "/Users/you/Code/claude-a".into(),
-        repo: Some("saltzapp/saltz.app".parse().unwrap()),
-        branch: Some(BranchName::new("fix/18798-short-expiry").unwrap()),
+        repo: Some("acme/shop".parse().unwrap()),
+        branch: Some(BranchName::new("fix/412-short-expiry").unwrap()),
         status: AgentStatus::Idle,
         is_tour_agent: false,
         is_review_agent: false,
@@ -126,10 +126,10 @@ fn a_choice_matches_a_search_when_every_word_is_in_its_space_folder_repo_or_bran
 
     assert!(choice.matches(""));
     assert!(choice.matches("CLAUDE-a"));
-    assert!(choice.matches("saltz expiry"));
+    assert!(choice.matches("shop expiry"));
     assert!(choice.matches("t6k"));
     assert!(!choice.matches("claude-b"));
-    assert!(!choice.matches("saltz dotfiles"));
+    assert!(!choice.matches("shop dotfiles"));
 }
 
 #[test]

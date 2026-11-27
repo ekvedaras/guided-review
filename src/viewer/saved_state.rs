@@ -151,8 +151,8 @@ impl SavedState {
         ))
     }
 
-    /// The viewer owns ticks and viewed sections; asks are saved by the Ask panel, so only
-    /// these are written into a freshly loaded file.
+    /// The viewer owns ticks and viewed sections; the re-pin record and the local threads are saved by
+    /// others, so only these are written into a freshly loaded file.
     fn save(&self) -> anyhow::Result<()> {
         let turn = self.saves.next_turn();
         self.saves.write(turn, || {

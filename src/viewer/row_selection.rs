@@ -1,6 +1,8 @@
+use std::fmt::Write;
+
 use super::comments::{CommentPlace, CommentRefusal};
 use super::diff_line::DiffLine;
-use super::line_location::LineLocation;
+use super::line_location::{LineLocation, Side};
 
 /// A drag over rows of one file: where the mouse went down and where it is now.
 /// The rows in between belong to it, whatever hunk or side they sit in.
@@ -92,6 +94,40 @@ impl SelectedLines {
 
     pub fn lines(&self) -> &[DiffLine] {
         &self.lines
+    }
+
+    /// The text of the rows on the head side, in order: what a suggestion replaces the lines with.
+    pub(super) fn head_texts(&self) -> Vec<&str> {
+        self.lines
+            .iter()
+            .filter(|row| row.location.side == Side::Head)
+            .map(|row| row.text.as_str())
+            .collect()
+    }
+
+    /// The rows as an agent is told them, one per line: `+ path:side:line: text`.
+    pub(super) fn told_to_an_agent(&self) -> String {
+        let mut told = String::new();
+        for row in &self.lines {
+            let (sign, side) = match row.location.side {
+                Side::Base => ('-', "base"),
+                Side::Head => ('+', "head"),
+            };
+            writeln!(
+                told,
+                "{sign} {}:{side}:{}: {}",
+                row.location.path, row.location.line, row.text
+            )
+            .ok();
+        }
+        told
+    }
+
+    /// Each row's line number and text, whichever side it is on.
+    pub(super) fn numbered_texts(&self) -> impl Iterator<Item = (u32, &str)> {
+        self.lines
+            .iter()
+            .map(|row| (row.location.line.get(), row.text.as_str()))
     }
 
     pub fn first(&self) -> &LineLocation {

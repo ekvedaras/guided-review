@@ -18,32 +18,26 @@ mod run_ai_review;
 mod stations;
 mod work;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
-use std::time::Instant;
 
 use crate::code_source::CodeSource;
 use crate::coverage::{self, PiecePart};
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::local_work_tree::OnDisk;
 use crate::navigation::{FileSearch, Lookups};
-use crate::pieces::{self, ChangedFile, PieceId};
+use crate::pieces::{self, ChangedFile};
 use crate::pull_request::{ChangeTips, HostSite, Sha};
 use crate::review_subject::ReviewSubject;
 use crate::tour::{BasicTour, GuidedTour, Step, Tour};
 
-use std::path::{Path, PathBuf};
-
-use crate::config::AskSettings;
+use std::path::PathBuf;
 
 use super::ai_review::AiReview;
 use super::ai_review_run::{AiReviewRun, ReviewAgentLife};
-use super::ask::{Ask, AskId, Asks, Place, ShownOn};
-use super::ask_context;
-use super::ask_desk::{AskDesk, AskProcesses};
-use super::ask_target::{AskTarget, Unavailable};
 use super::branch_link::BranchLink;
+use super::cancel::RefreshCancelled;
 use super::capability::HostCapabilities;
 use super::carried::ReadCarrier;
 use super::code_link::{CodeLinks, CodeOnWeb, CodeOpener, WorkingCopy};
@@ -52,10 +46,8 @@ use super::comment_send::CommentRequest;
 use super::comments::Audience;
 use super::comments::{CommentPlace, CommentRefusal, SendMode, Sending};
 use super::diff_display::{DiffDisplay, FilesAtHead, FilesAtHeadRequest};
-use super::diff_line::DiffLine;
 use super::disk_news::DiskNews;
 use super::display_options::DisplayOptions;
-use super::file_block::FileBlock;
 use super::file_tree::{FileTree, FolderPath, TreeRow};
 use super::finding_placement::{FindingHome, FindingPlacement, FindingView};
 use super::finish_review::FinishAction;
@@ -66,14 +58,14 @@ use super::host_outage::Read;
 use super::host_outage::{Affected, OutageCause};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
-use super::local_thread_store::ThreadHome;
+use super::local_thread_store::ThreadHomes;
 use super::markdown::Markdown;
 use super::move_offer::MoveFrom;
 use super::name_desk::NameDesk;
 use super::outdated_lines::FollowedLines;
 use super::overview::{OverviewFile, OverviewPage, OverviewStats};
 use super::piece_diff::PieceDiff;
-use super::ports::{AgentLaunch, HostError};
+use super::ports::HostError;
 use super::pr_controls::PrControls;
 use super::pr_notes::PrNotes;
 use super::pr_origin::PullRequestOrigin;
@@ -105,6 +97,7 @@ use crate::repin::RepinStatus;
 pub use crate::tour::StepId;
 
 use super::screen::{NextScreen, ReadSubject, Screen};
+use super::visits::{ReadingSpot, Visits};
 
 pub use kept::Review;
 
@@ -321,7 +314,6 @@ pub struct ReviewCore {
     comment_desk: CommentDesk,
     display_options: DisplayOptions,
     pr_notes: PrNotes,
-    ask_desk: AskDesk,
     work: WorkAgenda,
     jobs: ReplacingJobs,
     /// The names hovered in the diff, looked up at the commits this review reads. Not saved.
@@ -346,6 +338,10 @@ pub struct ReviewCore {
     /// The screen whose end the window last had on show; the forward key ticks a step only then.
     /// Not saved, and no input of the page.
     seen_end_of: Option<Screen>,
+    visits: Visits,
+    /// Where the reviewer is scrolled on the open screen, as the window last said. Not saved.
+    spot: ReadingSpot,
+    spot_to_restore: Option<ReadingSpot>,
 }
 
 impl Review {
@@ -391,21 +387,7 @@ impl Review {
                 self.finish_selection(&page)
             }
             CommentGesture::OnFile(path) => self.begin_file_comment(path).map(Some),
-            CommentGesture::AskAnswer(ask) => self.use_as_comment(ask).map(Some),
         }
-    }
-
-    /// What the comment box's Ask is about: its lines, on this screen. `None` for a comment on a
-    /// file, or lines not on this screen.
-    pub fn ask_place_of(&self, comment: &CommentPlace) -> Option<Place> {
-        let page = self.page();
-        let selected = page.selected(&RowSelection::of(comment)?)?;
-        Some(page.place_of(&selected))
-    }
-
-    /// The place an Ask about selected rows is about: the rows and the pieces holding them.
-    pub fn place_of_lines(&self, selected: &SelectedLines) -> Place {
-        self.page().place_of(selected)
     }
 
     /// The rows being dragged over, for drawing them.
@@ -420,7 +402,7 @@ impl Review {
         let Some(rows) = RowSelection::of(place).and_then(|lines| page.selected(&lines)) else {
             return Ok(None);
         };
-        self.suggest_lines(place, rows.lines())
+        self.suggest_lines(place, &rows)
     }
 
     /// A review reopened after a re-pin goes on with what the one it replaces was doing; see
@@ -452,6 +434,7 @@ impl Review {
                 self.job_failed(ReplacingJob::Repin, &error, None);
                 stays
             }
+            JobOutcome::Refresh(Err(error)) if error.is::<RefreshCancelled>() => stays,
             JobOutcome::Refresh(Err(error)) => {
                 self.job_failed(
                     ReplacingJob::Refresh,
@@ -513,27 +496,6 @@ impl Review {
             }
         }
     }
-
-    /// Opens the Ask panel on a place, with notes on the answers whose code changed since.
-    pub fn open_ask(
-        &mut self,
-        place: Place,
-        label: String,
-        settings: &AskSettings,
-        now: Instant,
-        processes: &mut dyn AskProcesses,
-    ) {
-        let clone = self.asks().clone_folder().cloned();
-        let target = self.ask_target(place, label, clone, settings);
-        let head = self.head().clone();
-        self.check_asks_for_code_changes();
-        self.change_asks(|desk| desk.open(target, &head, now, processes));
-    }
-
-    fn check_asks_for_code_changes(&mut self) {
-        let changed = self.asks_whose_code_changed();
-        self.change_asks(|desk| desk.code_changed_is(changed));
-    }
 }
 
 impl ReviewCore {
@@ -558,13 +520,10 @@ impl ReviewCore {
             self.guided_tour = replaced.guided_tour;
         }
         self.seen_end_of = replaced.seen_end_of;
-        self.ask_desk = replaced.ask_desk;
+        self.visits = replaced.visits;
         if switched_to_guided {
             self.take_over_from_basic(&replaced.state);
-            self.follow_file_asks_into_the_guided_tour();
         }
-        let changed = self.asks_whose_code_changed();
-        self.ask_desk.code_changed_is(changed);
         for (id, replied) in replaced.replies_after_repin {
             if let Err(error) = self.hand_off_replied(id, &replied) {
                 eprintln!("could not carry the reply to {id} into the re-pinned review: {error:#}");
@@ -575,13 +534,9 @@ impl ReviewCore {
     fn suggest_lines(
         &mut self,
         place: &CommentPlace,
-        lines: &[DiffLine],
+        rows: &SelectedLines,
     ) -> anyhow::Result<Option<String>> {
-        CommentDesk::suggest_change(&mut self.state, place, lines)
-    }
-
-    fn asks_whose_code_changed(&self) -> HashSet<AskId> {
-        self.ask_desk.ids_where(|ask| self.code_changed_since(ask))
+        CommentDesk::suggest_change(&mut self.state, place, rows)
     }
 
     /// This review replaces the basic review of its subject: its steps start with the read ticks
@@ -609,41 +564,6 @@ impl ReviewCore {
         }
         self.steps_started_read = Some(self.progress().read);
     }
-
-    /// An Ask about lines of a file screen finds its rows in the first step that shows all its
-    /// pieces, else in the safety net; when neither shows them its place is gone, as after a re-pin.
-    fn follow_file_asks_into_the_guided_tour(&mut self) {
-        let Some(guided) = self.tour.guided() else {
-            return;
-        };
-        let steps: Vec<(StepId, Vec<PieceId>)> = guided
-            .steps()
-            .into_iter()
-            .map(|step| {
-                let shown = super::piece_diff::pieces_of(step, guided, &self.files);
-                (
-                    step.id.clone(),
-                    shown.iter().map(|piece| piece.id.clone()).collect(),
-                )
-            })
-            .collect();
-        let in_safety_net: Vec<PieceId> = self
-            .safety_net()
-            .map_or_default(|page| page.pieces.iter().map(|piece| piece.id.clone()).collect());
-        let shows_all = |shown: &[PieceId], pieces: &[PieceId]| {
-            !pieces.is_empty() && pieces.iter().all(|piece| shown.contains(piece))
-        };
-        let moved = self.ask_desk.move_lines_asks(|pieces| {
-            steps
-                .iter()
-                .find(|(_, shown)| shows_all(shown, pieces))
-                .map(|(step, _)| ShownOn::Step { step: step.clone() })
-                .or_else(|| shows_all(&in_safety_net, pieces).then_some(ShownOn::SafetyNet))
-        });
-        if let Err(error) = moved {
-            eprintln!("could not save the Asks moved into the guided tour: {error:#}");
-        }
-    }
 }
 
 impl ReviewCore {
@@ -653,9 +573,8 @@ impl ReviewCore {
         state_file: ReviewStateFile,
         host: HostCapabilities,
     ) -> anyhow::Result<Self> {
-        let (mut state, saved_review_kept_as) = state_file.load_or_set_aside()?;
+        let (state, saved_review_kept_as) = state_file.load_or_set_aside()?;
         let parts_not_read = state.parts_not_read();
-        let asks = Asks::loaded(state.take_asks(), Arc::new(state_file.clone()));
         let tour_files = state_file.tour_files().to_owned();
         let subject = tour.pin().subject()?;
         let pr_host = subject.pull_request().map(|pr| pr.host);
@@ -785,7 +704,6 @@ impl ReviewCore {
             comment_desk: CommentDesk::for_host(host),
             display_options,
             pr_notes: PrNotes::for_host(host),
-            ask_desk: AskDesk::new(asks, source.local_clone().map(Path::to_path_buf)),
             work: WorkAgenda::default(),
             jobs: ReplacingJobs::default(),
             names,
@@ -799,6 +717,9 @@ impl ReviewCore {
             steps_started_read: None,
             read_carrier: None,
             seen_end_of: None,
+            visits: Visits::default(),
+            spot: ReadingSpot::default(),
+            spot_to_restore: None,
             tour_files,
         })
     }
@@ -828,11 +749,6 @@ impl ReviewCore {
         Some(ImagePreviewRequest::for_file(file, &self.base, &self.head))
     }
 
-    /// Every Ask of the PR, the place the Ask panel is open on and the processes answering.
-    pub fn asks(&self) -> &AskDesk {
-        &self.ask_desk
-    }
-
     pub fn display_options(&self) -> &DisplayOptions {
         &self.display_options
     }
@@ -850,16 +766,21 @@ impl ReviewCore {
         &self.subject
     }
 
-    pub(super) fn thread_home(&self) -> ThreadHome {
-        ThreadHome::of(&self.subject, self.state.file())
+    pub(super) fn thread_homes(&self) -> ThreadHomes {
+        ThreadHomes::of(&self.subject, self.state.file())
     }
 
-    /// The send actions a comment box of this review offers; Ask agent is one more for a PR.
+    /// The ways a comment box of this review sends. A PR's boxes also send a private question to the
+    /// tour agent with Send now, which the host never gets.
     pub fn send_modes(&self) -> &'static [SendMode] {
         if self.subject.comments_are_agent_tasks() {
             &SendMode::LOCAL
         } else {
-            &[SendMode::AddToReview, SendMode::CommentNow]
+            &[
+                SendMode::AddToReview,
+                SendMode::CommentNow,
+                SendMode::SendNow,
+            ]
         }
     }
 
@@ -1392,189 +1313,6 @@ impl ReviewCore {
         self.tour.pin().pinned_tips()
     }
 
-    /// What the AI is told about a place: pointers, the shown diff lines, step title and why.
-    pub fn ask_context(&self, place: &Place) -> Option<String> {
-        ask_context::context_for(&self.tour, &self.files, &self.links(), place)
-    }
-
-    /// What the reviewer's own tour agent is typed for an Ask. In a basic tour it is told so, and which
-    /// file the Ask is on, since there is no tour text to find the place in.
-    pub fn ask_hand_off_text(&self, ask: &Ask, place: &str) -> String {
-        let subject = &self.subject;
-        let Tour::Basic(_) = &self.tour else {
-            return ask.hand_off_text(subject, place);
-        };
-        let file = match &ask.place {
-            Place::File { path }
-            | Place::Lines {
-                shown_on: ShownOn::File { path },
-                ..
-            } => Some(path),
-            Place::Tour | Place::Step { .. } | Place::Piece { .. } | Place::Lines { .. } => None,
-        };
-        let named_file = file.map_or_else(String::new, |file| format!("\nFile: {file}"));
-        let reviewed = subject.owner_of_changed_files();
-        let basic_place = format!(
-            "{place}{named_file}\nThe tour is a basic tour: {reviewed} changed files, with no tour file. \
-             Read the changed code with `guided-review outline {subject}` and \
-             `guided-review show {subject} <piece ids> --around`."
-        );
-        ask.hand_off_text(subject, &basic_place)
-    }
-
-    /// A re-pin since the Ask changed, added or took away a piece it is about: its answer may be old.
-    pub fn code_changed_since(&self, ask: &Ask) -> bool {
-        if ask.head == self.head {
-            return false;
-        }
-        let Some(record) = self.repin_record() else {
-            return false;
-        };
-        let moved = |piece: &PieceId| record.status_of(piece) != Some(RepinStatus::Same);
-        match &ask.place {
-            Place::Tour => false,
-            Place::Step { step } => {
-                let Some(guided) = self.tour.guided() else {
-                    return false;
-                };
-                record.gone_count(step) > 0
-                    || self.step(step).is_some_and(|step| {
-                        step.pieces
-                            .iter()
-                            .flat_map(|pointer| coverage::shown_parts(pointer, guided, &self.files))
-                            .any(|part| moved(&part.piece.id))
-                    })
-            }
-            Place::File { path } => self
-                .files
-                .iter()
-                .filter(|file| file.path == *path)
-                .flat_map(|file| &file.pieces)
-                .any(|piece| moved(&piece.id)),
-            Place::Piece { piece, .. } => moved(piece),
-            Place::Lines { pieces, .. } => pieces.iter().any(moved),
-        }
-    }
-
-    /// Puts the Ask's latest answer into the comment box on its lines, after any text already
-    /// there. The reviewer edits and sends it; nothing goes to the host here.
-    fn use_as_comment(&mut self, ask: &Ask) -> Result<CommentPlace, CommentRefusal> {
-        if matches!(
-            ask.place,
-            Place::Tour | Place::Step { .. } | Place::File { .. }
-        ) {
-            return Err(CommentRefusal::NoLines);
-        }
-        if ask.head != self.head {
-            return Err(CommentRefusal::AskIsOnOlderCode);
-        }
-        if self.tour_freshness() == TourFreshness::Behind {
-            return Err(CommentRefusal::TourIsOld);
-        }
-        let selected = self.lines_of(&ask.place).ok_or(CommentRefusal::NoLines)?;
-        if !selected.take_comment() {
-            return Err(CommentRefusal::NotInsideHunk);
-        }
-        let answer = ask.latest_answer().ok_or(CommentRefusal::NoAnswerYet)?;
-        self.comment_desk
-            .add_to_draft(&mut self.state, &selected, &self.head, answer)
-    }
-
-    /// The rows an Ask about lines or a piece is on, in its step at the tour head.
-    /// The pieces the screen shows, as its page draws them; `None` when the tour has no such screen.
-    fn pieces_shown_on(&self, shown_on: ShownOn) -> Option<Vec<PieceDiff>> {
-        Some(match shown_on {
-            ShownOn::Step { step } => {
-                let links = self.links();
-                let display = self.display(&links);
-                let guided = self.tour.guided()?;
-                StepPage::of(self.step(&step)?, guided, &self.files, &display, false).pieces
-            }
-            ShownOn::SafetyNet => self.safety_net()?.pieces,
-            ShownOn::File { .. } if self.tour.guided().is_some() => return None,
-            ShownOn::File { path } => {
-                let links = self.links();
-                let display = self.display(&links);
-                let file = self.files.iter().find(|file| file.path == path)?;
-                FilePage::of(file, &self.files, &display).pieces
-            }
-        })
-    }
-
-    fn lines_of(&self, place: &Place) -> Option<SelectedLines> {
-        let (shown_on, only_piece) = match place {
-            Place::Tour | Place::Step { .. } | Place::File { .. } => return None,
-            Place::Piece { step, piece } => (ShownOn::Step { step: step.clone() }, Some(piece)),
-            Place::Lines { shown_on, .. } => (shown_on.clone(), None),
-        };
-        let pieces = self.pieces_shown_on(shown_on)?;
-        let blocks = FileBlock::group(pieces);
-        let shown: Vec<&DiffLine> = match only_piece {
-            Some(id) => blocks
-                .iter()
-                .flat_map(|block| &block.pieces)
-                .filter(|shown| shown.id == *id)
-                .flat_map(PieceDiff::lines)
-                .collect(),
-            None => blocks.iter().flat_map(FileBlock::lines).collect(),
-        };
-        let (start, end) = match place {
-            Place::Lines { start, end, .. } => (start.clone(), end.clone()),
-            _ => (
-                shown.first()?.location.clone(),
-                shown.last()?.location.clone(),
-            ),
-        };
-        let mut selection = RowSelection::start_at(start);
-        selection.extend_to(end);
-        selection.resolve(shown.into_iter())
-    }
-
-    /// The place the Ask panel opens on, ready only when an AI has code to read and the place is still in the tour.
-    pub fn ask_target(
-        &self,
-        place: Place,
-        label: String,
-        clone: Option<PathBuf>,
-        settings: &AskSettings,
-    ) -> AskTarget {
-        let Some(clone) = clone else {
-            return AskTarget::Unavailable {
-                place,
-                label,
-                why: Unavailable::NoClone,
-            };
-        };
-        let Some(context) = self.ask_context(&place) else {
-            return AskTarget::Unavailable {
-                place,
-                label,
-                why: Unavailable::PlaceGone,
-            };
-        };
-        AskTarget::Ready {
-            launch: self.agent_launch(clone, settings, None),
-            place,
-            label,
-            context,
-        }
-    }
-
-    pub fn agent_launch(
-        &self,
-        cwd: PathBuf,
-        settings: &AskSettings,
-        resume: Option<String>,
-    ) -> AgentLaunch {
-        AgentLaunch {
-            cwd,
-            model: settings.model.clone(),
-            effort: settings.effort.clone(),
-            system_prompt: ask_context::system_prompt(self.tour.pin().subject_key()),
-            resume,
-        }
-    }
-
     pub fn sidebar(&self) -> Vec<SidebarEntry<'_>> {
         fn walk<'a>(
             steps: &'a [Step],
@@ -1732,7 +1470,7 @@ impl ReviewCore {
         } else {
             audience
         };
-        let home = self.thread_home();
+        let home = self.thread_homes().for_new(mode);
         self.comment_desk
             .start_sending(&self.state, place, mode, audience, (&self.head, home))
     }
@@ -1813,10 +1551,6 @@ impl ReviewCore {
         build: Build,
         page_toggles: Vec<PaletteAction>,
     ) -> Vec<PaletteAction> {
-        let step = match &self.screen {
-            Screen::Step(id) => Some(id),
-            Screen::Summary | Screen::Overview | Screen::File(_) | Screen::SafetyNet => None,
-        };
         let tick = match &self.screen {
             Screen::Step(id) if self.is_ticked(id) => Some(PaletteAction::MarkStepUnread),
             Screen::Step(_) => Some(PaletteAction::MarkStepRead),
@@ -1837,7 +1571,6 @@ impl ReviewCore {
         let next_unread = (self.first_unread_step().is_some()
             || self.first_unread_file().is_some())
         .then_some(PaletteAction::NextUnreadStep);
-        let ask = step.map(|_| PaletteAction::AskAboutStep);
         let finish: Vec<PaletteAction> = match self.finish_action() {
             Some(FinishAction::FinishReview) => vec![PaletteAction::FinishReview],
             Some(FinishAction::SendTasks) => vec![PaletteAction::SendTasks],
@@ -1852,7 +1585,6 @@ impl ReviewCore {
         next_unread
             .into_iter()
             .chain(tick)
-            .chain(ask)
             .chain(self.guided_tour_palette_actions())
             .chain(self.has_findings().then_some(PaletteAction::NextFinding))
             .chain(

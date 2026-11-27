@@ -59,7 +59,7 @@ pub struct ThreadView {
     pub edit_drafts: BTreeMap<CommentId, String>,
     /// The comment of this thread the reviewer is being asked to confirm the deletion of.
     pub delete_asked: Option<CommentId>,
-    /// Where the comment sent with Ask agent is, when this thread has one.
+    /// Where the comment sent with Comment and ask agent is, when this thread has one.
     pub hand_off_line: Option<Arc<str>>,
     /// The agent is at work on the thread's latest hand-off, so its line shows it busy.
     pub agent_is_working: bool,
@@ -289,7 +289,7 @@ pub(super) fn views(
             can_hand_to_agent: thread
                 .comments
                 .iter()
-                .filter(|comment| agent.can_take(comment))
+                .filter(|comment| agent.can_take(thread, comment))
                 .map(|comment| comment.id.clone())
                 .collect(),
             hidden_text: thread
@@ -313,8 +313,8 @@ pub(super) struct AgentOfThreads<'a> {
 }
 
 impl AgentOfThreads<'_> {
-    fn can_take(&self, comment: &ThreadComment) -> bool {
-        self.takes_others_comments && !comment.by_viewer && !self.hand_offs.has_at_work(&comment.id)
+    fn can_take(&self, thread: &ReviewThread, comment: &ThreadComment) -> bool {
+        self.takes_others_comments && self.hand_offs.hand_over_refused(thread, comment).is_none()
     }
 }
 

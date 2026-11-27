@@ -1,7 +1,7 @@
 use crate::support::FixtureRepo;
 use crate::support::folders_in;
 use guided_review::codebase::Codebase;
-use guided_review::config::{AskEffortChoice, AskModelChoice, AskSettings, Config};
+use guided_review::config::Config;
 use guided_review::ide::{IdeChoice, IdeTemplate};
 use guided_review::instructions::{InstructionsChoice, InstructionsKind, SkillName};
 use guided_review::navigation::ServerAnswer;
@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 fn commented_config(shop: &FixtureRepo) -> String {
     format!(
         r#"# my settings, by hand
-ask_model = "sonnet" # quick answers
+nickname = "sonnet" # quick answers
 ide = "zed {{path}}:{{line}}"
 
 # where my clones live
@@ -63,21 +63,6 @@ fn loaded_with_commented_config() -> (FixtureRepo, String, Settings) {
 }
 
 #[test]
-fn a_changed_ask_model_rewrites_only_its_value_and_keeps_the_comment_after_it() {
-    let (shop, config, mut settings) = loaded_with_commented_config();
-    assert_eq!(settings.ask_model(), AskModelChoice::Sonnet);
-
-    settings.set_ask_model(&AskModelChoice::Opus);
-    let outcome = settings.save().unwrap();
-
-    assert_eq!(outcome, SaveOutcome::Written);
-    assert_eq!(
-        config_text(shop.home()),
-        config.replace(r#"ask_model = "sonnet""#, r#"ask_model = "opus""#)
-    );
-}
-
-#[test]
 fn a_cleared_ide_removes_only_its_line_and_keeps_its_template_as_ide_custom() {
     let (shop, config, mut settings) = loaded_with_commented_config();
 
@@ -94,33 +79,16 @@ fn a_cleared_ide_removes_only_its_line_and_keeps_its_template_as_ide_custom() {
 }
 
 #[test]
-fn a_new_ask_effort_is_added_among_the_top_keys_and_nothing_else_moves() {
-    let (shop, config, mut settings) = loaded_with_commented_config();
-    assert_eq!(settings.ask_effort(), AskEffortChoice::AppDefault);
-
-    settings.set_ask_effort(&AskEffortChoice::High);
-    settings.save().unwrap();
-
-    assert_eq!(
-        config_text(shop.home()),
-        config.replace(
-            "ide = \"zed {path}:{line}\"\n",
-            "ide = \"zed {path}:{line}\"\nask_effort = \"high\"\n"
-        )
-    );
-}
-
-#[test]
 fn an_edit_is_unsaved_until_save_and_an_edit_back_to_the_saved_value_is_not() {
     let (_shop, _config, mut settings) = loaded_with_commented_config();
     assert!(!settings.has_unsaved_changes());
 
-    settings.set_ask_model(&AskModelChoice::Opus);
+    settings.set_merge_method(MergeMethod::Squash);
     assert!(settings.has_unsaved_changes());
-    settings.set_ask_model(&AskModelChoice::Sonnet);
+    settings.set_merge_method(MergeMethod::Merge);
     assert!(!settings.has_unsaved_changes());
 
-    settings.set_ask_model(&AskModelChoice::Haiku);
+    settings.set_merge_method(MergeMethod::Rebase);
     settings.save().unwrap();
     assert!(!settings.has_unsaved_changes());
 }
@@ -426,11 +394,11 @@ fn summary_instructions_the_config_holds_wrongly_load_and_are_a_problem_on_that_
 
 #[test]
 fn save_is_refused_on_an_unreadable_summary_instructions_until_another_choice_is_picked() {
-    let config = "ask_model = \"sonnet\"\nsummary_instructions = { skill = \"two words\" }\n";
+    let config = "nickname = \"sonnet\"\nsummary_instructions = { skill = \"two words\" }\n";
     let (home, mut settings) = loaded_from(config);
     assert_eq!(settings.save().unwrap(), SaveOutcome::NothingChanged);
 
-    settings.set_ask_model(&AskModelChoice::Haiku);
+    settings.set_merge_method(MergeMethod::Squash);
     let outcome = settings.save().unwrap();
     assert!(matches!(outcome, SaveOutcome::Refused(problems) if problems.len() == 1));
     assert_eq!(config_text(home.path()), config);
@@ -439,7 +407,7 @@ fn save_is_refused_on_an_unreadable_summary_instructions_until_another_choice_is
     assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"haiku\"\nsummary_instructions = \"off\"\n"
+        "nickname = \"sonnet\"\nsummary_instructions = \"off\"\nmerge_method = \"squash\"\n"
     );
 }
 
@@ -532,7 +500,7 @@ fn the_last_custom_ide_comes_back_when_custom_is_picked_again() {
 #[test]
 fn a_custom_ide_survives_save_with_a_preset_in_ide_custom_beside_ide() {
     let (home, mut settings) =
-        loaded_from("ide = \"zed {path}:{line}\" # mine\nask_effort = \"low\"\n");
+        loaded_from("ide = \"zed {path}:{line}\" # mine\nnickname = \"low\"\n");
 
     settings.set_ide(&IdeChoice::VsCode);
     settings.save().unwrap();
@@ -540,7 +508,7 @@ fn a_custom_ide_survives_save_with_a_preset_in_ide_custom_beside_ide() {
     let config = config_text(home.path());
     assert_eq!(
         config,
-        "ide = \"vscode://file{path}:{line}\" # mine\nask_effort = \"low\"\nide_custom = \"zed {path}:{line}\"\n"
+        "ide = \"vscode://file{path}:{line}\" # mine\nnickname = \"low\"\nide_custom = \"zed {path}:{line}\"\n"
     );
     let reloaded = Settings::load(&folders_in(home.path())).unwrap();
     assert_eq!(reloaded.ide(), IdeChoice::VsCode);
@@ -572,79 +540,6 @@ fn a_custom_ide_equal_to_a_preset_reads_back_as_that_preset() {
     settings.set_ide(&custom_ide("zed://file{path}:{line}"));
 
     assert_eq!(settings.ide(), IdeChoice::Zed);
-}
-
-#[test]
-fn the_ask_model_reads_as_the_app_default_an_alias_or_custom() {
-    let model_of = |config: &str| loaded_from(config).1.ask_model();
-
-    assert_eq!(model_of(""), AskModelChoice::AppDefault);
-    assert_eq!(model_of("ask_model = \"opus\"\n"), AskModelChoice::Opus);
-    assert_eq!(model_of("ask_model = \"haiku\"\n"), AskModelChoice::Haiku);
-    assert_eq!(
-        model_of("ask_model = \"claude-opus-4-1\"\n"),
-        AskModelChoice::Custom("claude-opus-4-1".to_owned())
-    );
-    assert_eq!(AskSettings::default().model, "opus");
-}
-
-#[test]
-fn picking_the_app_default_model_removes_the_key_and_a_custom_one_is_written_as_typed() {
-    let (home, mut settings) = loaded_from("ask_model = \"sonnet\"\n");
-
-    settings.set_ask_model(&AskModelChoice::Custom("claude-opus-4-1".to_owned()));
-    settings.save().unwrap();
-    assert_eq!(
-        config_text(home.path()),
-        "ask_model = \"claude-opus-4-1\"\n"
-    );
-
-    settings.set_ask_model(&AskModelChoice::AppDefault);
-    settings.save().unwrap();
-    assert_eq!(
-        config_text(home.path()),
-        "ask_model_custom = \"claude-opus-4-1\"\n"
-    );
-}
-
-#[test]
-fn the_ask_effort_is_the_app_default_or_one_of_the_list_and_is_written_as_its_word() {
-    let (home, mut settings) = loaded_from("ask_effort = \"xhigh\"\n");
-    assert_eq!(settings.ask_effort(), AskEffortChoice::XHigh);
-    assert_eq!(AskSettings::default().effort, "medium");
-
-    settings.set_ask_effort(&AskEffortChoice::Max);
-    settings.save().unwrap();
-    assert_eq!(config_text(home.path()), "ask_effort = \"max\"\n");
-
-    settings.set_ask_effort(&AskEffortChoice::AppDefault);
-    settings.save().unwrap();
-    assert_eq!(config_text(home.path()), "");
-}
-
-#[test]
-fn an_ask_effort_outside_the_list_loads_and_blocks_the_save_until_another_is_picked() {
-    let config = "ask_effort = \"turbo\"\n";
-    let (home, mut settings) = loaded_from(config);
-    assert_eq!(
-        settings.ask_effort(),
-        AskEffortChoice::Unknown("turbo".to_owned())
-    );
-    assert_eq!(
-        settings.check(),
-        [SettingProblem::AskEffortUnknown("turbo".to_owned())]
-    );
-
-    settings.set_ask_model(&AskModelChoice::Haiku);
-    assert!(matches!(settings.save().unwrap(), SaveOutcome::Refused(_)));
-    assert_eq!(config_text(home.path()), config);
-
-    settings.set_ask_effort(&AskEffortChoice::Low);
-    assert_eq!(settings.save().unwrap(), SaveOutcome::Written);
-    assert_eq!(
-        config_text(home.path()),
-        "ask_effort = \"low\"\nask_model = \"haiku\"\n"
-    );
 }
 
 #[test]
@@ -692,10 +587,6 @@ fn each_problem_words_the_red_line_under_its_setting() {
         .message(),
         "{ skill = \"two words\" } is not a file, \"off\" or a skill name"
     );
-    assert_eq!(
-        SettingProblem::AskEffortUnknown("turbo".to_owned()).message(),
-        "\"turbo\" is not an effort Claude accepts: low, medium, high, xhigh or max"
-    );
 }
 
 #[test]
@@ -709,24 +600,6 @@ fn a_skill_folder_whose_name_is_not_a_skill_name_is_not_listed() {
         Settings::load(&folders_in(home.path())).unwrap().skills(),
         Vec::new()
     );
-}
-
-#[test]
-fn a_blank_custom_ask_model_is_refused_with_a_message_and_nothing_is_written() {
-    let (home, mut settings) = loaded_from("ask_model = \"sonnet\"\n");
-
-    settings.set_ask_model(&AskModelChoice::Custom("  ".to_owned()));
-    let outcome = settings.save().unwrap();
-
-    let SaveOutcome::Refused(problems) = outcome else {
-        panic!("expected a refusal, got {outcome:?}");
-    };
-    assert_eq!(problems, vec![SettingProblem::AskModelBlank]);
-    assert_eq!(
-        problems[0].message(),
-        "Type the model name, or pick another choice"
-    );
-    assert_eq!(config_text(home.path()), "ask_model = \"sonnet\"\n");
 }
 
 #[test]
@@ -773,25 +646,10 @@ fn creating_the_default_file_makes_an_empty_one_and_keeps_one_that_is_there() {
 }
 
 #[test]
-fn the_ask_model_choices_to_pick_are_the_aliases_and_each_reads_back_as_itself() {
-    let words: Vec<_> = AskModelChoice::PICKABLE
-        .iter()
-        .map(|choice| choice.config_text().unwrap())
-        .collect();
-
-    assert_eq!(words, ["opus", "sonnet", "haiku"]);
-    for choice in AskModelChoice::PICKABLE {
-        assert_eq!(AskModelChoice::of(choice.config_text()), choice);
-    }
-}
-
-#[test]
 fn a_custom_text_box_opens_on_the_text_of_a_custom_choice_and_only_then() {
-    let (_home, settings) = loaded_from(
-        "ide = \"zed {path}:{line}\"\nask_model = \"claude-opus-4-1\"\nsummary_instructions = { skill = \"recap\" }\n",
-    );
+    let (_home, settings) =
+        loaded_from("ide = \"zed {path}:{line}\"\nsummary_instructions = { skill = \"recap\" }\n");
     assert_eq!(settings.ide().custom_text(), Some("zed {path}:{line}"));
-    assert_eq!(settings.ask_model().custom_text(), Some("claude-opus-4-1"));
     assert_eq!(
         settings
             .instructions(InstructionsKind::Summary)
@@ -799,9 +657,8 @@ fn a_custom_text_box_opens_on_the_text_of_a_custom_choice_and_only_then() {
         Some("recap")
     );
 
-    let (_home, settings) = loaded_from("ask_model = \"opus\"\nsummary_instructions = \"off\"\n");
+    let (_home, settings) = loaded_from("summary_instructions = \"off\"\n");
     assert_eq!(settings.ide().custom_text(), None);
-    assert_eq!(settings.ask_model().custom_text(), None);
     assert_eq!(
         settings
             .instructions(InstructionsKind::Summary)
@@ -812,14 +669,13 @@ fn a_custom_text_box_opens_on_the_text_of_a_custom_choice_and_only_then() {
 
 #[test]
 fn settings_opens_showing_only_the_problems_the_config_already_has_in_it() {
-    let (_home, settings) =
-        loaded_from("summary_instructions = 5\nask_effort = \"turbo\"\nide = \"zed\"\n");
+    let (_home, settings) = loaded_from("summary_instructions = 5\nide = \"zed\"\n");
     assert_eq!(
         settings.problems_on_open(),
-        [
-            SettingProblem::AskEffortUnknown("turbo".to_owned()),
-            SettingProblem::InstructionsUnreadable(InstructionsKind::Summary, "5".to_owned()),
-        ]
+        [SettingProblem::InstructionsUnreadable(
+            InstructionsKind::Summary,
+            "5".to_owned()
+        ),]
     );
 
     let (_home, settings) = loaded_from(
@@ -841,34 +697,6 @@ fn a_clone_row_with_no_folder_says_so() {
 }
 
 #[test]
-fn the_last_custom_ask_model_comes_back_and_survives_save_in_ask_model_custom() {
-    let (home, mut settings) = loaded_from("ask_model = \"claude-opus-4-1\" # pinned\n");
-    assert_eq!(settings.ask_model_custom_text(), "claude-opus-4-1");
-
-    settings.set_ask_model(&AskModelChoice::Haiku);
-    assert_eq!(settings.ask_model_custom_text(), "claude-opus-4-1");
-    settings.save().unwrap();
-
-    assert_eq!(
-        config_text(home.path()),
-        "ask_model = \"haiku\" # pinned\nask_model_custom = \"claude-opus-4-1\"\n"
-    );
-    let reloaded = Settings::load(&folders_in(home.path())).unwrap();
-    assert_eq!(reloaded.ask_model(), AskModelChoice::Haiku);
-    assert_eq!(reloaded.ask_model_custom_text(), "claude-opus-4-1");
-}
-
-#[test]
-fn the_config_the_app_runs_on_ignores_the_custom_keys() {
-    let config = "ide = \"zed://file{path}:{line}\"\nide_custom = \"x {path}\"\nask_model = \"haiku\"\nask_model_custom = \"m\"\n";
-
-    assert_eq!(
-        Config::from_text(config).unwrap().ask_settings().model,
-        "haiku"
-    );
-}
-
-#[test]
 fn a_preset_shows_the_template_it_uses() {
     assert_eq!(
         IdeChoice::JetBrains.shown_template(),
@@ -876,18 +704,14 @@ fn a_preset_shows_the_template_it_uses() {
     );
     assert_eq!(IdeChoice::None.shown_template(), None);
     assert_eq!(custom_ide("code {path}").shown_template(), None);
-    assert_eq!(
-        AskModelChoice::Sonnet.shown_command(),
-        Some("claude --model sonnet".to_owned())
-    );
-    assert_eq!(AskModelChoice::AppDefault.shown_command(), None);
 }
 
 fn chord(text: &str) -> Chord {
     Chord::parse(text).unwrap()
 }
 
-const KEYED_CONFIG: &str = "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"space\", \"j\"] # like a pager\n";
+const KEYED_CONFIG: &str =
+    "nickname = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"space\", \"j\"] # like a pager\n";
 
 #[test]
 fn keys_in_the_config_load_as_each_command_s_keys_and_save_untouched() {
@@ -914,7 +738,7 @@ fn a_new_key_is_written_under_keys_as_its_one_text_and_the_rest_keeps_its_commen
 
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"space\", \"j\"] # like a pager\nwrap_lines = \"shift-w\"\n"
+        "nickname = \"sonnet\"\n\n# my keys\n[keys]\nnext_screen = [\"space\", \"j\"] # like a pager\nwrap_lines = \"shift-w\"\n"
     );
 }
 
@@ -933,7 +757,7 @@ fn a_key_set_back_to_its_default_or_reset_leaves_no_line() {
 
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"sonnet\"\n\n# my keys\n[keys]\n"
+        "nickname = \"sonnet\"\n\n# my keys\n[keys]\n"
     );
 }
 
@@ -1023,7 +847,7 @@ fn with_no_more_lines_key_a_step_shows_twenty_lines() {
 
 #[test]
 fn a_set_number_is_written_as_a_plain_integer_beside_the_rest() {
-    let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
+    let (home, mut settings) = loaded_from("nickname = \"sonnet\" # quick\n");
 
     settings.set_more_lines_text("35");
     let outcome = settings.save().unwrap();
@@ -1031,7 +855,7 @@ fn a_set_number_is_written_as_a_plain_integer_beside_the_rest() {
     assert_eq!(outcome, SaveOutcome::Written);
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"sonnet\" # quick\nmore_lines = 35\n"
+        "nickname = \"sonnet\" # quick\nmore_lines = 35\n"
     );
     let config = Config::from_text(&config_text(home.path())).unwrap();
     assert_eq!(config.more_lines().get(), 35);
@@ -1136,25 +960,28 @@ fn a_repo_in_merge_methods_gets_its_own_and_the_others_the_global_one() {
 
 #[test]
 fn a_chosen_merge_method_is_written_and_a_merge_commit_leaves_no_line() {
-    let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
+    let (home, mut settings) = loaded_from("nickname = \"sonnet\" # quick\n");
 
     settings.set_merge_method(MergeMethod::Squash);
     settings.save().unwrap();
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"sonnet\" # quick\nmerge_method = \"squash\"\n"
+        "nickname = \"sonnet\" # quick\nmerge_method = \"squash\"\n"
     );
 
     settings.set_merge_method(MergeMethod::Merge);
     settings.save().unwrap();
-    assert_eq!(config_text(home.path()), "ask_model = \"sonnet\" # quick\n");
+    assert_eq!(config_text(home.path()), "nickname = \"sonnet\" # quick\n");
 }
 
 #[test]
 fn chosen_primary_and_secondary_actions_are_written_and_the_defaults_leave_no_line() {
-    let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
+    let (home, mut settings) = loaded_from("nickname = \"sonnet\" # quick\n");
     assert_eq!(settings.primary_comment_action(), SendAction::AddToReview);
-    assert_eq!(settings.secondary_comment_action(), SendAction::AskAgent);
+    assert_eq!(
+        settings.secondary_comment_action(),
+        SendAction::CommentAndAskAgent
+    );
 
     settings.set_primary_comment_action(SendAction::CommentNow);
     settings.set_secondary_comment_action(SendAction::SuggestChange);
@@ -1165,28 +992,31 @@ fn chosen_primary_and_secondary_actions_are_written_and_the_defaults_leave_no_li
     settings.save().unwrap();
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"sonnet\" # quick\nprimary_comment_action = \"comment_now\"\nsecondary_comment_action = \"suggest_change\"\n"
+        "nickname = \"sonnet\" # quick\nprimary_comment_action = \"comment_now\"\nsecondary_comment_action = \"suggest_change\"\n"
     );
 
     settings.set_primary_comment_action(SendAction::AddToReview);
-    settings.set_secondary_comment_action(SendAction::AskAgent);
+    settings.set_secondary_comment_action(SendAction::CommentAndAskAgent);
     settings.save().unwrap();
-    assert_eq!(config_text(home.path()), "ask_model = \"sonnet\" # quick\n");
+    assert_eq!(config_text(home.path()), "nickname = \"sonnet\" # quick\n");
 }
 
 #[test]
 fn picking_the_secondarys_action_as_primary_swaps_them_and_both_are_written() {
     let (home, mut settings) = loaded_from("");
 
-    settings.set_primary_comment_action(SendAction::AskAgent);
+    settings.set_primary_comment_action(SendAction::CommentAndAskAgent);
     settings.save().unwrap();
 
     assert_eq!(
         config_text(home.path()),
-        "primary_comment_action = \"ask_agent\"\nsecondary_comment_action = \"add_to_review\"\n"
+        "primary_comment_action = \"comment_and_ask_agent\"\nsecondary_comment_action = \"add_to_review\"\n"
     );
     let (_, reloaded) = loaded_from(&config_text(home.path()));
-    assert_eq!(reloaded.primary_comment_action(), SendAction::AskAgent);
+    assert_eq!(
+        reloaded.primary_comment_action(),
+        SendAction::CommentAndAskAgent
+    );
     assert_eq!(reloaded.secondary_comment_action(), SendAction::AddToReview);
 }
 
@@ -1368,7 +1198,7 @@ fn settings_list_the_repos_with_an_answer_and_the_others_are_not_listed() {
 #[test]
 fn changing_a_repos_answer_writes_that_entry_only_and_keeps_the_comments() {
     let (home, mut settings) = loaded_from(
-        "ask_model = \"sonnet\" # quick\n\n# my servers\n[language_servers]\n\"acme/shop\" = true # trusted\n\"acme/old\" = false\n",
+        "nickname = \"sonnet\" # quick\n\n# my servers\n[language_servers]\n\"acme/shop\" = true # trusted\n\"acme/old\" = false\n",
     );
 
     settings.set_language_servers(&github("acme", "shop"), ServerAnswer::No);
@@ -1377,20 +1207,20 @@ fn changing_a_repos_answer_writes_that_entry_only_and_keeps_the_comments() {
 
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"sonnet\" # quick\n\n# my servers\n[language_servers]\n\"acme/shop\" = false # trusted\n\"acme/old\" = false\n"
+        "nickname = \"sonnet\" # quick\n\n# my servers\n[language_servers]\n\"acme/shop\" = false # trusted\n\"acme/old\" = false\n"
     );
 }
 
 #[test]
 fn a_repo_answered_for_the_first_time_is_added_to_the_config() {
-    let (home, mut settings) = loaded_from("ask_model = \"sonnet\" # quick\n");
+    let (home, mut settings) = loaded_from("nickname = \"sonnet\" # quick\n");
 
     settings.set_language_servers(&github("acme", "shop"), ServerAnswer::Yes);
     settings.save().unwrap();
 
     assert_eq!(
         config_text(home.path()),
-        "ask_model = \"sonnet\" # quick\n\n[language_servers]\n\"acme/shop\" = true\n"
+        "nickname = \"sonnet\" # quick\n\n[language_servers]\n\"acme/shop\" = true\n"
     );
     assert_eq!(
         settings.language_servers(),
@@ -1431,5 +1261,30 @@ fn a_listed_repos_answer_is_changed_by_its_row_and_saved() {
     assert_eq!(
         config_text(home.path()),
         "[language_servers]\n\"acme/shop\" = true\n\"acme/old\" = true\n"
+    );
+}
+
+#[test]
+fn the_old_ask_agent_names_in_the_config_read_as_the_comment_and_ask_agent_actions_and_are_written_under_the_new_ones()
+ {
+    let (home, mut settings) = loaded_from(
+        "primary_comment_action = \"ask_agent_now\"\nsecondary_comment_action = \"ask_agent\"\n",
+    );
+
+    assert_eq!(
+        settings.primary_comment_action(),
+        SendAction::CommentAndAskAgentNow
+    );
+    assert_eq!(
+        settings.secondary_comment_action(),
+        SendAction::CommentAndAskAgent
+    );
+    assert!(!settings.has_unsaved_changes());
+
+    settings.set_primary_comment_action(SendAction::CommentAndAskAgent);
+    settings.save().unwrap();
+    assert_eq!(
+        config_text(home.path()),
+        "primary_comment_action = \"comment_and_ask_agent\"\nsecondary_comment_action = \"comment_and_ask_agent_now\"\n"
     );
 }

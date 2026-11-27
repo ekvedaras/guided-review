@@ -263,7 +263,7 @@ fn an_ask_is_handed_to_the_change_sets_agent_even_when_the_app_started_it() {
 }
 
 #[test]
-fn an_ask_for_an_agent_that_does_not_report_its_state_is_typed_in_only_when_sent_anyway() {
+fn a_hand_off_to_an_agent_that_does_not_report_its_state_is_not_typed_in() {
     let fake =
         Arc::new(FakeTourAgent::new().with_terminal("t1", Some(LOCAL), AgentStatus::Unreported));
 
@@ -271,19 +271,6 @@ fn an_ask_for_an_agent_that_does_not_report_its_state_is_typed_in_only_when_sent
 
     assert_eq!(held, OwnAgentHandOff::Unreported(TerminalId::new("t1")));
     assert_eq!(sends(&fake), []);
-    assert!(held.can_send_anyway());
-
-    let sent = agents(&fake).hand_to_own_agent_anyway(&local(), "do it");
-
-    assert_eq!(sent, OwnAgentHandOff::Delivered(TerminalId::new("t1")));
-    assert!(!sent.can_send_anyway());
-    assert_eq!(
-        sends(&fake),
-        [TourAgentCall::Send {
-            terminal: TerminalId::new("t1"),
-            text: "do it".to_owned()
-        }]
-    );
 }
 
 #[test]
@@ -329,17 +316,4 @@ fn a_claude_in_a_nested_worktree_of_another_branch_is_not_the_folders_agent() {
     agents(&fake).claim_for_open(&subject, None).unwrap();
 
     assert_eq!(fake.agents_of(&subject.to_string()), ["t3"]);
-}
-
-#[test]
-fn the_ask_panel_line_for_a_local_review_says_what_to_do_about_the_agent() {
-    assert_eq!(
-        OwnAgentHandOff::Started(TerminalId::new("t9")).line(),
-        "Started an agent t9 in this review's folder with your Ask"
-    );
-    assert!(
-        OwnAgentHandOff::PickAnAgent
-            .line()
-            .contains("Pick an agent")
-    );
 }

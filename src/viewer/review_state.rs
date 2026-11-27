@@ -15,7 +15,6 @@ use crate::review_subject::{LOCAL_FILES_FOLDER, ReviewSubject};
 use crate::timestamp::UtcTimestamp;
 use crate::tour::Tour;
 
-use super::ask::{Ask, AskStore};
 use super::carried::CarriedReads;
 use super::carried::MovedReview;
 use super::comments::{CommentDraft, CommentPlace, QueuedComment};
@@ -87,8 +86,6 @@ pub struct ReviewState {
     viewer: ViewerSections,
     #[serde(flatten)]
     typed: TypedText,
-    #[serde(default)]
-    asks: KeptSection<KeptEntries<Ask>>,
     /// The key of the local review the file belongs to. Its path holds only a short hash of the folder, so
     /// the key is what tells a file of another review that landed on the same path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -118,7 +115,7 @@ pub struct ReviewState {
 }
 
 /// The sections the viewer owns and writes back whole, with `typed` beside it (serde cannot
-/// flatten one flattened struct into another); the Asks and the re-pin record are written by
+/// flatten one flattened struct into another); the re-pin record is written by
 /// others, so a save of these never touches them.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct ViewerSections {
@@ -165,7 +162,7 @@ struct ViewerSections {
     /// The PR's body at the last pull, so the summary shows it before the host answers.
     #[serde(default)]
     pr_description: KeptSection<String>,
-    /// The comments sent with Ask agent and where each is with the tour agent.
+    /// The comments sent with Comment and ask agent and where each is with the tour agent.
     #[serde(default)]
     hand_offs: KeptSection<HandOffs>,
     /// The step each thread the reviewer started was written on, so it stays there.
@@ -365,7 +362,6 @@ impl ReviewState {
             ("comment_drafts", typed.comment_drafts.is_unread()),
             ("reply_drafts", typed.reply_drafts.is_unread()),
             ("finish_body", typed.finish_body.is_unread()),
-            ("asks", self.asks.is_unread()),
             ("last_repin", self.last_repin.is_unread()),
             ("local_threads", self.local_threads.is_unread()),
         ];
@@ -379,7 +375,6 @@ impl ReviewState {
             ("comment_queue", viewer.comment_queue.unread_count()),
             ("hand_offs", viewer.hand_offs.unread_entries()),
             ("comment_drafts", typed.comment_drafts.unread_count()),
-            ("asks", self.asks.unread_count()),
         ];
         sections
             .into_iter()
@@ -883,11 +878,6 @@ impl ReviewState {
         body.clone_into(&mut self.viewer.pr_description);
     }
 
-    /// The Ask desk keeps the Asks and saves them itself, so the viewer's copy holds none.
-    pub(super) fn take_asks(&mut self) -> Vec<Ask> {
-        std::mem::take(&mut self.asks)
-    }
-
     pub(super) fn take_viewer_sections(&mut self, from: &Self) {
         self.viewer = from.viewer.clone();
         self.typed = from.typed.clone();
@@ -1256,8 +1246,8 @@ impl ReviewStateFile {
         anyhow::bail!("no free backup name for {}", self.path.display())
     }
 
-    /// Reads the file again before changing it: the viewer and the Asks each keep their own
-    /// copy in memory, and neither may write the other's section back stale.
+    /// Reads the file again before changing it: the viewer and the local threads each keep their
+    /// own copy in memory, and neither may write the other's section back stale.
     pub fn update(&self, change: impl FnOnce(&mut ReviewState)) -> anyhow::Result<()> {
         self.update_if(|state| {
             change(state);
@@ -1327,16 +1317,6 @@ impl ReviewStateFile {
             .with_context(|| format!("could not write {}", temp.display()))?;
         std::fs::rename(&temp, &self.path)
             .with_context(|| format!("could not write {}", self.path.display()))
-    }
-}
-
-impl AskStore for ReviewStateFile {
-    fn load(&self) -> anyhow::Result<Vec<Ask>> {
-        Ok(Self::load(self)?.asks.to_vec())
-    }
-
-    fn save(&self, asks: &[Ask]) -> anyhow::Result<()> {
-        self.update(|state| **state.asks = asks.to_vec())
     }
 }
 

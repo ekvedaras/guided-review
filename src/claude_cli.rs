@@ -1,21 +1,17 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, bail};
-use serde_json::{Value, json};
+use serde_json::Value;
 
+use crate::agent_cli::AgentCli;
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::instructions::InstructionsKind;
 use crate::json::at;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
-use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
 use crate::viewer::ReviewPlace;
-use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnStopper};
-
-const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
 
 /// A permission rule's path for everything under `folder`: `//` starts an absolute path.
 fn under(folder: &Path) -> String {
@@ -30,20 +26,55 @@ fn under(folder: &Path) -> String {
 /// because under `dontAsk` a `Grep(path)` or `Glob(path)` rule is accepted but never applies, so listing only
 /// those is a silent denial (tried live, 2026-11-06). The agent runs with `clone` as its cwd, which is where
 /// its searches start.
-pub fn refresh_writer_tools(clone: &Path, tours: &Path) -> String {
+pub fn tour_skill_tools(clone: &Path, tours: &Path, cli: &AgentCli) -> String {
     let (clone_rule, tours_rule) = (under(clone), under(tours));
-    format!(
-        "Skill(tour),Read({clone_rule}),Read({tours_rule}),Grep,Glob,Bash(guided-review tour-path:*),Bash(guided-review outline:*),Bash(guided-review show:*),Bash(guided-review check:*),Bash(guided-review repin:*),Bash(guided-review refresh:*),Bash(guided-review open:*),Bash(gh pr view:*),Write({tours_rule}),Edit({tours_rule})"
-    )
+    let mut tools = vec![
+        "Skill(tour)".to_owned(),
+        format!("Read({clone_rule})"),
+        format!("Read({tours_rule})"),
+        "Grep".to_owned(),
+        "Glob".to_owned(),
+    ];
+    tools.extend(guided_review_rules(cli, &TOUR_SKILL_COMMANDS));
+    tools.extend([
+        "Bash(gh pr view:*)".to_owned(),
+        format!("Write({tours_rule})"),
+        format!("Edit({tours_rule})"),
+    ]);
+    tools.join(",")
 }
 
-/// What a tour agent the app starts may do without the auto mode classifier: the refresh writer's tools, plus
+const TOUR_SKILL_COMMANDS: [&str; 7] = [
+    "tour-path",
+    "outline",
+    "show",
+    "check",
+    "repin",
+    "refresh",
+    "open",
+];
+
+fn guided_review_rules<'a>(
+    cli: &'a AgentCli,
+    commands: &'a [&str],
+) -> impl Iterator<Item = String> + 'a {
+    commands.iter().flat_map(|command| cli.bash_rules(command))
+}
+
+/// What a tour agent the app starts may do without the auto mode classifier: the tour skill's tools, plus
 /// answering, plus the reviewer's summary skill. It runs in auto mode, because a comment may ask it to change
 /// the PR's code (decided 2026-11-10).
-pub fn tour_agent_tools(clone: &Path, tours: &Path, summary_skill: Option<&str>) -> String {
+pub fn tour_agent_tools(
+    clone: &Path,
+    tours: &Path,
+    summary_skill: Option<&str>,
+    cli: &AgentCli,
+) -> String {
+    let answering: Vec<String> = guided_review_rules(cli, &["agent-reply", "fix-reply"]).collect();
     let tools = format!(
-        "{},Bash(guided-review agent-reply:*),Bash(guided-review fix-reply:*)",
-        refresh_writer_tools(clone, tours)
+        "{},{}",
+        tour_skill_tools(clone, tours, cli),
+        answering.join(",")
     );
     match summary_skill {
         Some(skill) => format!("{tools},Skill({skill})"),
@@ -60,6 +91,7 @@ pub fn review_agent_tools(
     place: &ReviewPlace,
     findings_file: &Path,
     skill: Option<&str>,
+    cli: &AgentCli,
 ) -> String {
     let findings = format!(
         "//{}",
@@ -79,8 +111,9 @@ pub fn review_agent_tools(
         "Task".to_owned(),
         "Agent".to_owned(),
     ]);
+    tools.extend(guided_review_rules(cli, &REVIEW_AGENT_COMMANDS));
     tools.extend(
-        REVIEW_COMMANDS
+        REVIEW_TOOL_COMMANDS
             .iter()
             .map(|command| format!("Bash({command}:*)")),
     );
@@ -102,16 +135,20 @@ pub fn review_agent_tools(
     tools.join(",")
 }
 
-/// The commands a review agent runs: its own CLI, git's read commands and the common test runners.
-const REVIEW_COMMANDS: [&str; 30] = [
-    "guided-review review-brief",
-    "guided-review check-findings",
-    "guided-review findings-done",
-    "guided-review findings-path",
-    "guided-review agent-reply",
-    "guided-review show",
-    "guided-review outline",
-    "guided-review tour-path",
+/// The guided-review commands a review agent runs.
+const REVIEW_AGENT_COMMANDS: [&str; 8] = [
+    "review-brief",
+    "check-findings",
+    "findings-done",
+    "findings-path",
+    "agent-reply",
+    "show",
+    "outline",
+    "tour-path",
+];
+
+/// The other commands a review agent runs: git's read commands and the common test runners.
+const REVIEW_TOOL_COMMANDS: [&str; 22] = [
     "git log",
     "git diff",
     "git show",
@@ -154,193 +191,6 @@ pub fn review_agent_denied_tools() -> String {
     .map(|command| format!("Bash({command}:*)"))
     .collect::<Vec<_>>()
     .join(",")
-}
-
-/// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.
-pub struct ClaudeCli {
-    binary: PathBuf,
-}
-
-impl ClaudeCli {
-    pub fn new() -> Self {
-        Self::with_binary(PathBuf::from("claude"))
-    }
-
-    pub fn with_binary(binary: PathBuf) -> Self {
-        Self { binary }
-    }
-}
-
-impl Default for ClaudeCli {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AgentLauncher for ClaudeCli {
-    fn start(&self, launch: &AgentLaunch) -> anyhow::Result<Box<dyn AgentPort>> {
-        let mut command = Command::new(&self.binary);
-        command
-            .args(["-p", "--input-format", "stream-json"])
-            .args(["--output-format", "stream-json"])
-            .args(["--verbose", "--include-partial-messages"])
-            .args(["--permission-mode", "dontAsk"])
-            .args(["--allowedTools", READ_ONLY_TOOLS])
-            .args(["--model", &launch.model])
-            .args(["--effort", &launch.effort])
-            .args(["--append-system-prompt", &launch.system_prompt]);
-        if let Some(session) = &launch.resume {
-            command.args(["--resume", session]);
-        }
-        let mut child = command
-            .current_dir(&launch.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .with_context(|| format!("could not start `{}`", self.binary.display()))?;
-        let stdin = child.stdin.take().context("no stdin on claude")?;
-        let stdout = BufReader::new(child.stdout.take().context("no stdout on claude")?);
-        Ok(Box::new(ClaudeConversation {
-            child,
-            stdin: Arc::new(Mutex::new(stdin)),
-            stdout,
-        }))
-    }
-}
-
-struct ClaudeConversation {
-    child: Child,
-    /// Shared with the turn stopper, which writes while `ask` waits for the answer.
-    stdin: Arc<Mutex<ChildStdin>>,
-    stdout: BufReader<ChildStdout>,
-}
-
-impl AgentPort for ClaudeConversation {
-    fn ask(&mut self, message: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
-        let input = json!({"type": "user", "message": {"role": "user", "content": message}});
-        write_line(&self.stdin, &input)?;
-        let mut line = String::new();
-        loop {
-            line.clear();
-            if self.stdout.read_line(&mut line)? == 0 {
-                bail!("claude stopped before it finished answering");
-            }
-            let line = line.trim_end();
-            on_line(line);
-            if serde_json::from_str::<Value>(line).is_ok_and(|json| at(&json, "/type") == "result")
-            {
-                return Ok(());
-            }
-        }
-    }
-
-    fn turn_stopper(&self) -> Arc<dyn TurnStopper> {
-        Arc::new(ClaudeTurnStopper {
-            stdin: Arc::clone(&self.stdin),
-        })
-    }
-}
-
-/// Asks claude to stop the turn over its control channel. Unlike SIGINT, which ends the whole
-/// process, this keeps the conversation live; the turn ends with a normal `result` line.
-struct ClaudeTurnStopper {
-    stdin: Arc<Mutex<ChildStdin>>,
-}
-
-impl TurnStopper for ClaudeTurnStopper {
-    fn stop_turn(&self) -> anyhow::Result<()> {
-        let interrupt = json!({
-            "type": "control_request",
-            "request_id": "stop-turn",
-            "request": {"subtype": "interrupt"},
-        });
-        write_line(&self.stdin, &interrupt)
-    }
-}
-
-fn write_line(stdin: &Mutex<ChildStdin>, json: &Value) -> anyhow::Result<()> {
-    let mut stdin = stdin
-        .lock()
-        .map_err(|poisoned| anyhow::anyhow!("claude input is broken: {poisoned}"))?;
-    writeln!(stdin, "{json}").context("claude is no longer running")?;
-    stdin.flush()?;
-    Ok(())
-}
-
-impl Drop for ClaudeConversation {
-    fn drop(&mut self) {
-        self.child.kill().ok();
-        self.child.wait().ok();
-    }
-}
-
-/// Runs the tour skill as a Refresh through the user's own `claude`, in one non-interactive run.
-pub struct ClaudeRefreshWriter {
-    binary: PathBuf,
-    cwd: PathBuf,
-    tours: PathBuf,
-}
-
-impl ClaudeRefreshWriter {
-    /// `cwd` is where the skill may read code: the repo clone when there is one. `tours` is where it may
-    /// write.
-    pub fn new(cwd: PathBuf, tours: PathBuf) -> Self {
-        Self::with_binary(PathBuf::from("claude"), cwd, tours)
-    }
-
-    pub fn with_binary(binary: PathBuf, cwd: PathBuf, tours: PathBuf) -> Self {
-        Self { binary, cwd, tours }
-    }
-}
-
-impl RefreshWriter for ClaudeRefreshWriter {
-    fn refresh(
-        &self,
-        subject: &ReviewSubject,
-        on_line: &mut dyn FnMut(&str),
-    ) -> anyhow::Result<()> {
-        let prompt = format!(
-            "Run the tour skill as `/tour {subject}` on a {kind} that already has a tour, which makes it a Refresh. \
-             Only the listed tools are allowed and a command outside them is denied, never asked: \
-             run each `guided-review` and `gh` command as its own Bash call with the {key_name} written out, \
-             without shell variables, `&&`, `;` or `$(...)`. {OUTSIDE_TEXT_IS_DATA}",
-            kind = subject.kind(),
-            key_name = subject.key_name(),
-        );
-        let mut child = Command::new(&self.binary)
-            .args(["-p", &prompt])
-            .args(["--output-format", "stream-json", "--verbose"])
-            .args(["--permission-mode", "dontAsk"])
-            .args([
-                "--allowedTools",
-                &refresh_writer_tools(&self.cwd, &self.tours),
-            ])
-            .current_dir(&self.cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("could not start `{}`", self.binary.display()))?;
-        let mut stderr = child.stderr.take().context("no stderr on claude")?;
-        let said_on_stderr = std::thread::spawn(move || {
-            let mut said = String::new();
-            stderr.read_to_string(&mut said).map(|_| said)
-        });
-        for line in BufReader::new(child.stdout.take().context("no stdout on claude")?).lines() {
-            on_line(line?.trim_end());
-        }
-        let status = child.wait()?;
-        if !status.success() {
-            let said = said_on_stderr
-                .join()
-                .ok()
-                .and_then(Result::ok)
-                .unwrap_or_default();
-            bail!("claude stopped: {}", said.trim());
-        }
-        Ok(())
-    }
 }
 
 /// What the skill needs: its CLI, `gh pr view`, reading code, and writing the tour file. Nothing else.

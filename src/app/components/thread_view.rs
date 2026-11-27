@@ -13,9 +13,9 @@ use crate::app::avatar_pictures::AvatarPictures;
 use crate::app::code_links::open_link;
 use crate::app::components::overlay::popover;
 use crate::viewer::{
-    Audience, CommentId, HandOffButton, Keymap, Reaction, ReactionChange, ReactionCount,
-    SendAction, SendMode, SendRole, Sending, ThreadAction, ThreadActionResult, ThreadComment,
-    ThreadId, ThreadView,
+    Audience, Command, CommentId, HandOffButton, Keymap, PlannedSend, Reaction, ReactionChange,
+    ReactionCount, SendAction, SendMode, SendRole, Sending, ThreadAction, ThreadActionResult,
+    ThreadComment, ThreadId, ThreadView,
 };
 
 use super::button::{ButtonKind, ButtonSize, button, chord_keys, icon_button, icon_label_button};
@@ -97,6 +97,8 @@ struct ReplyBox<'a> {
     can_reply_now: bool,
     can_ask_agent: bool,
     sending: Sending,
+    /// A private thread of a PR: a reply goes to the agent alone, whatever key sends it.
+    is_private: bool,
     keymap: Arc<Keymap>,
     on_action: &'a OnThreadAction,
     on_reply_draft: &'a OnReplyDraft,
@@ -206,6 +208,11 @@ impl ThreadElement {
                     (thread.is_outdated, Tone::Warning, "Outdated"),
                     (thread.is_resolved, Tone::Success, "Resolved"),
                     (is_bot, Tone::Neutral, "Bot"),
+                    (
+                        thread.is_private() && self.sending.to_host(),
+                        Tone::Neutral,
+                        "Not on GitHub",
+                    ),
                 ]
                 .into_iter()
                 .filter(|(is_on, _, _)| *is_on)
@@ -511,6 +518,7 @@ impl ThreadElement {
             can_reply_now,
             can_ask_agent,
             sending,
+            is_private,
             keymap,
             on_action,
             on_reply_draft,
@@ -527,9 +535,9 @@ impl ThreadElement {
                 offered.push(SendAction::CommentNow);
             }
             if can_ask_agent {
-                offered.push(SendAction::AskAgent);
+                offered.push(SendAction::CommentAndAskAgent);
                 if can_reply_now {
-                    offered.push(SendAction::AskAgentNow);
+                    offered.push(SendAction::CommentAndAskAgentNow);
                 }
             }
         } else if sending.tasks().len() > 1 {
@@ -539,6 +547,7 @@ impl ThreadElement {
             let (ui, on_action, thread_id) = (ui.clone(), Rc::clone(on_action), thread_id.clone());
             Rc::new(move |action, cx| {
                 let (mode, audience) = match action {
+                    _ if is_private => (SendMode::SendNow, Audience::Agent),
                     SendAction::AddToReview | SendAction::SuggestChange => {
                         match sending.tasks().first() {
                             Some(&task) => (task, Audience::Agent),
@@ -549,8 +558,9 @@ impl ThreadElement {
                         Some(&task) => (task, Audience::Agent),
                         None => (SendMode::CommentNow, Audience::Author),
                     },
-                    SendAction::AskAgent => (SendMode::AddToReview, Audience::Agent),
-                    SendAction::AskAgentNow => (SendMode::CommentNow, Audience::Agent),
+                    SendAction::CommentAndAskAgent => (SendMode::AddToReview, Audience::Agent),
+                    SendAction::CommentAndAskAgentNow => (SendMode::CommentNow, Audience::Agent),
+                    SendAction::AskAgent => (SendMode::SendNow, Audience::Agent),
                 };
                 send_reply(&ui, &on_action, &thread_id, mode, audience, cx);
             })
@@ -568,9 +578,9 @@ impl ThreadElement {
                 })
             };
             let (submits, on_submit) = typed(SendAction::AddToReview);
-            let (asks, on_ask) = typed(SendAction::AskAgent);
+            let (asks, on_ask) = typed(SendAction::CommentAndAskAgent);
             let (posts, on_post) = typed(SendAction::CommentNow);
-            let (asks_now, on_ask_now) = typed(SendAction::AskAgentNow);
+            let (asks_now, on_ask_now) = typed(SendAction::CommentAndAskAgentNow);
             TextBox::new(
                 SharedString::from(format!("reply-text-{thread_id}")),
                 focus,
@@ -584,9 +594,9 @@ impl ThreadElement {
                     on_submit(window, cx);
                 }
             })
-            .on_submit_to_agent(asks, on_ask)
+            .on_submit_and_ask_agent(asks, on_ask)
             .on_submit_now(posts, on_post)
-            .on_submit_to_agent_now(asks_now, on_ask_now)
+            .on_submit_and_ask_agent_now(asks_now, on_ask_now)
             .on_cancel(move |_, cx| on_cancel(ReplyDraftChange::Discard, cx))
             .into_any_element()
         };
@@ -606,7 +616,16 @@ impl ThreadElement {
             })
         });
         let send_buttons = (!is_busy).then(|| {
-            let buttons = keymap.send_plan(&offered).into_iter().map(|planned| {
+            let plan = if is_private {
+                vec![PlannedSend {
+                    action: SendAction::AskAgent,
+                    role: SendRole::Primary,
+                    chord: keymap.first_chord(Command::from(keymap.send_choice().primary())),
+                }]
+            } else {
+                keymap.send_plan(&offered)
+            };
+            let buttons = plan.into_iter().map(|planned| {
                 let kind = match planned.role {
                     SendRole::Primary => ButtonKind::Primary,
                     SendRole::Secondary | SendRole::Other => ButtonKind::Secondary,
@@ -627,8 +646,9 @@ impl ThreadElement {
                         ("add", None, "Add to review")
                     }
                     (SendAction::CommentNow, true) => ("now", None, "Reply now"),
-                    (SendAction::AskAgent, _) => ("ask", Some(Icon::Sparkles), "Ask agent"),
-                    (SendAction::AskAgentNow, _) => ("ask-now", Some(Icon::Zap), "Ask agent now"),
+                    (SendAction::CommentAndAskAgent, _) => ("ask", Some(Icon::Sparkles), "Comment and ask agent"),
+                    (SendAction::CommentAndAskAgentNow, _) => ("ask-now", Some(Icon::Zap), "Comment and ask agent now"),
+                    (SendAction::AskAgent, _) => ("ask-agent", Some(Icon::Terminal), "Ask agent"),
                 };
                 let id = SharedString::from(format!("reply-{name}-{id}"));
                 let base = match icon {
@@ -636,13 +656,18 @@ impl ThreadElement {
                     None => plain_button(&colors, id, kind, label),
                 };
                 base.child(chord_keys(&colors, kind, planned.chord))
-                    .when(action == SendAction::AskAgent, |button| {
+                    .when(action == SendAction::CommentAndAskAgent, |button| {
                         button.tooltip(tooltip(|_| {
-                            "Ask agent: adds the reply to the review for your agent".into()
+                            "Comment and ask agent: adds the reply to the review and hands it to your agent".into()
                         }))
                     })
-                    .when(action == SendAction::AskAgentNow, |button| {
-                        button.tooltip(tooltip(|_| "Ask agent now: posts the reply at once".into()))
+                    .when(action == SendAction::CommentAndAskAgentNow, |button| {
+                        button.tooltip(tooltip(|_| "Comment and ask agent now: posts the reply at once and hands it to your agent".into()))
+                    })
+                    .when(action == SendAction::AskAgent, |button| {
+                        button.tooltip(tooltip(|_| {
+                            "Ask agent: only your agent sees this, nothing goes to GitHub".into()
+                        }))
                     })
                     .on_click(move |_, _, cx| act(action, cx))
             });
@@ -1206,6 +1231,7 @@ impl RenderOnce for ThreadElement {
                     }),
             )
         });
+        let is_private = self.view.thread.is_private() && self.sending.to_host();
         let reply = self.reply.clone();
         let on_reply_draft = Rc::clone(&self.on_reply_draft);
         let (can_reply_now, can_ask_agent, sending, on_action) = (
@@ -1273,6 +1299,7 @@ impl RenderOnce for ThreadElement {
                             can_reply_now,
                             can_ask_agent,
                             sending,
+                            is_private,
                             keymap: crate::app::keymap::shared_keymap(cx),
                             on_action: &on_action,
                             on_reply_draft: &on_reply_draft,

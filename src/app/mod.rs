@@ -60,7 +60,6 @@ use crate::viewer::{
 };
 use crate::viewer::{FixReply, WhyReply};
 use components::agent_picker::AgentPicker;
-use components::ask_panel::AskPanel;
 use components::comment_composer::CommentComposer;
 use components::comments_sheet::CommentsSheet;
 use components::files_sheet::FilesSheet;
@@ -73,12 +72,12 @@ use components::settings_panel::SettingsPanel;
 use components::shortcuts_sheet::ShortcutsSheet;
 use components::text_box;
 use layouts::one_step::{
-    AskAboutStep, AskToOpenPr, CloseWindow, Collaborators, CopySelection, FocusNextChange,
-    FocusPreviousChange, GoBack, GoForward, GoToNextUnread, OneStepLayout, OpenIssue, OpenPrOnHost,
-    ReadDown, ReadUp, ShowMoreAbove, ShowMoreBelow, ToggleAutoMerge, ToggleCommentsList,
-    ToggleDraft, ToggleFilesList, ToggleFindingsList, ToggleFold, ToggleJump, TogglePieceLabels,
-    TogglePrSwitcher, ToggleRead, ToggleRenderedView, ToggleSettings, ToggleShortcuts,
-    ToggleWhitespace, ToggleWrapLines,
+    AskToOpenPr, CloseWindow, Collaborators, CopySelection, FocusNextChange, FocusPreviousChange,
+    GoBack, GoForward, GoToNextUnread, HistoryBack, HistoryForward, OneStepLayout, OpenIssue,
+    OpenPrOnHost, ReadDown, ReadUp, ShowMoreAbove, ShowMoreBelow, ToggleAutoMerge,
+    ToggleCommentsList, ToggleDraft, ToggleFilesList, ToggleFindingsList, ToggleFold, ToggleJump,
+    TogglePieceLabels, TogglePrSwitcher, ToggleRead, ToggleRenderedView, ToggleSettings,
+    ToggleShortcuts, ToggleWhitespace, ToggleWrapLines,
 };
 use review_session::TourWork;
 use settings_window::SettingsWindow;
@@ -943,7 +942,7 @@ fn apply_replies_held_for_reopen(
     }
 }
 
-/// Typing is saved first. The old root, with its session, Asks and code source, is dropped by the swap.
+/// Typing is saved first. The old root, with its session and code source, is dropped by the swap.
 fn switch_window(
     window: WindowHandle<OneStepLayout>,
     opened: OpenedReview,
@@ -1087,10 +1086,9 @@ pub fn apply_keymap(keymap: Keymap, cx: &mut App) {
 /// Every shortcut comes from the keymap the shortcuts sheet lists.
 fn bind_keys(keymap: &Keymap, cx: &mut App) {
     let typing_is_not_navigation = format!(
-        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
+        "{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{} && !{}",
         OneStepLayout::KEY_CONTEXT,
         AgentPicker::KEY_CONTEXT,
-        AskPanel::KEY_CONTEXT,
         JumpPalette::KEY_CONTEXT,
         PrSwitcherView::KEY_CONTEXT,
         SettingsPanel::KEY_CONTEXT,
@@ -1121,6 +1119,8 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
             match command {
                 Command::NextScreen => KeyBinding::new(&keys, GoForward, context),
                 Command::PreviousScreen => KeyBinding::new(&keys, GoBack, context),
+                Command::HistoryBack => KeyBinding::new(&keys, HistoryBack, context),
+                Command::HistoryForward => KeyBinding::new(&keys, HistoryForward, context),
                 Command::NextUnreadStep => KeyBinding::new(&keys, GoToNextUnread, context),
                 Command::NextChange => KeyBinding::new(&keys, FocusNextChange, context),
                 Command::PreviousChange => KeyBinding::new(&keys, FocusPreviousChange, context),
@@ -1137,14 +1137,18 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::ToggleRead => KeyBinding::new(&keys, ToggleRead, context),
                 Command::CopyCode => KeyBinding::new(&keys, CopySelection, context),
                 Command::AddToReview => KeyBinding::new(&keys, text_box::Submit, context),
-                Command::AskAgent => KeyBinding::new(&keys, text_box::SubmitToAgent, context),
+                Command::CommentAndAskAgent => {
+                    KeyBinding::new(&keys, text_box::SubmitAndAskAgent, context)
+                }
                 Command::CommentNow => KeyBinding::new(&keys, text_box::SubmitNow, context),
-                Command::AskAgentNow => KeyBinding::new(&keys, text_box::SubmitToAgentNow, context),
+                Command::CommentAndAskAgentNow => {
+                    KeyBinding::new(&keys, text_box::SubmitAndAskAgentNow, context)
+                }
+                Command::AskAgent => KeyBinding::new(&keys, text_box::SubmitAskAgent, context),
                 Command::SuggestChange => KeyBinding::new(&keys, text_box::SuggestChange, context),
                 Command::CloseBox => KeyBinding::new(&keys, text_box::Cancel, context),
                 Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),
                 Command::HideWhitespace => KeyBinding::new(&keys, ToggleWhitespace, context),
-                Command::AskAboutStep => KeyBinding::new(&keys, AskAboutStep, context),
                 Command::Settings => KeyBinding::new(&keys, ToggleSettings, context),
                 Command::Shortcuts => KeyBinding::new(&keys, ToggleShortcuts, context),
                 Command::FindingsList => KeyBinding::new(&keys, ToggleFindingsList, context),
@@ -1267,7 +1271,6 @@ fn new_layout(
     let layout = OneStepLayout::new(
         opened.review,
         opened.source,
-        opened.ask,
         collaborators,
         carried_settings,
         window,

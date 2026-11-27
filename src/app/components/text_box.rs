@@ -44,9 +44,10 @@ actions!(
         SelectAll,
         Newline,
         Submit,
-        SubmitToAgent,
+        SubmitAndAskAgent,
         SubmitNow,
-        SubmitToAgentNow,
+        SubmitAndAskAgentNow,
+        SubmitAskAgent,
         SuggestChange,
         Cancel,
         Copy,
@@ -176,6 +177,17 @@ pub const TYPING_CONTEXT: &str = KEY_CONTEXT;
 pub type OnText = Rc<dyn Fn(String, &mut Window, &mut App)>;
 pub type OnKey = Rc<dyn Fn(&mut Window, &mut App)>;
 
+/// What the keys that send the text do, each off until the owner turns it on.
+#[derive(Default)]
+struct SendKeys {
+    submit: Option<OnKey>,
+    submit_and_ask_agent: Option<OnKey>,
+    submit_now: Option<OnKey>,
+    submit_and_ask_agent_now: Option<OnKey>,
+    submit_ask_agent: Option<OnKey>,
+    suggest_change: Option<OnKey>,
+}
+
 /// An editable box: click to place the caret, keys move it, shift selects, copy and paste,
 /// and input methods for accented letters. The owner keeps the text; the box keeps the caret.
 #[derive(IntoElement)]
@@ -186,11 +198,7 @@ pub struct TextBox {
     lines: Lines,
     label: SharedString,
     on_edit: Option<OnText>,
-    on_submit: Option<OnKey>,
-    on_submit_to_agent: Option<OnKey>,
-    on_submit_now: Option<OnKey>,
-    on_submit_to_agent_now: Option<OnKey>,
-    on_suggest_change: Option<OnKey>,
+    send_keys: SendKeys,
     on_cancel: Option<OnKey>,
 }
 
@@ -204,11 +212,7 @@ impl TextBox {
             lines,
             label: SharedString::from("Text"),
             on_edit: None,
-            on_submit: None,
-            on_submit_to_agent: None,
-            on_submit_now: None,
-            on_submit_to_agent_now: None,
-            on_suggest_change: None,
+            send_keys: SendKeys::default(),
             on_cancel: None,
         }
     }
@@ -225,17 +229,18 @@ impl TextBox {
     }
 
     pub fn on_submit(mut self, on_submit: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-        self.on_submit = Some(Rc::new(on_submit));
+        self.send_keys.submit = Some(Rc::new(on_submit));
         self
     }
 
-    /// Primary-shift-enter: sends the text with Ask agent. Without it the key does nothing.
-    pub fn on_submit_to_agent(
+    /// Primary-shift-enter: sends the text with Comment and ask agent. Without it the key does nothing.
+    pub fn on_submit_and_ask_agent(
         mut self,
         enabled: bool,
-        on_submit_to_agent: impl Fn(&mut Window, &mut App) + 'static,
+        on_submit_and_ask_agent: impl Fn(&mut Window, &mut App) + 'static,
     ) -> Self {
-        self.on_submit_to_agent = enabled.then(|| Rc::new(on_submit_to_agent) as OnKey);
+        self.send_keys.submit_and_ask_agent =
+            enabled.then(|| Rc::new(on_submit_and_ask_agent) as OnKey);
         self
     }
 
@@ -245,17 +250,28 @@ impl TextBox {
         enabled: bool,
         on_submit_now: impl Fn(&mut Window, &mut App) + 'static,
     ) -> Self {
-        self.on_submit_now = enabled.then(|| Rc::new(on_submit_now) as OnKey);
+        self.send_keys.submit_now = enabled.then(|| Rc::new(on_submit_now) as OnKey);
         self
     }
 
     /// Primary-alt-shift-enter: posts the text at once and asks the agent.
-    pub fn on_submit_to_agent_now(
+    pub fn on_submit_and_ask_agent_now(
         mut self,
         enabled: bool,
-        on_submit_to_agent_now: impl Fn(&mut Window, &mut App) + 'static,
+        on_submit_and_ask_agent_now: impl Fn(&mut Window, &mut App) + 'static,
     ) -> Self {
-        self.on_submit_to_agent_now = enabled.then(|| Rc::new(on_submit_to_agent_now) as OnKey);
+        self.send_keys.submit_and_ask_agent_now =
+            enabled.then(|| Rc::new(on_submit_and_ask_agent_now) as OnKey);
+        self
+    }
+
+    /// Primary-alt-p: sends the text to the agent alone, which keeps it off the host. Without it the key does nothing.
+    pub fn on_submit_ask_agent(
+        mut self,
+        enabled: bool,
+        on_submit_ask_agent: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.send_keys.submit_ask_agent = enabled.then(|| Rc::new(on_submit_ask_agent) as OnKey);
         self
     }
 
@@ -265,7 +281,7 @@ impl TextBox {
         enabled: bool,
         on_suggest_change: impl Fn(&mut Window, &mut App) + 'static,
     ) -> Self {
-        self.on_suggest_change = enabled.then(|| Rc::new(on_suggest_change) as OnKey);
+        self.send_keys.suggest_change = enabled.then(|| Rc::new(on_suggest_change) as OnKey);
         self
     }
 
@@ -283,14 +299,14 @@ impl RenderOnce for TextBox {
         });
         state.update(cx, |state, _| {
             state.follow(&self.text, &self.focus);
-            state.lines = self.lines;
-            state.on_edit = self.on_edit;
-            state.on_submit = self.on_submit;
-            state.on_submit_to_agent = self.on_submit_to_agent;
-            state.on_submit_now = self.on_submit_now;
-            state.on_submit_to_agent_now = self.on_submit_to_agent_now;
-            state.on_suggest_change = self.on_suggest_change;
-            state.on_cancel = self.on_cancel;
+            state.adopt(
+                self.lines,
+                OwnerHooks {
+                    on_edit: self.on_edit,
+                    send_keys: self.send_keys,
+                    on_cancel: self.on_cancel,
+                },
+            );
         });
         let key_context = match self.lines {
             Lines::Single => KEY_CONTEXT.to_owned(),
@@ -335,9 +351,10 @@ impl RenderOnce for TextBox {
             .on_action(window.listener_for(&state, EditState::select_all))
             .on_action(window.listener_for(&state, EditState::newline))
             .on_action(window.listener_for(&state, EditState::submit))
-            .on_action(window.listener_for(&state, EditState::submit_to_agent))
+            .on_action(window.listener_for(&state, EditState::submit_and_ask_agent))
             .on_action(window.listener_for(&state, EditState::submit_now))
-            .on_action(window.listener_for(&state, EditState::submit_to_agent_now))
+            .on_action(window.listener_for(&state, EditState::submit_and_ask_agent_now))
+            .on_action(window.listener_for(&state, EditState::submit_ask_agent))
             .on_action(window.listener_for(&state, EditState::suggest_change))
             .on_action(window.listener_for(&state, EditState::cancel))
             .on_action(window.listener_for(&state, EditState::copy))
@@ -372,11 +389,7 @@ struct EditState {
     /// How far a single line is moved left so the caret stays in view; it never wraps.
     scroll_x: Pixels,
     on_edit: Option<OnText>,
-    on_submit: Option<OnKey>,
-    on_submit_to_agent: Option<OnKey>,
-    on_submit_now: Option<OnKey>,
-    on_submit_to_agent_now: Option<OnKey>,
-    on_suggest_change: Option<OnKey>,
+    send_keys: SendKeys,
     on_cancel: Option<OnKey>,
 }
 
@@ -424,7 +437,22 @@ impl Layout {
     }
 }
 
+/// What the owner of a text box wants done with its typing, handed to the state each frame.
+struct OwnerHooks {
+    on_edit: Option<OnText>,
+    send_keys: SendKeys,
+    on_cancel: Option<OnKey>,
+}
+
 impl EditState {
+    /// Takes the owner's lines and hooks as of this frame.
+    fn adopt(&mut self, lines: Lines, hooks: OwnerHooks) {
+        self.lines = lines;
+        self.on_edit = hooks.on_edit;
+        self.send_keys = hooks.send_keys;
+        self.on_cancel = hooks.on_cancel;
+    }
+
     fn new(text: &str, focus: FocusHandle) -> Self {
         Self {
             draft: TextDraft::with_text(text),
@@ -435,11 +463,7 @@ impl EditState {
             goal_x: None,
             scroll_x: Pixels::ZERO,
             on_edit: None,
-            on_submit: None,
-            on_submit_to_agent: None,
-            on_submit_now: None,
-            on_submit_to_agent_now: None,
-            on_suggest_change: None,
+            send_keys: SendKeys::default(),
             on_cancel: None,
         }
     }
@@ -671,43 +695,54 @@ impl EditState {
         self.caret_moved(window, cx);
     }
 
+    /// Runs what a key of sending does, once the key's own handling is done; nothing if the owner left it off.
+    fn run(key: Option<OnKey>, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(on_key) = key {
+            cx.defer_in(window, move |_, window, cx| on_key(window, cx));
+        }
+    }
+
     fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
         self.change(window, cx, |draft| draft.insert("\n"));
     }
 
     fn submit(&mut self, _: &Submit, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(on_submit) = self.on_submit.clone() {
-            cx.defer_in(window, move |_, window, cx| on_submit(window, cx));
-        }
+        Self::run(self.send_keys.submit.clone(), window, cx);
     }
 
-    fn submit_to_agent(&mut self, _: &SubmitToAgent, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(on_submit) = self.on_submit_to_agent.clone() {
-            cx.defer_in(window, move |_, window, cx| on_submit(window, cx));
-        }
-    }
-
-    fn submit_now(&mut self, _: &SubmitNow, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(on_submit) = self.on_submit_now.clone() {
-            cx.defer_in(window, move |_, window, cx| on_submit(window, cx));
-        }
-    }
-
-    fn submit_to_agent_now(
+    fn submit_and_ask_agent(
         &mut self,
-        _: &SubmitToAgentNow,
+        _: &SubmitAndAskAgent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(on_submit) = self.on_submit_to_agent_now.clone() {
-            cx.defer_in(window, move |_, window, cx| on_submit(window, cx));
-        }
+        Self::run(self.send_keys.submit_and_ask_agent.clone(), window, cx);
+    }
+
+    fn submit_now(&mut self, _: &SubmitNow, window: &mut Window, cx: &mut Context<Self>) {
+        Self::run(self.send_keys.submit_now.clone(), window, cx);
+    }
+
+    fn submit_and_ask_agent_now(
+        &mut self,
+        _: &SubmitAndAskAgentNow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        Self::run(self.send_keys.submit_and_ask_agent_now.clone(), window, cx);
+    }
+
+    fn submit_ask_agent(
+        &mut self,
+        _: &SubmitAskAgent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        Self::run(self.send_keys.submit_ask_agent.clone(), window, cx);
     }
 
     fn suggest_change(&mut self, _: &SuggestChange, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(on_suggest) = self.on_suggest_change.clone() {
-            cx.defer_in(window, move |_, window, cx| on_suggest(window, cx));
-        }
+        Self::run(self.send_keys.suggest_change.clone(), window, cx);
     }
 
     fn cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {

@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use gpui::{
     App, AsyncWindowContext, Bounds, Context, Keystroke, ListOffset, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Task, WeakEntity, Window,
-    point, px,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, ScrollDelta, ScrollEvent,
+    ScrollHandle, Task, TouchPhase, WeakEntity, Window, point, px,
 };
 
 use super::OneStepLayout;
@@ -29,8 +29,9 @@ use crate::review_subject::{BranchName, ReviewSubject};
 use crate::update::running_build;
 use crate::update::{InTheWay, ReleaseAsset, Target, Update, UpdateOffer};
 use crate::version::Version;
+use crate::viewer::DefinitionCard;
 use crate::viewer::{
-    AgentStatus, AiReview, AiReviewRun, AutoMerge, CheckRun, CheckState, Checks, FileView,
+    AgentStatus, AiReview, AiReviewRun, AutoMerge, CardRow, CheckRun, CheckState, Checks, FileView,
     HoveredName, LineKind, LineLocation, MergeChange, MergeMethod, MergeMethods, Mergeability,
     Merging, NameUnderPointer, OpenPrStatus, PageRow, PieceLabels, PrStatus, Problem, ProblemKind,
     Readiness, Review, TerminalId, TextBox,
@@ -51,7 +52,6 @@ enum Scene {
     PrSwitcher,
     FinishReview,
     CommentComposer,
-    AskPanel,
     SwitchingVeil,
     LoadingScreen,
     Gallery,
@@ -120,19 +120,20 @@ enum Scene {
     TitleBarMerging,
     FoldedMarkdownParts,
     StationsBusy,
+    GithubCardLongState,
     FilesList,
     FilesListSearch,
     AgentPicker,
+    AgentThread,
 }
 
 impl Scene {
-    const ALL: [Self; 77] = [
+    const ALL: [Self; 78] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
         Self::FinishReview,
         Self::CommentComposer,
-        Self::AskPanel,
         Self::SwitchingVeil,
         Self::LoadingScreen,
         Self::Gallery,
@@ -201,9 +202,11 @@ impl Scene {
         Self::TitleBarMerging,
         Self::FoldedMarkdownParts,
         Self::StationsBusy,
+        Self::GithubCardLongState,
         Self::FilesList,
         Self::FilesListSearch,
         Self::AgentPicker,
+        Self::AgentThread,
     ];
 
     fn file_name(self) -> &'static str {
@@ -213,7 +216,6 @@ impl Scene {
             Self::PrSwitcher => "22-pr-switcher",
             Self::FinishReview => "23-finish-review",
             Self::CommentComposer => "24-comment-composer",
-            Self::AskPanel => "25-ask-panel",
             Self::SwitchingVeil => "26-switching-veil",
             Self::LoadingScreen => "27-loading-screen",
             Self::Gallery => "28-gallery",
@@ -282,9 +284,11 @@ impl Scene {
             Self::TitleBarMerging => "92-title-bar-merging",
             Self::FoldedMarkdownParts => "93-folded-markdown-parts",
             Self::StationsBusy => "95-sidebar-stations-busy",
+            Self::GithubCardLongState => "101-sidebar-github-card-long-state",
             Self::FilesList => "97-files-list",
             Self::FilesListSearch => "98-files-list-search",
             Self::AgentPicker => "99-agent-picker",
+            Self::AgentThread => "100-agent-thread",
         }
     }
 
@@ -520,7 +524,84 @@ async fn hover_a_name(
     cx.update(|window, cx| window.dispatch_event(move_to(point(px(-1000.), px(-1000.))), cx))?;
     layout.update(cx, |layout, cx| layout.stage_name_card(under, word, cx))?;
     camera.take("96-name-card", cx).await?;
+    let pane = layout.update(cx, |layout, _| layout.name_card_code_scroll.clone())?;
+    swipe_the_code_pane(
+        camera,
+        &pane,
+        ("97-name-card-swiped-sideways", Modifiers::default()),
+        ScrollDelta::Pixels(point(px(-600.), px(0.))),
+        cx,
+    )
+    .await?;
+    layout.update(cx, OneStepLayout::follow_a_long_usage_line)?;
+    // A mouse wheel turned with shift held, as macOS hands it over: the turn comes as lines along x.
+    swipe_the_code_pane(
+        camera,
+        &pane,
+        (
+            "98-name-card-usage-shift-wheel",
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            },
+        ),
+        ScrollDelta::Lines(point(-30., 0.)),
+        cx,
+    )
+    .await?;
     layout.update(cx, OneStepLayout::dismiss_name_card)
+}
+
+/// The open card's code pane scrolled by one sideways scroll event, as the window gets it from the
+/// trackpad or the mouse wheel; fails when the pane did not move, so the run checks the scroll.
+async fn swipe_the_code_pane(
+    camera: &Camera,
+    pane: &ScrollHandle,
+    (name, modifiers): (&str, Modifiers),
+    delta: ScrollDelta,
+    cx: &mut AsyncWindowContext,
+) -> anyhow::Result<()> {
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+    })?;
+    let spot = pane.bounds().center();
+    cx.update(|window, cx| {
+        window.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: spot,
+                pressed_button: None,
+                modifiers,
+            }),
+            cx,
+        );
+        window.refresh();
+        window.draw(cx).clear(cx);
+        window.dispatch_event(
+            PlatformInput::Scroll(ScrollEvent {
+                position: spot,
+                delta,
+                modifiers,
+                touch_phase: TouchPhase::Moved,
+                ..ScrollEvent::default()
+            }),
+            cx,
+        );
+        window.refresh();
+        window.draw(cx).clear(cx);
+    })?;
+    let (offset, most) = (pane.offset(), pane.max_offset());
+    eprintln!(
+        "{name}: the code pane scrolled to x {} of {}",
+        offset.x, most.x
+    );
+    anyhow::ensure!(
+        offset.x < px(0.),
+        "{name}: the code pane did not scroll sideways (x {}, at most {})",
+        offset.x,
+        most.x
+    );
+    camera.take(name, cx).await
 }
 
 /// The issue card's description dragged down by its scrollbar, as the mouse gives it: pressed on the
@@ -841,6 +922,22 @@ impl OneStepLayout {
 
     /// The card by `word`, with a lookup that found two definitions, some usages and a note, so
     /// the card has all its parts.
+    /// The code pane follows the third usage of the first file, whose line runs past the pane.
+    fn follow_a_long_usage_line(&mut self, cx: &mut Context<Self>) {
+        let Some(name) = self.name_hover.shown().cloned() else {
+            return;
+        };
+        let Some(card) = self.session.read(cx).review().definition_card(&name) else {
+            return;
+        };
+        let DefinitionCard::Found(found) = &*card else {
+            return;
+        };
+        let staged = found.usages.first().and_then(|file| file.lines.get(2));
+        self.follow_card_row(staged.map(|_| CardRow::Usage { file: 0, line: 2 }));
+        cx.notify();
+    }
+
     fn stage_name_card(
         &mut self,
         under: NameUnderPointer,
@@ -848,8 +945,9 @@ impl OneStepLayout {
         cx: &mut Context<Self>,
     ) {
         let lookup = staged_lookup(&under.name);
+        let files = staged_files(&lookup);
         self.session.update(cx, |session, cx| {
-            session.stage_name_card(&under.name, lookup, cx);
+            session.stage_name_card(&under.name, lookup, &files, cx);
         });
         self.show_staged_name_card(under, word, cx);
     }
@@ -905,7 +1003,6 @@ impl OneStepLayout {
                 }
                 self.compose_on_first_added_lines(window, cx);
             }
-            Scene::AskPanel => self.ask_about_screen(window, cx),
             Scene::SwitchingVeil => {
                 if let Some(other) = sample_pr(OTHER_PR).map(ReviewSubject::from) {
                     let active = cx.global::<PrSwitching>().active.clone();
@@ -1131,6 +1228,10 @@ impl OneStepLayout {
                     );
                 }
             }
+            Scene::AgentThread => self.change_review(cx, |review| {
+                review.go_forward();
+                review.stage_private_thread();
+            }),
             Scene::TourEndUnread => {
                 self.change_review(cx, |review| while review.go_forward() {});
                 self.session.update(cx, ReviewSession::stage_unread_end);
@@ -1247,6 +1348,11 @@ impl OneStepLayout {
                 self.session
                     .update(cx, |session, cx| session.stage_viewed_wait(true, cx));
             }
+            Scene::GithubCardLongState => {
+                self.picked_station = Some(StationKind::Host);
+                self.session
+                    .update(cx, |session, cx| session.stage_viewed_wait(true, cx));
+            }
             Scene::RefreshRunning => {
                 self.scroll_to_row(0);
                 self.session
@@ -1348,7 +1454,6 @@ impl OneStepLayout {
                 });
                 window.focus(&self.focus, cx);
             }
-            Scene::AskPanel => self.ask.update(cx, |panel, cx| panel.close(window, cx)),
             Scene::SwitchingVeil => {}
             Scene::LoadingScreen => {
                 let active = cx.global::<PrSwitching>().active.clone();
@@ -1378,6 +1483,11 @@ impl OneStepLayout {
                     review.ai_review_is(AiReview::NotRun);
                     review.go_to_summary();
                 });
+            }
+            Scene::GithubCardLongState => {
+                self.picked_station = None;
+                self.session
+                    .update(cx, |session, cx| session.stage_viewed_wait(false, cx));
             }
             Scene::HostOutage => {
                 self.session.update(cx, ReviewSession::unstage_outage);
@@ -1430,6 +1540,10 @@ impl OneStepLayout {
                     review.go_to_summary();
                 });
             }
+            Scene::AgentThread => self.change_review(cx, |review| {
+                review.unstage_private_thread();
+                review.go_to_summary();
+            }),
             Scene::AiReviewThreadFromFinding => self.change_review(cx, |review| {
                 review.unstage_thread_from_finding();
                 review.ai_review_is(AiReview::NotRun);
@@ -1568,30 +1682,119 @@ impl OneStepLayout {
     }
 }
 
-/// The maintainer's case: a PHP enum used all over a big repo, with a same-named TypeScript enum.
+/// The enum's own file, so the card's code pane has a body to show beside the lists.
+fn staged_files(lookup: &Lookup) -> Vec<(FilePath, String)> {
+    const ENUM: &str = r"<?php
+
+declare(strict_types=1);
+
+namespace App\Models\Enum\Subscriptions;
+
+use Acme\Support\Contracts\HasColor;
+use Acme\Support\Contracts\HasLabel;
+use JsonSerializable;
+
+/** Where a scheduled renewal is in its life. */
+#[Entity]
+#[Table('renewals')]
+enum SubscriptionRenewalStatus: string implements HasLabel, HasColor, JsonSerializable
+{
+    case PENDING = 'pending';
+    case WAITING_FOR_APPROVAL = 'waiting_for_approval';
+    case REJECTED = 'rejected';
+    case CANCELLED = 'cancelled';
+    case RENEWED = 'renewed';
+
+    public function getLabel(): string
+    {
+        // The label a customer reads in the renewal reminder email, the account page and the invoice footer.
+        return match ($this) {
+            self::PENDING => 'Planned',
+            self::WAITING_FOR_APPROVAL => 'Waiting for approval',
+            self::REJECTED => 'Rejected',
+            self::CANCELLED => 'Called off',
+            self::RENEWED => 'Renewed',
+        };
+    }
+
+    public function jsonSerialize(): string
+    {
+        return $this->value;
+    }
+}
+";
+    lookup
+        .definitions
+        .iter()
+        .map(|definition| definition.place.path.clone())
+        .filter(|path| {
+            std::path::Path::new(path.as_str())
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
+        })
+        .map(|path| {
+            (
+                path,
+                ENUM.replace("SubscriptionRenewalStatus", lookup.word.as_str()),
+            )
+        })
+        .chain(first_usage_file(lookup))
+        .collect()
+}
+
+/// The file the card lists first, holding its usages at their lines, so a usage's pane has code.
+fn first_usage_file(lookup: &Lookup) -> Option<(FilePath, String)> {
+    let path = first_usage_path(lookup)?;
+    let mut lines = vec!["<?php".to_owned()];
+    for usage in lookup
+        .usages
+        .iter()
+        .filter(|usage| usage.place.path == path)
+    {
+        let index = usize::try_from(usage.place.line.get()).ok()? - 1;
+        if lines.len() <= index {
+            lines.resize(index + 1, String::new());
+        }
+        if let Some(line) = lines.get_mut(index) {
+            *line = format!("        {}", usage.text);
+        }
+    }
+    Some((path, lines.join("\n") + "\n"))
+}
+
+/// The card lists usage files by path, as none of the staged ones is in the PR.
+fn first_usage_path(lookup: &Lookup) -> Option<FilePath> {
+    lookup
+        .usages
+        .iter()
+        .map(|usage| usage.place.path.clone())
+        .min()
+}
+
+/// A PHP enum used all over a big repo, with a same-named TypeScript enum.
 fn staged_lookup(hovered: &HoveredName) -> Lookup {
     const FOLDERS: [&str; 6] = [
-        "app/Domain/StandingOrders/Actions",
-        "app/Http/Controllers/Api/V2/StandingOrders",
-        "app/Models/StandingOrders/Scopes",
-        "tests/Feature/Domain/StandingOrders",
-        "resources/js/features/standing-orders/components",
+        "app/Domain/Subscriptions/Actions",
+        "app/Http/Controllers/Api/V2/Subscriptions",
+        "app/Models/Subscriptions/Scopes",
+        "tests/Feature/Domain/Subscriptions",
+        "resources/js/features/subscriptions/components",
         "database/migrations",
     ];
     const FILES: [&str; 7] = [
-        "UpdateStandingOrder.php",
-        "StandingOrder.php",
-        "ListStandingOrderScheduleItems.php",
-        "CancelStandingOrderTest.php",
+        "UpdateSubscription.php",
+        "Subscription.php",
+        "ListSubscriptionRenewals.php",
+        "CancelSubscriptionTest.php",
         "ScheduleItemRow.tsx",
-        "StandingOrderScheduleItemFactory.php",
-        "RescheduleDeliveries.php",
+        "SubscriptionRenewalFactory.php",
+        "RescheduleRenewals.php",
     ];
     const LINES: [&str; 4] = [
-        "use App\\Models\\Enum\\StandingOrders\\{word};",
+        "use App\\Models\\Enum\\Subscriptions\\{word};",
         "->where('status', {word}::PENDING)",
         "return collect([{word}::PENDING, {word}::WAITING_FOR_APPROVAL, {word}::CANCELLED])->contains($this->status);",
-        "$items = $standingOrder->scheduleItems()->whereIn('status', [{word}::PENDING, {word}::REJECTED]);",
+        "$items = $subscription->renewals()->whereIn('status', [{word}::PENDING, {word}::REJECTED]);",
     ];
     let word = &hovered.word;
     let line = |number: u32| LineNumber::try_from(number).unwrap_or(LineNumber::FIRST);
@@ -1625,21 +1828,21 @@ fn staged_lookup(hovered: &HoveredName) -> Lookup {
             Definition {
                 name: word.clone(),
                 kind: DefinitionKind::Enum,
-                place: place("app/Models/Enum/StandingOrders/StandingOrderScheduleItemStatus.php", 12),
+                place: place("app/Models/Enum/Subscriptions/SubscriptionRenewalStatus.php", 14),
                 signature: format!(
                     "enum {word}: string implements HasLabel, HasColor, JsonSerializable"
                 )
                 .into(),
                 signature_origin: Arc::from([]),
                 doc: Some(
-                    "Where a scheduled delivery is in its life, from the week it is planned to the day it is delivered or called off. Drives the badge in the schedule."
+                    "Where a scheduled renewal is in its life, from the week it is planned to the day it is renewed or called off. Drives the badge in the schedule."
                         .into(),
                 ),
             },
             Definition {
                 name: word.clone(),
                 kind: DefinitionKind::Enum,
-                place: place("resources/js/features/standing-orders/types/standing-order-schedule-item-status.ts", 3),
+                place: place("resources/js/features/subscriptions/types/subscription-renewal-status.ts", 3),
                 signature: format!("export enum {word}").into(),
                 signature_origin: Arc::from([]),
                 doc: None,

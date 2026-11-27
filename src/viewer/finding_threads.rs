@@ -7,6 +7,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent_cli::AgentCli;
 use crate::findings::{Finding, FindingId};
 use crate::prompt_safety::{OUTSIDE_TEXT_IS_DATA, quoted};
 use crate::review_subject::ReviewSubject;
@@ -214,10 +215,11 @@ impl FindingThreads {
         {
             return None;
         }
-        let queued: Vec<&FindingThread> = self
+        let queued: Vec<FindingThread> = self
             .0
             .iter()
             .filter(|thread| thread.state == WhyState::Queued)
+            .cloned()
             .collect();
         if queued.is_empty() {
             return None;
@@ -228,7 +230,7 @@ impl FindingThreads {
                 .map(|thread| thread.finding.id.clone())
                 .collect(),
             subject: subject.clone(),
-            text: questions_message(&queued, subject),
+            questions: queued,
         })
     }
 
@@ -297,7 +299,7 @@ impl FindingThreads {
 }
 
 /// What the review agent is typed: each question with its finding and the thread so far, and how to answer.
-fn questions_message(threads: &[&FindingThread], subject: &ReviewSubject) -> String {
+fn questions_message(threads: &[FindingThread], subject: &ReviewSubject, cli: &AgentCli) -> String {
     let key = shell_word(&subject.to_string());
     let ids: Vec<String> = threads
         .iter()
@@ -334,7 +336,7 @@ fn questions_message(threads: &[&FindingThread], subject: &ReviewSubject) -> Str
         }
         lines.push(format!("Question: {question}"));
         lines.push(format!(
-            "Answer: `guided-review agent-reply {key} {id} --body -` with the answer on stdin, in a \
+            "Answer: `{cli} agent-reply {key} {id} --body -` with the answer on stdin, in a \
              quoted heredoc (`<<'EOF'`)."
         ));
     }
@@ -351,18 +353,20 @@ fn questions_message(threads: &[&FindingThread], subject: &ReviewSubject) -> Str
 pub struct WhyDeliveryRequest {
     ids: Vec<FindingId>,
     subject: ReviewSubject,
-    text: String,
+    /// Typed as one message, written when it goes in the words of the agent it goes to (`AgentCli`).
+    questions: Vec<FindingThread>,
 }
 
 impl WhyDeliveryRequest {
     pub fn run(self, agents: &ReviewAgents) -> WhyDeliveryOutcome {
-        let how = match agents.send_if_idle(&self.subject, &self.text) {
+        let text = questions_message(&self.questions, &self.subject, &agents.agent_cli());
+        let how = match agents.send_if_idle(&self.subject, &text) {
             Ok(SendOutcome::Delivered) => WhyDelivery::Delivered,
             Ok(SendOutcome::Unreported(_) | SendOutcome::Refused(_) | SendOutcome::Starting) => {
                 WhyDelivery::Waiting
             }
             Ok(SendOutcome::NoAgent) => WhyDelivery::Failed(
-                "the review agent is gone: ask again for the Ask panel".to_owned(),
+                "the review agent is gone: the finding has no one to ask".to_owned(),
             ),
             Err(error) => WhyDelivery::Failed(format!("{error:#}")),
         };

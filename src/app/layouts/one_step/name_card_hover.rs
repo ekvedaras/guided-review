@@ -12,7 +12,9 @@ use gpui::{
 
 use crate::app::code_links::{open_code, open_disk_file};
 use crate::app::components::diff_view::NamePointer;
-use crate::app::components::name_card::{OnNameTarget, OnServerAnswer, name_card};
+use crate::app::components::name_card::{
+    CardActions, OnCardRow, OnNameTarget, OnServerAnswer, name_card,
+};
 use crate::app::components::overlay::popover_by;
 use crate::app::components::palette::Colors;
 use crate::viewer::{HoverTicket, NameTarget, Screen};
@@ -80,6 +82,14 @@ impl OneStepLayout {
         }
         self.name_hover.dismiss();
         self.name_card_place = None;
+        self.follow_card_row(None);
+    }
+
+    /// The code pane follows `row`, from its top left.
+    pub(super) fn follow_card_row(&mut self, row: Option<crate::viewer::CardRow>) {
+        self.name_card_row = row;
+        self.name_card_code_scroll
+            .set_offset(gpui::Point::default());
     }
 
     fn wait(
@@ -167,6 +177,19 @@ impl OneStepLayout {
                 .update(cx, |this, cx| this.open_name_target(&target, cx))
                 .ok();
         });
+        let on_row: OnCardRow = Rc::new({
+            let layout = cx.weak_entity();
+            move |row, _, cx| {
+                layout
+                    .update(cx, |this, cx| {
+                        if this.name_card_row != Some(row) {
+                            this.follow_card_row(Some(row));
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+            }
+        });
         let answered = name;
         let on_answer: OnServerAnswer = Rc::new({
             let layout = cx.weak_entity();
@@ -182,6 +205,13 @@ impl OneStepLayout {
                     .ok();
             }
         });
+        let actions = CardActions {
+            on_open: &on_open,
+            on_answer: &on_answer,
+            on_row: &on_row,
+            followed: self.name_card_row,
+            code_scroll: &self.name_card_code_scroll,
+        };
         let colors = Colors::active(cx);
         let room = window.viewport_size().width - px(2. * WINDOW_MARGIN);
         Some(
@@ -197,7 +227,7 @@ impl OneStepLayout {
                             this.wait(GRACE, ticket, Self::name_grace_over, cx);
                         }
                     }))
-                    .child(name_card(&colors, &card, &on_open, &on_answer, room)),
+                    .child(name_card(&colors, &card, &actions, room)),
             )
             .into_any_element(),
         )

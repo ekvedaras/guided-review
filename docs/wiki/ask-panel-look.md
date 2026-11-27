@@ -19,3 +19,5 @@ The header lost its band and its bottom rule and shows an accent sparkle, "Ask" 
 Dark greys carried a blue cast (OKLCH chroma about 0.025 to 0.04 at hue of the brand) where light mode's greys sit at about 0.007 to 0.017. Each dark neutral kept its lightness and its chroma was cut to 30 percent (grounds, surface, overlay, raised, inset, hover, pressed, borders, text, sidebar text, muted text, code comment), so contrast against the grounds is unchanged. The quiet page wash stays a faint cool tint on purpose. Accent, state and trail colours and the `ink` ladder (which light mode shares) are untouched; dark roles now hold their own values instead of reading `ink` steps.
 
 Open: the maintainer judges the result by hand; the 30 percent figure is one number in one script run, so another step is a cheap change per role.
+
+2026-11-27: the Ask panel this page describes was removed (see [agent-threads.md](agent-threads.md)). The dark neutrals half stays in force; the panel's look does not.

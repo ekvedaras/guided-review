@@ -5,18 +5,20 @@ pub enum SendAction {
     AddToReview,
     CommentNow,
     SuggestChange,
+    CommentAndAskAgent,
+    CommentAndAskAgentNow,
     AskAgent,
-    AskAgentNow,
 }
 
 impl SendAction {
     /// In the order a box lists the actions that are neither primary nor secondary.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::AddToReview,
         Self::CommentNow,
         Self::SuggestChange,
+        Self::CommentAndAskAgent,
+        Self::CommentAndAskAgentNow,
         Self::AskAgent,
-        Self::AskAgentNow,
     ];
 
     pub fn config_text(self) -> &'static str {
@@ -24,15 +26,26 @@ impl SendAction {
             Self::AddToReview => "add_to_review",
             Self::CommentNow => "comment_now",
             Self::SuggestChange => "suggest_change",
-            Self::AskAgent => "ask_agent",
-            Self::AskAgentNow => "ask_agent_now",
+            Self::CommentAndAskAgent => "comment_and_ask_agent",
+            Self::CommentAndAskAgentNow => "comment_and_ask_agent_now",
+            Self::AskAgent => "ask_agent_only",
+        }
+    }
+
+    /// The text the action was written under before it was renamed, still read: `ask_agent` and
+    /// `ask_agent_now` meant what Comment and ask agent do now.
+    fn former_config_text(self) -> Option<&'static str> {
+        match self {
+            Self::CommentAndAskAgent => Some("ask_agent"),
+            Self::CommentAndAskAgentNow => Some("ask_agent_now"),
+            Self::AddToReview | Self::CommentNow | Self::SuggestChange | Self::AskAgent => None,
         }
     }
 
     pub fn of_config_text(text: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|action| action.config_text() == text)
+        Self::ALL.into_iter().find(|action| {
+            action.config_text() == text || action.former_config_text() == Some(text)
+        })
     }
 
     pub fn label(self) -> &'static str {
@@ -40,18 +53,26 @@ impl SendAction {
             Self::AddToReview => "Add to review",
             Self::CommentNow => "Comment now",
             Self::SuggestChange => "Suggest change",
+            Self::CommentAndAskAgent => "Comment and ask agent",
+            Self::CommentAndAskAgentNow => "Comment and ask agent now",
             Self::AskAgent => "Ask agent",
-            Self::AskAgentNow => "Ask agent now",
         }
     }
 
     /// What stands in for the action in a box that does not offer it, nearest first. Add to review
-    /// is in every box, so it ends every list.
+    /// is in every box, so it ends every list. A private Ask agent is never stood in for by an action that
+    /// posts.
     fn stand_ins(self) -> &'static [Self] {
         match self {
             Self::AddToReview => &[],
-            Self::CommentNow | Self::SuggestChange | Self::AskAgent => &[Self::AddToReview],
-            Self::AskAgentNow => &[Self::AskAgent, Self::CommentNow, Self::AddToReview],
+            Self::CommentNow | Self::SuggestChange | Self::CommentAndAskAgent | Self::AskAgent => {
+                &[Self::AddToReview]
+            }
+            Self::CommentAndAskAgentNow => &[
+                Self::CommentAndAskAgent,
+                Self::CommentNow,
+                Self::AddToReview,
+            ],
         }
     }
 
@@ -85,7 +106,7 @@ impl Default for SendChoice {
     fn default() -> Self {
         Self {
             primary: SendAction::AddToReview,
-            secondary: SendAction::AskAgent,
+            secondary: SendAction::CommentAndAskAgent,
         }
     }
 }

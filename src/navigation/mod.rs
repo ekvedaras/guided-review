@@ -1,6 +1,7 @@
 //! Where a name is defined and used at a commit, found by name with tree-sitter alone.
 
 mod column;
+mod declaration;
 mod dependency_file;
 mod git_grep;
 mod import;
@@ -12,6 +13,7 @@ mod word;
 mod word_in_file;
 
 pub use column::Column;
+pub use declaration::declaration_lines;
 pub use dependency_file::is_dependency_file;
 pub use git_grep::{FilesWithWord, GitGrep};
 pub use import::Import;

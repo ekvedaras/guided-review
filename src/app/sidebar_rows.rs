@@ -127,8 +127,6 @@ pub struct SidebarAiReview {
 /// guided tour while nothing is asked, and the banner once it is ready.
 pub struct SidebarGuidedTour {
     pub stage: Option<GuidedTourStage>,
-    /// Show agent beside the stage, when the tour agent can be shown.
-    pub can_show_agent: bool,
     /// Write guided tour, offered while nothing is asked; the reason when it is off.
     pub write: Option<WriteOffer>,
     pub banner: Option<GuidedTourBanner>,
@@ -257,7 +255,6 @@ impl SidebarRows {
             },
             guided_tour: review.basic_mode_label().map(|_| SidebarGuidedTour {
                 stage: review.guided_tour_stage(),
-                can_show_agent: tour_agent.can_show(),
                 write: (review.guided_tour_progress() == &GuidedTourProgress::NotAsked).then(
                     || match review.write_guided_tour_refusal() {
                         None => WriteOffer::Available,

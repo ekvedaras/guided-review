@@ -16,11 +16,6 @@ fn each_problem_belongs_to_the_page_that_holds_its_setting() {
             SettingProblem::InstructionsFileGone(InstructionsKind::Review, PathBuf::from("/gone")),
             SettingsPage::Agents,
         ),
-        (
-            SettingProblem::AskEffortUnknown("huge".to_owned()),
-            SettingsPage::Agents,
-        ),
-        (SettingProblem::AskModelBlank, SettingsPage::Agents),
         (SettingProblem::IdeTemplateBlank, SettingsPage::Code),
         (
             SettingProblem::MoreLinesNotACount("lots".to_owned()),
@@ -37,7 +32,7 @@ fn each_problem_belongs_to_the_page_that_holds_its_setting() {
 fn a_refused_save_stays_on_the_page_when_it_has_a_problem() {
     let problems = [
         SettingProblem::IdeTemplateBlank,
-        SettingProblem::AskModelBlank,
+        SettingProblem::InstructionsFileGone(InstructionsKind::Review, PathBuf::from("/gone")),
     ];
 
     assert_eq!(
@@ -50,7 +45,7 @@ fn a_refused_save_stays_on_the_page_when_it_has_a_problem() {
 fn a_refused_save_moves_to_the_first_page_with_a_problem_when_the_shown_one_has_none() {
     let problems = [
         SettingProblem::IdeTemplateBlank,
-        SettingProblem::AskModelBlank,
+        SettingProblem::InstructionsFileGone(InstructionsKind::Review, PathBuf::from("/gone")),
     ];
 
     assert_eq!(

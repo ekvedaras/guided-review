@@ -32,14 +32,13 @@ use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
-    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CodeHost,
+    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Audience, CloneOffer, CodeHost,
     CommentId, CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal,
     FinishResult, HandOffButton, HandOffId, HoveredName, ImageCache, JobOutcome, JobProgress,
-    LineLocation, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour,
-    ReplacingJob, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId,
-    TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourSwitcher, WorkPorts, announcements, land_elsewhere,
-    line_count,
+    LineLocation, NoteSubject, OldHead, Problem, RefreshBrief, RepinnedTour, ReplacingJob, Review,
+    ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId, TextBox, ThreadAction,
+    ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader,
+    TourSwitcher, WhyAsked, WorkPorts, announcements, land_elsewhere, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -349,8 +348,10 @@ impl ReviewSession {
         cx: &mut Context<Self>,
         change: impl FnOnce(&mut Self) -> T,
     ) -> T {
+        self.note_where_the_reader_is();
         let result = change(self);
         self.rebuild_rows(cx);
+        self.scroll_to_restored_spot();
         self.run_due_work(cx);
         result
     }
@@ -404,22 +405,6 @@ impl ReviewSession {
                 this.update(cx, Self::run_due_work).ok();
             })
         });
-    }
-
-    /// For changes of the Asks, which come on every line an answer streams in: the rows are built
-    /// again only when the page changed, that is when the lines with Asks on the screen did.
-    pub fn change_asks<T>(
-        &mut self,
-        cx: &mut Context<Self>,
-        change: impl FnOnce(&mut Review) -> T,
-    ) -> T {
-        let result = change(&mut self.review);
-        if self.rows.shows(self.review.page()) {
-            cx.notify();
-        } else {
-            self.rebuild_rows(cx);
-        }
-        result
     }
 
     /// The drag selection only changes how rows look, which is read when they are drawn.
@@ -546,6 +531,19 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) -> Result<(), FindingRefusal> {
         self.change(cx, |review| review.fix_with_note(id, note, timing))
+    }
+
+    pub fn ask_why(
+        &mut self,
+        id: &FindingId,
+        question: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<WhyAsked, FindingRefusal> {
+        let asked = self.change(cx, |review| review.ask_why(id, question))?;
+        if let WhyAsked::ToTourAgent(place) = &asked {
+            self.send_comment(place, SendMode::SendNow, Audience::Agent, cx);
+        }
+        Ok(asked)
     }
 
     pub fn mark_fixed(
@@ -813,7 +811,12 @@ impl ReviewSession {
         self.start_job(ReplacingJob::Reload, cx);
     }
 
-    /// Runs only on the button: the user's `claude` rewrites the marked steps.
+    /// The banner's Cancel while the Refresh waits for the tour agent.
+    pub fn cancel_refresh(&self) {
+        self.review.cancel_refresh();
+    }
+
+    /// Runs only on the button: the PR's tour agent rewrites the marked steps.
     pub fn refresh_tour(&mut self, cx: &mut Context<Self>) {
         self.start_job(ReplacingJob::Refresh, cx);
     }
@@ -856,7 +859,7 @@ impl ReviewSession {
         self.run_off_thread(cx, run, Self::land_job).detach();
     }
 
-    /// Each tool claude uses shows in the banner, so a long refresh is seen to be working.
+    /// What the tour agent is waited for to do shows in the banner, so a long refresh is seen to be working.
     fn refresh_reporting_activity(
         &self,
         cx: &mut Context<Self>,
@@ -875,8 +878,9 @@ impl ReviewSession {
         })
         .detach();
         let refresher = Arc::clone(&self.tour_work.refresher);
+        let cancel = self.review.refresh_cancel();
         Box::new(move || {
-            JobOutcome::Refresh(refresher.run(&mut |activity| {
+            JobOutcome::Refresh(refresher.run(&cancel, &mut |activity| {
                 activities.unbounded_send(activity).ok();
             }))
         })
@@ -1000,6 +1004,22 @@ impl ReviewSession {
         }
     }
 
+    /// The review keeps this for Back, which only the list can say.
+    fn note_where_the_reader_is(&mut self) {
+        let top = self.screen_list.logical_scroll_top();
+        self.review.note_scroll_top(top.item_ix);
+    }
+
+    /// After Back or Forward: to the code the reader was on, which may have moved since.
+    fn scroll_to_restored_spot(&mut self) {
+        if let Some(row) = self.review.take_row_to_scroll_to() {
+            self.screen_list.scroll_to(ListOffset {
+                item_ix: row,
+                offset_in_item: px(0.),
+            });
+        }
+    }
+
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
         let started = Instant::now();
         let rows = PageRows::of(&self.review, &self.open_details);
@@ -1043,9 +1063,10 @@ impl ReviewSession {
         &mut self,
         hovered: &HoveredName,
         lookup: crate::navigation::Lookup,
+        files: &[(FilePath, String)],
         cx: &mut Context<Self>,
     ) {
-        self.review.stage_looked_up_name(hovered, lookup);
+        self.review.stage_looked_up_name(hovered, lookup, files);
         cx.notify();
     }
 
@@ -1435,7 +1456,8 @@ impl ReviewSession {
                 start: at.clone(),
                 end: at,
             };
-            store.stage_answered_task(
+            crate::viewer::stage_answered_task(
+                &store,
                 &place,
                 &head,
                 (
@@ -1443,7 +1465,8 @@ impl ReviewSession {
                     "Done: the README now says the total is before tax, and `tax` names the rate.",
                 ),
             )?;
-            store.stage_queued_task(
+            crate::viewer::stage_queued_task(
+                &store,
                 &CommentPlace::File(FilePath::new("README.md")?),
                 &head,
                 "Add a line on how to run the shop's tests.",
@@ -1470,15 +1493,15 @@ impl ReviewSession {
                 side: crate::viewer::Side::Head,
                 line: crate::line_number::LineNumber::try_from(3_u32)?,
             };
-            crate::viewer::LocalThreadStore::in_file(opened.review.state_file())
-                .stage_held_back_task(
-                    &CommentPlace::Lines {
-                        start: at.clone(),
-                        end: at,
-                    },
-                    &head,
-                    "Name the currency next to every price in the README.",
-                )
+            crate::viewer::stage_held_back_task(
+                &crate::viewer::LocalThreadStore::in_file(opened.review.state_file()),
+                &CommentPlace::Lines {
+                    start: at.clone(),
+                    end: at,
+                },
+                &head,
+                "Name the currency next to every price in the README.",
+            )
         });
         if let Err(error) = staged {
             eprintln!("could not stage a held back task in the local review: {error:#}");
@@ -1695,11 +1718,7 @@ impl ReviewSession {
         self.image_pictures.clear();
         self.loading_images.clear();
         self.rows = PageRows::none();
-        self.change(cx, |review| match screen {
-            Screen::Step(id) => review.go_to(id),
-            Screen::File(path) => review.go_to_file(path),
-            _ => {}
-        });
+        self.change(cx, |review| review.resume_on(screen));
         cx.emit(SessionEvent::Reopened);
         self.start_background_work(cx);
     }
@@ -1921,33 +1940,12 @@ impl ReviewSession {
         self.review.is_delivering_hand_offs()
     }
 
-    /// Types the Ask into the reviewer's own tour agent off the UI thread, since herdr is asked first.
-    /// Ends with what the Ask panel says of it.
-    pub fn hand_ask_to_agent(
-        &self,
-        ask: &Ask,
-        place: &str,
-        anyway: bool,
-        cx: &App,
-    ) -> Task<OwnAgentHandOff> {
-        let agents = self.tour_work.tour_agents.clone();
-        let subject = self.review.subject().clone();
-        let text = self.review.ask_hand_off_text(ask, place);
-        cx.background_executor().spawn(async move {
-            if anyway {
-                agents.hand_to_own_agent_anyway(&subject, &text)
-            } else {
-                agents.hand_to_own_agent(&subject, &text)
-            }
-        })
-    }
-
     /// Retry beside the message of an off link.
     pub fn retry_agent_link(&mut self, cx: &mut Context<Self>) {
         self.change(cx, |review| review.retry_agent_link());
     }
 
-    /// Whether the comment box offers Ask agent.
+    /// Whether the comment box offers Comment and ask agent.
     pub fn agent_link_is_on(&self) -> bool {
         !matches!(self.tour_agent, TourAgentState::LinkOff(_))
     }
@@ -1982,6 +1980,11 @@ impl ReviewSession {
                 this.follow_tour_agent(cx);
             },
         ));
+    }
+
+    /// Several agents fit and none is picked, so a hand-off to the agent cannot choose.
+    pub fn tour_agent_must_be_picked(&self) -> bool {
+        !self.tour_agent.choices().is_empty()
     }
 
     pub fn tour_agents(&self) -> TourAgents {
@@ -2037,7 +2040,7 @@ impl ReviewSession {
                 rows.stations.stage(Station::of_host(
                     pr.host,
                     StationHealth::Waiting,
-                    "3 viewed marks waiting · 4 min",
+                    "90 viewed marks waiting · 12 min",
                 ));
             }
         }
@@ -2231,7 +2234,7 @@ fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
     let done = match mode {
         SendMode::AddToReview => "added to your review",
         SendMode::CommentNow => "posted",
-        SendMode::SendNow => "kept as a task",
+        SendMode::SendNow => return format!("{what} sent to your agent"),
         SendMode::AddToTasks => return format!("{what} queued for Send tasks"),
     };
     match audience {

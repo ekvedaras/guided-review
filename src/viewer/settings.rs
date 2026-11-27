@@ -5,7 +5,6 @@ use toml_edit::{DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
 use crate::app_folders::AppFolders;
 use crate::codebase::Codebase;
-use crate::config::{AskEffortChoice, AskModelChoice};
 use crate::home::expand_home;
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
@@ -32,12 +31,9 @@ pub struct Settings {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Values {
-    ask_model: AskModelChoice,
-    ask_effort: AskEffortChoice,
     ide: Option<IdeTemplate>,
     /// The last custom value: `ide` while it is not a preset, else what `ide_custom` keeps beside it.
     ide_custom: String,
-    ask_model_custom: String,
     summary_instructions: InstructionsChoice,
     review_instructions: InstructionsChoice,
     clones: Vec<CloneRow>,
@@ -51,21 +47,13 @@ struct Values {
 impl Values {
     fn read(document: &DocumentMut) -> Self {
         let text = |key: &str| document.get(key).and_then(Item::as_str).map(str::to_owned);
-        let ask_model = AskModelChoice::of(text(ASK_MODEL).as_deref());
         let ide = text(IDE).map(IdeTemplate::new);
         Self {
-            ask_model_custom: ask_model
-                .custom_text()
-                .map(str::to_owned)
-                .or_else(|| text(ASK_MODEL_CUSTOM))
-                .unwrap_or_default(),
             ide_custom: IdeChoice::of(ide.as_ref())
                 .custom_text()
                 .map(str::to_owned)
                 .or_else(|| text(IDE_CUSTOM))
                 .unwrap_or_default(),
-            ask_model,
-            ask_effort: AskEffortChoice::of(text(ASK_EFFORT).as_deref()),
             ide,
             summary_instructions: instructions_in(document, InstructionsKind::Summary),
             review_instructions: instructions_in(document, InstructionsKind::Review),
@@ -92,13 +80,6 @@ impl Values {
     fn ide_custom_key(&self) -> Option<&str> {
         let is_active = matches!(IdeChoice::of(self.ide.as_ref()), IdeChoice::Custom(_));
         Self::kept_custom(&self.ide_custom, is_active)
-    }
-
-    fn ask_model_custom_key(&self) -> Option<&str> {
-        Self::kept_custom(
-            &self.ask_model_custom,
-            self.ask_model.custom_text().is_some(),
-        )
     }
 
     fn kept_custom(custom: &str, is_active: bool) -> Option<&str> {
@@ -152,10 +133,6 @@ pub enum SettingProblem {
     InstructionsFileGone(InstructionsKind, PathBuf),
     /// The config holds a `summary_instructions` or `review_instructions` that is not a path, `"off"` or a skill name; the value as written.
     InstructionsUnreadable(InstructionsKind, String),
-    /// The config holds an `ask_effort` that `claude --effort` does not accept.
-    AskEffortUnknown(String),
-    /// Custom is picked and no model is typed.
-    AskModelBlank,
     /// Custom is picked and no template is typed.
     IdeTemplateBlank,
     /// The `more_lines` is not a whole number the app can show; the text as written.
@@ -177,13 +154,9 @@ impl SettingProblem {
                     InstructionsChoice::OFF
                 )
             }
-            Self::AskModelBlank => "Type the model name, or pick another choice".to_owned(),
             Self::IdeTemplateBlank => {
                 "Type the command or link, with {path} and {line}, or pick another choice"
                     .to_owned()
-            }
-            Self::AskEffortUnknown(text) => {
-                format!("{text:?} is not an effort Claude accepts: low, medium, high, xhigh or max")
             }
             Self::MoreLinesNotACount(written) => format!(
                 "{written} is not a whole number from {} to {}",
@@ -227,11 +200,7 @@ impl From<CloneProblem> for CloneRowProblem {
     }
 }
 
-const ASK_MODEL: &str = "ask_model";
-const ASK_EFFORT: &str = "ask_effort";
 const IDE: &str = "ide";
-/// Only Settings reads the `_custom` keys; the config the app runs on does not know them.
-const ASK_MODEL_CUSTOM: &str = "ask_model_custom";
 const IDE_CUSTOM: &str = "ide_custom";
 const CLONES: &str = "clones";
 const KEYS: &str = "keys";
@@ -307,32 +276,9 @@ impl Settings {
         })
     }
 
-    pub fn ask_model(&self) -> AskModelChoice {
-        self.edited.ask_model.clone()
-    }
-
-    pub fn set_ask_model(&mut self, model: &AskModelChoice) {
-        if let Some(text) = model.custom_text() {
-            text.clone_into(&mut self.edited.ask_model_custom);
-        }
-        self.edited.ask_model = model.clone();
-    }
-
-    pub fn ask_effort(&self) -> AskEffortChoice {
-        self.edited.ask_effort.clone()
-    }
-
-    pub fn set_ask_effort(&mut self, effort: &AskEffortChoice) {
-        self.edited.ask_effort = effort.clone();
-    }
-
     /// What a Custom box opens with: the last custom IDE template, even while a preset is picked.
     pub fn ide_custom_text(&self) -> &str {
         &self.edited.ide_custom
-    }
-
-    pub fn ask_model_custom_text(&self) -> &str {
-        &self.edited.ask_model_custom
     }
 
     pub fn ide(&self) -> IdeChoice {
@@ -442,7 +388,6 @@ impl Settings {
                 matches!(
                     problem,
                     SettingProblem::InstructionsUnreadable(..)
-                        | SettingProblem::AskEffortUnknown(_)
                         | SettingProblem::MoreLinesNotACount(_)
                         | SettingProblem::Key(_)
                 )
@@ -465,12 +410,6 @@ impl Settings {
                 })
             })
             .collect();
-        if let AskEffortChoice::Unknown(text) = self.ask_effort() {
-            problems.push(SettingProblem::AskEffortUnknown(text));
-        }
-        if matches!(self.ask_model(), AskModelChoice::Custom(text) if text.trim().is_empty()) {
-            problems.push(SettingProblem::AskModelBlank);
-        }
         if matches!(self.ide(), IdeChoice::Custom(template) if template.as_str().trim().is_empty())
         {
             problems.push(SettingProblem::IdeTemplateBlank);
@@ -648,20 +587,11 @@ impl Settings {
         }
         let root = self.document.as_table_mut();
         let (saved, edited) = (&self.saved, &self.edited);
-        if saved.ask_model != edited.ask_model {
-            set_text(root, ASK_MODEL, edited.ask_model.config_text());
-        }
-        if saved.ask_effort != edited.ask_effort {
-            set_text(root, ASK_EFFORT, edited.ask_effort.config_text());
-        }
         if saved.ide != edited.ide {
             set_text(root, IDE, edited.ide.as_ref().map(IdeTemplate::as_str));
         }
         if saved.ide_custom_key() != edited.ide_custom_key() {
             set_text(root, IDE_CUSTOM, edited.ide_custom_key());
-        }
-        if saved.ask_model_custom_key() != edited.ask_model_custom_key() {
-            set_text(root, ASK_MODEL_CUSTOM, edited.ask_model_custom_key());
         }
         for (kind, saved, edited) in [
             (

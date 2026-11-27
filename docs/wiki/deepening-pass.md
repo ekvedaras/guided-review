@@ -25,3 +25,5 @@ Each pass kept the behaviour it found, even where it looked wrong. These are for
 - (e) An Ask-agent comment sent later from the queue does not start a delivery until the next trigger.
 - (f) `switch_failed` and `tour_not_refreshed` are never cleared on purpose: a successful switch or refresh replaces the review.
 - (g) A failed Show agent now lists in the problems list and posts a toast that stays until dismissed.
+
+2026-11-27: the Ask desk named above was removed with the Ask panel; see [agent-threads.md](agent-threads.md).

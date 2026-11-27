@@ -1,20 +1,18 @@
 use crate::support::app_path::AppPath;
-use crate::support::fake_ports::{FakeAskProcesses, FakeHost, HostFault, SentLog};
+use crate::support::fake_ports::{FakeHost, HostFault, SentLog};
 use crate::support::{FixtureRepo, drafts, file_path, line, save_typing};
-use guided_review::config::AskSettings;
 use guided_review::local_git::LocalGit;
 use guided_review::pull_request::{PullRequestUrl, Sha};
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::{BasicTour, GuidedTour, Tour, TourPin};
 use guided_review::viewer::{
-    Asks, Audience, CommentGesture, CommentId, CommentPlace, CommentResult, GuidedTourProgress,
-    GuidedTourRefusal, PageRow, Place, Review, ReviewStateFile, ReviewThread, Screen, SendMode,
-    ShownOn, Side, TextBox, ThreadComment, ThreadId, TourSwitcher, repin_tour,
+    Audience, CommentGesture, CommentId, CommentPlace, CommentResult, GuidedTourProgress,
+    GuidedTourRefusal, PageRow, Review, ReviewStateFile, ReviewThread, Screen, SendMode, Side,
+    TextBox, ThreadComment, ThreadId, TourSwitcher, repin_tour,
 };
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 
 const PR: &str = "https://github.com/acme/shop/pull/7";
 
@@ -343,81 +341,6 @@ fn on_file_screen(review: &mut Review, path: &str) {
     }
 }
 
-/// A basic review with an Ask about the line `first` of a.txt, asked on its file screen.
-fn basic_review_with_an_ask_on_a_txt(shop: &Shop) -> Review {
-    let mut review = shop.basic_review();
-    on_file_screen(&mut review, "a.txt");
-    let row = review
-        .file_page()
-        .unwrap()
-        .pieces
-        .iter()
-        .flat_map(guided_review::viewer::PieceDiff::lines)
-        .find(|line| line.text == "first")
-        .unwrap()
-        .location
-        .clone();
-    review.begin_selection(row.clone());
-    review.extend_selection(row);
-    let place = review.place_of_lines(&review.selected_lines().unwrap());
-    review.cancel_selection();
-    let mut processes = FakeAskProcesses::default();
-    review.open_ask(
-        place,
-        "a.txt line 1".to_owned(),
-        &AskSettings::default(),
-        Instant::now(),
-        &mut processes,
-    );
-    review.change_asks(|desk| desk.send("Why?", Instant::now(), &mut processes));
-    review
-}
-
-fn where_the_ask_is_shown(review: &Review) -> ShownOn {
-    let Place::Lines { shown_on, .. } = &review.asks().all()[0].place else {
-        panic!("the Ask is about lines");
-    };
-    shown_on.clone()
-}
-
-#[test]
-fn an_ask_made_on_a_file_screen_moves_to_the_first_step_that_shows_its_lines() {
-    let shop = Shop::new();
-    let old = basic_review_with_an_ask_on_a_txt(&shop);
-    let third = shop.commit_third(&["c.txt"]);
-    shop.write_guided_tour_at(&third);
-    let mut switched = shop.switcher().run().unwrap().review;
-
-    switched.carry_on_from(old);
-
-    assert_eq!(
-        where_the_ask_is_shown(&switched),
-        ShownOn::Step { step: "ab".into() }
-    );
-    let saved = Asks::load(Arc::new(shop.state_file())).unwrap();
-    assert_eq!(
-        saved.all()[0].place,
-        switched.asks().all()[0].place,
-        "the move is saved"
-    );
-}
-
-#[test]
-fn an_ask_made_on_a_file_screen_no_step_shows_moves_to_the_safety_net() {
-    let shop = Shop::new();
-    let old = basic_review_with_an_ask_on_a_txt(&shop);
-    let third = shop.commit_third(&["c.txt"]);
-    shop.write_guided_tour_with_steps(
-        &third,
-        json!([{"id": "c", "title": "C", "why": "w", "pieces": [{"file": "c.txt"}]}]),
-    );
-    let mut switched = shop.switcher().run().unwrap().review;
-
-    switched.carry_on_from(old);
-
-    assert_eq!(where_the_ask_is_shown(&switched), ShownOn::SafetyNet);
-}
-
 #[test]
 fn the_switched_review_does_not_say_the_guided_tour_is_ready() {
     let shop = Shop::new();
@@ -632,30 +555,4 @@ fn a_hand_off_made_while_the_guided_review_is_being_built_is_kept() {
 
     assert_eq!(guided.hand_offs().all().len(), 1);
     assert_eq!(reopened_guided(&shop).hand_offs().all().len(), 1);
-}
-
-#[test]
-fn an_ask_made_while_the_guided_review_is_being_built_is_kept() {
-    let shop = Shop::new();
-
-    let guided = switched_while(&shop, |basic| {
-        select_first(basic);
-        let place = basic.place_of_lines(&basic.selected_lines().unwrap());
-        basic.cancel_selection();
-        let mut processes = FakeAskProcesses::default();
-        basic.open_ask(
-            place,
-            "a.txt line 1".to_owned(),
-            &AskSettings::default(),
-            Instant::now(),
-            &mut processes,
-        );
-        basic.change_asks(|desk| desk.send("Why?", Instant::now(), &mut processes));
-    });
-
-    assert_eq!(guided.asks().all().len(), 1);
-    assert_eq!(
-        Asks::load(Arc::new(shop.state_file())).unwrap().all().len(),
-        1
-    );
 }

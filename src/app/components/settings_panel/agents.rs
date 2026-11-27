@@ -1,4 +1,4 @@
-//! The Agents page: the summary and review instructions, and the model and effort Ask uses.
+//! The Agents page: the summary and review instructions.
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -10,8 +10,7 @@ use super::super::chip::chip;
 use super::super::icon::{Icon, sized_icon};
 use super::super::palette::{CODE_FONT, CONTROL_RADIUS, Colors, Tone};
 use super::super::segmented::{Segment, SegmentLayout, Segmented};
-use super::{Editing, SettingsPanel, Slot, effort_level, rising, setting_row};
-use crate::config::{AskEffortChoice, AskModelChoice};
+use super::{Editing, SettingsPanel, Slot, rising};
 use crate::instructions::{InstructionsChoice, InstructionsKind};
 
 impl SettingsPanel {
@@ -256,188 +255,6 @@ impl SettingsPanel {
             },
         )
     }
-
-    pub(super) fn ask(
-        &self,
-        editing: &Editing,
-        colors: &Colors,
-        cx: &Context<Self>,
-    ) -> impl IntoElement {
-        let model = editing.settings.ask_model();
-        let is_custom = editing.model.is_open;
-        let model_picked = if is_custom {
-            Some(4)
-        } else {
-            Some(match model {
-                AskModelChoice::AppDefault => 0,
-                AskModelChoice::Opus => 1,
-                AskModelChoice::Sonnet => 2,
-                AskModelChoice::Haiku => 3,
-                AskModelChoice::Custom(_) => 4,
-            })
-        };
-        let model_segment = |id: &'static str, label: &'static str, choice: AskModelChoice| {
-            Segment::new(
-                id,
-                label,
-                cx.listener(move |this, _, _, cx| {
-                    let choice = choice.clone();
-                    this.edit(cx, |editing| {
-                        editing.model.is_open = false;
-                        editing.settings.set_ask_model(&choice);
-                    });
-                }),
-            )
-        };
-        let model_segments = vec![
-            model_segment("ask-model-default", "Default", AskModelChoice::AppDefault),
-            model_segment("ask-model-opus", "opus", AskModelChoice::Opus),
-            model_segment("ask-model-sonnet", "sonnet", AskModelChoice::Sonnet),
-            model_segment("ask-model-haiku", "haiku", AskModelChoice::Haiku),
-            Segment::new(
-                "ask-model-custom",
-                "Custom",
-                cx.listener(|this, _, _, cx| {
-                    this.edit(cx, |editing| {
-                        if !editing.model.is_open {
-                            editing.model.is_open = true;
-                            editing.model.text =
-                                editing.settings.ask_model_custom_text().to_owned();
-                            editing
-                                .settings
-                                .set_ask_model(&AskModelChoice::Custom(editing.model.text.clone()));
-                        }
-                    });
-                }),
-            ),
-        ];
-        let model_note = if is_custom {
-            div()
-                .text_xs()
-                .text_color(colors.muted_text)
-                .child("Any model name claude accepts")
-        } else {
-            match model.shown_command() {
-                Some(command) => Self::shown_text(colors, command),
-                None => div()
-                    .text_xs()
-                    .text_color(colors.muted_text)
-                    .child(editing.default_model_note.clone()),
-            }
-        };
-        let custom_model = editing
-            .model
-            .focus
-            .as_ref()
-            .filter(|_| is_custom)
-            .map(|focus| {
-                rising(
-                    self.text_box(
-                        "ask-model-name",
-                        focus,
-                        &editing.model.text,
-                        editing.has_problem_under(Slot::AskModel),
-                        cx,
-                        |editing, text| {
-                            editing
-                                .settings
-                                .set_ask_model(&AskModelChoice::Custom(text.clone()));
-                            editing.model.text = text;
-                        },
-                    ),
-                    "ask-model-rise",
-                )
-            });
-        let effort = editing.settings.ask_effort();
-        let effort_picked = match effort {
-            AskEffortChoice::AppDefault => Some(0),
-            AskEffortChoice::Low => Some(1),
-            AskEffortChoice::Medium => Some(2),
-            AskEffortChoice::High => Some(3),
-            AskEffortChoice::XHigh => Some(4),
-            AskEffortChoice::Max => Some(5),
-            AskEffortChoice::Unknown(_) => None,
-        };
-        let effort_segments =
-            std::iter::once(("ask-effort-default", "Default", AskEffortChoice::AppDefault))
-                .chain([
-                    ("ask-effort-low", "low", AskEffortChoice::Low),
-                    ("ask-effort-medium", "medium", AskEffortChoice::Medium),
-                    ("ask-effort-high", "high", AskEffortChoice::High),
-                    ("ask-effort-xhigh", "xhigh", AskEffortChoice::XHigh),
-                    ("ask-effort-max", "max", AskEffortChoice::Max),
-                ])
-                .map(|(id, label, choice)| {
-                    Segment::new(
-                        id,
-                        label,
-                        cx.listener(move |this, _, _, cx| {
-                            let choice = choice.clone();
-                            this.edit(cx, |editing| editing.settings.set_ask_effort(&choice));
-                        }),
-                    )
-                })
-                .collect();
-        let level = match effort {
-            AskEffortChoice::AppDefault => editing.default_effort_level,
-            ref chosen => effort_level(chosen),
-        };
-        let effort_note = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_xs()
-            .text_color(colors.muted_text)
-            .child(effort_meter(colors, level))
-            .when(effort == AskEffortChoice::AppDefault, |note| {
-                note.child(editing.default_effort_note.clone())
-            });
-        div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(setting_row(
-                        "Model",
-                        model_note,
-                        Segmented::new(
-                            "ask-model",
-                            SegmentLayout::Row {
-                                segment_width: px(80.),
-                            },
-                            model_segments,
-                        )
-                        .picked(model_picked),
-                    ))
-                    .children(custom_model)
-                    .child(Self::problem_lines(editing, Slot::AskModel, colors)),
-            )
-            .child(div().h_px().bg(colors.subtle_border))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(setting_row(
-                        "Effort",
-                        effort_note,
-                        Segmented::new(
-                            "ask-effort",
-                            SegmentLayout::Row {
-                                segment_width: px(70.),
-                            },
-                            effort_segments,
-                        )
-                        .picked(effort_picked)
-                        .invalid(editing.has_problem_under(Slot::AskEffort)),
-                    ))
-                    .child(Self::problem_lines(editing, Slot::AskEffort, colors)),
-            )
-    }
 }
 
 /// A file a setting points at: its icon and path, then what the caller adds (a status, an action).
@@ -469,25 +286,4 @@ fn file_row(colors: &Colors, path: SharedString, is_invalid: bool) -> gpui::Div 
                 .text_xs()
                 .child(path),
         )
-}
-
-/// Five bars rising from low to max, filled up to the chosen effort.
-fn effort_meter(colors: &Colors, level: usize) -> impl IntoElement {
-    const HEIGHTS: [f32; 5] = [4., 6., 8., 10., 12.];
-    div()
-        .flex()
-        .items_end()
-        .gap(px(2.))
-        .h(px(12.))
-        .children(HEIGHTS.into_iter().enumerate().map(move |(index, height)| {
-            div()
-                .w(px(3.))
-                .h(px(height))
-                .rounded(px(1.))
-                .bg(if index < level {
-                    colors.accent
-                } else {
-                    colors.border
-                })
-        }))
 }

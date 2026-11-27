@@ -14,7 +14,7 @@ use guided_review::viewer::{
     AgentStatus, Audience, Capability, CommentGesture, CommentId, CommentPlace, CommentResult,
     HandOffButton, HandOffId, HandOffState, HandToAgentRefused, LineLocation, Problem, Reaction,
     ReactionChange, ReplyPlacement, Review, ReviewStateFile, ReviewThread, SeenMark, SendMode,
-    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadComment, ThreadHome,
+    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadComment, ThreadHomes,
     ThreadId, ThreadMessage, ThreadView, TourAgentPort, TourAgentState, TourAgents, Work, WorkKind,
     WorkPorts,
 };
@@ -934,14 +934,16 @@ fn reply_request(
     id: HandOffId,
     body: &str,
 ) -> Result<AgentReplyRequest, AgentReplyRefused> {
-    let pr: PullRequestUrl = PR.parse().unwrap();
-    let state =
-        ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pr.clone()))
-            .load()
-            .unwrap();
-    state
-        .hand_offs()
-        .agent_reply(&ThreadHome::Host(pr), id, body)
+    let file = pull_state_file(pull);
+    ThreadHomes::of(&pull_subject(), &file).agent_reply(file.load().unwrap().hand_offs(), id, body)
+}
+
+fn pull_subject() -> ReviewSubject {
+    ReviewSubject::from(PR.parse::<PullRequestUrl>().unwrap())
+}
+
+fn pull_state_file(pull: &Pull) -> ReviewStateFile {
+    ReviewStateFile::for_subject(&pull.repo.folders(), &pull_subject())
 }
 
 fn replies(sent: &SentLog) -> Vec<(String, SendMode)> {
@@ -1149,12 +1151,9 @@ fn delivered_one(pull: &Pull, host: &FakeHost) -> (Review, HandOffId) {
 }
 
 fn working_on_it_request(pull: &Pull, id: HandOffId) -> AgentReplyRequest {
-    let pr: PullRequestUrl = PR.parse().unwrap();
-    ReviewStateFile::for_subject(&pull.repo.folders(), &ReviewSubject::from(pr.clone()))
-        .load()
-        .unwrap()
-        .hand_offs()
-        .agent_working_on_it(&ThreadHome::Host(pr), id)
+    let file = pull_state_file(pull);
+    ThreadHomes::of(&pull_subject(), &file)
+        .agent_working_on_it(file.load().unwrap().hand_offs(), id)
         .unwrap()
 }
 

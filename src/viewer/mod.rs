@@ -2,18 +2,14 @@
 //! Views read its state and send it user actions; tests drive it the same way.
 
 mod active_pr;
-mod agent_event;
-mod agent_pool;
+mod agent_refresh;
 mod ai_review;
 mod ai_review_run;
 mod app_state;
 mod app_window;
-mod ask;
-mod ask_context;
-mod ask_desk;
-mod ask_target;
 mod avatars;
 mod branch_link;
+mod cancel;
 mod capability;
 mod carried;
 mod clone_offer;
@@ -49,6 +45,8 @@ mod jump;
 mod kept_values;
 mod line_location;
 mod local_row;
+#[cfg(feature = "snapshots")]
+mod local_task_staging;
 mod local_thread_store;
 mod local_threads;
 mod markdown;
@@ -56,6 +54,7 @@ mod merging;
 mod move_offer;
 mod move_to_pr;
 mod name_card;
+mod name_code;
 mod name_desk;
 mod name_highlights;
 mod name_hover;
@@ -111,6 +110,7 @@ mod tour_writing;
 mod typing_save;
 mod used_findings;
 mod viewed_sync;
+mod visits;
 mod word_diff;
 mod work_agenda;
 mod written_on;
@@ -123,8 +123,7 @@ pub use crate::merge_method::MergeMethod;
 pub use crate::more_lines::{MoreLines, MoreLinesEntry};
 pub use active_pr::WritingFact;
 pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOutcome, WriteDecision};
-pub use agent_event::AgentEvent;
-pub use agent_pool::{AgentPool, Opening};
+pub use agent_refresh::{Pace, TourAgentRefresh};
 pub use ai_review::AiReview;
 pub use ai_review_run::{
     AiReviewAction, AiReviewRefusal, AiReviewRun, AiReviewStage, RunningReview,
@@ -134,13 +133,9 @@ pub use app_window::{
     AfterClose, AppWindow, FailedBuild, Relaunched, ShowBuilding, ShowReview, ShowSettings,
     ShowSwitcher, ShowWriting,
 };
-pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place, ShownOn};
-pub use ask_desk::{
-    AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,
-};
-pub use ask_target::{AskTarget, Unavailable};
 pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub use branch_link::{BranchOffer, local_reviews_of_repo};
+pub use cancel::{Cancel, RefreshCancelled};
 pub use capability::{Capability, HostCapabilities};
 pub use clone_offer::{CloneJob, CloneOffer, CloneOfferState};
 pub use code_link::{
@@ -204,7 +199,9 @@ pub use jump::{
 };
 pub use line_location::{LineLocation, Side};
 pub use local_row::LocalRow;
-pub use local_thread_store::{LocalThreadStore, ThreadHome};
+#[cfg(feature = "snapshots")]
+pub use local_task_staging::{stage_answered_task, stage_held_back_task, stage_queued_task};
+pub use local_thread_store::{LocalThreadStore, ThreadHome, ThreadHomes};
 pub use local_threads::{LocalAuthor, LocalThreads};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use merging::{
@@ -213,9 +210,10 @@ pub use merging::{
 pub use move_offer::{MoveFrom, MoveHereOffer, MoveOffer, StartedMove};
 pub use move_to_pr::{DropLocalReview, PickPullCodeSource, PrMover, let_go_of_unread_snapshots};
 pub use name_card::{
-    CardNote, CodeRun, DefinitionCard, DefinitionRow, FoundNames, NameTarget, ServerQuestion,
+    CardNote, CardRow, DefinitionCard, DefinitionRow, FoundNames, NameTarget, ServerQuestion,
     Snippet, UsageFile, UsageLine,
 };
+pub use name_code::{BODY_LINES_AT_MOST, CodePane, CodeRun, PaneLine, USAGE_CONTEXT_LINES};
 pub use name_desk::{HoveredName, NameOutcome, NameUnderPointer, NameWaiting, NameWork};
 pub use name_highlights::NameHighlights;
 pub use name_highlights::USAGES_SHOWN;
@@ -225,7 +223,7 @@ pub use no_host::NoHost;
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use overview::{OverviewFile, OverviewPage, OverviewStats};
 pub use page::{
-    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
+    BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
     FullDiffControl, HunkGapRow, Page, PageRow, PieceHeading, PieceLabel, PinnedHeader,
     ReviewerSummaryRow, RouteStopRow, ScreenFooter, SelectedRows, ShownLine, StepHeading,
     StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar, line_count,
@@ -234,12 +232,11 @@ pub use page::{
 pub use piece_diff::PieceDiff;
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost,
-    CommentReactionsPort, HostError, HostedCodePort, IssueDetailsPort, MergingPort, NoAccess,
-    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
-    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, RefreshWriter,
-    RelevantPullRequestsPort, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed,
-    ViewedFile, ViewedFilesPort, ViewedState,
+    ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost, CommentReactionsPort, HostError,
+    HostedCodePort, IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
+    PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, RelevantPullRequestsPort, Resolution,
+    ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};
@@ -311,6 +308,7 @@ pub use tour_writing::{TourWriting, WritingPhase, WritingStage};
 pub use typing_save::TypingSave;
 pub use used_findings::UsedFinding;
 pub use viewed_sync::{SyncOutcome, SyncRequest};
+pub use visits::ReadingSpot;
 pub use work_agenda::{
     AGENT_LINK_RECHECK, AGENT_START_RETRY, AfterLanding, PULL_OF_BRANCH_RETRY, PUSH_DEBOUNCE,
     WORKING_TREE_RECHECK, Work, WorkKind, WorkOutcome, WorkPorts,

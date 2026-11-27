@@ -12,8 +12,6 @@ use gpui::{
 
 use crate::app::code_links::open_file_in_ide;
 #[cfg(feature = "snapshots")]
-use crate::config::AskModelChoice;
-use crate::config::{AskEffortChoice, AskSettings};
 #[cfg(feature = "snapshots")]
 use crate::ide::{IdeChoice, IdeTemplate};
 use crate::instructions::{InstructionsChoice, InstructionsKind, SkillName};
@@ -71,8 +69,6 @@ impl EventEmitter<SettingsEvent> for SettingsPanel {}
 enum Slot {
     Instructions(InstructionsKind),
     Ide,
-    AskModel,
-    AskEffort,
     Clone(usize),
     MoreLines,
     Keys,
@@ -111,8 +107,6 @@ impl ShownProblem {
             SettingProblem::Clone { row, .. } => Slot::Clone(*row),
             SettingProblem::InstructionsFileGone(kind, _)
             | SettingProblem::InstructionsUnreadable(kind, _) => Slot::Instructions(*kind),
-            SettingProblem::AskEffortUnknown(_) => Slot::AskEffort,
-            SettingProblem::AskModelBlank => Slot::AskModel,
             SettingProblem::IdeTemplateBlank => Slot::Ide,
             SettingProblem::MoreLinesNotACount(_) => Slot::MoreLines,
             SettingProblem::Key(_) => Slot::Keys,
@@ -163,13 +157,9 @@ struct Editing {
     skills: Vec<(SkillName, SharedString)>,
     summary: InstructionsEntry,
     review: InstructionsEntry,
-    /// What the Default segments stand for, said beside the setting's name.
-    default_model_note: SharedString,
-    default_effort_note: SharedString,
-    default_effort_level: usize,
+    /// What the Default segment stands for, said beside the setting's name.
     default_more_lines_note: SharedString,
     ide: CustomEntry,
-    model: CustomEntry,
     /// The text the reviewer typed for the number, kept as typed while it is not a number yet.
     more_lines: CustomEntry,
     folder_labels: Vec<SharedString>,
@@ -201,10 +191,6 @@ impl Editing {
             settings.ide().custom_text().is_some(),
             settings.ide_custom_text(),
         );
-        let model = entry(
-            settings.ask_model().custom_text().is_some(),
-            settings.ask_model_custom_text(),
-        );
         let more_lines = entry(true, &settings.more_lines_text());
         let problems = settings
             .problems_on_open()
@@ -212,11 +198,6 @@ impl Editing {
             .map(ShownProblem::of)
             .collect();
         let mut editing = Self {
-            default_model_note: format!("Default is {}", AskSettings::default().model).into(),
-            default_effort_note: format!("Default is {}", AskSettings::default().effort).into(),
-            default_effort_level: effort_level(&AskEffortChoice::of(Some(
-                &AskSettings::default().effort,
-            ))),
             default_more_lines_note: format!(
                 "Default is {}; from {} to {}",
                 MoreLines::default().get(),
@@ -229,7 +210,6 @@ impl Editing {
             summary,
             review,
             ide,
-            model,
             more_lines,
             folder_labels: Vec::new(),
             problems,
@@ -762,13 +742,6 @@ impl SettingsPanel {
                     self.instructions(InstructionsKind::Review, editing, colors, cx),
                 )
                 .into_any_element(),
-                Self::section(
-                    colors,
-                    "Ask",
-                    "The model and effort Ask uses.",
-                    self.ask(editing, colors, cx),
-                )
-                .into_any_element(),
             ],
             SettingsPage::Code => vec![
                 Self::section(
@@ -973,7 +946,7 @@ impl SettingsPanel {
             .child(content)
     }
 
-    /// A made-up config being edited, for the pictures: a custom IDE, another model and effort,
+    /// A made-up config being edited, for the pictures: a custom IDE,
     /// two clones, one of them wrong, and nothing saved yet.
     #[cfg(feature = "snapshots")]
     pub fn stage_sample_edits(&mut self, cx: &mut Context<Self>) {
@@ -984,8 +957,6 @@ impl SettingsPanel {
             editing
                 .settings
                 .set_ide(&IdeChoice::Custom(IdeTemplate::new(TEMPLATE.to_owned())));
-            editing.settings.set_ask_model(&AskModelChoice::Sonnet);
-            editing.settings.set_ask_effort(&AskEffortChoice::High);
             "30".clone_into(&mut editing.more_lines.text);
             editing.settings.set_more_lines_text("30");
             for (repo, folder) in [
@@ -1106,14 +1077,6 @@ fn setting_row(name: &'static str, note: gpui::Div, control: impl IntoElement) -
                 .child(note),
         )
         .child(control)
-}
-
-/// How much thinking an effort asks for, from 1 (low) to 5 (max); 0 for an effort Claude does not know.
-fn effort_level(effort: &AskEffortChoice) -> usize {
-    AskEffortChoice::PICKABLE
-        .iter()
-        .position(|pickable| pickable == effort)
-        .map_or(0, |index| index + 1)
 }
 
 impl Render for SettingsPanel {

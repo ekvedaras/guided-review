@@ -1,6 +1,6 @@
 use crate::pull_request::{PullRequestUrl, Sha};
 
-use super::local_thread_store::{LocalThreadStore, ThreadHome};
+use super::local_thread_store::{LocalThreadStore, ThreadHome, ThreadHomes};
 use super::local_threads::LocalAuthor;
 
 use super::capability::Capability;
@@ -11,6 +11,20 @@ use super::reactions::{Reaction, ReactionChange};
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 
 /// What the reviewer does to a thread that is already on the host.
+impl ThreadAction {
+    /// Where the thread or comment the action is about is kept.
+    pub(super) fn home_in(&self, homes: &ThreadHomes) -> ThreadHome {
+        match self {
+            Self::Reply { thread_id, .. }
+            | Self::Resolve { thread_id }
+            | Self::Unresolve { thread_id } => homes.of_thread(thread_id),
+            Self::EditComment { comment_id }
+            | Self::DeleteComment { comment_id }
+            | Self::SetReaction { comment_id, .. } => homes.of_comment(comment_id),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadAction {
     /// Sends the thread's reply draft as it is saved when the request is made, so a key typed
@@ -18,7 +32,7 @@ pub enum ThreadAction {
     Reply {
         thread_id: ThreadId,
         mode: SendMode,
-        /// Ask agent hands the reply to the tour agent too.
+        /// Comment and ask agent hands the reply to the tour agent too.
         audience: Audience,
     },
     Resolve {
@@ -68,6 +82,8 @@ pub struct ThreadActionRequest {
 
 pub struct ThreadActionOutcome {
     pub(super) action: ThreadAction,
+    /// Where the thread the action was about is kept, so its threads are the ones to read again.
+    pub(super) home: ThreadHome,
     pub(super) result: ThreadActionResult,
     /// The threads as the host has them after the action, so the screen shows what the host shows;
     /// `None` when the action did not go through, so nothing changed.
@@ -100,6 +116,7 @@ impl ThreadActionRequest {
             .flatten();
         ThreadActionOutcome {
             action: self.action,
+            home: self.home,
             result,
             threads,
             reply_body,
