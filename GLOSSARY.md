@@ -106,6 +106,8 @@
 
 **Safety net**: The last screen of a tour. It shows every diff piece no step points to, so nothing in the PR goes unseen. It is computed from the tour and the diff, never stored.
 
+**History**: The screens the reviewer visited in this review, with where they were scrolled on each, for Back and Forward (the mouse's side buttons, `Cmd+[` and `Cmd+]`). Every change of screen adds a visit, the next, previous and unread keys too; a move after a Back drops what Forward held. It lives in the review, goes on after a re-pin and is gone when another PR is opened. Not the **Previous screen** key, which walks the reading order.
+
 **Screen**: What the viewer shows now: in a guided tour the summary, one step, or the safety net; in a basic tour the overview or one changed file.
 
 **Page**: The content of one screen, laid out for reading: the summary page holds the summary, the route and the PR description; a step page holds the step's text, its pieces and their threads; the safety net page holds the uncovered pieces. Under a line it shows, in this order: threads, queued comments, comment boxes and the ask marker of lines with Asks.
