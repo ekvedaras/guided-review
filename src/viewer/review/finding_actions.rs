@@ -560,7 +560,7 @@ impl ReviewCore {
         }
     }
 
-    fn comment_place_of(&self, anchor: &Anchor) -> Result<CommentPlace, FindingRefusal> {
+    pub(super) fn comment_place_of(&self, anchor: &Anchor) -> Result<CommentPlace, FindingRefusal> {
         if self.tour_freshness() == TourFreshness::Behind {
             return Err(FindingRefusal::Comment(CommentRefusal::TourIsOld));
         }

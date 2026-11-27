@@ -18,7 +18,7 @@ use guided_review::viewer::{
     AgentLinkOff, AgentStatus, Audience, CommentGesture, CommentPlace, CommentProblem,
     CommentRefusal, CommentResult, Effect, FinishRefusal, HandOffButton, HandOffState,
     HandToAgentRefused, Intent, LineLocation, PieceDiff, ReviewStateFile, ReviewVerdict, SendMode,
-    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadHome, ThreadMessage,
+    Side, TerminalId, TextBox, ThreadAction, ThreadActionResult, ThreadHomes, ThreadMessage,
     ThreadView, TourAgentPort, TourAgentState, TourAgents, WindowMoment, WorkPorts,
 };
 
@@ -346,10 +346,10 @@ fn the_app_and_agent_reply_never_write_a_stale_thread_over_each_others_words() {
     let mut app = task_sent(&feature);
 
     // The app shows the review, so the command writes the thread and the app takes the hand-off.
-    let home = ThreadHome::of(&feature.subject, &app.review.state_file());
+    let home = ThreadHomes::of(&feature.subject, &app.review.state_file());
     let state = app.review.state_file().load().unwrap();
     let first = app.review.hand_offs().all()[0].id();
-    let request = state.hand_offs().agent_working_on_it(&home, first).unwrap();
+    let request = home.agent_working_on_it(state.hand_offs(), first).unwrap();
     let done = request.run(&feature.host()).unwrap();
     app.review.hand_off_replied(first, done.replied()).unwrap();
     feature.run_work(&mut app);
@@ -1010,13 +1010,10 @@ fn sending_tasks_while_the_agent_answers_another_loses_no_task_thread_or_answer(
 /// `agent-reply` writes the answer on the thread, the running app marks the hand-off, and the
 /// agent is idle again.
 fn answered_while_the_app_shows(feature: &Feature, app: &mut OpenedReview, nth: usize, body: &str) {
-    let home = ThreadHome::of(&feature.subject, &app.review.state_file());
+    let home = ThreadHomes::of(&feature.subject, &app.review.state_file());
     let hand_off = app.review.hand_offs().all()[nth].id();
     let state = app.review.state_file().load().unwrap();
-    let request = state
-        .hand_offs()
-        .agent_reply(&home, hand_off, body)
-        .unwrap();
+    let request = home.agent_reply(state.hand_offs(), hand_off, body).unwrap();
     let done = request.run(&feature.host()).unwrap();
     app.review
         .hand_off_replied(hand_off, done.replied())

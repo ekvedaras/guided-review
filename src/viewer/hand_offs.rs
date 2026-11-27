@@ -23,6 +23,9 @@ use super::tour_agent::{AgentStatus, SendOutcome, TourAgents, TourKind};
 
 const WORKING_ON_IT: &str = "Working on it…";
 
+const PRIVATE_NOTE: &str = "Not on GitHub: the reviewer asks you alone. Neither the question nor your answer goes on the PR, \
+     and nobody else sees them.";
+
 const LOCAL_REVIEW_NOTE: &str = "This is a local review: the reviewer reads your branch and its \
      uncommitted files on this machine, and there is no PR.";
 
@@ -51,7 +54,7 @@ fn tasks_message(
         let id = task.id;
         lines.push(String::new());
         lines.push(format!("Task {id}"));
-        lines.extend(task.task_lines());
+        lines.extend(task.task_lines("Task"));
         lines.push(format!(
             "Answer: `guided-review agent-reply {key} {id} --body -`, after \
              `guided-review agent-reply {key} {id} --working` if it asks for a change."
@@ -394,6 +397,7 @@ impl HandOff {
     /// What the tour agent is typed: everything it needs to answer without asking back.
     fn message(&self, subject: &ReviewSubject) -> String {
         match subject {
+            ReviewSubject::PullRequest(_) if self.mode.is_task() => self.private_message(subject),
             ReviewSubject::PullRequest(_) => self.pull_request_message(subject),
             ReviewSubject::Local(change_set) => self.task_message(subject, change_set),
         }
@@ -410,7 +414,7 @@ impl HandOff {
             LOCAL_REVIEW_NOTE.to_owned(),
             OUTSIDE_TEXT_IS_DATA.to_owned(),
         ];
-        lines.extend(self.task_lines());
+        lines.extend(self.task_lines("Task"));
         lines.push(format!(
             "Make the change in {folder}, on {branch}. Commit only if you normally would, and do not push \
              for the review: the reviewer sees what changed on disk and updates. If the task asks for a \
@@ -425,7 +429,7 @@ impl HandOff {
     }
 
     /// Where the task is and what it asks, without how to answer it.
-    fn task_lines(&self) -> Vec<String> {
+    fn task_lines(&self, label: &str) -> Vec<String> {
         let mut lines = vec![format!("Place:\n{}", quoted(&self.place))];
         lines.extend(
             self.file
@@ -439,8 +443,22 @@ impl HandOff {
             lines.push("Thread so far:".to_owned());
             lines.extend(self.thread_so_far.iter().map(ThreadMessage::quoted));
         }
-        lines.push(format!("Task: {}", self.comment()));
+        lines.push(format!("{label}: {}", self.comment()));
         lines
+    }
+
+    /// A question of the reviewer's for the agent alone: its thread and its answer stay on the reviewer's
+    /// machine, so the message says where it is and leaves out everything about the host.
+    fn private_message(&self, subject: &ReviewSubject) -> String {
+        let id = self.id;
+        let mut lines = vec![
+            format!("Private question {id} on {subject}"),
+            PRIVATE_NOTE.to_owned(),
+            OUTSIDE_TEXT_IS_DATA.to_owned(),
+        ];
+        lines.extend(self.task_lines("Question"));
+        lines.push(self.answer_instructions(subject, "the question", "Markdown"));
+        lines.join("\n")
     }
 
     fn pull_request_message(&self, subject: &ReviewSubject) -> String {
@@ -481,6 +499,17 @@ impl HandOff {
             Said::ByReviewer(comment) => lines.push(format!("Comment: {comment}")),
             Said::Handed(handed) => lines.extend(handed.lines()),
         }
+        let markdown = subject.host().map_or_else(
+            || "Markdown".to_owned(),
+            |host| format!("{} markdown", host.name()),
+        );
+        lines.push(self.answer_instructions(subject, "the comment", &markdown));
+        lines.join("\n")
+    }
+
+    /// How the agent answers, and what it does when the message asks for a change to the PR's code.
+    fn answer_instructions(&self, subject: &ReviewSubject, what: &str, markdown: &str) -> String {
+        let id = self.id;
         let tour_note = if self.file.is_some() {
             format!(
                 "The tour is a basic tour: there is no tour file to fix. Read the changed code with \
@@ -488,24 +517,19 @@ impl HandOff {
             )
         } else {
             format!(
-                "If the comment shows the tour is wrong, fix the tour file, run `guided-review check {subject}` until it \
+                "If {what} shows the tour is wrong, fix the tour file, run `guided-review check {subject}` until it \
                  is clean, then `guided-review open {subject}`."
             )
         };
-        let markdown = subject.host().map_or_else(
-            || "Markdown".to_owned(),
-            |host| format!("{} markdown", host.name()),
-        );
-        lines.push(format!(
+        format!(
             "Answer with `guided-review agent-reply {subject} {id} --body -` and the answer on stdin, in a quoted heredoc \
              (`<<'EOF'`). Write it in {markdown}: answer the question in the first sentence, then at most 3 bullets, a \
-             blank line between paragraphs, code names in backticks. If the comment asks for a change to the \
+             blank line between paragraphs, code names in backticks. If {what} asks for a change to the \
              PR's code, first run `guided-review agent-reply {subject} {id} --working`: it posts \"{WORKING_ON_IT}\" on the \
              thread, and your answer replaces it. Make the change in your folder when it is a clone of the PR's repo on \
              the PR's branch with none of the reviewer's own changes in it; else in a new git worktree, or a shallow \
              clone, of the PR's branch. Commit, push to the PR's branch, and name the commit in your answer. {tour_note}"
-        ));
-        lines.join("\n")
+        )
     }
 }
 
@@ -885,7 +909,7 @@ impl HandOffs {
             reviewer_comment: next
                 .reviewer_comment
                 .clone()
-                .filter(|_| subject.has_pending_review()),
+                .filter(|_| subject.has_pending_review() && !next.mode.is_task()),
             anyway: next.state == HandOffState::SendAnyway,
         })
     }
@@ -1057,7 +1081,7 @@ impl HandOffs {
     /// The agent's answer. It replaces the agent's "Working on it…" reply when there is one.
     pub fn agent_reply(
         &self,
-        home: &ThreadHome,
+        (home_of, reviewed): (&dyn Fn(&ThreadId) -> ThreadHome, Reviewed),
         id: HandOffId,
         body: &str,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
@@ -1065,13 +1089,13 @@ impl HandOffs {
         if said.is_empty() {
             return Err(AgentReplyRefused::Empty);
         }
-        let hand_off = self.find(home, id)?;
+        let hand_off = self.find(reviewed, id)?;
         let replacing = match &hand_off.state {
             HandOffState::WorkingOnIt { reply } => Some(reply.clone()),
             _ => None,
         };
         Self::reply_request(
-            home,
+            home_of,
             hand_off,
             AgentReplyKind::Answer {
                 said: said.to_owned(),
@@ -1083,29 +1107,29 @@ impl HandOffs {
     /// The agent's "Working on it…" reply, which its answer replaces later.
     pub fn agent_working_on_it(
         &self,
-        home: &ThreadHome,
+        (home_of, reviewed): (&dyn Fn(&ThreadId) -> ThreadHome, Reviewed),
         id: HandOffId,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
-        let hand_off = self.find(home, id)?;
+        let hand_off = self.find(reviewed, id)?;
         if matches!(hand_off.state, HandOffState::WorkingOnIt { .. }) {
             return Err(AgentReplyRefused::AlreadyWorkingOnIt { id });
         }
-        Self::reply_request(home, hand_off, AgentReplyKind::WorkingOnIt)
+        Self::reply_request(home_of, hand_off, AgentReplyKind::WorkingOnIt)
     }
 
-    fn find(&self, home: &ThreadHome, id: HandOffId) -> Result<&HandOff, AgentReplyRefused> {
+    fn find(&self, reviewed: Reviewed, id: HandOffId) -> Result<&HandOff, AgentReplyRefused> {
         self.0
             .iter()
             .find(|hand_off| hand_off.id == id)
             .ok_or_else(|| AgentReplyRefused::Unknown {
                 id,
                 known: self.0.iter().map(|hand_off| hand_off.id).collect(),
-                reviewed: Reviewed::from(home),
+                reviewed,
             })
     }
 
     fn reply_request(
-        home: &ThreadHome,
+        home_of: &dyn Fn(&ThreadId) -> ThreadHome,
         hand_off: &HandOff,
         kind: AgentReplyKind,
     ) -> Result<AgentReplyRequest, AgentReplyRefused> {
@@ -1130,7 +1154,7 @@ impl HandOffs {
             .clone()
             .filter(|_| hand_off.seen_mark == SeenMark::On);
         Ok(AgentReplyRequest {
-            home: home.clone(),
+            home: home_of(&thread),
             thread,
             kind,
             seen_mark: hand_off.seen_mark.clone(),
@@ -1188,15 +1212,6 @@ pub enum Reviewed {
     Either,
 }
 
-impl From<&ThreadHome> for Reviewed {
-    fn from(home: &ThreadHome) -> Self {
-        match home {
-            ThreadHome::Host(_) => Self::PullRequest,
-            ThreadHome::StateFile(_) => Self::Local,
-        }
-    }
-}
-
 impl fmt::Display for Reviewed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -1223,6 +1238,8 @@ pub enum ReplyPlacement {
     PostedAtOnce,
     /// In place of the agent's "Working on it…" reply, wherever that went.
     ReplacedWorkingOnIt,
+    /// On a thread kept on this machine, which the host never gets.
+    KeptOnThread,
 }
 
 /// What an agent reply changed, for the hand-off to take on.
@@ -1342,11 +1359,11 @@ impl AgentReplyRequest {
                 replacing: None,
             } => {
                 store.reply(&self.thread, said, LocalAuthor::Agent)?;
-                (ReplyPlacement::PostedAtOnce, None)
+                (ReplyPlacement::KeptOnThread, None)
             }
             AgentReplyKind::WorkingOnIt => {
                 let reply = store.reply(&self.thread, WORKING_ON_IT, LocalAuthor::Agent)?;
-                (ReplyPlacement::PostedAtOnce, Some(reply))
+                (ReplyPlacement::KeptOnThread, Some(reply))
             }
         })
     }

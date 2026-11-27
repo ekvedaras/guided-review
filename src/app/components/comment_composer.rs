@@ -39,6 +39,7 @@ pub struct ComposerActions {
     pub on_comment_now: OnCompose,
     pub on_comment_and_ask_agent: OnCompose,
     pub on_comment_and_ask_agent_now: OnCompose,
+    pub on_ask_agent: OnCompose,
     pub on_suggest_change: OnCompose,
     pub on_discard: OnCompose,
     /// One of a local review's task send actions.
@@ -81,6 +82,7 @@ fn offered_actions(capabilities: CommentCapabilities) -> Vec<SendAction> {
             if capabilities.comment_now {
                 offered.push(SendAction::CommentAndAskAgentNow);
             }
+            offered.push(SendAction::AskAgent);
         }
     } else if sending.tasks().len() > 1 {
         offered.push(SendAction::CommentNow);
@@ -118,6 +120,7 @@ fn send_button_look(
             Some(Icon::Zap),
             "Comment and ask agent now",
         ),
+        (SendAction::AskAgent, _) => ("ask-agent-only", Some(Icon::Terminal), "Ask agent"),
     }
 }
 
@@ -196,6 +199,7 @@ impl RenderOnce for CommentComposer {
                 SendAction::CommentAndAskAgentNow => {
                     Rc::clone(&actions.on_comment_and_ask_agent_now)
                 }
+                SendAction::AskAgent => Rc::clone(&actions.on_ask_agent),
             }
         };
         let body = if self.state == BoxState::Composing {
@@ -211,6 +215,7 @@ impl RenderOnce for CommentComposer {
             let (asks, on_ask) = typed(SendAction::CommentAndAskAgent);
             let (posts, on_post) = typed(SendAction::CommentNow);
             let (asks_now, on_ask_now) = typed(SendAction::CommentAndAskAgentNow);
+            let (asks_alone, on_ask_alone) = typed(SendAction::AskAgent);
             let (suggests, on_suggest) = typed(SendAction::SuggestChange);
             TextBox::new(
                 SharedString::from(format!("{id}-text")),
@@ -229,6 +234,7 @@ impl RenderOnce for CommentComposer {
             .on_submit_and_ask_agent(asks, on_ask)
             .on_submit_now(posts, on_post)
             .on_submit_and_ask_agent_now(asks_now, on_ask_now)
+            .on_submit_ask_agent(asks_alone, on_ask_alone)
             .on_suggest_change(suggests, on_suggest)
             .into_any_element()
         } else {
@@ -252,6 +258,11 @@ impl RenderOnce for CommentComposer {
                     .when(planned.action == SendAction::CommentAndAskAgentNow, |button| {
                         button.tooltip(tooltip(|_| {
                             "Comment and ask agent now: posts the comment at once and hands it to your agent".into()
+                        }))
+                    })
+                    .when(planned.action == SendAction::AskAgent, |button| {
+                        button.tooltip(tooltip(|_| {
+                            "Ask agent: only your agent sees this, nothing goes to GitHub".into()
                         }))
                     })
                     .aria_label(label)

@@ -7,7 +7,7 @@ use guided_review::viewer::{
 };
 
 use SendAction::{
-    AddToReview, CommentAndAskAgent, CommentAndAskAgentNow, CommentNow, SuggestChange,
+    AddToReview, AskAgent, CommentAndAskAgent, CommentAndAskAgentNow, CommentNow, SuggestChange,
 };
 use SendRole::{Other, Primary, Secondary};
 
@@ -452,12 +452,13 @@ fn every_text_key_is_one_gpui_can_bind() {
     }
 }
 
-const SEND_COMMANDS: [Command; 5] = [
+const SEND_COMMANDS: [Command; 6] = [
     Command::AddToReview,
     Command::CommentNow,
     Command::SuggestChange,
     Command::CommentAndAskAgent,
     Command::CommentAndAskAgentNow,
+    Command::AskAgent,
 ];
 
 fn send_keys(keymap: &Keymap) -> Vec<String> {
@@ -488,6 +489,7 @@ fn with_no_choice_add_to_review_is_primary_and_ask_agent_secondary_and_the_rest_
             "primary-alt-s",
             "primary-shift-enter",
             "primary-alt-shift-enter",
+            "primary-alt-p",
         ]
     );
 }
@@ -504,6 +506,7 @@ fn the_primary_action_has_cmd_enter_the_secondary_cmd_shift_enter_and_the_others
             "primary-shift-enter",
             "primary-alt-g",
             "primary-alt-shift-enter",
+            "primary-alt-p",
         ]
     );
 }
@@ -523,7 +526,7 @@ fn no_choice_of_primary_and_secondary_gives_two_send_actions_one_key() {
             chords.dedup();
 
             assert_eq!(chords.len(), count, "{config}");
-            assert_eq!(count, 5, "{config}");
+            assert_eq!(count, 6, "{config}");
             assert_eq!(keys(&keymap, Command::from(primary)), ["primary-enter"]);
             assert_eq!(
                 keys(&keymap, Command::from(secondary)),
@@ -660,7 +663,7 @@ fn button(action: SendAction, role: SendRole, keys: &str) -> Button {
     (action, role, Some(keys.to_owned()))
 }
 
-const EVERY_ACTION: [SendAction; 5] = SendAction::ALL;
+const EVERY_ACTION: [SendAction; 6] = SendAction::ALL;
 
 #[test]
 fn a_box_lists_the_primary_first_then_the_secondary_then_the_rest_each_with_its_key() {
@@ -672,6 +675,7 @@ fn a_box_lists_the_primary_first_then_the_secondary_then_the_rest_each_with_its_
             button(CommentNow, Other, "primary-alt-enter"),
             button(SuggestChange, Other, "primary-alt-s"),
             button(CommentAndAskAgentNow, Other, "primary-alt-shift-enter"),
+            button(AskAgent, Other, "primary-alt-p"),
         ]
     );
     assert_eq!(
@@ -685,6 +689,7 @@ fn a_box_lists_the_primary_first_then_the_secondary_then_the_rest_each_with_its_
             button(AddToReview, Other, "primary-alt-a"),
             button(SuggestChange, Other, "primary-alt-s"),
             button(CommentAndAskAgent, Other, "primary-alt-g"),
+            button(AskAgent, Other, "primary-alt-p"),
         ]
     );
 }
@@ -779,4 +784,50 @@ fn the_old_names_of_the_two_agent_commands_still_bind_their_keys() {
 
     assert_eq!(keys(&keymap, Command::CommentAndAskAgent), ["primary-j"]);
     assert_eq!(keys(&keymap, Command::CommentAndAskAgentNow), ["primary-y"]);
+}
+
+#[test]
+fn ask_agent_is_the_private_action_with_its_own_text_label_and_key() {
+    assert_eq!(AskAgent.config_text(), "ask_agent_only");
+    assert_eq!(SendAction::of_config_text("ask_agent_only"), Some(AskAgent));
+    assert_eq!(
+        SendAction::of_config_text("ask_agent"),
+        Some(CommentAndAskAgent),
+        "the old name keeps its old meaning"
+    );
+    assert_eq!(AskAgent.label(), "Ask agent");
+    assert_eq!(
+        Command::from(AskAgent).send_action(),
+        Some(AskAgent),
+        "a command runs it in a box"
+    );
+    assert_eq!(
+        keys(&keymap_of("").unwrap(), Command::AskAgent),
+        ["primary-alt-p"]
+    );
+    assert_eq!(
+        SendChoice::of_config_text(Some("ask_agent_only"), None),
+        SendChoice::new(AskAgent, CommentAndAskAgent)
+    );
+}
+
+#[test]
+fn a_box_with_no_agent_to_ask_never_stands_a_posting_action_in_for_ask_agent() {
+    assert_eq!(AskAgent.resolve(&[AddToReview, CommentNow]), AddToReview);
+    assert_eq!(
+        AskAgent.resolve(&[AddToReview, CommentAndAskAgent]),
+        AddToReview
+    );
+}
+
+#[test]
+fn a_box_that_offers_ask_agent_lists_it_after_the_main_two() {
+    assert_eq!(
+        plan("", &[AddToReview, CommentNow, AskAgent]),
+        [
+            button(AddToReview, Primary, "primary-enter"),
+            button(CommentNow, Other, "primary-alt-enter"),
+            button(AskAgent, Other, "primary-alt-p"),
+        ]
+    );
 }

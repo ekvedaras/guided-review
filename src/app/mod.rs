@@ -1144,6 +1144,7 @@ fn bind_keys(keymap: &Keymap, cx: &mut App) {
                 Command::CommentAndAskAgentNow => {
                     KeyBinding::new(&keys, text_box::SubmitAndAskAgentNow, context)
                 }
+                Command::AskAgent => KeyBinding::new(&keys, text_box::SubmitAskAgent, context),
                 Command::SuggestChange => KeyBinding::new(&keys, text_box::SuggestChange, context),
                 Command::CloseBox => KeyBinding::new(&keys, text_box::Cancel, context),
                 Command::WrapLines => KeyBinding::new(&keys, ToggleWrapLines, context),

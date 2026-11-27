@@ -122,10 +122,11 @@ enum Scene {
     FilesList,
     FilesListSearch,
     AgentPicker,
+    AgentThread,
 }
 
 impl Scene {
-    const ALL: [Self; 76] = [
+    const ALL: [Self; 77] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
@@ -202,6 +203,7 @@ impl Scene {
         Self::FilesList,
         Self::FilesListSearch,
         Self::AgentPicker,
+        Self::AgentThread,
     ];
 
     fn file_name(self) -> &'static str {
@@ -282,6 +284,7 @@ impl Scene {
             Self::FilesList => "97-files-list",
             Self::FilesListSearch => "98-files-list-search",
             Self::AgentPicker => "99-agent-picker",
+            Self::AgentThread => "100-agent-thread",
         }
     }
 
@@ -1127,6 +1130,10 @@ impl OneStepLayout {
                     );
                 }
             }
+            Scene::AgentThread => self.change_review(cx, |review| {
+                review.go_forward();
+                review.stage_private_thread();
+            }),
             Scene::TourEndUnread => {
                 self.change_review(cx, |review| while review.go_forward() {});
                 self.session.update(cx, ReviewSession::stage_unread_end);
@@ -1425,6 +1432,10 @@ impl OneStepLayout {
                     review.go_to_summary();
                 });
             }
+            Scene::AgentThread => self.change_review(cx, |review| {
+                review.unstage_private_thread();
+                review.go_to_summary();
+            }),
             Scene::AiReviewThreadFromFinding => self.change_review(cx, |review| {
                 review.unstage_thread_from_finding();
                 review.ai_review_is(AiReview::NotRun);

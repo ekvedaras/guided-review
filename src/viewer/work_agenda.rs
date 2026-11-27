@@ -16,9 +16,9 @@ use super::capability::Capability;
 use super::comment_send::{CommentOutcome, CommentRequest};
 use super::fix_requests::{FixDeliveryOutcome, FixDeliveryRequest};
 use super::hand_offs::{DeliveryOutcome, DeliveryRequest, SeenMarkOff, SeenMarkOffOutcome};
-use super::local_thread_store::ThreadHome;
+use super::local_thread_store::ThreadHomes;
 use super::merging::{MergeChange, Merging};
-use super::outdated_lines::{FollowedLines, follow_outdated};
+use super::outdated_lines::FollowedLines;
 use super::ports::{CodeHost, HostError, PullOfBranch};
 use super::pr_origin::PullRequestOrigin;
 use super::pr_reviewers::PullRequestReviews;
@@ -261,7 +261,7 @@ pub(super) enum Job {
     PullIssueDetails(Vec<IssueUrl>),
     SyncViewed(SyncRequest),
     PullThreads {
-        home: ThreadHome,
+        homes: ThreadHomes,
         head: Sha,
     },
     PullPendingReview(PullRequestUrl),
@@ -350,15 +350,9 @@ impl Work {
             }),
             Job::SyncViewed(request) => Done::SyncViewed(request.run(host)),
             // Outdated threads are followed to their lines in the same trip, so they never jump once shown.
-            Job::PullThreads { home, head } => Done::Threads(match &home {
-                ThreadHome::Host(pr) => host.review_threads(pr).map(|threads| {
-                    let followed = follow_outdated(&threads, ports.source, &head);
-                    (threads, followed)
-                }),
-                ThreadHome::StateFile(store) => store
-                    .threads_and_followed_at(ports.source, &head)
-                    .map_err(HostError::Other),
-            }),
+            Job::PullThreads { homes, head } => {
+                Done::Threads(homes.read(host, ports.source, &head))
+            }
             Job::PullPendingReview(pr) => Done::PendingReview {
                 exists: host.has_pending_review(&pr),
                 authored: host.viewer_authored(&pr),

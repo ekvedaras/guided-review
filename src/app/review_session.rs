@@ -539,7 +539,11 @@ impl ReviewSession {
         question: &str,
         cx: &mut Context<Self>,
     ) -> Result<WhyAsked, FindingRefusal> {
-        self.change(cx, |review| review.ask_why(id, question))
+        let asked = self.change(cx, |review| review.ask_why(id, question))?;
+        if let WhyAsked::ToTourAgent(place) = &asked {
+            self.send_comment(place, SendMode::SendNow, Audience::Agent, cx);
+        }
+        Ok(asked)
     }
 
     pub fn mark_fixed(
@@ -1445,7 +1449,8 @@ impl ReviewSession {
                 start: at.clone(),
                 end: at,
             };
-            store.stage_answered_task(
+            crate::viewer::stage_answered_task(
+                &store,
                 &place,
                 &head,
                 (
@@ -1453,7 +1458,8 @@ impl ReviewSession {
                     "Done: the README now says the total is before tax, and `tax` names the rate.",
                 ),
             )?;
-            store.stage_queued_task(
+            crate::viewer::stage_queued_task(
+                &store,
                 &CommentPlace::File(FilePath::new("README.md")?),
                 &head,
                 "Add a line on how to run the shop's tests.",
@@ -1480,15 +1486,15 @@ impl ReviewSession {
                 side: crate::viewer::Side::Head,
                 line: crate::line_number::LineNumber::try_from(3_u32)?,
             };
-            crate::viewer::LocalThreadStore::in_file(opened.review.state_file())
-                .stage_held_back_task(
-                    &CommentPlace::Lines {
-                        start: at.clone(),
-                        end: at,
-                    },
-                    &head,
-                    "Name the currency next to every price in the README.",
-                )
+            crate::viewer::stage_held_back_task(
+                &crate::viewer::LocalThreadStore::in_file(opened.review.state_file()),
+                &CommentPlace::Lines {
+                    start: at.clone(),
+                    end: at,
+                },
+                &head,
+                "Name the currency next to every price in the README.",
+            )
         });
         if let Err(error) = staged {
             eprintln!("could not stage a held back task in the local review: {error:#}");
@@ -2216,7 +2222,7 @@ fn sent_note(what: &str, mode: SendMode, audience: Audience) -> String {
     let done = match mode {
         SendMode::AddToReview => "added to your review",
         SendMode::CommentNow => "posted",
-        SendMode::SendNow => "kept as a task",
+        SendMode::SendNow => return format!("{what} sent to your agent"),
         SendMode::AddToTasks => return format!("{what} queued for Send tasks"),
     };
     match audience {

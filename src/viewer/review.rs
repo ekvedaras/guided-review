@@ -57,7 +57,7 @@ use super::host_outage::Read;
 use super::host_outage::{Affected, OutageCause};
 use super::image_preview::ImagePreviewRequest;
 use super::jump::{self, JumpTarget, PaletteAction, PaletteGroup};
-use super::local_thread_store::ThreadHome;
+use super::local_thread_store::ThreadHomes;
 use super::markdown::Markdown;
 use super::move_offer::MoveFrom;
 use super::name_desk::NameDesk;
@@ -764,16 +764,21 @@ impl ReviewCore {
         &self.subject
     }
 
-    pub(super) fn thread_home(&self) -> ThreadHome {
-        ThreadHome::of(&self.subject, self.state.file())
+    pub(super) fn thread_homes(&self) -> ThreadHomes {
+        ThreadHomes::of(&self.subject, self.state.file())
     }
 
-    /// The send actions a comment box of this review offers; Comment and ask agent is one more for a PR.
+    /// The ways a comment box of this review sends. A PR's boxes also send a private question to the
+    /// tour agent with Send now, which the host never gets.
     pub fn send_modes(&self) -> &'static [SendMode] {
         if self.subject.comments_are_agent_tasks() {
             &SendMode::LOCAL
         } else {
-            &[SendMode::AddToReview, SendMode::CommentNow]
+            &[
+                SendMode::AddToReview,
+                SendMode::CommentNow,
+                SendMode::SendNow,
+            ]
         }
     }
 
@@ -1463,7 +1468,7 @@ impl ReviewCore {
         } else {
             audience
         };
-        let home = self.thread_home();
+        let home = self.thread_homes().for_new(mode);
         self.comment_desk
             .start_sending(&self.state, place, mode, audience, (&self.head, home))
     }

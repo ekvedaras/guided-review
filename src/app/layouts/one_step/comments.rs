@@ -122,6 +122,12 @@ impl OneStepLayout {
                 });
                 window.focus(&this.focus, cx);
             }),
+            on_ask_agent: self.on_compose(place, cx, |this, place, window, cx| {
+                this.session.update(cx, |session, cx| {
+                    session.send_comment(&place, SendMode::SendNow, Audience::Agent, cx);
+                });
+                window.focus(&this.focus, cx);
+            }),
             on_suggest_change: self.on_compose(place, cx, |this, place, window, cx| {
                 // A refused or failed save is one of the review's problems, which the sidebar shows.
                 this.change_review(cx, |review| review.suggest_change(&place))

@@ -72,6 +72,16 @@ impl CommentRequest {
         &self.draft.place
     }
 
+    /// Whether the comment stays on this machine as a question for the agent, which the host never gets.
+    pub const fn is_private(&self) -> bool {
+        matches!(self.home, ThreadHome::StateFile(_))
+    }
+
+    /// Where the thread this comment starts is kept.
+    pub const fn home(&self) -> &ThreadHome {
+        &self.home
+    }
+
     pub const fn audience(&self) -> Audience {
         self.audience
     }

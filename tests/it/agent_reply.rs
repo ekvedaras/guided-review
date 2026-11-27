@@ -1,7 +1,10 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use guided_review::viewer::{CommentId, HandOffState, ReviewState, ReviewStateFile};
+use guided_review::pull_request::Sha;
+use guided_review::viewer::{
+    CommentId, CommentPlace, HandOffState, LocalThreadStore, ReviewState, ReviewStateFile,
+};
 
 use crate::support::fake_app::{CliEnded, answering_one_request};
 use crate::support::graphql::serve_graphql;
@@ -237,4 +240,52 @@ fn a_body_of_a_dash_is_read_from_stdin_so_the_reply_keeps_its_paragraphs() {
         reply["variables"]["input"]["body"],
         "🤖 Two jobs:\n\n- price the lines\n- record the discount"
     );
+}
+
+#[test]
+fn an_answer_to_a_private_question_goes_on_its_private_thread_and_github_is_not_asked() {
+    let repo = FixtureRepo::cloned_from("acme/shop");
+    let state: ReviewState = serde_json::from_value(serde_json::json!({
+        "hand_offs": [{
+            "id": 0,
+            "place": "notes.txt",
+            "step": null,
+            "mode": "SendNow",
+            "comment": "why ten?",
+            "thread": "local-thread-1",
+            "thread_so_far": [],
+            "state": "Delivered",
+        }]
+    }))
+    .unwrap();
+    state_file(repo.home()).save(&state).unwrap();
+    let head = Sha::new("abc123");
+    LocalThreadStore::in_file(state_file(repo.home()))
+        .start(
+            &CommentPlace::on_file(&crate::support::file_path("notes.txt")),
+            "why ten?",
+            &head,
+        )
+        .unwrap();
+
+    let (run, asked) =
+        run_agent_reply(&repo, Vec::new(), &["h0", "--body", "Because of the loop."]);
+
+    assert!(run.success, "stderr: {}", run.stderr);
+    assert_eq!(
+        *asked.lock().unwrap(),
+        Vec::<String>::new(),
+        "nothing asked of GitHub"
+    );
+    assert!(run.stdout.contains("private thread"), "{}", run.stdout);
+    let threads = LocalThreadStore::in_file(state_file(repo.home()))
+        .threads_at(&head)
+        .unwrap();
+    let said: Vec<&str> = threads[0]
+        .comments
+        .iter()
+        .map(|comment| comment.body.as_str())
+        .collect();
+    assert_eq!(said, ["why ten?", "Because of the loop."]);
+    assert_eq!(hand_off_state(repo.home()), HandOffState::Answered);
 }

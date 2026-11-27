@@ -4,6 +4,7 @@ use super::finding_outcome::FindingRefusal;
 use super::{Review, ReviewCore};
 use crate::findings::{Finding, FindingId};
 use crate::viewer::ai_review_run::ReviewAgentLife;
+use crate::viewer::comments::{CommentPlace, CommentRefusal, SendMode};
 use crate::viewer::finding_threads::{
     FindingThread, WhyDeliveryOutcome, WhyDeliveryRequest, WhyReply, WhyState,
 };
@@ -14,6 +15,9 @@ use crate::viewer::tour_agent::AgentStatus;
 pub enum WhyAsked {
     /// Onto the finding's thread, for the review agent that reported it.
     ToReviewAgent,
+    /// The review agent is gone: the question waits as a private question to the tour agent in a comment
+    /// box on the finding's lines, which the caller sends.
+    ToTourAgent(CommentPlace),
 }
 
 /// What Ask why asks when the reviewer typed nothing.
@@ -27,13 +31,48 @@ impl Review {
             typed => typed,
         };
         if !self.review_agent_is_alive() {
-            return Err(FindingRefusal::NoReviewAgent);
+            return self.ask_tour_agent_why(&finding, question);
         }
         self.ask_review_agent_why(finding, question)
     }
 }
 
 impl ReviewCore {
+    /// The review agent is gone, so the question becomes a private question to the tour agent on the
+    /// finding's lines: a comment box holds it, with the finding quoted, and the caller sends it.
+    fn ask_tour_agent_why(
+        &mut self,
+        finding: &Finding,
+        question: &str,
+    ) -> Result<WhyAsked, FindingRefusal> {
+        if let Some(refusal) = self.send_refusal(SendMode::SendNow) {
+            return Err(FindingRefusal::Comment(refusal));
+        }
+        let place = self
+            .comment_place_of(&finding.anchor)
+            .map_err(|refusal| match refusal {
+                FindingRefusal::Comment(CommentRefusal::NoLines) => FindingRefusal::NoReviewAgent,
+                other => other,
+            })?;
+        if self.state.draft_at(&place).is_some() {
+            return Err(FindingRefusal::DraftInTheWay(place));
+        }
+        let quoted_finding: Vec<String> = finding
+            .body
+            .lines()
+            .map(|line| format!("> {line}"))
+            .collect();
+        let text = format!(
+            "{question}\n\nAI review finding ({}):\n{}",
+            finding.severity,
+            quoted_finding.join("\n")
+        );
+        self.comment_desk
+            .add_text_at(&mut self.state, &place, &self.head, &text, &[])
+            .map_err(FindingRefusal::Comment)?;
+        Ok(WhyAsked::ToTourAgent(place))
+    }
+
     fn review_agent_is_alive(&self) -> bool {
         self.review_agent.is_alive()
     }

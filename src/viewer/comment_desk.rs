@@ -12,7 +12,7 @@ use super::finish_review::ReviewVerdict;
 use super::finish_review::{FinishOutcome, FinishRefusal, FinishRequest, FinishResult};
 use super::hand_offs::{SentComment, SentFrom};
 use super::line_location::{LineLocation, Side};
-use super::local_thread_store::ThreadHome;
+use super::local_thread_store::{ThreadHome, ThreadHomes};
 use super::review_state::{ReviewState, ReviewStateFile};
 use super::review_thread::{CommentId, ReviewThread, ThreadId};
 use super::row_selection::{RowSelection, SelectedLines};
@@ -355,7 +355,7 @@ impl CommentDesk {
     pub(super) fn queued_comment_request(
         state: &ReviewState,
         tour_head: &Sha,
-        home: ThreadHome,
+        homes: &ThreadHomes,
     ) -> Option<CommentRequest> {
         let queued = state.comment_queue().first()?;
         Some(CommentRequest::new(
@@ -364,7 +364,7 @@ impl CommentDesk {
             queued.mode,
             queued.audience,
             tour_head.clone(),
-            home,
+            homes.for_new(queued.mode),
         ))
     }
 

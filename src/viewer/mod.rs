@@ -44,6 +44,8 @@ mod jump;
 mod kept_values;
 mod line_location;
 mod local_row;
+#[cfg(feature = "snapshots")]
+mod local_task_staging;
 mod local_thread_store;
 mod local_threads;
 mod markdown;
@@ -194,7 +196,9 @@ pub use jump::{
 };
 pub use line_location::{LineLocation, Side};
 pub use local_row::LocalRow;
-pub use local_thread_store::{LocalThreadStore, ThreadHome};
+#[cfg(feature = "snapshots")]
+pub use local_task_staging::{stage_answered_task, stage_held_back_task, stage_queued_task};
+pub use local_thread_store::{LocalThreadStore, ThreadHome, ThreadHomes};
 pub use local_threads::{LocalAuthor, LocalThreads};
 pub use markdown::{Block, ColumnAlignment, Markdown, Run, Table};
 pub use merging::{

@@ -7,16 +7,18 @@ pub enum SendAction {
     SuggestChange,
     CommentAndAskAgent,
     CommentAndAskAgentNow,
+    AskAgent,
 }
 
 impl SendAction {
     /// In the order a box lists the actions that are neither primary nor secondary.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::AddToReview,
         Self::CommentNow,
         Self::SuggestChange,
         Self::CommentAndAskAgent,
         Self::CommentAndAskAgentNow,
+        Self::AskAgent,
     ];
 
     pub fn config_text(self) -> &'static str {
@@ -26,6 +28,7 @@ impl SendAction {
             Self::SuggestChange => "suggest_change",
             Self::CommentAndAskAgent => "comment_and_ask_agent",
             Self::CommentAndAskAgentNow => "comment_and_ask_agent_now",
+            Self::AskAgent => "ask_agent_only",
         }
     }
 
@@ -35,7 +38,7 @@ impl SendAction {
         match self {
             Self::CommentAndAskAgent => Some("ask_agent"),
             Self::CommentAndAskAgentNow => Some("ask_agent_now"),
-            Self::AddToReview | Self::CommentNow | Self::SuggestChange => None,
+            Self::AddToReview | Self::CommentNow | Self::SuggestChange | Self::AskAgent => None,
         }
     }
 
@@ -52,15 +55,17 @@ impl SendAction {
             Self::SuggestChange => "Suggest change",
             Self::CommentAndAskAgent => "Comment and ask agent",
             Self::CommentAndAskAgentNow => "Comment and ask agent now",
+            Self::AskAgent => "Ask agent",
         }
     }
 
     /// What stands in for the action in a box that does not offer it, nearest first. Add to review
-    /// is in every box, so it ends every list.
+    /// is in every box, so it ends every list. A private Ask agent is never stood in for by an action that
+    /// posts.
     fn stand_ins(self) -> &'static [Self] {
         match self {
             Self::AddToReview => &[],
-            Self::CommentNow | Self::SuggestChange | Self::CommentAndAskAgent => {
+            Self::CommentNow | Self::SuggestChange | Self::CommentAndAskAgent | Self::AskAgent => {
                 &[Self::AddToReview]
             }
             Self::CommentAndAskAgentNow => &[

@@ -252,3 +252,26 @@ fn primary_bracket_goes_back_and_forward_from_anywhere_in_the_window() {
         Some(Command::HistoryBack)
     );
 }
+
+#[test]
+fn ask_agent_has_its_own_key_in_the_comment_group_and_a_name_that_leaves_the_old_one_alone() {
+    assert_eq!(
+        Command::AskAgent.default_chords()[0].keystroke(),
+        "secondary-alt-p"
+    );
+    assert_eq!(Command::AskAgent.config_name(), "ask_agent_only");
+    assert_eq!(Command::AskAgent.scope(), KeyScope::TextBox);
+    assert_eq!(Command::AskAgent.group(), ShortcutGroup::Comment);
+    assert_eq!(
+        Command::of_config_name("ask_agent_only"),
+        Some(Command::AskAgent)
+    );
+    assert_eq!(
+        Command::of_config_name("ask_agent"),
+        Some(Command::CommentAndAskAgent)
+    );
+    assert_eq!(
+        Command::AskAgent.label(),
+        "Ask your agent without posting anything"
+    );
+}

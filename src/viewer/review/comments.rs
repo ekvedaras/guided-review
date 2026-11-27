@@ -15,6 +15,7 @@ use crate::viewer::comments_list::{CommentsList, ListedThread, ThreadVisit};
 use crate::viewer::hand_offs::{HandOff, HandOffState, HandOffs, HandToAgentRefused, SentFrom};
 use crate::viewer::host_outage::Affected;
 use crate::viewer::line_location::LineLocation;
+use crate::viewer::local_thread_store::ThreadHome;
 use crate::viewer::outdated_lines::FollowedLines;
 use crate::viewer::page::Page;
 use crate::viewer::ports::HostError;
@@ -37,6 +38,22 @@ impl ReviewCore {
         #[cfg(feature = "snapshots")]
         self.pulled_threads
             .extend(self.staged_threads.iter().cloned());
+        self.place_threads();
+    }
+
+    /// What one home read replaces of the threads shown, which are every home's.
+    fn set_threads_of(&mut self, home: &ThreadHome, threads: &[ReviewThread]) {
+        self.clear_problem(ProblemKind::ThreadsNotRead);
+        self.host_answered(Affected::Comments);
+        self.pulled_threads.retain(|thread| !home.holds(thread));
+        self.pulled_threads.extend(threads.iter().cloned());
+        #[cfg(feature = "snapshots")]
+        self.pulled_threads.extend(
+            self.staged_threads
+                .iter()
+                .filter(|staged| home.holds(staged))
+                .cloned(),
+        );
         self.place_threads();
     }
 
@@ -161,8 +178,9 @@ impl ReviewCore {
             }
             other => (other, None, None),
         };
+        let home = action.home_in(&self.thread_homes());
         let mut request = self.comment_desk.thread_action_request(
-            (self.thread_home(), &self.head),
+            (home, &self.head),
             &self.pulled_threads,
             action,
             reply_body,
@@ -216,7 +234,7 @@ impl ReviewCore {
         self.work.want(WorkKind::DeliverHandOff);
         self.comment_desk
             .apply_thread_action(&mut self.state, &outcome, sent_from(&self.screen));
-        self.show_pulled_threads(outcome.threads.as_ref());
+        self.show_threads_of(&outcome.home, outcome.threads.as_ref());
         if outcome.result == ThreadActionResult::Done {
             match &outcome.action {
                 ThreadAction::Resolve { thread_id } => self.fold_thread(thread_id, true),
@@ -242,9 +260,14 @@ impl ReviewCore {
         }
     }
 
-    fn show_pulled_threads(&mut self, threads: Option<&Result<Vec<ReviewThread>, String>>) {
+    /// The threads read from one home replace that home's threads and leave the others as they were.
+    fn show_threads_of(
+        &mut self,
+        home: &ThreadHome,
+        threads: Option<&Result<Vec<ReviewThread>, String>>,
+    ) {
         match threads {
-            Some(Ok(threads)) => self.set_threads(threads),
+            Some(Ok(threads)) => self.set_threads_of(home, threads),
             Some(Err(reason)) => self.raise_problem(Problem::ThreadsNotRead(reason.clone())),
             None => {}
         }
@@ -391,7 +414,7 @@ impl ReviewCore {
 
     /// The oldest comment in the queue, to send again.
     pub fn queued_comment_request(&self) -> Option<CommentRequest> {
-        CommentDesk::queued_comment_request(&self.state, &self.head, self.thread_home())
+        CommentDesk::queued_comment_request(&self.state, &self.head, &self.thread_homes())
     }
 
     /// A comment sent from its box. Whatever came of it, the next hand-off may go now.
@@ -407,6 +430,7 @@ impl ReviewCore {
     ) -> anyhow::Result<CommentResult> {
         let from_findings = outcome.request.findings_carried().to_vec();
         let threads = outcome.threads.clone();
+        let home = outcome.request.home().clone();
         let made = outcome.thread_made(&self.pulled_threads);
         let hand_offs_before = self.state.hand_offs().all().len();
         let code = self.code_commented_on(&outcome);
@@ -420,7 +444,7 @@ impl ReviewCore {
             (Ok(CommentResult::Sent), Some(thread)) => self.keep_thread_on_this_screen(thread),
             _ => Ok(()),
         };
-        self.show_pulled_threads(threads.as_ref());
+        self.show_threads_of(&home, threads.as_ref());
         match result {
             Ok(CommentResult::Sent) => {
                 kept_on_screen?;
@@ -443,9 +467,12 @@ impl ReviewCore {
             .record(|state| state.thread_written_on(thread.clone(), step))
     }
 
-    /// The lines a task of a local review is about, as the page shows them; a PR's hand-off has none.
+    /// The lines a task or a private question is about, as the page shows them; what a PR sends to the host
+    /// has none.
     fn code_commented_on(&self, outcome: &CommentOutcome) -> Option<String> {
-        self.subject.local()?;
+        if !outcome.request.is_private() {
+            return None;
+        }
         let place = outcome.request.place();
         let selected = Page::of(self).selected(&RowSelection::of(place)?)?;
         Some(selected.told_to_an_agent())

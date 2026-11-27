@@ -364,9 +364,7 @@ impl OneStepLayout {
             .update(cx, |session, cx| session.ask_why(id, &question, cx));
         if asked.is_ok() {
             self.finding_questions.close(id);
-            if asked == Ok(WhyAsked::ToReviewAgent) {
-                window.focus(&self.focus, cx);
-            }
+            window.focus(&self.focus, cx);
         }
         if asked == Ok(WhyAsked::ToReviewAgent) {
             self.session.update(cx, ReviewSession::deliver_questions);

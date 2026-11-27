@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::support::fake_app::{CliEnded, answering_one_request};
 use crate::support::fake_checkouts::FakeCheckouts;
+use crate::support::fake_ports::{FakeHost, SentLog};
 use crate::support::fake_tour_agent::{FakeTourAgent, TourAgentCall};
 use crate::support::{FakeGitHub, FixtureRepo, GuidedReview, Run, folders_in};
 use guided_review::findings::FindingId;
@@ -13,9 +14,9 @@ use guided_review::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use guided_review::review_subject::ReviewSubject;
 use guided_review::tour::Tour;
 use guided_review::viewer::{
-    AgentStatus, FindingRefusal, FindingRow, PageRow, Review, ReviewAgents, ReviewState,
-    ReviewStateFile, TerminalId, TourAgentPort, WhyAsked, WhyAuthor, WhyMessage, WhyReply,
-    WhyState,
+    AgentStatus, Audience, FindingRefusal, FindingRow, PageRow, Review, ReviewAgents, ReviewState,
+    ReviewStateFile, SendMode, TerminalId, TourAgentPort, WhyAsked, WhyAuthor, WhyMessage,
+    WhyReply, WhyState,
 };
 use serde_json::{Value, json};
 
@@ -339,4 +340,63 @@ fn a_running_app_that_shows_the_review_takes_the_answer_to_a_question_on_a_findi
         &WhyState::Delivered,
         "the app keeps the answer"
     );
+}
+
+#[test]
+fn with_the_review_agent_gone_the_question_goes_privately_to_the_tour_agent_on_the_findings_lines()
+{
+    let shop = Shop::with_findings(&[on_line("f1", 2, "B is shouted.")]);
+    let mut review = shop.open();
+
+    let asked = review.ask_why(&id("f1"), "Why is that wrong?").unwrap();
+
+    let WhyAsked::ToTourAgent(place) = asked else {
+        panic!("{asked:?}");
+    };
+    let request = review
+        .start_sending(&place, SendMode::SendNow, Audience::Agent)
+        .unwrap();
+    let host = FakeHost::with_pull("main-tip", "head", &SentLog::default());
+    review.apply_comment(request.run(&host)).unwrap();
+    let [hand_off] = review.hand_offs().all() else {
+        panic!("one hand-off expected");
+    };
+    assert_eq!(hand_off.mode(), SendMode::SendNow);
+    for part in ["Why is that wrong?", "> B is shouted.", "should fix"] {
+        assert!(
+            hand_off.comment().contains(part),
+            "{part} missing from {}",
+            hand_off.comment()
+        );
+    }
+    assert_eq!(
+        review.why_state_of(&id("f1")),
+        None,
+        "no thread of the review agent's"
+    );
+    assert!(
+        finding_row_is_open(&review, "f1"),
+        "asking about a finding does not decide it"
+    );
+}
+
+#[test]
+fn with_the_review_agent_gone_a_question_on_a_finding_with_no_lines_is_refused() {
+    let shop = Shop::with_findings(&[json!({
+        "id": "w1", "severity": "nit", "body": "Overall.", "anchor": {"kind": "change"},
+    })]);
+    let mut review = shop.open();
+
+    assert_eq!(
+        review.ask_why(&id("w1"), "Why?"),
+        Err(FindingRefusal::NoReviewAgent)
+    );
+}
+
+fn finding_row_is_open(review: &Review, finding: &str) -> bool {
+    review
+        .page()
+        .rows()
+        .iter()
+        .any(|row| matches!(row, PageRow::Finding(row) if row.id == id(finding)))
 }

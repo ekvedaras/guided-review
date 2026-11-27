@@ -47,6 +47,7 @@ const PRIMARY_ALT_SHIFT_ENTER: Chord = PRIMARY_ALT_ENTER.with(Modifier::Shift);
 const PRIMARY_ALT_A: Chord = primary('a').with(Modifier::Alt);
 const PRIMARY_ALT_S: Chord = primary('s').with(Modifier::Alt);
 const PRIMARY_ALT_G: Chord = primary('g').with(Modifier::Alt);
+const PRIMARY_ALT_P: Chord = primary('p').with(Modifier::Alt);
 const ESCAPE: Chord = Chord::key(Key::Escape);
 const PRIMARY_K: Chord = primary('k');
 const PRIMARY_OPEN_BRACKET: Chord = primary('[');
@@ -139,6 +140,7 @@ pub enum Command {
     CommentAndAskAgent,
     CommentNow,
     CommentAndAskAgentNow,
+    AskAgent,
     SuggestChange,
     CloseBox,
     WrapLines,
@@ -168,6 +170,7 @@ impl From<SendAction> for Command {
             SendAction::SuggestChange => Self::SuggestChange,
             SendAction::CommentAndAskAgent => Self::CommentAndAskAgent,
             SendAction::CommentAndAskAgentNow => Self::CommentAndAskAgentNow,
+            SendAction::AskAgent => Self::AskAgent,
         }
     }
 }
@@ -181,6 +184,7 @@ impl Command {
             Self::SuggestChange => Some(SendAction::SuggestChange),
             Self::CommentAndAskAgent => Some(SendAction::CommentAndAskAgent),
             Self::CommentAndAskAgentNow => Some(SendAction::CommentAndAskAgentNow),
+            Self::AskAgent => Some(SendAction::AskAgent),
             _ => None,
         }
     }
@@ -201,11 +205,12 @@ impl Command {
                 SendAction::SuggestChange => &[PRIMARY_ALT_S],
                 SendAction::CommentAndAskAgent => &[PRIMARY_ALT_G],
                 SendAction::CommentAndAskAgentNow => &[PRIMARY_ALT_SHIFT_ENTER],
+                SendAction::AskAgent => &[PRIMARY_ALT_P],
             },
         }
     }
 
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::HistoryBack,
@@ -225,6 +230,7 @@ impl Command {
         Self::CommentAndAskAgent,
         Self::CommentNow,
         Self::CommentAndAskAgentNow,
+        Self::AskAgent,
         Self::SuggestChange,
         Self::CloseBox,
         Self::WrapLines,
@@ -273,6 +279,7 @@ impl Command {
             | Self::CommentAndAskAgent
             | Self::CommentNow
             | Self::CommentAndAskAgentNow
+            | Self::AskAgent
             | Self::SuggestChange => self.default_chords_for(SendChoice::default()),
             Self::CloseBox => &[ESCAPE],
             Self::WrapLines => &[W],
@@ -312,6 +319,7 @@ impl Command {
             Self::CommentAndAskAgent => "comment_and_ask_agent",
             Self::CommentNow => "comment_now",
             Self::CommentAndAskAgentNow => "comment_and_ask_agent_now",
+            Self::AskAgent => "ask_agent_only",
             Self::SuggestChange => "suggest_change",
             Self::CloseBox => "close_box",
             Self::WrapLines => "wrap_lines",
@@ -389,6 +397,7 @@ impl Command {
             | Self::CommentAndAskAgent
             | Self::CommentNow
             | Self::CommentAndAskAgentNow
+            | Self::AskAgent
             | Self::SuggestChange
             | Self::CloseBox => KeyScope::TextBox,
             Self::CopyCode => KeyScope::NotTyping,
@@ -415,6 +424,7 @@ impl Command {
             | Self::CommentAndAskAgent
             | Self::CommentNow
             | Self::CommentAndAskAgentNow
+            | Self::AskAgent
             | Self::SuggestChange
             | Self::CloseBox => ShortcutGroup::Comment,
             Self::WrapLines
@@ -459,6 +469,7 @@ impl Command {
             Self::CommentAndAskAgent => "Add it and ask your agent",
             Self::CommentNow => "Post the comment or reply at once, without your review",
             Self::CommentAndAskAgentNow => "Post it at once and ask your agent",
+            Self::AskAgent => "Ask your agent without posting anything",
             Self::SuggestChange => "Put the commented lines in the box as a suggestion",
             Self::CloseBox => "Leave the box you are typing in",
             Self::WrapLines => "Wrap long lines",

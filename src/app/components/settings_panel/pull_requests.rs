@@ -88,7 +88,7 @@ impl SettingsPanel {
             Segmented::new(
                 id,
                 SegmentLayout::Row {
-                    segment_width: px(116.),
+                    segment_width: px(140.),
                 },
                 segments,
             )
