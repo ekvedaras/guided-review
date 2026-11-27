@@ -3,15 +3,10 @@
 
 mod active_pr;
 mod agent_event;
-mod agent_pool;
 mod ai_review;
 mod ai_review_run;
 mod app_state;
 mod app_window;
-mod ask;
-mod ask_context;
-mod ask_desk;
-mod ask_target;
 mod avatars;
 mod branch_link;
 mod capability;
@@ -125,7 +120,6 @@ pub use crate::more_lines::{MoreLines, MoreLinesEntry};
 pub use active_pr::WritingFact;
 pub use active_pr::{ActivePr, BuildTicket, Finished, OpenDecision, OpenOutcome, WriteDecision};
 pub use agent_event::AgentEvent;
-pub use agent_pool::{AgentPool, Opening};
 pub use ai_review::AiReview;
 pub use ai_review_run::{
     AiReviewAction, AiReviewRefusal, AiReviewRun, AiReviewStage, RunningReview,
@@ -135,11 +129,6 @@ pub use app_window::{
     AfterClose, AppWindow, FailedBuild, Relaunched, ShowBuilding, ShowReview, ShowSettings,
     ShowSwitcher, ShowWriting,
 };
-pub use ask::{Ask, AskId, AskStore, Asks, Author, Message, Place, ShownOn};
-pub use ask_desk::{
-    AskDesk, AskNotice, AskProcessEvent, AskProcesses, NotDelivered, QUESTION_NOT_SENT, Question,
-};
-pub use ask_target::{AskTarget, Unavailable};
 pub use avatars::{AvatarOutcome, AvatarPort, AvatarRequest, Avatars};
 pub use branch_link::{BranchOffer, local_reviews_of_repo};
 pub use capability::{Capability, HostCapabilities};
@@ -226,7 +215,7 @@ pub use no_host::NoHost;
 pub use outdated_lines::{FollowedLines, follow_outdated};
 pub use overview::{OverviewFile, OverviewPage, OverviewStats};
 pub use page::{
-    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
+    BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
     FullDiffControl, HunkGapRow, Page, PageRow, PieceHeading, PieceLabel, PinnedHeader,
     ReviewerSummaryRow, RouteStopRow, ScreenFooter, SelectedRows, ShownLine, StepHeading,
     StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar, line_count,
@@ -235,12 +224,11 @@ pub use page::{
 pub use piece_diff::PieceDiff;
 pub use piece_labels::{LabelSwitch, PieceLabels, TINY_PIECE_LINES};
 pub use ports::{
-    AgentLaunch, AgentLauncher, AgentPort, ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost,
-    CommentReactionsPort, HostError, HostedCodePort, IssueDetailsPort, MergingPort, NoAccess,
-    PictureUploadPort, PullOfBranch, PullRequestDescriptionPort, PullRequestOriginPort,
-    PullRequestReactionsPort, PullRequestStatusPort, PullsOfBranchPort, RefreshWriter,
-    RelevantPullRequestsPort, Resolution, ReviewThreadsPort, ReviewWritesPort, TurnStopper, Viewed,
-    ViewedFile, ViewedFilesPort, ViewedState,
+    ChangeRequestsPort, ChangeTipsPort, ClonePort, CodeHost, CommentReactionsPort, HostError,
+    HostedCodePort, IssueDetailsPort, MergingPort, NoAccess, PictureUploadPort, PullOfBranch,
+    PullRequestDescriptionPort, PullRequestOriginPort, PullRequestReactionsPort,
+    PullRequestStatusPort, PullsOfBranchPort, RefreshWriter, RelevantPullRequestsPort, Resolution,
+    ReviewThreadsPort, ReviewWritesPort, Viewed, ViewedFile, ViewedFilesPort, ViewedState,
 };
 pub use pr_notes::{NoteSubject, NotesButton, ToNotes, ToNotesOutcome, with_diagram_in_notes};
 pub use pr_origin::{HeadBranch, MergeRoute, PrAuthor, PullRequestOrigin};

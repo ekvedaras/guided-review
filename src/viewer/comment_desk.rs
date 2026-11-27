@@ -1,7 +1,6 @@
 use super::thread_actions::TourFreshness;
 use crate::pull_request::{PullRequestUrl, Sha};
 
-use super::ask::Ask;
 use super::capability::{Capability, HostCapabilities};
 use super::comment_send::{CommentOutcome, CommentRequest, Origin, Outcome};
 use super::comments::Audience;
@@ -113,8 +112,6 @@ pub enum CommentGesture<'a> {
     DragEnded,
     /// The comment button under a picture: the comment is on the whole file.
     OnFile(&'a FilePath),
-    /// Use as comment on an Ask: its latest answer goes into the box on its lines.
-    AskAnswer(&'a Ask),
 }
 
 /// A comment box as it is drawn: its draft, what it is doing and what stops it.
@@ -235,20 +232,7 @@ impl CommentDesk {
         Ok(place)
     }
 
-    /// Opens a draft on the lines when there is none and puts `text` after what is typed already.
-    pub(super) fn add_to_draft(
-        &mut self,
-        state: &mut SavedState,
-        selected: &SelectedLines,
-        head: &Sha,
-        text: &str,
-    ) -> Result<CommentPlace, CommentRefusal> {
-        let place = selected.comment_place();
-        self.add_text_at(state, &place, head, text, &[])?;
-        Ok(place)
-    }
-
-    /// Like `add_to_draft`, for a place that is not taken from selected rows.
+    /// Opens a draft at the place when there is none and puts `text` after what is typed already.
     pub(super) fn add_text_at(
         &mut self,
         state: &mut SavedState,
@@ -297,16 +281,12 @@ impl CommentDesk {
     pub(super) fn suggest_change(
         state: &mut SavedState,
         place: &CommentPlace,
-        rows: &[DiffLine],
+        rows: &SelectedLines,
     ) -> anyhow::Result<Option<String>> {
         if state.draft_at(place).is_none() || !Self::can_suggest_change(place) {
             return Ok(None);
         }
-        let kept_lines: Vec<&str> = rows
-            .iter()
-            .filter(|row| row.location.side == Side::Head)
-            .map(|row| row.text.as_str())
-            .collect();
+        let kept_lines = rows.head_texts();
         if kept_lines.is_empty() {
             return Ok(None);
         }

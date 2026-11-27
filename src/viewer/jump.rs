@@ -229,7 +229,6 @@ pub enum PaletteAction {
     /// On the open screen's boxes, where the toolbar has the fold toggle.
     OpenAllPieces,
     FoldAllPieces,
-    AskAboutStep,
     /// Asks the PR's tour agent to write the guided tour of a basic review.
     WriteGuidedTour,
     SwitchToGuidedTour,
@@ -289,7 +288,6 @@ impl PaletteAction {
             Self::ShowCode => "Show this file as code",
             Self::OpenAllPieces => "Open all pieces",
             Self::FoldAllPieces => "Fold all pieces",
-            Self::AskAboutStep => "Ask about this step",
             Self::WriteGuidedTour => "Write guided tour",
             Self::SwitchToGuidedTour => "Switch to guided tour",
             Self::RunAiReview => "Run AI review",
@@ -338,7 +336,6 @@ impl PaletteAction {
             Self::SwitchPr => Some(Command::SwitchPr),
             Self::Shortcuts => Some(Command::Shortcuts),
             Self::HideWhitespace | Self::ShowWhitespace => Some(Command::HideWhitespace),
-            Self::AskAboutStep => Some(Command::AskAboutStep),
             Self::NextFinding
             | Self::WriteGuidedTour
             | Self::SwitchToGuidedTour

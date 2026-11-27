@@ -362,7 +362,7 @@ impl WhyDeliveryRequest {
                 WhyDelivery::Waiting
             }
             Ok(SendOutcome::NoAgent) => WhyDelivery::Failed(
-                "the review agent is gone: ask again for the Ask panel".to_owned(),
+                "the review agent is gone: the finding has no one to ask".to_owned(),
             ),
             Err(error) => WhyDelivery::Failed(format!("{error:#}")),
         };

@@ -430,7 +430,7 @@ impl fmt::Display for TourAgentState {
     }
 }
 
-/// What became of an Ask handed to the reviewer's own tour agent.
+/// What became of a message handed to the reviewer's own tour agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnAgentHandOff {
     Delivered(TerminalId),
@@ -438,7 +438,7 @@ pub enum OwnAgentHandOff {
     /// Nothing was typed, for this reason.
     NotSent(String),
     NoAgent,
-    /// A local change set whose folder had no agent, so one was started with the Ask as its task.
+    /// A local change set whose folder had no agent, so one was started with the message as its task.
     Started(TerminalId),
     /// A local change set whose folder has several agents and none is picked.
     PickAnAgent,
@@ -457,11 +457,6 @@ fn not_asked(why: &str) -> (ToastTone, String) {
 }
 
 impl OwnAgentHandOff {
-    /// Held back from an agent that does not report its state: the reviewer may send it anyway.
-    pub fn can_send_anyway(&self) -> bool {
-        matches!(self, Self::Unreported(_))
-    }
-
     /// What the toast says after Open PR.
     pub fn open_pr_toast(&self) -> (ToastTone, String) {
         match self {
@@ -484,25 +479,6 @@ impl OwnAgentHandOff {
             Self::Unreported(terminal) => not_asked(&format!(
                 "your agent {terminal} does not report its state. Look at it first, it may be waiting on a question"
             )),
-        }
-    }
-
-    /// What the Ask panel says under the Ask.
-    pub fn line(&self) -> String {
-        match self {
-            Self::Delivered(terminal) => format!("Handed to your agent {terminal}"),
-            Self::StartedByApp(terminal) => format!(
-                "Not handed: the tour agent {terminal} was started by the app and cannot change files. {MAKE_YOURS}"
-            ),
-            Self::NotSent(reason) => format!("Not handed: {reason}. Try again when it is free"),
-            Self::NoAgent => format!("Not handed: this PR has no tour agent. {MAKE_YOURS}"),
-            Self::Started(terminal) => {
-                format!("Started an agent {terminal} in this review's folder with your Ask")
-            }
-            Self::PickAnAgent => "Not handed: several agents work in this review's folder. Pick one with Pick an agent in the sidebar".to_owned(),
-            Self::Unreported(terminal) => format!(
-                "Not handed: your agent {terminal} does not report its state. Look at it first, it may be waiting on a question"
-            ),
         }
     }
 }
@@ -837,23 +813,14 @@ impl TourAgents {
         }
     }
 
-    /// Types an Ask into the PR's tour agent, but only one the reviewer started: an app-started agent
-    /// cannot change files, and the reviewer's own one may.
-    pub fn hand_to_own_agent(&self, subject: &ReviewSubject, text: &str) -> OwnAgentHandOff {
-        self.hand_to_own(subject, text, false)
-    }
-
     /// Open PR: the agent's own skills open the PR of the branch, as when the reviewer types it.
     pub fn ask_to_open_pr(&self, subject: &ReviewSubject) -> OwnAgentHandOff {
         self.hand_to_own_agent(subject, "pr it")
     }
 
-    /// Types an Ask the reviewer chose to send anyway into their agent, whatever its state.
-    pub fn hand_to_own_agent_anyway(&self, subject: &ReviewSubject, text: &str) -> OwnAgentHandOff {
-        self.hand_to_own(subject, text, true)
-    }
-
-    fn hand_to_own(&self, subject: &ReviewSubject, text: &str, anyway: bool) -> OwnAgentHandOff {
+    /// Types a message into the PR's tour agent, but only one the reviewer started: an app-started agent
+    /// cannot change files, and the reviewer's own one may.
+    pub fn hand_to_own_agent(&self, subject: &ReviewSubject, text: &str) -> OwnAgentHandOff {
         let terminal = match self.lookup(subject) {
             TourAgentState::Agent { terminal, .. } => terminal,
             TourAgentState::LinkOff(reason) => {
@@ -862,7 +829,7 @@ impl TourAgents {
             TourAgentState::Choose(_) => return OwnAgentHandOff::PickAnAgent,
             TourAgentState::None | TourAgentState::Unknown => {
                 return match subject.local() {
-                    Some(change_set) => self.start_with_ask(subject, change_set, text),
+                    Some(change_set) => self.start_with_message(subject, change_set, text),
                     None => OwnAgentHandOff::NoAgent,
                 };
             }
@@ -877,12 +844,7 @@ impl TourAgents {
                 Err(error) => return OwnAgentHandOff::NotSent(format!("{error:#}")),
             }
         }
-        let sent = if anyway {
-            self.send_anyway(subject, text)
-        } else {
-            self.send_if_idle(subject, text)
-        };
-        match sent {
+        match self.send_if_idle(subject, text) {
             Ok(SendOutcome::Delivered) => OwnAgentHandOff::Delivered(terminal),
             Ok(SendOutcome::Refused(reason)) => OwnAgentHandOff::NotSent(reason),
             Ok(SendOutcome::Starting) => {
@@ -894,7 +856,7 @@ impl TourAgents {
         }
     }
 
-    fn start_with_ask(
+    fn start_with_message(
         &self,
         subject: &ReviewSubject,
         change_set: &LocalChangeSet,

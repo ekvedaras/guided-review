@@ -45,7 +45,7 @@ pub fn gallery(colors: &Colors) -> AnyElement {
         ))
         .child(
             notice_band(colors, Tone::Warning)
-                .child("Waiting for 1 Ask to answer before the PR reopens."),
+                .child("Waiting for the hand-offs to be delivered before the PR reopens."),
         )
         .child(
             div()

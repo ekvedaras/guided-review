@@ -2,9 +2,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::app_folders::AppFolders;
-use crate::claude_cli::{ClaudeCli, ClaudeRefreshWriter};
+use crate::claude_cli::ClaudeRefreshWriter;
 use crate::code_source::CodeSource;
-use crate::config::{AskSettings, Config};
+use crate::config::Config;
 use crate::hc_tour_agent::HcTourAgents;
 use crate::ide::{Ide, NoIde};
 use crate::instructions::TourWriter;
@@ -12,22 +12,15 @@ use crate::opened_subject::{OpenedChangeSet, OpenedSubject, TourRepinner, adapte
 use crate::review_subject::{LocalChangeSet, ReviewSubject};
 use crate::tour::Tour;
 use crate::viewer::{
-    AgentLauncher, CodeHost, HostCapabilities, PrMover, PullsOfBranchPort, Review, TourAgents,
-    TourRefresher, TourReloader, TourSwitcher,
+    CodeHost, HostCapabilities, PrMover, PullsOfBranchPort, Review, TourAgents, TourRefresher,
+    TourReloader, TourSwitcher,
 };
-
-/// Everything the Ask panel needs to start the AI, built once at startup.
-pub struct AskSetup {
-    pub launcher: Arc<dyn AgentLauncher>,
-    pub settings: AskSettings,
-}
 
 /// Everything the app shows and works with for one PR. Nothing else holds the PR's objects, so dropping
 /// this frees them.
 pub struct OpenedReview {
     pub review: Review,
     pub source: Arc<dyn CodeSource>,
-    pub ask: AskSetup,
     pub ide: Result<Ide, NoIde>,
     pub host: Arc<dyn CodeHost>,
     pub repinner: TourRepinner,
@@ -56,10 +49,6 @@ pub fn open_review(
     let agent_folder = clone
         .clone()
         .unwrap_or_else(|| folders.home().to_path_buf());
-    let ask = AskSetup {
-        launcher: Arc::new(ClaudeCli::new()),
-        settings: config.ask_settings(),
-    };
     let refresher = TourRefresher {
         folders: folders.clone(),
         subject: subject.clone(),
@@ -97,7 +86,6 @@ pub fn open_review(
     Ok(OpenedReview {
         review,
         source: source.into(),
-        ask,
         ide: Ide::for_clone(clone, config.ide_template()),
         host,
         repinner,

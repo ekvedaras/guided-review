@@ -21,10 +21,6 @@ pub struct Config {
     /// `"owner/repo" = "~/path/to/clone"`, a repo on GitHub; `"<host>:<repo>"` names its host.
     #[serde(default)]
     clones: BTreeMap<String, String>,
-    #[serde(default)]
-    ask_model: Option<String>,
-    #[serde(default)]
-    ask_effort: Option<String>,
     /// `idea://open?file={path}&line={line}` or a shell command such as `code --goto {path}:{line}`.
     #[serde(default)]
     ide: Option<String>,
@@ -55,112 +51,6 @@ pub struct Config {
     /// The send action with Cmd+Shift+Enter, one other than the primary.
     #[serde(default)]
     secondary_comment_action: Option<String>,
-}
-
-/// Which model answers an Ask, and how hard it thinks.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AskSettings {
-    pub model: String,
-    pub effort: String,
-}
-
-impl Default for AskSettings {
-    fn default() -> Self {
-        Self {
-            model: "opus".to_owned(),
-            effort: "medium".to_owned(),
-        }
-    }
-}
-
-/// The `ask_model` the reviewer picks in Settings: no key (the app's default), a Claude alias, or any model name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AskModelChoice {
-    AppDefault,
-    Opus,
-    Sonnet,
-    Haiku,
-    Custom(String),
-}
-
-impl AskModelChoice {
-    pub const PICKABLE: [Self; 3] = [Self::Opus, Self::Sonnet, Self::Haiku];
-
-    pub fn custom_text(&self) -> Option<&str> {
-        match self {
-            Self::Custom(text) => Some(text),
-            _ => None,
-        }
-    }
-
-    /// What an alias runs `claude` with, so the reviewer sees what it means.
-    pub fn shown_command(&self) -> Option<String> {
-        Self::PICKABLE
-            .contains(self)
-            .then(|| format!("claude --model {}", self.config_text().unwrap_or_default()))
-    }
-
-    pub fn of(config_text: Option<&str>) -> Self {
-        match config_text {
-            None => Self::AppDefault,
-            Some("opus") => Self::Opus,
-            Some("sonnet") => Self::Sonnet,
-            Some("haiku") => Self::Haiku,
-            Some(other) => Self::Custom(other.to_owned()),
-        }
-    }
-
-    /// What `ask_model` holds in the config, none for the app's default.
-    pub fn config_text(&self) -> Option<&str> {
-        match self {
-            Self::AppDefault => None,
-            Self::Opus => Some("opus"),
-            Self::Sonnet => Some("sonnet"),
-            Self::Haiku => Some("haiku"),
-            Self::Custom(text) => Some(text),
-        }
-    }
-}
-
-/// The `ask_effort` the reviewer picks in Settings: no key (the app's default) or one `claude --effort` accepts.
-/// A config can hold anything, so `Unknown` keeps what it says until the reviewer picks another.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AskEffortChoice {
-    AppDefault,
-    Low,
-    Medium,
-    High,
-    XHigh,
-    Max,
-    Unknown(String),
-}
-
-impl AskEffortChoice {
-    pub const PICKABLE: [Self; 5] = [Self::Low, Self::Medium, Self::High, Self::XHigh, Self::Max];
-
-    pub fn of(config_text: Option<&str>) -> Self {
-        match config_text {
-            None => Self::AppDefault,
-            Some("low") => Self::Low,
-            Some("medium") => Self::Medium,
-            Some("high") => Self::High,
-            Some("xhigh") => Self::XHigh,
-            Some("max") => Self::Max,
-            Some(other) => Self::Unknown(other.to_owned()),
-        }
-    }
-
-    pub fn config_text(&self) -> Option<&str> {
-        match self {
-            Self::AppDefault => None,
-            Self::Low => Some("low"),
-            Self::Medium => Some("medium"),
-            Self::High => Some("high"),
-            Self::XHigh => Some("xhigh"),
-            Self::Max => Some("max"),
-            Self::Unknown(text) => Some(text),
-        }
-    }
 }
 
 impl Config {
@@ -199,14 +89,6 @@ impl Config {
             InstructionsKind::Review => &self.review_instructions,
         }
         .resolve(folders)
-    }
-
-    pub fn ask_settings(&self) -> AskSettings {
-        let default = AskSettings::default();
-        AskSettings {
-            model: self.ask_model.clone().unwrap_or(default.model),
-            effort: self.ask_effort.clone().unwrap_or(default.effort),
-        }
     }
 
     /// What the config says, or twenty when it says nothing or something that is not a number of lines.

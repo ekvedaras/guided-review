@@ -14,7 +14,6 @@ const fn primary(face: char) -> Chord {
 }
 
 const S: Chord = key('s');
-const A: Chord = key('a');
 const J: Chord = key('j');
 const K: Chord = key('k');
 const N: Chord = key('n');
@@ -144,7 +143,6 @@ pub enum Command {
     CloseBox,
     WrapLines,
     HideWhitespace,
-    AskAboutStep,
     MoreAbove,
     MoreBelow,
     ToggleRenderedView,
@@ -207,7 +205,7 @@ impl Command {
         }
     }
 
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 38] = [
         Self::NextScreen,
         Self::PreviousScreen,
         Self::HistoryBack,
@@ -231,7 +229,6 @@ impl Command {
         Self::CloseBox,
         Self::WrapLines,
         Self::HideWhitespace,
-        Self::AskAboutStep,
         Self::MoreAbove,
         Self::MoreBelow,
         Self::ToggleRenderedView,
@@ -280,7 +277,6 @@ impl Command {
             Self::CloseBox => &[ESCAPE],
             Self::WrapLines => &[W],
             Self::HideWhitespace => &[S],
-            Self::AskAboutStep => &[A],
             Self::Settings => &[PRIMARY_COMMA],
             Self::Shortcuts => &[QUESTION],
             Self::OpenOnHost => &[G],
@@ -320,7 +316,6 @@ impl Command {
             Self::CloseBox => "close_box",
             Self::WrapLines => "wrap_lines",
             Self::HideWhitespace => "hide_whitespace",
-            Self::AskAboutStep => "ask_about_step",
             Self::MoreAbove => "more_above",
             Self::MoreBelow => "more_below",
             Self::ToggleRenderedView => "toggle_rendered_view",
@@ -369,7 +364,6 @@ impl Command {
             | Self::ToggleRead
             | Self::WrapLines
             | Self::HideWhitespace
-            | Self::AskAboutStep
             | Self::MoreAbove
             | Self::MoreBelow
             | Self::ToggleRenderedView
@@ -413,7 +407,7 @@ impl Command {
             | Self::ReadDown
             | Self::ReadUp
             | Self::Jump => ShortcutGroup::Navigate,
-            Self::ToggleRead | Self::CopyCode | Self::AskAboutStep => ShortcutGroup::Read,
+            Self::ToggleRead | Self::CopyCode => ShortcutGroup::Read,
             Self::AddToReview
             | Self::AskAgent
             | Self::CommentNow
@@ -466,7 +460,6 @@ impl Command {
             Self::CloseBox => "Leave the box you are typing in",
             Self::WrapLines => "Wrap long lines",
             Self::HideWhitespace => "Hide whitespace-only changes",
-            Self::AskAboutStep => "Ask your agent about this step",
             Self::MoreAbove => "Show more lines above the focused change",
             Self::MoreBelow => "Show more lines below the focused change",
             Self::ToggleRenderedView => "Show the focused change's file rendered, or as code",

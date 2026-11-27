@@ -186,10 +186,7 @@ impl<'a> ReviewPlaces<'a> {
                 if screens.iter().any(|(screen, _)| *screen == target.screen) {
                     continue;
                 }
-                let pieces = target
-                    .screen
-                    .shown_on()
-                    .and_then(|shown_on| self.core.pieces_shown_on(shown_on));
+                let pieces = self.core.pieces_on(&target.screen);
                 if let Some(pieces) = pieces {
                     screens.push((target.screen.clone(), pieces));
                 }

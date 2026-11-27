@@ -14,14 +14,12 @@ use anyhow::Context as _;
 use gpui::{AsyncWindowContext, Global, Modifiers, MouseMoveEvent, PlatformInput, point, px};
 
 use crate::app::components::palette::Appearance;
-use crate::open_review::AskSetup;
 use crate::pull_request::PullRequestUrl;
 use crate::review_subject::ReviewSubject;
 use crate::viewer::{
-    AgentLaunch, AgentLauncher, AgentLinkOff, AgentPort, AgentStatus, AppAgent, HostError,
-    LiveTerminal, PrAuthor, RelevantPullRequest, RelevantPullRequests, RelevantPullRequestsPort,
-    ReviewAgentStart, SendOutcome, TerminalId, TourAgentPort, TourAgentStart, TurnStopper,
-    WhyListed,
+    AgentLinkOff, AgentStatus, AppAgent, HostError, LiveTerminal, PrAuthor, RelevantPullRequest,
+    RelevantPullRequests, RelevantPullRequestsPort, ReviewAgentStart, SendOutcome, TerminalId,
+    TourAgentPort, TourAgentStart, WhyListed,
 };
 
 const FOLDER_ENV: &str = "GUIDED_REVIEW_SNAPSHOTS";
@@ -199,7 +197,7 @@ impl RelevantPullRequestsPort for SamplePullRequests {
             (
                 OURS,
                 12,
-                "Settings panel for summary instructions, IDE, Ask and clones",
+                "Settings panel for summary instructions, IDE and clones",
                 "ekvedaras",
                 WhyListed::Mine,
                 false,
@@ -429,41 +427,4 @@ pub fn sample_pr(number: u32) -> Option<PullRequestUrl> {
     format!("https://github.com/ekvedaras/guided-review/pull/{number}")
         .parse()
         .ok()
-}
-
-/// Ask starts its AI when the panel opens; pictures need the panel, not an answer.
-pub struct SilentAgents;
-
-impl AgentLauncher for SilentAgents {
-    fn start(&self, _: &AgentLaunch) -> anyhow::Result<Box<dyn AgentPort>> {
-        Ok(Box::new(SilentAgent))
-    }
-}
-
-struct SilentAgent;
-
-impl AgentPort for SilentAgent {
-    fn ask(&mut self, _: &str, _: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn turn_stopper(&self) -> Arc<dyn TurnStopper> {
-        Arc::new(Self)
-    }
-}
-
-impl TurnStopper for SilentAgent {
-    fn stop_turn(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
-
-pub fn quiet_ask(setup: AskSetup) -> AskSetup {
-    if !is_on() {
-        return setup;
-    }
-    AskSetup {
-        launcher: Arc::new(SilentAgents),
-        ..setup
-    }
 }

@@ -383,10 +383,10 @@ fn a_modifier_cap_shows_the_face_its_spelling_uses() {
 
 #[test]
 fn the_new_simple_keys_change_and_clear_through_the_keys_table() {
-    let keymap = keymap_of("[keys]\nhide_whitespace = \"x\"\nask_about_step = []").unwrap();
+    let keymap = keymap_of("[keys]\nhide_whitespace = \"x\"\nwrap_lines = []").unwrap();
 
     assert_eq!(keys(&keymap, Command::HideWhitespace), ["x"]);
-    assert!(keymap.first_chord(Command::AskAboutStep).is_none());
+    assert!(keymap.first_chord(Command::WrapLines).is_none());
 }
 
 #[test]

@@ -1,10 +1,9 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, bail};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::eval::{EvalWriter, JudgeInput, TourJudge, Verdicts, WriterBrief};
 use crate::instructions::InstructionsKind;
@@ -12,10 +11,8 @@ use crate::json::at;
 use crate::prompt_safety::OUTSIDE_TEXT_IS_DATA;
 use crate::review_subject::ReviewSubject;
 use crate::tour::Tour;
+use crate::viewer::RefreshWriter;
 use crate::viewer::ReviewPlace;
-use crate::viewer::{AgentLaunch, AgentLauncher, AgentPort, RefreshWriter, TurnStopper};
-
-const READ_ONLY_TOOLS: &str = "Read,Grep,Glob,Bash(guided-review show:*)";
 
 /// A permission rule's path for everything under `folder`: `//` starts an absolute path.
 fn under(folder: &Path) -> String {
@@ -154,125 +151,6 @@ pub fn review_agent_denied_tools() -> String {
     .map(|command| format!("Bash({command}:*)"))
     .collect::<Vec<_>>()
     .join(",")
-}
-
-/// Runs the user's own `claude` CLI, so answers use their subscription. Never `--bare`: it skips the login.
-pub struct ClaudeCli {
-    binary: PathBuf,
-}
-
-impl ClaudeCli {
-    pub fn new() -> Self {
-        Self::with_binary(PathBuf::from("claude"))
-    }
-
-    pub fn with_binary(binary: PathBuf) -> Self {
-        Self { binary }
-    }
-}
-
-impl Default for ClaudeCli {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl AgentLauncher for ClaudeCli {
-    fn start(&self, launch: &AgentLaunch) -> anyhow::Result<Box<dyn AgentPort>> {
-        let mut command = Command::new(&self.binary);
-        command
-            .args(["-p", "--input-format", "stream-json"])
-            .args(["--output-format", "stream-json"])
-            .args(["--verbose", "--include-partial-messages"])
-            .args(["--permission-mode", "dontAsk"])
-            .args(["--allowedTools", READ_ONLY_TOOLS])
-            .args(["--model", &launch.model])
-            .args(["--effort", &launch.effort])
-            .args(["--append-system-prompt", &launch.system_prompt]);
-        if let Some(session) = &launch.resume {
-            command.args(["--resume", session]);
-        }
-        let mut child = command
-            .current_dir(&launch.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .with_context(|| format!("could not start `{}`", self.binary.display()))?;
-        let stdin = child.stdin.take().context("no stdin on claude")?;
-        let stdout = BufReader::new(child.stdout.take().context("no stdout on claude")?);
-        Ok(Box::new(ClaudeConversation {
-            child,
-            stdin: Arc::new(Mutex::new(stdin)),
-            stdout,
-        }))
-    }
-}
-
-struct ClaudeConversation {
-    child: Child,
-    /// Shared with the turn stopper, which writes while `ask` waits for the answer.
-    stdin: Arc<Mutex<ChildStdin>>,
-    stdout: BufReader<ChildStdout>,
-}
-
-impl AgentPort for ClaudeConversation {
-    fn ask(&mut self, message: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
-        let input = json!({"type": "user", "message": {"role": "user", "content": message}});
-        write_line(&self.stdin, &input)?;
-        let mut line = String::new();
-        loop {
-            line.clear();
-            if self.stdout.read_line(&mut line)? == 0 {
-                bail!("claude stopped before it finished answering");
-            }
-            let line = line.trim_end();
-            on_line(line);
-            if serde_json::from_str::<Value>(line).is_ok_and(|json| at(&json, "/type") == "result")
-            {
-                return Ok(());
-            }
-        }
-    }
-
-    fn turn_stopper(&self) -> Arc<dyn TurnStopper> {
-        Arc::new(ClaudeTurnStopper {
-            stdin: Arc::clone(&self.stdin),
-        })
-    }
-}
-
-/// Asks claude to stop the turn over its control channel. Unlike SIGINT, which ends the whole
-/// process, this keeps the conversation live; the turn ends with a normal `result` line.
-struct ClaudeTurnStopper {
-    stdin: Arc<Mutex<ChildStdin>>,
-}
-
-impl TurnStopper for ClaudeTurnStopper {
-    fn stop_turn(&self) -> anyhow::Result<()> {
-        let interrupt = json!({
-            "type": "control_request",
-            "request_id": "stop-turn",
-            "request": {"subtype": "interrupt"},
-        });
-        write_line(&self.stdin, &interrupt)
-    }
-}
-
-fn write_line(stdin: &Mutex<ChildStdin>, json: &Value) -> anyhow::Result<()> {
-    let mut stdin = stdin
-        .lock()
-        .map_err(|poisoned| anyhow::anyhow!("claude input is broken: {poisoned}"))?;
-    writeln!(stdin, "{json}").context("claude is no longer running")?;
-    stdin.flush()?;
-    Ok(())
-}
-
-impl Drop for ClaudeConversation {
-    fn drop(&mut self) {
-        self.child.kill().ok();
-        self.child.wait().ok();
-    }
 }
 
 /// Runs the tour skill as a Refresh through the user's own `claude`, in one non-interactive run.

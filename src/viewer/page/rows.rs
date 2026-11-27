@@ -14,7 +14,7 @@ use crate::tour::Step;
 use crate::viewer::finding_threads::WhyMessage;
 use crate::viewer::{
     AiReviewAction, Capture, CodeLink, CommentPlace, CommentProblem, DiffLine, HiddenLines,
-    LabelSwitch, LineKind, LineLocation, Markdown, NextScreen, NotesButton, OverviewPage, Place,
+    LabelSwitch, LineKind, LineLocation, Markdown, NextScreen, NotesButton, OverviewPage,
     QueuedComment, ReadSubject, RenderedBlock, Screen, StepId, SummaryStats, ThreadView, TourLead,
     ViewSwitch,
 };
@@ -76,8 +76,6 @@ pub enum PageRow {
         problem: Option<CommentProblem>,
         is_sending: bool,
     },
-    /// The ask button under the last of the lines that have Asks.
-    AskMarker(Arc<AskAt>),
     /// The space under a piece box; the box's last row draws its bottom edge.
     PieceEnd,
     ScreenFooter(Arc<ScreenFooter>),
@@ -129,15 +127,6 @@ pub enum FixesOffer {
     None,
 }
 
-/// An ask button and what it asks about.
-#[derive(Debug, Clone)]
-pub struct AskAt {
-    /// Tells this button apart from the page's other ask buttons.
-    pub id: Arc<str>,
-    pub place: Place,
-    pub label: String,
-}
-
 pub struct StepHeading {
     pub id: StepId,
     pub title: Arc<str>,
@@ -154,7 +143,6 @@ pub struct StepHeading {
 pub struct Toolbar {
     /// The button that starts the AI review, on the screens that open a review.
     pub run_ai_review: Option<AiReviewAction>,
-    pub ask: Option<AskAt>,
     /// The file a basic tour's screen shows, which the reviewer can comment on as a whole.
     pub comment_on_file: Option<FilePath>,
     pub fold: Option<FoldControl>,
@@ -254,7 +242,6 @@ pub struct PieceHeading {
     pub piece: PieceId,
     pub label: PieceLabel,
     pub path: FilePath,
-    pub ask: Option<AskAt>,
     /// "changed" or "new" after a re-pin.
     pub repin_label: Option<&'static str>,
     pub code_link: Option<CodeLink>,
@@ -477,8 +464,7 @@ impl PageRow {
                 ..
             }
             | Self::QueuedComment(_)
-            | Self::Composer { .. }
-            | Self::AskMarker(_) => BoxPart::Hung,
+            | Self::Composer { .. } => BoxPart::Hung,
             Self::PieceEnd => BoxPart::End,
             _ => BoxPart::Outside,
         }

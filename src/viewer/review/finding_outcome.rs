@@ -28,6 +28,8 @@ pub enum FindingRefusal {
     BeingAsked,
     /// The tour agent asked nothing of the reviewer on this finding, or it was answered already.
     NoFixQuestion,
+    /// The review agent that reported the finding is gone, so nobody can say why.
+    NoReviewAgent,
     Comment(CommentRefusal),
 }
 
@@ -51,6 +53,7 @@ impl fmt::Display for FindingRefusal {
             Self::NoFixQuestion => {
                 f.write_str("The tour agent has no question on this finding to answer")
             }
+            Self::NoReviewAgent => f.write_str("The review agent that reported this is gone"),
             Self::Comment(refusal) => refusal.fmt(f),
         }
     }

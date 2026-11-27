@@ -32,14 +32,13 @@ use crate::app_folders::AppFolders;
 use crate::code_source::CodeSource;
 use crate::opened_subject::{OpenedChangeSet, writer_folder};
 use crate::viewer::{
-    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Ask, Audience, CloneOffer, CodeHost,
+    AfterJob, AfterLanding, AgentReplied, AiReviewRefusal, Audience, CloneOffer, CodeHost,
     CommentId, CommentOutcome, CommentPlace, CommentRequest, CommentResult, FindingRefusal,
     FinishResult, HandOffButton, HandOffId, HoveredName, ImageCache, JobOutcome, JobProgress,
-    LineLocation, NoteSubject, OldHead, OwnAgentHandOff, Problem, RefreshBrief, RepinnedTour,
-    ReplacingJob, Review, ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId,
-    TextBox, ThreadAction, ThreadActionResult, ToastTone, TourAgentState, TourAgents,
-    TourRefresher, TourReloader, TourSwitcher, WorkPorts, announcements, land_elsewhere,
-    line_count,
+    LineLocation, NoteSubject, OldHead, Problem, RefreshBrief, RepinnedTour, ReplacingJob, Review,
+    ReviewChange, ReviewVerdict, Screen, SendMode, StartedJob, TerminalId, TextBox, ThreadAction,
+    ThreadActionResult, ToastTone, TourAgentState, TourAgents, TourRefresher, TourReloader,
+    TourSwitcher, WhyAsked, WorkPorts, announcements, land_elsewhere, line_count,
 };
 
 const TYPING_SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -408,22 +407,6 @@ impl ReviewSession {
         });
     }
 
-    /// For changes of the Asks, which come on every line an answer streams in: the rows are built
-    /// again only when the page changed, that is when the lines with Asks on the screen did.
-    pub fn change_asks<T>(
-        &mut self,
-        cx: &mut Context<Self>,
-        change: impl FnOnce(&mut Review) -> T,
-    ) -> T {
-        let result = change(&mut self.review);
-        if self.rows.shows(self.review.page()) {
-            cx.notify();
-        } else {
-            self.rebuild_rows(cx);
-        }
-        result
-    }
-
     /// The drag selection only changes how rows look, which is read when they are drawn.
     pub fn select_from(&mut self, at: LineLocation, cx: &mut Context<Self>) {
         self.review.begin_selection(at);
@@ -548,6 +531,15 @@ impl ReviewSession {
         cx: &mut Context<Self>,
     ) -> Result<(), FindingRefusal> {
         self.change(cx, |review| review.fix_with_note(id, note, timing))
+    }
+
+    pub fn ask_why(
+        &mut self,
+        id: &FindingId,
+        question: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<WhyAsked, FindingRefusal> {
+        self.change(cx, |review| review.ask_why(id, question))
     }
 
     pub fn mark_fixed(
@@ -1933,27 +1925,6 @@ impl ReviewSession {
 
     pub fn is_delivering_hand_offs(&self) -> bool {
         self.review.is_delivering_hand_offs()
-    }
-
-    /// Types the Ask into the reviewer's own tour agent off the UI thread, since herdr is asked first.
-    /// Ends with what the Ask panel says of it.
-    pub fn hand_ask_to_agent(
-        &self,
-        ask: &Ask,
-        place: &str,
-        anyway: bool,
-        cx: &App,
-    ) -> Task<OwnAgentHandOff> {
-        let agents = self.tour_work.tour_agents.clone();
-        let subject = self.review.subject().clone();
-        let text = self.review.ask_hand_off_text(ask, place);
-        cx.background_executor().spawn(async move {
-            if anyway {
-                agents.hand_to_own_agent_anyway(&subject, &text)
-            } else {
-                agents.hand_to_own_agent(&subject, &text)
-            }
-        })
     }
 
     /// Retry beside the message of an off link.

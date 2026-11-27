@@ -1,17 +1,9 @@
-//! Ask why on a finding: to the review agent while it lives, on the finding's thread; else in the Ask
-//! panel, on the finding's lines with the finding told.
-
-use std::fmt::Write as _;
-use std::time::Instant;
+//! Ask why on a finding: to the review agent while it lives, on the finding's thread.
 
 use super::finding_outcome::FindingRefusal;
 use super::{Review, ReviewCore};
-use crate::config::AskSettings;
 use crate::findings::{Finding, FindingId};
-use crate::prompt_safety::quoted;
 use crate::viewer::ai_review_run::ReviewAgentLife;
-use crate::viewer::ask_desk::AskProcesses;
-use crate::viewer::ask_target::AskTarget;
 use crate::viewer::finding_threads::{
     FindingThread, WhyDeliveryOutcome, WhyDeliveryRequest, WhyReply, WhyState,
 };
@@ -22,65 +14,22 @@ use crate::viewer::tour_agent::AgentStatus;
 pub enum WhyAsked {
     /// Onto the finding's thread, for the review agent that reported it.
     ToReviewAgent,
-    /// The review agent is gone: the Ask panel took it, on the finding's place.
-    InAskPanel,
 }
 
 /// What Ask why asks when the reviewer typed nothing.
 pub const DEFAULT_WHY_QUESTION: &str = "Why is this a finding? What did you see in the code?";
 
 impl Review {
-    pub fn ask_why(
-        &mut self,
-        id: &FindingId,
-        question: &str,
-        settings: &AskSettings,
-        now: Instant,
-        processes: &mut dyn AskProcesses,
-    ) -> Result<WhyAsked, FindingRefusal> {
+    pub fn ask_why(&mut self, id: &FindingId, question: &str) -> Result<WhyAsked, FindingRefusal> {
         let finding = self.open_finding(id)?;
         let question = match question.trim() {
             "" => DEFAULT_WHY_QUESTION,
             typed => typed,
         };
         if !self.review_agent_is_alive() {
-            self.ask_in_panel(&finding, question, settings, now, processes);
-            return Ok(WhyAsked::InAskPanel);
+            return Err(FindingRefusal::NoReviewAgent);
         }
         self.ask_review_agent_why(finding, question)
-    }
-
-    /// A fresh Ask on the finding's place, told the finding, takes the question.
-    fn ask_in_panel(
-        &mut self,
-        finding: &Finding,
-        question: &str,
-        settings: &AskSettings,
-        now: Instant,
-        processes: &mut dyn AskProcesses,
-    ) {
-        let place = self.ask_place_of_finding(finding);
-        let label = place
-            .lines_label()
-            .unwrap_or_else(|| finding.anchor.to_string());
-        let clone = self.asks().clone_folder().cloned();
-        let mut target = self.ask_target(place, label, clone, settings);
-        if let AskTarget::Ready { context, .. } = &mut target {
-            write!(
-                context,
-                "\n\nAn AI review of this change reported this finding here ({}):\n{}\n\
-                 The reviewer asks about it. Check it against the code: the AI review may be wrong.",
-                finding.severity,
-                quoted(&finding.body)
-            )
-            .ok();
-        }
-        let head = self.head().clone();
-        self.check_asks_for_code_changes();
-        self.change_asks(|desk| {
-            desk.open(target, &head, now, processes);
-            desk.send(question, now, processes);
-        });
     }
 }
 

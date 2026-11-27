@@ -30,19 +30,18 @@ use guided_review::pull_request::{
     ChangeTips, HostSite, HostedRepo, PullRequestUrl, RepoName, Sha,
 };
 use guided_review::viewer::{
-    AgentLaunch, AgentLauncher, AgentPort, Ask, AskId, AskProcesses, AskStore, ChangeRequestsPort,
-    ChangeTipsPort, Checks, ClonePort, CodeHost, CommentId, CommentPlace, CommentReactionsPort,
-    HostError, HostedCodePort, IssueDetails, IssueDetailsPort, MergingPort, NoAccess, NotDelivered,
-    OpenPrStatus, OutageCause, PictureUploadPort, PrStatus, PullOfBranch,
+    ChangeRequestsPort, ChangeTipsPort, Checks, ClonePort, CodeHost, CommentId, CommentPlace,
+    CommentReactionsPort, HostError, HostedCodePort, IssueDetails, IssueDetailsPort, MergingPort,
+    NoAccess, OpenPrStatus, OutageCause, PictureUploadPort, PrStatus, PullOfBranch,
     PullRequestDescriptionPort, PullRequestIssues, PullRequestOrigin, PullRequestOriginPort,
     PullRequestReactionsPort, PullRequestReviews, PullRequestStatusPort, PullsOfBranchPort,
     Reaction, ReactionChange, ReactionCount, Readiness, RelevantPullRequests,
     RelevantPullRequestsPort, Resolution, ReviewOutcome, ReviewThread, ReviewThreadsPort,
     ReviewVerdict, ReviewWritesPort, Reviewer, SendMode, Side, Stance, Standing, SubmittedReview,
-    ThreadComment, ThreadId, TurnStopper, Viewed, ViewedFile, ViewedFilesPort, ViewedState, Whose,
+    ThreadComment, ThreadId, Viewed, ViewedFile, ViewedFilesPort, ViewedState, Whose,
 };
 
-/// What the app core sent out: what it asked of GitHub, and the lines it said to the agent.
+/// What the app core sent out: what it asked of GitHub.
 #[derive(Clone, Default)]
 pub struct SentLog(Arc<Mutex<Sent>>);
 
@@ -51,7 +50,6 @@ struct Sent {
     host: Vec<HostCall>,
     /// The looks for a PR of a branch, kept apart: a local review makes them and no other call.
     branch_lookups: Vec<String>,
-    agent: Vec<String>,
 }
 
 /// One request the app core made of `FakeHost`, in the order it made them.
@@ -137,16 +135,8 @@ impl SentLog {
         self.0.lock().unwrap().branch_lookups.clone()
     }
 
-    pub fn agent_lines(&self) -> Vec<String> {
-        self.0.lock().unwrap().agent.clone()
-    }
-
     fn record(&self, call: HostCall) {
         self.0.lock().unwrap().host.push(call);
-    }
-
-    fn push(&self, line: String) {
-        self.0.lock().unwrap().agent.push(line);
     }
 }
 
@@ -1193,141 +1183,6 @@ fn viewers_comment(id: &CommentId, body: &str) -> ThreadComment {
         body: body.to_owned(),
         url: format!("https://github.com/acme/shop/pull/7#discussion_r{id}"),
         reactions: Vec::new(),
-    }
-}
-
-/// Replays scripted answers, one stream line at a time, one scripted turn per question.
-pub struct FakeAgent {
-    pub sent: SentLog,
-    turns: VecDeque<Vec<String>>,
-}
-
-impl FakeAgent {
-    pub fn answering(turns: &[&str], sent: &SentLog) -> Self {
-        Self {
-            sent: sent.clone(),
-            turns: turns
-                .iter()
-                .map(|turn| turn.lines().map(str::to_owned).collect())
-                .collect(),
-        }
-    }
-}
-
-impl AgentPort for FakeAgent {
-    fn ask(&mut self, message: &str, on_line: &mut dyn FnMut(&str)) -> anyhow::Result<()> {
-        self.sent.push(format!("agent: {message}"));
-        let turn = self.turns.pop_front().unwrap_or_default();
-        for line in &turn {
-            on_line(line);
-        }
-        Ok(())
-    }
-
-    fn turn_stopper(&self) -> Arc<dyn TurnStopper> {
-        Arc::new(FakeTurnStopper(self.sent.clone()))
-    }
-}
-
-struct FakeTurnStopper(SentLog);
-
-impl TurnStopper for FakeTurnStopper {
-    fn stop_turn(&self) -> anyhow::Result<()> {
-        self.0.push("agent: stop the turn".to_owned());
-        Ok(())
-    }
-}
-
-/// Hands out one `FakeAgent` per start and logs how it was launched.
-pub struct FakeAgentLauncher {
-    pub sent: SentLog,
-    pub turns: Vec<String>,
-}
-
-impl AgentLauncher for FakeAgentLauncher {
-    fn start(&self, launch: &AgentLaunch) -> anyhow::Result<Box<dyn AgentPort>> {
-        self.sent.push(format!(
-            "agent started in {} with {} / {}{}",
-            launch.cwd.display(),
-            launch.model,
-            launch.effort,
-            launch
-                .resume
-                .as_ref()
-                .map_or_default(|id| format!(", resuming {id}"))
-        ));
-        let turns: Vec<&str> = self.turns.iter().map(String::as_str).collect();
-        Ok(Box::new(FakeAgent::answering(&turns, &self.sent)))
-    }
-}
-
-/// Stands in for the Asks' process threads: logs what the desk does to them, and lets the next
-/// deliveries fail as if the process had died.
-#[derive(Default)]
-pub struct FakeAskProcesses {
-    pub log: Vec<String>,
-    running: Vec<AskId>,
-    pub deliveries_failing: usize,
-}
-
-impl AskProcesses for FakeAskProcesses {
-    fn start(&mut self, ask: AskId, launch: AgentLaunch) {
-        assert!(launch.cwd.exists(), "an Ask's process starts in the clone");
-        self.log
-            .push(format!("start {}", serde_json::to_string(&ask).unwrap()));
-        self.running.push(ask);
-    }
-
-    fn stop(&mut self, ask: AskId) {
-        self.log
-            .push(format!("stop {}", serde_json::to_string(&ask).unwrap()));
-        self.running.retain(|running| *running != ask);
-    }
-
-    fn is_running(&self, ask: AskId) -> bool {
-        self.running.contains(&ask)
-    }
-
-    fn deliver(&mut self, ask: AskId, message: String) -> Result<(), NotDelivered> {
-        if self.deliveries_failing > 0 {
-            self.deliveries_failing -= 1;
-            self.log.push(format!(
-                "not delivered to {}",
-                serde_json::to_string(&ask).unwrap()
-            ));
-            return Err(NotDelivered);
-        }
-        let question = message.lines().last().unwrap_or_default();
-        self.log.push(format!(
-            "deliver to {}: {question}",
-            serde_json::to_string(&ask).unwrap()
-        ));
-        Ok(())
-    }
-
-    fn turn_stopper(&self, _: AskId) -> Option<Arc<dyn TurnStopper>> {
-        None
-    }
-}
-
-/// Stands in for the per-PR state file.
-#[derive(Clone, Default)]
-pub struct FakeAskStore(Arc<Mutex<Vec<Ask>>>);
-
-impl FakeAskStore {
-    pub fn saved(&self) -> Vec<Ask> {
-        self.0.lock().unwrap().clone()
-    }
-}
-
-impl AskStore for FakeAskStore {
-    fn load(&self) -> anyhow::Result<Vec<Ask>> {
-        Ok(self.saved())
-    }
-
-    fn save(&self, asks: &[Ask]) -> anyhow::Result<()> {
-        *self.0.lock().unwrap() = asks.to_vec();
-        Ok(())
     }
 }
 

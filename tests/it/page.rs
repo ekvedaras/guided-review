@@ -134,8 +134,7 @@ fn the_page_is_built_once_and_kept_while_the_review_does_not_change() {
     review.begin_selection(at_head("notes.txt", 10));
     let page = Arc::clone(review.page());
 
-    let selected = review.selected_lines().unwrap();
-    review.place_of_lines(&selected);
+    review.selected_lines().unwrap();
     review.image_preview_requests();
 
     assert!(Arc::ptr_eq(&page, review.page()));
@@ -199,7 +198,6 @@ fn shape(row: &PageRow) -> String {
         PageRow::Thread { view, place, .. } => format!("thread {} {place:?}", view.thread.id),
         PageRow::Composer { .. } => "comment box".into(),
         PageRow::QueuedComment(_) => "queued".into(),
-        PageRow::AskMarker(_) => "ask marker".into(),
         PageRow::Image { .. } => "image".into(),
         PageRow::NoChangeSinceRead => "no change since read".into(),
         _ => "other".into(),

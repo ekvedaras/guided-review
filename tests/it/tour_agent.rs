@@ -451,7 +451,7 @@ fn sends(fake: &FakeTourAgent) -> Vec<TourAgentCall> {
 }
 
 #[test]
-fn an_ask_is_handed_only_to_an_idle_agent_the_reviewer_started() {
+fn a_message_is_handed_only_to_an_idle_agent_the_reviewer_started() {
     let mine = Arc::new(FakeTourAgent::new().with_terminal("mine", Some(PR), AgentStatus::Idle));
     assert_eq!(
         agents(&mine).hand_to_own_agent(&pr(), "do it"),
@@ -483,26 +483,6 @@ fn an_ask_is_handed_only_to_an_idle_agent_the_reviewer_started() {
     assert_eq!(
         agents(&none).hand_to_own_agent(&pr(), "do it"),
         OwnAgentHandOff::NoAgent
-    );
-}
-
-#[test]
-fn the_ask_panel_line_says_what_became_of_the_hand_off() {
-    assert_eq!(
-        OwnAgentHandOff::Delivered(TerminalId::new("t2")).line(),
-        "Handed to your agent t2"
-    );
-    assert_eq!(
-        OwnAgentHandOff::StartedByApp(TerminalId::new("t1")).line(),
-        "Not handed: the tour agent t1 was started by the app and cannot change files. Run `guided-review open` from your own Claude in herdr to make it the tour agent"
-    );
-    assert_eq!(
-        OwnAgentHandOff::NotSent("t2 is working".to_owned()).line(),
-        "Not handed: t2 is working. Try again when it is free"
-    );
-    assert_eq!(
-        OwnAgentHandOff::NoAgent.line(),
-        "Not handed: this PR has no tour agent. Run `guided-review open` from your own Claude in herdr to make it the tour agent"
     );
 }
 

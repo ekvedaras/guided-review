@@ -73,7 +73,6 @@ impl OneStepLayout {
             ask_agent: session.agent_link_is_on(),
             sending: review.sending(),
         };
-        let ask_place = review.ask_place_of(place);
         let on_type = {
             let (layout, draft) = (cx.entity(), TextBox::Draft(place.clone()));
             Rc::new(move |body: String, _: &mut Window, cx: &mut App| {
@@ -147,28 +146,14 @@ impl OneStepLayout {
                 })
             },
         };
-        let ask = ask_place.map(|ask_place| {
-            let label = ask_place.lines_label().unwrap_or_default();
-            self.ask_button(
-                format!("ask-{}", place.describe()),
-                ask_place,
-                label,
-                ButtonKind::Ghost,
-                cx,
-            )
-            .into_any_element()
-        });
-        Some(
-            CommentComposer::new(
-                draft,
-                self.composer_focus.clone(),
-                state,
-                capabilities,
-                problem,
-                actions,
-            )
-            .with_ask(ask),
-        )
+        Some(CommentComposer::new(
+            draft,
+            self.composer_focus.clone(),
+            state,
+            capabilities,
+            problem,
+            actions,
+        ))
     }
 
     fn on_thread_action(&self) -> OnThreadAction {

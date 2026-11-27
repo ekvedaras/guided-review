@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 
 use super::ReviewCore;
 use crate::file_path::FilePath;
-use crate::viewer::ask_context;
 use crate::viewer::comment_desk::{CommentBox, CommentDesk, TextBox};
 use crate::viewer::comment_send::{CommentOutcome, CommentRequest};
 use crate::viewer::comments::Audience;
@@ -449,7 +448,7 @@ impl ReviewCore {
         self.subject.local()?;
         let place = outcome.request.place();
         let selected = Page::of(self).selected(&RowSelection::of(place)?)?;
-        Some(ask_context::code_lines(selected.lines()))
+        Some(selected.told_to_an_agent())
     }
 
     fn note_new_hand_off(&mut self, hand_offs_before: usize) {

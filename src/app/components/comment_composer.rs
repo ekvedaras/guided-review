@@ -125,8 +125,6 @@ pub struct CommentComposer {
     /// What stops the comment, or what went wrong with the last send.
     problem: Option<CommentProblem>,
     actions: ComposerActions,
-    /// Asks the AI about the box's lines; on the box, so it goes when the box goes.
-    ask: Option<gpui::AnyElement>,
 }
 
 impl CommentComposer {
@@ -147,13 +145,7 @@ impl CommentComposer {
             capabilities,
             problem,
             actions,
-            ask: None,
         }
-    }
-
-    pub fn with_ask(mut self, ask: Option<gpui::AnyElement>) -> Self {
-        self.ask = ask;
-        self
     }
 }
 
@@ -284,18 +276,12 @@ impl RenderOnce for CommentComposer {
             .font_family(*super::palette::TEXT_FONT)
             .on_click(move |_, window, cx| on_focus(window, cx))
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(colors.muted_text)
-                            .child(place.describe()),
-                    )
-                    .children(self.ask),
+                div().flex().items_center().justify_between().gap_2().child(
+                    div()
+                        .text_xs()
+                        .text_color(colors.muted_text)
+                        .child(place.describe()),
+                ),
             )
             .child(
                 Field::new(&self.focus)

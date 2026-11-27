@@ -41,11 +41,10 @@ use crate::app::page_rows::DESCRIPTION_KEY;
 use crate::app::review_session::ReviewSession;
 use crate::local_facts::{LocalChange, LocalFacts};
 use crate::viewer::{
-    AskAt, BoxEdges, BoxFold, Command, CommentGesture, FinishAction, Intent, NextScreen,
-    NoteSubject, NotesButton, OverviewPage, OverviewStats, PageRow, ReadSubject, ReadUnit,
-    ReviewChange, ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, SelectedRows,
-    StepHeading, StepId, StepIntro, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar,
-    TourLead, pluralised,
+    BoxEdges, BoxFold, Command, CommentGesture, FinishAction, Intent, NextScreen, NoteSubject,
+    NotesButton, OverviewPage, OverviewStats, PageRow, ReadSubject, ReadUnit, ReviewChange,
+    ReviewerSummaryRow, RouteStopRow, Screen, ScreenFooter, SelectedRows, StepHeading, StepId,
+    StepIntro, SummaryColumns, SummaryStatsRow, ThreadRowPlace, Toolbar, TourLead, pluralised,
 };
 
 impl OneStepLayout {
@@ -156,10 +155,6 @@ impl OneStepLayout {
                 let open_code = heading.code_link.as_ref().map(|link| {
                     Self::open_code_button(format!("open-piece-{}", heading.piece), link, cx)
                 });
-                let ask = heading
-                    .ask
-                    .as_ref()
-                    .map(|ask| self.ask_at(ask, ButtonKind::Ghost, cx));
                 let view_switch = heading
                     .view
                     .as_ref()
@@ -175,7 +170,6 @@ impl OneStepLayout {
                         .into_iter()
                         .chain(view_switch)
                         .chain(open_code)
-                        .chain(ask)
                         .collect(),
                 )
                 .closing_its_box(edges.closes);
@@ -190,14 +184,10 @@ impl OneStepLayout {
                 let open_code = heading.code_link.as_ref().map(|link| {
                     Self::open_code_button(format!("open-marker-{}", heading.piece), link, cx)
                 });
-                let ask = heading
-                    .ask
-                    .as_ref()
-                    .map(|ask| self.ask_at(ask, ButtonKind::Ghost, cx));
                 PieceMarker::new(
                     heading.label.clone(),
                     heading.repin_label,
-                    open_code.into_iter().chain(ask).collect(),
+                    open_code.into_iter().collect(),
                 )
                 .with_edges(edges)
                 .into_any_element()
@@ -301,12 +291,6 @@ impl OneStepLayout {
                 .into_any_element(),
             PageRow::Composer { place, .. } => hung_row()
                 .children(self.composer(&place, cx))
-                .into_any_element(),
-            PageRow::AskMarker(ask) => hung_row()
-                .flex()
-                .px_2()
-                .py_1()
-                .child(self.ask_at(&ask, ButtonKind::Ghost, cx))
                 .into_any_element(),
             PageRow::PieceEnd => piece_end(),
         }
@@ -651,14 +635,6 @@ impl OneStepLayout {
         });
         let toggles: Vec<Stateful<Div>> = whitespace.into_iter().chain(wrap).collect();
         let toggles = (!toggles.is_empty()).then(|| joined(&colors, toggles));
-        let ask = toolbar.ask.as_ref().map(|ask| {
-            self.ask_at(ask, ButtonKind::Tinted, cx).child(button_keys(
-                &colors,
-                ButtonKind::Tinted,
-                Command::AskAboutStep,
-                cx,
-            ))
-        });
         let run_ai_review = toolbar.run_ai_review.map(|action| {
             icon_label_button(
                 &colors,
@@ -700,7 +676,6 @@ impl OneStepLayout {
             .children(run_ai_review)
             .children(comment_on_file)
             .children(toggles)
-            .children(ask.map(|ask| div().pl_1().child(ask)))
     }
 
     /// The text keeps its reading width; the diagram sits beside it where the window has room, else under it.
@@ -752,16 +727,6 @@ impl OneStepLayout {
             .gap_y_4()
             .child(text)
             .children(diagram)
-    }
-
-    fn ask_at(&self, ask: &AskAt, kind: ButtonKind, cx: &mut Context<Self>) -> Stateful<Div> {
-        self.ask_button(
-            ask.id.to_string(),
-            ask.place.clone(),
-            ask.label.clone(),
-            kind,
-            cx,
-        )
     }
 
     fn on_gap_ask(&self, cx: &mut Context<Self>) -> OnGapAsk {

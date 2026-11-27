@@ -233,10 +233,8 @@ pub enum CommentRefusal {
     NotInsideHunk,
     /// The row is a line of the head the step was read at: the host has no such line to comment on.
     OlderHeadLine,
-    /// An Ask about a step or the whole tour has no lines a comment could sit on.
+    /// A finding on a step or the whole change has no lines a comment could sit on.
     NoLines,
-    /// The Ask was answered about an older head; its lines may sit elsewhere now.
-    AskIsOnOlderCode,
     /// Someone started a pending review since the last look, so "Comment now" is off.
     PendingReviewExists,
     /// A reply with no text has nothing to send.
@@ -247,8 +245,6 @@ pub enum CommentRefusal {
     NotYourComment,
     /// A comment is deleted only after the reviewer said yes to the question.
     DeleteNotConfirmed,
-    /// An Ask still waiting for its first answer has nothing to put in a comment.
-    NoAnswerYet,
     NoAccess(String),
     /// The send action is not one this review offers: a task in a PR's review, or a comment to the host
     /// comment in a local review.
@@ -267,16 +263,12 @@ impl CommentRefusal {
             Self::OlderHeadLine => {
                 "This line is from the code as you last read it and takes no comment: show the full diff to comment"
             }
-            Self::NoLines => "Only an Ask about lines can become a comment",
-            Self::AskIsOnOlderCode => {
-                "This Ask is about older code: select the lines again to comment"
-            }
+            Self::NoLines => "There are no lines of the diff to comment on",
             Self::PendingReviewExists => "There is a pending review now: add the comment to it",
             Self::EmptyReply => "Write the reply first",
             Self::EmptyComment => "A comment needs text",
             Self::NotYourComment => "Only your own comments can be deleted",
             Self::DeleteNotConfirmed => "Confirm the deletion first",
-            Self::NoAnswerYet => "This Ask has no answer yet",
             Self::NotOffered => "This review does not send comments that way",
             Self::AgentLinkOff => {
                 "The agent cannot be reached now: the comment stays here until it can"

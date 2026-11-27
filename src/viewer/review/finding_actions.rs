@@ -3,17 +3,21 @@ use super::finding_outcome::{FindingRefusal, FindingsBatch};
 use crate::file_path::FilePath;
 use crate::findings::{Anchor, Finding, FindingId};
 use crate::viewer::ai_review::AiReview;
-use crate::viewer::ask::{Place, ShownOn};
 use crate::viewer::comment_send::CommentRequest;
 use crate::viewer::comments::Audience;
 use crate::viewer::comments::{CommentPlace, CommentRefusal, SendMode};
+use crate::viewer::file_block::FileBlock;
 use crate::viewer::finding_decisions::Fate;
 use crate::viewer::finding_placement::FindingHome;
 use crate::viewer::finding_threads::WhyAuthor;
 use crate::viewer::findings_list::{FindingLine, FindingsList};
 use crate::viewer::fix_requests::{FixNote, FixReply, FixState, FixTiming};
 use crate::viewer::line_location::{LineLocation, Side};
+use crate::viewer::piece_diff::PieceDiff;
 use crate::viewer::review_thread::ThreadId;
+use crate::viewer::row_selection::RowSelection;
+use crate::viewer::screen::Screen;
+use crate::viewer::step_page::{FilePage, StepPage};
 use crate::viewer::thread_actions::TourFreshness;
 use crate::viewer::work_agenda::WorkKind;
 
@@ -398,64 +402,56 @@ impl ReviewCore {
             .collect()
     }
 
-    /// The lines of a finding on the screen that shows it; its step or file for a finding on a file; the
-    /// whole tour for one on the whole change.
-    pub(super) fn ask_place_of_finding(&self, finding: &Finding) -> Place {
-        let home = self.findings.home_of(&finding.id);
-        let shown_on = match home {
-            Some(FindingHome::Step(step)) => Some(ShownOn::Step { step: step.clone() }),
-            Some(FindingHome::SafetyNet) => Some(ShownOn::SafetyNet),
-            Some(FindingHome::File(path)) => Some(ShownOn::File { path: path.clone() }),
-            Some(FindingHome::Change) | None => None,
-        };
-        match (&finding.anchor, shown_on) {
-            (Anchor::Lines { file, side, lines }, Some(shown_on)) => {
-                let at = |line| LineLocation {
-                    path: file.clone(),
-                    side: Side::from(*side),
-                    line,
-                };
-                let (start, end) = (at(lines.start), at(lines.end));
-                let pieces = self
-                    .pieces_shown_on(shown_on.clone())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|piece| {
-                        piece.lines().any(|line| {
-                            line.location.path == start.path
-                                && line.location.side == start.side
-                                && (start.line..=end.line).contains(&line.location.line)
-                        })
-                    })
-                    .map(|piece| piece.id)
-                    .collect();
-                Place::Lines {
-                    shown_on,
-                    start,
-                    end,
-                    pieces,
-                }
-            }
-            (Anchor::File { .. }, Some(ShownOn::Step { step })) => Place::Step { step },
-            (Anchor::File { file }, Some(ShownOn::File { .. })) => {
-                Place::File { path: file.clone() }
-            }
-            _ => Place::Tour,
-        }
-    }
-
     /// The code lines of a finding's anchor on the screen that shows them; none when no screen does.
     fn code_lines_of(&self, finding: &Finding) -> Vec<FindingLine> {
-        let place = self.ask_place_of_finding(finding);
-        self.lines_of(&place).map_or_default(|selected| {
+        let Anchor::Lines { file, side, lines } = &finding.anchor else {
+            return Vec::new();
+        };
+        let screen = match self.findings.home_of(&finding.id) {
+            Some(FindingHome::Step(step)) => Screen::Step(step.clone()),
+            Some(FindingHome::SafetyNet) => Screen::SafetyNet,
+            Some(FindingHome::File(path)) => Screen::File(path.clone()),
+            Some(FindingHome::Change) | None => return Vec::new(),
+        };
+        let Some(pieces) = self.pieces_on(&screen) else {
+            return Vec::new();
+        };
+        let blocks = FileBlock::group(pieces);
+        let at = |line| LineLocation {
+            path: file.clone(),
+            side: Side::from(*side),
+            line,
+        };
+        let mut selection = RowSelection::start_at(at(lines.start));
+        selection.extend_to(at(lines.end));
+        let selected = selection.resolve(blocks.iter().flat_map(FileBlock::lines));
+        selected.map_or_default(|selected| {
             selected
-                .lines()
-                .iter()
-                .map(|line| FindingLine {
-                    number: line.location.line.get(),
-                    text: line.text.clone(),
+                .numbered_texts()
+                .map(|(number, text)| FindingLine {
+                    number,
+                    text: text.to_owned(),
                 })
                 .collect()
+        })
+    }
+
+    /// The pieces the screen shows, as its page draws them; `None` when the tour has no such screen.
+    pub(in crate::viewer::review) fn pieces_on(&self, screen: &Screen) -> Option<Vec<PieceDiff>> {
+        let links = self.links();
+        let display = self.display(&links);
+        Some(match screen {
+            Screen::Step(step) => {
+                let guided = self.tour.guided()?;
+                StepPage::of(self.step(step)?, guided, &self.files, &display, false).pieces
+            }
+            Screen::SafetyNet => self.safety_net()?.pieces,
+            Screen::File(_) if self.tour.guided().is_some() => return None,
+            Screen::File(path) => {
+                let file = self.files.iter().find(|file| file.path == *path)?;
+                FilePage::of(file, &self.files, &display).pieces
+            }
+            Screen::Summary | Screen::Overview => return None,
         })
     }
 

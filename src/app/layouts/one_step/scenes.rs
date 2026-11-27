@@ -51,7 +51,6 @@ enum Scene {
     PrSwitcher,
     FinishReview,
     CommentComposer,
-    AskPanel,
     SwitchingVeil,
     LoadingScreen,
     Gallery,
@@ -126,13 +125,12 @@ enum Scene {
 }
 
 impl Scene {
-    const ALL: [Self; 77] = [
+    const ALL: [Self; 76] = [
         Self::Settings,
         Self::JumpPalette,
         Self::PrSwitcher,
         Self::FinishReview,
         Self::CommentComposer,
-        Self::AskPanel,
         Self::SwitchingVeil,
         Self::LoadingScreen,
         Self::Gallery,
@@ -213,7 +211,6 @@ impl Scene {
             Self::PrSwitcher => "22-pr-switcher",
             Self::FinishReview => "23-finish-review",
             Self::CommentComposer => "24-comment-composer",
-            Self::AskPanel => "25-ask-panel",
             Self::SwitchingVeil => "26-switching-veil",
             Self::LoadingScreen => "27-loading-screen",
             Self::Gallery => "28-gallery",
@@ -905,7 +902,6 @@ impl OneStepLayout {
                 }
                 self.compose_on_first_added_lines(window, cx);
             }
-            Scene::AskPanel => self.ask_about_screen(window, cx),
             Scene::SwitchingVeil => {
                 if let Some(other) = sample_pr(OTHER_PR).map(ReviewSubject::from) {
                     let active = cx.global::<PrSwitching>().active.clone();
@@ -1348,7 +1344,6 @@ impl OneStepLayout {
                 });
                 window.focus(&self.focus, cx);
             }
-            Scene::AskPanel => self.ask.update(cx, |panel, cx| panel.close(window, cx)),
             Scene::SwitchingVeil => {}
             Scene::LoadingScreen => {
                 let active = cx.global::<PrSwitching>().active.clone();

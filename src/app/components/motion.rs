@@ -41,8 +41,6 @@ pub const OVERLAY_RISE: Pixels = px(8.);
 pub const BOX_RISE: Pixels = px(6.);
 /// How far a band under the title bar (new commits, refresh, a notice) drops into place.
 pub const BANNER_DROP: Pixels = px(8.);
-/// How far a docked panel (Ask) slides in from its edge.
-pub const PANEL_SLIDE: Pixels = px(24.);
 
 /// Fast at first, settling softly: the one easing for things arriving.
 pub fn ease_out(delta: f32) -> f32 {

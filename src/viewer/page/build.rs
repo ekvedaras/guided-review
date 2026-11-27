@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::rows::{
-    AskAt, BinaryFileRow, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
-    FullDiffControl, HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow,
-    RouteStopRow, ScreenFooter, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
-    SummaryStatsRow, ThreadRowPlace, Toolbar, line_count,
+    BinaryFileRow, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl, FullDiffControl,
+    HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow, RouteStopRow, ScreenFooter,
+    ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns, SummaryStatsRow, ThreadRowPlace,
+    Toolbar, line_count,
 };
 use crate::file_path::FilePath;
 use crate::pieces::PieceId;
@@ -20,8 +20,8 @@ use crate::viewer::rendered_view::section_title_at;
 use crate::viewer::review::ReviewCore;
 use crate::viewer::{
     BoxState, CommentPlace, FileBlock, FilePage, LineKind, LineLocation, Markdown, NoteSubject,
-    PieceDiff, Place, QueuedComment, ReadSubject, SafetyNetPage, Screen, Side, StepPage,
-    ThreadView, TourLead, hidden_lines_after, hidden_lines_before,
+    PieceDiff, QueuedComment, ReadSubject, SafetyNetPage, Screen, Side, StepPage, ThreadView,
+    TourLead, hidden_lines_after, hidden_lines_before,
 };
 use crate::viewer::{FileView, LabelSwitch, PageChange, PieceLabels, Rendering, ViewSwitch};
 
@@ -157,11 +157,6 @@ impl<'a> Builder<'a> {
         self.finding_rows_of_the_whole_change();
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
             run_ai_review: review.ai_review_stage().action,
-            ask: Some(AskAt {
-                id: "ask-tour".into(),
-                place: Place::Tour,
-                label: "the whole tour".into(),
-            }),
             comment_on_file: None,
             fold: None,
             full_diff: None,
@@ -187,11 +182,6 @@ impl<'a> Builder<'a> {
         self.finding_rows_of_the_whole_change();
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
             run_ai_review: self.review.ai_review_stage().action,
-            ask: Some(AskAt {
-                id: "ask-tour".into(),
-                place: Place::Tour,
-                label: self.review.subject().whole_change().into(),
-            }),
             comment_on_file: None,
             fold: None,
             full_diff: None,
@@ -206,11 +196,6 @@ impl<'a> Builder<'a> {
         let review = self.review;
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
             run_ai_review: None,
-            ask: Some(AskAt {
-                id: format!("ask-file-{path}").into(),
-                place: Place::File { path: path.clone() },
-                label: path.to_string(),
-            }),
             // A picture has its own button for it.
             comment_on_file: (!page.pieces.iter().any(|piece| piece.is_image))
                 .then(|| path.clone()),
@@ -244,7 +229,7 @@ impl<'a> Builder<'a> {
                 screen,
                 path: block.path.clone(),
             };
-            self.block_rows(block, None, Some(fold), shown);
+            self.block_rows(block, Some(fold), shown);
         }
         self.rows_after_code(after_code);
         self.rows.push(screen_footer(
@@ -299,11 +284,6 @@ impl<'a> Builder<'a> {
         let folds = page.is_folded || step.skim || page.is_ticked;
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
             run_ai_review: None,
-            ask: Some(AskAt {
-                id: format!("ask-step-{id}").into(),
-                place: Place::Step { step: id.clone() },
-                label: step.title.clone(),
-            }),
             comment_on_file: None,
             fold: (folds && has_code).then(|| FoldControl {
                 step: id.clone(),
@@ -332,14 +312,6 @@ impl<'a> Builder<'a> {
             DiffShown::Full
         };
         let after_code = self.hang_threads_and_comments(page.threads);
-        let ask_of = |piece: &PieceDiff| AskAt {
-            id: format!("ask-piece-{id}-{}", piece.id).into(),
-            place: Place::Piece {
-                step: id.clone(),
-                piece: piece.id.clone(),
-            },
-            label: piece.id.to_string(),
-        };
         for block in FileBlock::group(page.pieces) {
             let screen = Screen::Step(id.clone());
             let fold = BoxFold {
@@ -347,7 +319,7 @@ impl<'a> Builder<'a> {
                 screen,
                 path: block.path.clone(),
             };
-            self.block_rows(block, Some(&ask_of), Some(fold), shown);
+            self.block_rows(block, Some(fold), shown);
         }
         self.rows_after_code(after_code);
         self.rows.push(footer);
@@ -359,7 +331,6 @@ impl<'a> Builder<'a> {
         self.rows.push(PageRow::SafetyNetIntro);
         self.rows.push(PageRow::Toolbar(Arc::new(Toolbar {
             run_ai_review: None,
-            ask: None,
             comment_on_file: None,
             fold: None,
             full_diff: None,
@@ -369,7 +340,7 @@ impl<'a> Builder<'a> {
         })));
         let after_code = self.hang_threads_and_comments(page.threads);
         for block in FileBlock::group(page.pieces) {
-            self.block_rows(block, None, None, DiffShown::Full);
+            self.block_rows(block, None, DiffShown::Full);
         }
         self.rows_after_code(after_code);
         self.rows.push(screen_footer(review, None));
@@ -391,7 +362,7 @@ impl<'a> Builder<'a> {
                 .into_iter()
                 .map(UnderLine::Thread)
                 .chain(findings_under_a_line.into_iter().map(UnderLine::Finding))
-                .chain(comments_and_asks(self.review)),
+                .chain(comments_here(self.review)),
         );
         AfterCode {
             threads: threads_after_code,
@@ -419,16 +390,10 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn block_rows(
-        &mut self,
-        block: FileBlock,
-        ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>,
-        fold: Option<BoxFold>,
-        shown: DiffShown,
-    ) {
+    fn block_rows(&mut self, block: FileBlock, fold: Option<BoxFold>, shown: DiffShown) {
         let switch = self.view_switch(&block);
         if fold.as_ref().is_some_and(|fold| fold.is_folded) {
-            self.folded_block_rows(&block, ask_of, fold, switch);
+            self.folded_block_rows(&block, fold, switch);
             self.blocks.push(block);
             return;
         }
@@ -436,10 +401,10 @@ impl<'a> Builder<'a> {
             .clone()
             .filter(|switch| switch.view == FileView::Rendered)
         {
-            self.rendered_block_rows(block, ask_of, fold, switch);
+            self.rendered_block_rows(block, fold, switch);
             return;
         }
-        let heading = |piece: &PieceDiff| heading_of(piece, ask_of);
+        let heading = heading_of;
         let has_no_change_since_read = |piece: &PieceDiff| {
             shown == DiffShown::ChangeSinceRead
                 && piece.hunks.is_empty()
@@ -517,7 +482,6 @@ impl<'a> Builder<'a> {
                     // A piece that starts again after one inside it keeps its buttons on its first label only.
                     let marker = if is_resumed {
                         PieceHeading {
-                            ask: None,
                             code_link: None,
                             ..heading(piece)
                         }
@@ -582,18 +546,12 @@ impl<'a> Builder<'a> {
 
     /// A rendered box shows its file instead of its lines, and takes no line comments. What hangs
     /// under its lines follows the file, so a thread stays readable and answerable in either view.
-    fn rendered_block_rows(
-        &mut self,
-        block: FileBlock,
-        ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>,
-        fold: Option<BoxFold>,
-        switch: ViewSwitch,
-    ) {
+    fn rendered_block_rows(&mut self, block: FileBlock, fold: Option<BoxFold>, switch: ViewSwitch) {
         let header = match block.pieces.as_slice() {
             [piece] => PieceHeading {
                 fold,
                 view: Some(switch.clone()),
-                ..heading_of(piece, ask_of)
+                ..heading_of(piece)
             },
             _ => PieceHeading {
                 view: Some(switch.clone()),
@@ -642,7 +600,6 @@ impl<'a> Builder<'a> {
     fn folded_block_rows(
         &mut self,
         block: &FileBlock,
-        ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>,
         fold: Option<BoxFold>,
         switch: Option<ViewSwitch>,
     ) {
@@ -650,7 +607,7 @@ impl<'a> Builder<'a> {
             self.rows.push(PageRow::PieceHeader(Arc::new(PieceHeading {
                 fold,
                 view: switch,
-                ..heading_of(piece, ask_of)
+                ..heading_of(piece)
             })));
         } else {
             self.rows.push(PageRow::PieceHeader(Arc::new(PieceHeading {
@@ -658,7 +615,7 @@ impl<'a> Builder<'a> {
                 ..whole_file_heading(block, fold)
             })));
             for piece in block.pieces_in_order() {
-                let mut marker = heading_of(piece, ask_of);
+                let mut marker = heading_of(piece);
                 marker.label = marker.label.named_as_part(self.part_name(piece));
                 self.rows.push(PageRow::PieceMarker(Arc::new(marker)));
             }
@@ -705,13 +662,12 @@ impl<'a> Builder<'a> {
     }
 }
 
-fn heading_of(piece: &PieceDiff, ask_of: Option<&dyn Fn(&PieceDiff) -> AskAt>) -> PieceHeading {
+fn heading_of(piece: &PieceDiff) -> PieceHeading {
     PieceHeading {
         fold: None,
         piece: piece.id.clone(),
         label: PieceLabel::of(&piece.id),
         path: piece.id.path().clone(),
-        ask: ask_of.map(|ask_of| ask_of(piece)),
         repin_label: piece.repin_status.and_then(repin_label),
         code_link: piece.code_link().cloned(),
         view: None,
@@ -727,7 +683,6 @@ fn whole_file_heading(block: &FileBlock, fold: Option<BoxFold>) -> PieceHeading 
         label: PieceLabel::of(&whole_file),
         piece: whole_file,
         path: block.path.clone(),
-        ask: None,
         repin_label: None,
         code_link: block.lines().next().map(|line| line.code_link.clone()),
         view: None,
@@ -830,13 +785,12 @@ struct AfterCode {
     findings: Vec<FindingView>,
 }
 
-/// What hangs under a row of code, in this order: threads, findings, queued comments, comment boxes, ask markers.
+/// What hangs under a row of code, in this order: threads, findings, queued comments, comment boxes.
 enum UnderLine {
     Thread(ThreadView),
     Finding(FindingView),
     Queued(QueuedComment),
     CommentBox(CommentPlace),
-    AskMarker(AskAt),
 }
 
 impl UnderLine {
@@ -846,10 +800,6 @@ impl UnderLine {
             Self::Finding(view) => view.anchor.clone().map(Hangs::Line),
             Self::Queued(queued) => Some(Hangs::of_comment(&queued.draft.place)),
             Self::CommentBox(place) => Some(Hangs::of_comment(place)),
-            Self::AskMarker(ask) => match &ask.place {
-                Place::Lines { end, .. } => Some(Hangs::Line(end.clone())),
-                _ => None,
-            },
         }
     }
 
@@ -859,7 +809,6 @@ impl UnderLine {
             Self::Finding(view) => finding_row(view, ThreadRowPlace::UnderLine),
             Self::Queued(queued) => PageRow::QueuedComment(Arc::new(queued)),
             Self::CommentBox(place) => comment_box_row(place, review),
-            Self::AskMarker(ask) => PageRow::AskMarker(Arc::new(ask)),
         }
     }
 }
@@ -940,8 +889,8 @@ impl UnderLines {
     }
 }
 
-/// Comments and asks of the screen; threads come with the page.
-fn comments_and_asks(review: &ReviewCore) -> Vec<UnderLine> {
+/// Comments of the screen; threads come with the page.
+fn comments_here(review: &ReviewCore) -> Vec<UnderLine> {
     let queued = review
         .queued_comments()
         .iter()
@@ -950,19 +899,7 @@ fn comments_and_asks(review: &ReviewCore) -> Vec<UnderLine> {
     let boxes = review
         .comment_boxes()
         .map(|comment_box| UnderLine::CommentBox(comment_box.draft.place.clone()));
-    let markers = review
-        .asks()
-        .asked_lines_on(review.screen())
-        .into_iter()
-        .filter_map(|place| {
-            let Place::Lines { start, end, .. } = &place else {
-                return None;
-            };
-            let id = format!("ask-lines-{}-{}-{}", end.path, start.line, end.line).into();
-            let label = place.lines_label()?;
-            Some(UnderLine::AskMarker(AskAt { id, place, label }))
-        });
-    queued.chain(boxes).chain(markers).collect()
+    queued.chain(boxes).collect()
 }
 
 fn comment_box_row(place: CommentPlace, review: &ReviewCore) -> PageRow {

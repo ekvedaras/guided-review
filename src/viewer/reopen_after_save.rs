@@ -2,49 +2,28 @@ use std::time::{Duration, Instant};
 
 use crate::keys::Command;
 
-/// The work running now that a reopen would kill, as the window counts it: Ask turns answer in threads
-/// the Ask panel owns, and hand-offs and Asks handed to the agent are typed in by tasks of the session.
+/// The work running now that a reopen would kill, as the window counts it: hand-offs are typed in by
+/// tasks of the session.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InFlight {
-    pub asks_answering: u16,
     pub delivering_hand_offs: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Pending {
-    in_flight: InFlight,
-    asks_handed_to_agent: u16,
-}
-
-impl Pending {
+impl InFlight {
     fn is_idle(self) -> bool {
-        self.in_flight == InFlight::default() && self.asks_handed_to_agent == 0
+        self == Self::default()
     }
 
     fn waiting_line(self) -> String {
         format!("Saved. The PR opens again once {}.", self.waits())
     }
 
-    /// What has to end first, as one clause: "the Ask finishes answering and …".
-    fn waits(self) -> String {
-        let mut waits = Vec::new();
-        match self.in_flight.asks_answering {
-            0 => {}
-            1 => waits.push("the Ask finishes answering".to_owned()),
-            count => waits.push(format!("{count} Asks finish answering")),
-        }
-        match self.asks_handed_to_agent {
-            0 => {}
-            1 => waits.push("the Ask is handed to your agent".to_owned()),
-            count => waits.push(format!("{count} Asks are handed to your agent")),
-        }
-        if self.in_flight.delivering_hand_offs {
-            waits.push("the hand-offs are delivered to the tour agent".to_owned());
-        }
-        match waits.split_last() {
-            Some((last, [])) => last.clone(),
-            Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-            None => String::new(),
+    /// What has to end first, as one clause.
+    fn waits(self) -> &'static str {
+        if self.delivering_hand_offs {
+            "the hand-offs are delivered to the tour agent"
+        } else {
+            ""
         }
     }
 }
@@ -61,26 +40,21 @@ pub enum Reopen {
 }
 
 /// The reopen that a save of the settings asks for, so the new config applies. Reopening drops the
-/// window's session, and with it any Ask answering or hand-off being typed in, so the reopen waits
+/// window's session, and with it any hand-off being typed in, so the reopen waits
 /// until that work ends. However often the reviewer saves meanwhile, it is one reopen.
 #[derive(Debug, Default)]
 pub struct ReopenAfterSave {
     /// The line for the Settings panel while the reopen waits; kept so a render only borrows it.
     waiting: Option<String>,
-    asks_handed_to_agent: u16,
 }
 
 impl ReopenAfterSave {
     pub fn saved(&mut self, in_flight: InFlight) -> Reopen {
-        let pending = Pending {
-            in_flight,
-            asks_handed_to_agent: self.asks_handed_to_agent,
-        };
-        if pending.is_idle() {
+        if in_flight.is_idle() {
             self.waiting = None;
             return Reopen::Now;
         }
-        self.waiting = Some(pending.waiting_line());
+        self.waiting = Some(in_flight.waiting_line());
         Reopen::Waiting
     }
 
@@ -90,16 +64,6 @@ impl ReopenAfterSave {
             return Reopen::NotAsked;
         }
         self.saved(in_flight)
-    }
-
-    /// An Ask is being typed into the reviewer's own agent.
-    pub fn ask_handed_to_agent(&mut self) {
-        self.asks_handed_to_agent += 1;
-    }
-
-    pub fn ask_hand_off_ended(&mut self, in_flight: InFlight) -> Reopen {
-        self.asks_handed_to_agent = self.asks_handed_to_agent.saturating_sub(1);
-        self.work_in_flight_changed(in_flight)
     }
 
     pub fn waiting_line(&self) -> Option<&str> {
@@ -147,16 +111,12 @@ impl RestartGuard {
         let was_warned = self.warned.is_some_and(|(warned_for, at)| {
             warned_for == departure && now.saturating_duration_since(at) <= CONFIRM_WITHIN
         });
-        if in_flight == InFlight::default() || was_warned {
+        if in_flight.is_idle() || was_warned {
             self.warned = None;
             return RestartStep::Restart;
         }
         self.warned = Some((departure, now));
-        let running = Pending {
-            in_flight,
-            asks_handed_to_agent: 0,
-        };
-        let waits = running.waits();
+        let waits = in_flight.waits();
         RestartStep::Warn(match departure {
             Departure::Restart => format!(
                 "A restart now does not wait until {waits}. Pick Restart again to restart anyway."

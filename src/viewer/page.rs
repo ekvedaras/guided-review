@@ -12,13 +12,12 @@ use std::sync::Arc;
 use crate::findings::FindingId;
 
 pub use rows::{
-    AskAt, BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
+    BinaryFileRow, BoxEdges, BoxFold, DiagramRow, FindingRow, FixesOffer, FoldControl,
     FullDiffControl, HunkGapRow, PageRow, PieceHeading, PieceLabel, ReviewerSummaryRow,
     RouteStopRow, ScreenFooter, ShownLine, StepHeading, StepIntro, StepNotes, SummaryColumns,
     SummaryStatsRow, ThreadRowPlace, Toolbar, line_count, pluralised,
 };
 
-use super::ask::{Place, ShownOn};
 use super::comments::CommentPlace;
 use super::diff_line::DiffLine;
 use super::file_block::FileBlock;
@@ -310,22 +309,6 @@ impl Page {
         selection.resolve(self.lines())
     }
 
-    /// What an Ask about the selected lines is about: the lines and the pieces of this page that hold them.
-    pub fn place_of(&self, selected: &SelectedLines) -> Place {
-        Place::Lines {
-            shown_on: self.screen.shown_on().unwrap_or(ShownOn::SafetyNet),
-            start: selected.first().clone(),
-            end: selected.last().clone(),
-            pieces: self
-                .blocks
-                .iter()
-                .flat_map(|block| &block.pieces)
-                .filter(|piece| piece.lines().any(|line| selected.contains(&line.location)))
-                .map(|piece| piece.id.clone())
-                .collect(),
-        }
-    }
-
     /// The pictures of the page that are not loaded yet, each once, folded boxes too.
     pub fn images_to_load(&self) -> &[FilePath] {
         &self.images_to_load
@@ -385,14 +368,6 @@ impl Page {
     pub fn screen_change(&self) -> Option<LocalChange> {
         self.rows.iter().find_map(|row| match row {
             PageRow::Toolbar(toolbar) => toolbar.change,
-            _ => None,
-        })
-    }
-
-    /// What the screen's own Ask button asks about, as its toolbar offers it.
-    pub fn screen_ask(&self) -> Option<&AskAt> {
-        self.rows.iter().find_map(|row| match row {
-            PageRow::Toolbar(toolbar) => toolbar.ask.as_ref(),
             _ => None,
         })
     }

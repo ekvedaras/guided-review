@@ -315,12 +315,10 @@ fn the_actions_follow_what_the_open_screen_allows() {
     assert!(on_summary.contains(&"Switch pull request"));
     assert!(on_summary.contains(&"Open on GitHub"));
     assert!(!on_summary.contains(&"Mark step as read"));
-    assert!(!on_summary.contains(&"Ask about this step"));
 
     review.go_to(&"totals".into());
     let on_step = actions(&review);
     assert!(on_step.contains(&"Mark step as read"));
-    assert!(on_step.contains(&"Ask about this step"));
     assert!(on_step.contains(&"Hide whitespace"));
     assert!(on_step.contains(&"Wrap lines"));
 
@@ -371,10 +369,6 @@ fn the_whitespace_and_ask_actions_name_their_shortcuts() {
     assert_eq!(
         PaletteAction::ShowWhitespace.command(),
         Some(Command::HideWhitespace)
-    );
-    assert_eq!(
-        PaletteAction::AskAboutStep.command(),
-        Some(Command::AskAboutStep)
     );
 }
 

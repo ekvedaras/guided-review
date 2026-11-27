@@ -1,6 +1,5 @@
 //! Which screen of a tour the reviewer reads, and what a read tick says was read.
 
-use super::ask::ShownOn;
 use crate::file_path::FilePath;
 use crate::tour::StepId;
 
@@ -21,19 +20,6 @@ pub enum Screen {
     Step(StepId),
     /// After the last step: every change no step shows.
     SafetyNet,
-}
-
-impl Screen {
-    /// What an Ask about lines of this screen records as the screen it was shown on; the
-    /// summary and the overview show no lines.
-    pub fn shown_on(&self) -> Option<ShownOn> {
-        match self {
-            Self::Step(step) => Some(ShownOn::Step { step: step.clone() }),
-            Self::SafetyNet => Some(ShownOn::SafetyNet),
-            Self::File(path) => Some(ShownOn::File { path: path.clone() }),
-            Self::Summary | Self::Overview => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

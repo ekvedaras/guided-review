@@ -53,7 +53,6 @@ pub enum Intent {
     /// Settings asked for from outside the window, by `guided-review settings`.
     ShowSettings,
     ToggleShortcuts,
-    AskAboutScreen,
     /// Write guided tour, from the overview, the sidebar or the palette.
     WriteGuidedTour,
     SwitchToGuidedTour,
@@ -105,7 +104,6 @@ impl From<PaletteAction> for Intent {
             }
             PaletteAction::ShowRendered | PaletteAction::ShowCode => Self::ToggleRenderedView,
             PaletteAction::OpenAllPieces | PaletteAction::FoldAllPieces => Self::ToggleFold,
-            PaletteAction::AskAboutStep => Self::AskAboutScreen,
             PaletteAction::WriteGuidedTour => Self::WriteGuidedTour,
             PaletteAction::SwitchToGuidedTour => Self::SwitchToGuidedTour,
             PaletteAction::RunAiReview => Self::RunAiReview,
@@ -143,7 +141,6 @@ pub enum Effect {
     OpenSettings,
     /// Opens the PR switcher, or leaves it open.
     OpenPrSwitcher,
-    AskAboutScreen,
     /// Starts the guided tour's writing: the review took it and the app hands the task to the agent.
     WriteGuidedTour,
     /// The reviewer asked to switch to a ready guided tour.
@@ -297,7 +294,6 @@ impl Intent {
             | Self::ToggleWhitespace
             | Self::TogglePrSwitcher
             | Self::ShowPrSwitcher
-            | Self::AskAboutScreen
             | Self::WriteGuidedTour
             | Self::SwitchToGuidedTour
             | Self::RunAiReview
@@ -382,7 +378,6 @@ impl ReviewCore {
                 SettingsSheet::Closed => Effect::OpenSettings,
             },
             Intent::ToggleShortcuts => Effect::Toggle(Overlay::Shortcuts),
-            Intent::AskAboutScreen => Effect::AskAboutScreen,
             Intent::WriteGuidedTour => match self.write_guided_tour_refusal() {
                 None => Effect::WriteGuidedTour,
                 Some(refusal) => Effect::Refused(Refusal::GuidedTour(refusal)),
