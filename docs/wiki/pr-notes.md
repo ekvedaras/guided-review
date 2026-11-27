@@ -18,4 +18,4 @@ A `#` line inside a `<details>` fold belongs to the fold, so a folded summary's 
 
 ## Back-ticks in a fold's title
 
-2026-11-20. GitHub does not render Markdown inside `<summary>`, so a title's back-tick pairs are written as `<code>` (escaped inside); an unpaired back-tick stays. Code: `summary_html` in `src/viewer/pr_notes.rs`, issue #170.
+2026-11-20 (issue #170). GitHub does not render Markdown inside `<summary>`, so a title's back-tick pairs are written as `<code>` (escaped inside); an unpaired back-tick stays. Code: `summary_html` in `src/viewer/pr_notes.rs`.

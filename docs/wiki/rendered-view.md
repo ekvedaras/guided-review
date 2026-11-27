@@ -8,7 +8,7 @@ A rendered Markdown file is cut into its top-level blocks by pulldown-cmark's ow
 
 Each removed line learns the head line it sat under by walking base and head side by side, so the marking works the same for local diffs (`-U0`) and GitHub patches (with context).
 
-The blocks are cut once, when the files at head land (`ReviewCore::set_files_at_head`), not on every page build.
+The blocks are cut once, when the text of the files at head is read (`cut_markdown` in `src/viewer/display_options.rs`, reached from `Review::set_files_at_head`), not on every page build.
 
 Rejected: a word-level rendered diff. Formatting a merged base/head text needs a Markdown-aware diff, and the line diff is one click away.
 
@@ -26,9 +26,9 @@ The view is a display option like whitespace and wrap, so it is not in the state
 
 ## Open
 
-- Relative images inside a rendered Markdown file are not loaded from the repo.
-- A removed run that ends a list or a quote is shown as its own removed block after it, not as a change of it.
+- Relative images inside a rendered Markdown file are not loaded from the repo (not checked since 2026-11-12).
+- A removed run that ends a list or a quote is shown as its own removed block after it, not as a change of it (not checked since 2026-11-12).
 
 ## Folded boxes name their parts
 
-2026-11-20, #160. A Markdown file is cut into one numbered piece per hunk (`hunk-N`), and a numbered part has no name to show, so a folded box listed its parts as empty rows. A folded box now names each part: the Markdown section its first changed line sits in (`section_title_at`, the last heading above it outside code fences), else `line N` (YAML, JSON and XML parts, or Markdown above its first heading). Only folded boxes do this (`PieceLabel::part_name`); an open box keeps its gaps and no labels, as the gap already sets a part apart. Agent's choice over hiding the rows: a folded box is read to see what the step covers. Test: `tests/it/piece_labels.rs`.
+On 2026-11-20 (#160) a Markdown file is cut into one numbered piece per hunk (`hunk-N`), and a numbered part has no name to show, so a folded box listed its parts as empty rows. A folded box now names each part: the Markdown section its first changed line sits in (`section_title_at`, the last heading above it outside code fences), else `line N` (YAML, JSON and XML parts, or Markdown above its first heading). Only folded boxes do this (`PieceLabel::part_name`); an open box keeps its gaps and no labels, as the gap already sets a part apart. Agent's choice over hiding the rows: a folded box is read to see what the step covers. Test: `tests/it/piece_labels.rs`.

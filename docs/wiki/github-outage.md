@@ -1,6 +1,6 @@
 # GitHub outage
 
-2026-11-12. During a GitHub 503 the sidebar listed three long red problems and three failure toasts, each repeating the PR URL and "http status: 503", and none went away until the window was focused again. Code (names since #140): `src/viewer/host_outage.rs`, `HostError::NotAnswering` in `src/viewer/ports.rs`, the classification in `src/github.rs`, `Problem::HostNotAnswering` in `src/viewer/problems.rs`, the retries in `Review::could_not_read`.
+2026-11-12. During a GitHub 503 the sidebar had listed three long red problems and three failure toasts, each repeating the PR URL and "http status: 503", and none went away until the window was focused again. Code (names since #140): `src/viewer/host_outage.rs`, `HostError::NotAnswering` in `src/viewer/ports.rs`, the classification in `src/github.rs`, `Problem::HostNotAnswering` in `src/viewer/problems.rs`, the retries in `Review::could_not_read`.
 
 ## One problem, told once
 
@@ -12,10 +12,10 @@ Its toast is neutral, so it leaves by itself after a few seconds: an outage is n
 
 ## Retries
 
-A failed read is wanted again in 30 s, then 1 min, 2 min, 4 min, and every 5 min after, counted per read. Focus still reads at once. The agenda replaces a later try when one is wanted again, so a focus read that fails sets the next wait from its own count.
+A failed read is wanted again in 30 s (`FIRST`), then 1 min, 2 min, 4 min, and every 5 min after (`LONGEST`, 300 s in `host_outage.rs`), counted per read. Focus still reads at once. The agenda replaces a later try when one is wanted again, so a focus read that fails sets the next wait from its own count.
 
-- 2026-11-17, #94: the PR status (draft, checks) is a read like the others: `Affected::PrStatus`, retried by `WorkKind::PullPrStatus`, kept as last read while it fails. Its writes (convert to draft, mark ready) are not an outage case: a failure is `Problem::ReadinessNotChanged`, whose danger toast stays until dismissed. Checks that are running are read again every 30 s (`CHECKS_RECHECK`) by `want_in`, which an outage's backoff replaces and a read that goes through restores; once none runs the polling ends. Polling does not stop while the window is in the back: the app has no notion of that yet (open).
-- 2026-11-17, #95: auto-merge and Merge now write like draft / ready: `WorkKind::ChangeMerging`, a failure is `Problem::MergingNotChanged` (a danger toast that stays, and a sidebar line), a write that goes through is read back with `PullPrStatus`. The decided "refusals are toasts" is read as GitHub's refusal known before asking (the viewer may not, the repo does not allow auto-merge, the PR is closed): a neutral toast and nothing sent. A refusal GitHub gives on the write itself is a failure like any other write's.
+- The PR status (draft and checks; #94, 2026-11-17) is a read like the others: `Affected::PrStatus`, retried by `WorkKind::PullPrStatus`, kept as last read while it fails. Its writes (convert to draft, mark ready) are not an outage case: a failure is `Problem::ReadinessNotChanged`, whose danger toast stays until dismissed. Checks that are running are read again every 30 s (`CHECKS_RECHECK`) by `want_in`, which an outage's backoff replaces and a read that goes through restores; once none runs the polling ends. Polling does not stop while the window is in the back: the app has no notion of that yet (open).
+- Auto-merge and Merge now (#95, 2026-11-17) write like draft / ready: `WorkKind::ChangeMerging`, a failure is `Problem::MergingNotChanged` (a danger toast that stays, and a sidebar line), a write that goes through is read back with `PullPrStatus`. The decided "refusals are toasts" is read as GitHub's refusal known before asking (the viewer may not, the repo does not allow auto-merge, the PR is closed): a neutral toast and nothing sent. A refusal GitHub gives on the write itself is a failure like any other write's.
 
 ## Open
 
